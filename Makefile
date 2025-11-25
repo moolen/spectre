@@ -108,7 +108,7 @@ docker-run: docker-build
 deploy:
 	@echo "Deploying to Kubernetes cluster..."
 	@kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
-	@helm install k8s-event-monitor $(CHART_PATH) \
+	@helm upgrade --install k8s-event-monitor $(CHART_PATH) \
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(CHART_PATH)/values.yaml

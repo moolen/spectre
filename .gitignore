@@ -48,3 +48,19 @@ Thumbs.db
 # Helm artifacts
 Chart.lock
 charts/
+
+# Node.js / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Vite / Build output
+ui/dist/
+ui/.vite/
+ui/coverage/
+*.tsbuildinfo

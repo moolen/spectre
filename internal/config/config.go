@@ -1,11 +1,5 @@
 package config
 
-import (
-	"os"
-	"strconv"
-	"strings"
-)
-
 // Config holds all configuration for the application
 type Config struct {
 	// DataDir is the directory where events are stored
@@ -17,8 +11,8 @@ type Config struct {
 	// LogLevel is the logging level (debug, info, warn, error)
 	LogLevel string
 
-	// WatchResources is a comma-separated list of resource types to watch
-	WatchResources []string
+	// WatcherConfigPath is the path to the YAML file containing watcher configuration
+	WatcherConfigPath string
 
 	// SegmentSize is the target size for compression segments in bytes
 	SegmentSize int64
@@ -27,21 +21,15 @@ type Config struct {
 	MaxConcurrentRequests int
 }
 
-// LoadConfig loads configuration from environment variables
-func LoadConfig() *Config {
+// LoadConfig creates a Config with the provided values
+func LoadConfig(dataDir string, apiPort int, logLevel string, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int) *Config {
 	cfg := &Config{
-		DataDir:                getEnvOrDefault("RPK_DATA_DIR", "./data"),
-		APIPort:                getEnvOrDefaultInt("RPK_API_PORT", 8080),
-		LogLevel:               getEnvOrDefault("RPK_LOG_LEVEL", "info"),
-		SegmentSize:            getEnvOrDefaultInt64("RPK_SEGMENT_SIZE", 1048576), // 1MB
-		MaxConcurrentRequests:  getEnvOrDefaultInt("RPK_MAX_CONCURRENT_REQUESTS", 100),
-	}
-
-	// Parse watch resources
-	watchResourcesStr := getEnvOrDefault("RPK_WATCH_RESOURCES", "Pod,Deployment,Service,Node,StatefulSet")
-	cfg.WatchResources = strings.Split(watchResourcesStr, ",")
-	for i := range cfg.WatchResources {
-		cfg.WatchResources[i] = strings.TrimSpace(cfg.WatchResources[i])
+		DataDir:               dataDir,
+		APIPort:               apiPort,
+		LogLevel:              logLevel,
+		WatcherConfigPath:     watcherConfigPath,
+		SegmentSize:           segmentSize,
+		MaxConcurrentRequests: maxConcurrentRequests,
 	}
 
 	return cfg
@@ -69,41 +57,7 @@ func (c *Config) Validate() error {
 		return NewConfigError("MaxConcurrentRequests must be at least 1")
 	}
 
-	if len(c.WatchResources) == 0 {
-		return NewConfigError("WatchResources must contain at least one resource type")
-	}
-
 	return nil
-}
-
-// Helper functions for environment variable loading
-
-// getEnvOrDefault returns the value of an environment variable or a default value
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// getEnvOrDefaultInt returns the value of an environment variable as int or a default value
-func getEnvOrDefaultInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intVal, err := strconv.Atoi(value); err == nil {
-			return intVal
-		}
-	}
-	return defaultValue
-}
-
-// getEnvOrDefaultInt64 returns the value of an environment variable as int64 or a default value
-func getEnvOrDefaultInt64(key string, defaultValue int64) int64 {
-	if value := os.Getenv(key); value != "" {
-		if intVal, err := strconv.ParseInt(value, 10, 64); err == nil {
-			return intVal
-		}
-	}
-	return defaultValue
 }
 
 // ConfigError represents a configuration error

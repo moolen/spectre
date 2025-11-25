@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	dps "github.com/markusmobius/go-dateparser"
 	"github.com/moritz/rpk/internal/logging"
 	"github.com/moritz/rpk/internal/models"
 	"github.com/moritz/rpk/internal/storage"
@@ -61,9 +62,9 @@ func (sh *SearchHandler) parseQuery(r *http.Request) (*models.QueryRequest, erro
 	if startStr == "" {
 		return nil, NewValidationError("start timestamp is required")
 	}
-	start, err := strconv.ParseInt(startStr, 10, 64)
+	start, err := sh.parseTimestamp(startStr, "start")
 	if err != nil {
-		return nil, NewValidationError("start timestamp must be a valid integer")
+		return nil, err
 	}
 
 	// Parse end timestamp (required)
@@ -71,9 +72,9 @@ func (sh *SearchHandler) parseQuery(r *http.Request) (*models.QueryRequest, erro
 	if endStr == "" {
 		return nil, NewValidationError("end timestamp is required")
 	}
-	end, err := strconv.ParseInt(endStr, 10, 64)
+	end, err := sh.parseTimestamp(endStr, "end")
 	if err != nil {
-		return nil, NewValidationError("end timestamp must be a valid integer")
+		return nil, err
 	}
 
 	// Validate timestamps
@@ -123,4 +124,35 @@ func (sh *SearchHandler) respondWithError(w http.ResponseWriter, statusCode int,
 	}
 
 	writeJSON(w, response)
+}
+
+// parseTimestamp parses a timestamp string, supporting both Unix timestamps and human-readable dates
+func (sh *SearchHandler) parseTimestamp(timestampStr, fieldName string) (int64, error) {
+	// First, try parsing as Unix timestamp (for backward compatibility)
+	if unixTimestamp, err := strconv.ParseInt(timestampStr, 10, 64); err == nil {
+		if unixTimestamp < 0 {
+			return 0, NewValidationError("%s timestamp must be non-negative", fieldName)
+		}
+		return unixTimestamp, nil
+	}
+
+	// If not a valid integer, try parsing as human-readable date
+	parser := dps.Parser{}
+	cfg := &dps.Configuration{
+		// Use CurrentPeriod as default to interpret dates like "March" as current period
+		// This is more intuitive for search queries
+		PreferredDateSource: dps.CurrentPeriod,
+	}
+
+	parsedDate, err := parser.Parse(cfg, timestampStr)
+	if err != nil {
+		return 0, NewValidationError("%s must be a valid Unix timestamp or human-readable date: %v", fieldName, err)
+	}
+
+	if parsedDate.IsZero() {
+		return 0, NewValidationError("%s could not be parsed as a valid date: %s", fieldName, timestampStr)
+	}
+
+	// Convert to Unix seconds
+	return parsedDate.Time.Unix(), nil
 }

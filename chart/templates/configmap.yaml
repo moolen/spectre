@@ -5,10 +5,14 @@ metadata:
   labels:
     {{- include "k8s-event-monitor.labels" . | nindent 4 }}
 data:
-  # Configuration for the application
-  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
-  DATA_DIR: {{ .Values.persistence.mountPath | quote }}
-  KUBE_WATCH_RESOURCES: |
-    {{- range .Values.config.kubeWatchResources }}
-    - {{ . }}
+  # Watcher configuration file
+  watcher.yaml: |
+    resources:
+    {{- range .Values.config.watcher.resources }}
+      - group: {{ .group | quote }}
+        version: {{ .version | quote }}
+        kind: {{ .kind | quote }}
+        {{- if .namespace }}
+        namespace: {{ .namespace | quote }}
+        {{- end }}
     {{- end }}

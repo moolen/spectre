@@ -114,7 +114,39 @@ helm install k8s-event-monitor ./chart \
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `config.logLevel` | Log level | `info` |
-| `config.kubeWatchResources` | Resources to watch | (see values.yaml) |
+| `config.watcher.resources` | List of resources to watch (GVK format) | (see values.yaml) |
+
+#### Watcher Configuration
+
+The watcher configuration uses Group/Version/Kind (GVK) format to specify which Kubernetes resources to monitor. Each resource can optionally specify a namespace (if omitted, watches cluster-wide).
+
+Example configuration:
+
+```yaml
+config:
+  watcher:
+    resources:
+      # Core v1 Pods (cluster-wide)
+      - group: ""
+        version: "v1"
+        kind: "Pod"
+      # Apps v1 Deployments in specific namespace
+      - group: "apps"
+        version: "v1"
+        kind: "Deployment"
+        namespace: "default"
+      # Core v1 Services (cluster-wide)
+      - group: ""
+        version: "v1"
+        kind: "Service"
+```
+
+**Notes:**
+- For core resources (Pod, Service, Node, etc.), use an empty string `""` for the group
+- If `namespace` is omitted, the watcher monitors the resource cluster-wide
+- Cluster-scoped resources (like Node) ignore the namespace field
+- The watcher config is mounted as a ConfigMap at `/etc/watcher/watcher.yaml`
+- Changes to the ConfigMap trigger automatic hot-reload of watchers
 
 ### Security
 

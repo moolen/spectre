@@ -29,14 +29,19 @@ spec:
         - name: http
           containerPort: {{ .Values.service.targetPort }}
           protocol: TCP
-        env:
-        {{- range .Values.env }}
-        - name: {{ .name }}
-          value: {{ .value | quote }}
-        {{- end }}
+        args:
+        - --data-dir={{ .Values.persistence.mountPath }}
+        - --api-port={{ .Values.service.targetPort }}
+        - --log-level={{ .Values.config.logLevel | quote }}
+        - --watcher-config=/etc/watcher/watcher.yaml
+        - --segment-size={{ .Values.config.segmentSize | int64 }}
+        - --max-concurrent-requests={{ .Values.config.maxConcurrentRequests }}
         volumeMounts:
         - name: data
           mountPath: {{ .Values.persistence.mountPath }}
+        - name: watcher-config
+          mountPath: /etc/watcher
+          readOnly: true
         {{- if .Values.livenessProbe.enabled }}
         livenessProbe:
           httpGet:
@@ -67,6 +72,9 @@ spec:
         {{- else }}
         emptyDir: {}
         {{- end }}
+      - name: watcher-config
+        configMap:
+          name: {{ include "k8s-event-monitor.fullname" . }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

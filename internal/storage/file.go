@@ -49,12 +49,12 @@ func NewStorageFile(path string, hourTimestamp int64, compressor *Compressor, se
 		compressor:    compressor,
 		segmentSize:   segmentSize,
 		metadata: models.FileMetadata{
-			CreatedAt:           timeNow().Unix(),
-			ResourceTypes:       make(map[string]bool),
-			Namespaces:          make(map[string]bool),
+			CreatedAt:     timeNow().Unix(),
+			ResourceTypes: make(map[string]bool),
+			Namespaces:    make(map[string]bool),
 		},
 		index: models.SparseTimestampIndex{
-			Entries:      make([]models.IndexEntry, 0),
+			Entries:       make([]models.IndexEntry, 0),
 			TotalSegments: 0,
 		},
 	}
@@ -167,7 +167,7 @@ func (sf *StorageFile) Close() error {
 		return err
 	}
 
-	sf.logger.InfoWithFields("Storage file closed",
+	sf.logger.InfoWithFields("Storage file closed and synced",
 		logging.Field("file", sf.path),
 		logging.Field("total_compressed_bytes", sf.metadata.TotalCompressedBytes),
 		logging.Field("total_uncompressed_bytes", sf.metadata.TotalUncompressedBytes),
