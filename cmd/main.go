@@ -7,13 +7,38 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/moritz/rpk/internal/api"
 	"github.com/moritz/rpk/internal/config"
+	"github.com/moritz/rpk/internal/lifecycle"
 	"github.com/moritz/rpk/internal/logging"
+	"github.com/moritz/rpk/internal/storage"
+	"github.com/moritz/rpk/internal/watcher"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // Version is the application version
 const Version = "0.1.0"
+
+// NoOpEventHandler is a no-op implementation of the EventHandler interface
+// Used during startup when the actual event handler is not yet ready
+type NoOpEventHandler struct{}
+
+// OnAdd is called when a resource is created
+func (h *NoOpEventHandler) OnAdd(obj runtime.Object) error {
+	return nil
+}
+
+// OnUpdate is called when a resource is updated
+func (h *NoOpEventHandler) OnUpdate(oldObj, newObj runtime.Object) error {
+	return nil
+}
+
+// OnDelete is called when a resource is deleted
+func (h *NoOpEventHandler) OnDelete(obj runtime.Object) error {
+	return nil
+}
 
 func main() {
 	// Parse command line flags
@@ -49,33 +74,81 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Create context for graceful shutdown
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Create lifecycle manager
+	manager := lifecycle.NewManager()
+	logger.Info("Lifecycle manager created")
+
+	// Initialize storage component
+	storageComponent, err := storage.New(cfg.DataDir, 10*1024*1024) // 10MB segments
+	if err != nil {
+		logger.Error("Failed to create storage component: %v", err)
+		fmt.Fprintf(os.Stderr, "Storage initialization error: %v\n", err)
+		os.Exit(1)
+	}
+	logger.Info("Storage component created")
+
+	// Initialize watcher component (create mock handler for now - will be replaced with actual event handler)
+	// For MVP, create a no-op event handler
+	watcherComponent, err := watcher.New(&NoOpEventHandler{}, []string{"Pod", "Deployment", "Service"})
+	if err != nil {
+		logger.Error("Failed to create watcher component: %v", err)
+		fmt.Fprintf(os.Stderr, "Watcher initialization error: %v\n", err)
+		os.Exit(1)
+	}
+	logger.Info("Watcher component created")
+
+	// Initialize API server component
+	apiComponent := api.New(cfg.APIPort, nil) // TODO: Create QueryExecutor from storage
+	logger.Info("API server component created")
+
+	// Register components with dependencies
+	// Storage has no dependencies
+	if err := manager.Register(storageComponent); err != nil {
+		logger.Error("Failed to register storage component: %v", err)
+		fmt.Fprintf(os.Stderr, "Storage registration error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Watchers depend on storage
+	if err := manager.Register(watcherComponent, storageComponent); err != nil {
+		logger.Error("Failed to register watcher component: %v", err)
+		fmt.Fprintf(os.Stderr, "Watcher registration error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// API server depends on storage
+	if err := manager.Register(apiComponent, storageComponent); err != nil {
+		logger.Error("Failed to register API server component: %v", err)
+		fmt.Fprintf(os.Stderr, "API server registration error: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger.Info("All components registered with dependencies")
+
+	// Start all components in dependency order
+	if err := manager.Start(context.Background()); err != nil {
+		logger.Error("Failed to start components: %v", err)
+		fmt.Fprintf(os.Stderr, "Startup error: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger.Info("Application started successfully")
+	logger.Info("Listening for events and API requests...")
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// TODO: Initialize watchers
-	// TODO: Initialize storage
-	// TODO: Initialize API server
-	// TODO: Start watchers
-	// TODO: Start API server
-
-	logger.Info("Application started successfully")
-	logger.Info("Listening for events and API requests...")
-
 	// Wait for shutdown signal
 	<-sigChan
 	logger.Info("Shutdown signal received, gracefully shutting down...")
 
-	// Cancel context to stop all goroutines
-	cancel()
+	// Create context with 30-second timeout for graceful shutdown
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	// TODO: Stop watchers
-	// TODO: Stop API server
-	// TODO: Flush storage
+	// Stop all components in reverse dependency order
+	manager.Stop(shutdownCtx)
 
 	logger.Info("Shutdown complete")
 	os.Exit(0)

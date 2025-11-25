@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -245,4 +246,52 @@ func (s *Storage) DeleteOldFiles(maxAgeHours int) error {
 	}
 
 	return nil
+}
+
+// Start implements the lifecycle.Component interface
+// Initializes the storage component for use
+func (s *Storage) Start(ctx context.Context) error {
+	s.logger.Info("Starting storage component")
+
+	// Check context isn't already cancelled
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Storage is already initialized in New(), so just verify it's ready
+	s.logger.Info("Storage component ready")
+	return nil
+}
+
+// Stop implements the lifecycle.Component interface
+// Gracefully shuts down the storage component
+func (s *Storage) Stop(ctx context.Context) error {
+	s.logger.Info("Stopping storage component")
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- s.Close()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			s.logger.Error("Storage component shutdown error: %v", err)
+			return err
+		}
+		s.logger.Info("Storage component stopped")
+		return nil
+	case <-ctx.Done():
+		s.logger.Warn("Storage component shutdown timeout")
+		return ctx.Err()
+	}
+}
+
+// Name implements the lifecycle.Component interface
+// Returns the human-readable name of the storage component
+func (s *Storage) Name() string {
+	return "Storage"
 }

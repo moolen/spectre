@@ -15,7 +15,6 @@ README.md
 CHANGELOG.md
 
 # Dependency files
-go.sum
 vendor/
 
 # Build artifacts and temporary files

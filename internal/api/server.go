@@ -56,9 +56,17 @@ func (s *Server) registerHandlers() {
 	s.router.HandleFunc("/", s.handleRoot)
 }
 
-// Start starts the HTTP server
+// Start implements the lifecycle.Component interface
+// Starts the HTTP server and begins listening for requests
 func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info("Starting API server on port %d", s.port)
+
+	// Check context isn't already cancelled
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 
 	// Start server in a goroutine
 	go func() {
@@ -67,29 +75,36 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
-	// Wait for context cancellation
-	<-ctx.Done()
-	s.logger.Info("Received shutdown signal")
-
-	return s.Stop()
+	s.logger.Info("API server started and listening on port %d", s.port)
+	return nil
 }
 
-// Stop stops the HTTP server
-func (s *Server) Stop() error {
+// Stop implements the lifecycle.Component interface
+// Gracefully stops the HTTP server
+func (s *Server) Stop(ctx context.Context) error {
 	s.logger.Info("Stopping API server...")
 
-	// Create shutdown context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	done := make(chan error, 1)
 
-	// Gracefully shutdown server
-	if err := s.server.Shutdown(ctx); err != nil {
-		s.logger.Error("Server shutdown error: %v", err)
-		return err
+	go func() {
+		// Gracefully shutdown server
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- s.server.Shutdown(shutdownCtx)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			s.logger.Error("API server shutdown error: %v", err)
+			return err
+		}
+		s.logger.Info("API server stopped")
+		return nil
+	case <-ctx.Done():
+		s.logger.Warn("API server shutdown timeout")
+		return ctx.Err()
 	}
-
-	s.logger.Info("API server stopped")
-	return nil
 }
 
 // handleRoot handles requests to /
@@ -169,4 +184,10 @@ func (s *Server) GetPort() int {
 // IsRunning checks if the server is running
 func (s *Server) IsRunning() bool {
 	return s.server != nil
+}
+
+// Name implements the lifecycle.Component interface
+// Returns the human-readable name of the API server component
+func (s *Server) Name() string {
+	return "API Server"
 }

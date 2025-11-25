@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/moritz/rpk/internal/logging"
 	"github.com/moritz/rpk/internal/models"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -165,7 +165,7 @@ func (h *EventCaptureHandler) objectToJSON(obj runtime.Object) (json.RawMessage,
 // extractMetadata extracts resource metadata from a Kubernetes object
 func extractMetadata(obj runtime.Object) (models.ResourceMetadata, error) {
 	// Get the object's metadata
-	accessor, err := metav1.Accessor(obj)
+	accessor, err := apimeta.Accessor(obj)
 	if err != nil {
 		return models.ResourceMetadata{}, fmt.Errorf("failed to access object metadata: %w", err)
 	}

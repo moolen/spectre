@@ -83,8 +83,8 @@ Initialize project structure and create interface definitions that all component
 
 ---
 
-- [ ] T001 Create lifecycle package structure with `internal/lifecycle/` directory
-- [ ] T002 Create test integration directory at `tests/integration/` for lifecycle tests
+- [x] T001 Create lifecycle package structure with `internal/lifecycle/` directory
+- [x] T002 Create test integration directory at `tests/integration/` for lifecycle tests
 
 ---
 
@@ -100,10 +100,10 @@ Implement the core component lifecycle interface and manager that orchestrates s
 
 ---
 
-- [ ] T003 Implement Component interface in `internal/lifecycle/component.go` with Start, Stop, Name methods
-- [ ] T004 Create Manager struct in `internal/lifecycle/manager.go` with fields for components and dependencies
-- [ ] T005 Implement Manager.Register() method in `internal/lifecycle/manager.go` with dependency validation
-- [ ] T006 Implement Manager.Start() method in `internal/lifecycle/manager.go` with dependency-ordered startup and rollback on failure
+- [x] T003 Implement Component interface in `internal/lifecycle/component.go` with Start, Stop, Name methods
+- [x] T004 Create Manager struct in `internal/lifecycle/manager.go` with fields for components and dependencies
+- [x] T005 Implement Manager.Register() method in `internal/lifecycle/manager.go` with dependency validation
+- [x] T006 Implement Manager.Start() method in `internal/lifecycle/manager.go` with dependency-ordered startup and rollback on failure
 
 ---
 
@@ -125,14 +125,14 @@ When the application starts, all required components must be initialized in corr
 
 ---
 
-- [ ] T007 [P] [US1] Implement Storage component to meet Component interface in `internal/storage/storage.go`
+- [x] T007 [P] [US1] Implement Storage component to meet Component interface in `internal/storage/storage.go`
 - [ ] T008 [US1] Add unit test for Storage.Start() in `tests/unit/storage_lifecycle_test.go`
-- [ ] T009 [P] [US1] Implement Watcher component to meet Component interface in `internal/watcher/watcher.go`
+- [x] T009 [P] [US1] Implement Watcher component to meet Component interface in `internal/watcher/watcher.go`
 - [ ] T010 [US1] Add unit test for Watcher.Start() in `tests/unit/watcher_lifecycle_test.go`
-- [ ] T011 [P] [US1] Implement API Server component to meet Component interface in `internal/api/server.go`
+- [x] T011 [P] [US1] Implement API Server component to meet Component interface in `internal/api/server.go`
 - [ ] T012 [US1] Add unit test for APIServer.Start() in `tests/unit/api_lifecycle_test.go`
 - [ ] T013 [US1] Create integration test for startup sequence in `tests/integration/startup_test.go` (tests dependency order and logging)
-- [ ] T014 [US1] Update cmd/main.go to register components and call manager.Start() with proper error handling and exit codes
+- [x] T014 [US1] Update cmd/main.go to register components and call manager.Start() with proper error handling and exit codes
 - [ ] T015 [US1] Add integration test for startup failure scenario in `tests/integration/startup_test.go` (validates rollback and cleanup)
 
 ---

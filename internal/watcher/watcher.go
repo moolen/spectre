@@ -99,12 +99,27 @@ func (w *Watcher) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops all watchers
-func (w *Watcher) Stop() {
-	w.logger.Info("Stopping watchers...")
-	close(w.stopChan)
-	w.wg.Wait()
-	w.logger.Info("All watchers stopped")
+// Stop implements the lifecycle.Component interface
+// Gracefully shuts down the watcher component
+func (w *Watcher) Stop(ctx context.Context) error {
+	w.logger.Info("Stopping watcher component")
+
+	done := make(chan struct{}, 1)
+
+	go func() {
+		close(w.stopChan)
+		w.wg.Wait()
+		done <- struct{}{}
+	}()
+
+	select {
+	case <-done:
+		w.logger.Info("Watcher component stopped")
+		return nil
+	case <-ctx.Done():
+		w.logger.Warn("Watcher component shutdown timeout")
+		return ctx.Err()
+	}
 }
 
 // registerResourceWatcher registers a watcher for a specific resource type
@@ -203,6 +218,12 @@ func (w *Watcher) handleDelete(kind string, obj interface{}) {
 	if err := w.eventHandler.OnDelete(obj.(runtime.Object)); err != nil {
 		w.logger.Error("Error handling Delete event for %s: %v", kind, err)
 	}
+}
+
+// Name implements the lifecycle.Component interface
+// Returns the human-readable name of the watcher component
+func (w *Watcher) Name() string {
+	return "Watcher"
 }
 
 // buildClientConfig builds the Kubernetes client config
