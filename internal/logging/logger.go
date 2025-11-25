@@ -21,10 +21,22 @@ const (
 	ERROR
 )
 
+// LogField represents a structured logging field
+type LogField struct {
+	Key   string
+	Value interface{}
+}
+
+// Field creates a structured logging field
+func Field(key string, value interface{}) LogField {
+	return LogField{Key: key, Value: value}
+}
+
 // Logger provides structured logging throughout the application
 type Logger struct {
-	level LogLevel
-	name  string
+	level  LogLevel
+	name   string
+	fields map[string]interface{} // Structured fields
 }
 
 var globalLogger *Logger
@@ -55,8 +67,9 @@ func GetLogger(name string) *Logger {
 		Initialize("info")
 	}
 	return &Logger{
-		level: globalLogger.level,
-		name:  name,
+		level:  globalLogger.level,
+		name:   name,
+		fields: make(map[string]interface{}),
 	}
 }
 
@@ -116,7 +129,95 @@ func GetTimestamp() string {
 // WithName returns a new logger with a custom name
 func (l *Logger) WithName(name string) *Logger {
 	return &Logger{
-		level: l.level,
-		name:  name,
+		level:  l.level,
+		name:   name,
+		fields: make(map[string]interface{}),
+	}
+}
+
+// WithField adds a structured field to the logger
+func (l *Logger) WithField(key string, value interface{}) *Logger {
+	newLogger := &Logger{
+		level:  l.level,
+		name:   l.name,
+		fields: make(map[string]interface{}),
+	}
+	// Copy existing fields
+	for k, v := range l.fields {
+		newLogger.fields[k] = v
+	}
+	newLogger.fields[key] = value
+	return newLogger
+}
+
+// WithFields adds multiple structured fields to the logger
+func (l *Logger) WithFields(fields ...LogField) *Logger {
+	newLogger := &Logger{
+		level:  l.level,
+		name:   l.name,
+		fields: make(map[string]interface{}),
+	}
+	// Copy existing fields
+	for k, v := range l.fields {
+		newLogger.fields[k] = v
+	}
+	// Add new fields
+	for _, f := range fields {
+		newLogger.fields[f.Key] = f.Value
+	}
+	return newLogger
+}
+
+// DebugWithFields logs a debug message with structured fields
+func (l *Logger) DebugWithFields(msg string, fields ...LogField) {
+	if l.level <= DEBUG {
+		l.logWithFields("DEBUG", msg, fields...)
+	}
+}
+
+// InfoWithFields logs an info message with structured fields
+func (l *Logger) InfoWithFields(msg string, fields ...LogField) {
+	if l.level <= INFO {
+		l.logWithFields("INFO", msg, fields...)
+	}
+}
+
+// WarnWithFields logs a warning message with structured fields
+func (l *Logger) WarnWithFields(msg string, fields ...LogField) {
+	if l.level <= WARN {
+		l.logWithFields("WARN", msg, fields...)
+	}
+}
+
+// ErrorWithFields logs an error message with structured fields
+func (l *Logger) ErrorWithFields(msg string, fields ...LogField) {
+	if l.level <= ERROR {
+		l.logWithFields("ERROR", msg, fields...)
+	}
+}
+
+// logWithFields logs a message with structured fields
+func (l *Logger) logWithFields(level, msg string, fields ...LogField) {
+	timestamp := fmt.Sprintf("[%s]", GetTimestamp())
+	logMsg := fmt.Sprintf("%s [%s] %s: %s", timestamp, level, l.name, msg)
+
+	// Add structured fields
+	if len(fields) > 0 || len(l.fields) > 0 {
+		logMsg += " |"
+		// Add context fields
+		for k, v := range l.fields {
+			logMsg += fmt.Sprintf(" %s=%v", k, v)
+		}
+		// Add method-specific fields
+		for _, f := range fields {
+			logMsg += fmt.Sprintf(" %s=%v", f.Key, f.Value)
+		}
+	}
+
+	log.Println(logMsg)
+
+	// Also write to stderr for errors
+	if level == "ERROR" {
+		fmt.Fprintf(os.Stderr, "%s\n", logMsg)
 	}
 }

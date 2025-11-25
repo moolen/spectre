@@ -135,7 +135,11 @@ func (sf *StorageFile) finalizeSegment() error {
 	// Add segment to segments list
 	sf.segments = append(sf.segments, sf.currentSegment)
 
-	sf.logger.Debug("Finalized segment %d in file %s", sf.currentSegment.ID, sf.path)
+	sf.logger.DebugWithFields("Finalized segment",
+		logging.Field("segment_id", sf.currentSegment.ID),
+		logging.Field("file", sf.path),
+		logging.Field("uncompressed_bytes", sf.currentSegment.GetUncompressedSize()),
+		logging.Field("compressed_bytes", sf.currentSegment.GetCompressedSize()))
 
 	return nil
 }
@@ -163,7 +167,11 @@ func (sf *StorageFile) Close() error {
 		return err
 	}
 
-	sf.logger.Info("Storage file closed: %s", sf.path)
+	sf.logger.InfoWithFields("Storage file closed",
+		logging.Field("file", sf.path),
+		logging.Field("total_compressed_bytes", sf.metadata.TotalCompressedBytes),
+		logging.Field("total_uncompressed_bytes", sf.metadata.TotalUncompressedBytes),
+		logging.Field("segment_count", len(sf.segments)))
 	return nil
 }
 

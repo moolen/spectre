@@ -41,8 +41,10 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 		return nil, fmt.Errorf("invalid query: %w", err)
 	}
 
-	qe.logger.Debug("Executing query: start=%d, end=%d, filters=%v",
-		query.StartTimestamp, query.EndTimestamp, query.Filters)
+	qe.logger.DebugWithFields("Executing query",
+		logging.Field("start_timestamp", query.StartTimestamp),
+		logging.Field("end_timestamp", query.EndTimestamp),
+		logging.Field("filters", fmt.Sprintf("%v", query.Filters)))
 
 	// Find all storage files that overlap with the time range
 	files, err := qe.storage.getStorageFiles()
@@ -88,8 +90,11 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 		FilesSearched:   int32(filesSearched),
 	}
 
-	qe.logger.Info("Query complete: events=%d, executionTime=%dms, segmentsScanned=%d, segmentsSkipped=%d",
-		result.Count, result.ExecutionTimeMs, totalSegmentsScanned, totalSegmentsSkipped)
+	qe.logger.InfoWithFields("Query complete",
+		logging.Field("events_found", result.Count),
+		logging.Field("execution_time_ms", result.ExecutionTimeMs),
+		logging.Field("segments_scanned", totalSegmentsScanned),
+		logging.Field("segments_skipped", totalSegmentsSkipped))
 
 	return result, nil
 }
