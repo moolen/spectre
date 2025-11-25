@@ -31,9 +31,9 @@ This document contains all implementation tasks organized by user story and phas
 
 ## Phase 1: Setup & Project Initialization
 
-- [ ] T001 Add spaolac/bloom dependency to go.mod: `go get github.com/spaolac/bloom`
-- [ ] T002 Update .specify/scripts/bash/update-agent-context.sh to document block-based storage terminology and bloom filter library
-- [ ] T003 Create docs/BLOCK_FORMAT_REFERENCE.md as operational reference for storage format (copy from quickstart.md)
+- [x] T001 Add spaolac/bloom dependency to go.mod: `go get github.com/spaolac/bloom` (Using bits-and-blooms/bloom/v3 instead - more actively maintained)
+- [x] T002 Update .specify/scripts/bash/update-agent-context.sh to document block-based storage terminology and bloom filter library
+- [x] T003 Create docs/BLOCK_FORMAT_REFERENCE.md as operational reference for storage format (copy from quickstart.md)
 
 ---
 
@@ -41,14 +41,14 @@ This document contains all implementation tasks organized by user story and phas
 
 These tasks establish shared infrastructure and core interfaces needed by all user stories.
 
-- [ ] T004 Define BloomFilter interface in internal/storage/filter.go with methods: Add(string), Contains(string), FalsePositiveRate() float32, Serialize() ([]byte, error), Deserialize([]byte) error
-- [ ] T005 [P] Implement BloomFilter using spaolac/bloom in internal/storage/filter.go with configurable false positive rate (default 5%)
-- [ ] T006 [P] Create Block data structure in internal/storage/block.go with fields: ID, Offset, Length, UncompressedLength, EventCount, TimestampMin, TimestampMax, CompressedData, Metadata
-- [ ] T007 [P] Create BlockMetadata structure in internal/storage/block.go with fields: ID, BloomFilterKinds, BloomFilterNamespaces, BloomFilterGroups, KindSet, NamespaceSet, GroupSet, Checksum
-- [ ] T008 Create FileHeader structure in internal/storage/block_format.go with fields: MagicBytes("RPKBLOCK"), FormatVersion, CreatedAt, CompressionAlgorithm, BlockSize, EncodingFormat, ChecksumEnabled, Reserved
-- [ ] T009 Create FileFooter structure in internal/storage/block_format.go with fields: IndexSectionOffset, IndexSectionLength, Checksum, Reserved, MagicBytes("RPKEND")
-- [ ] T010 Create IndexSection structure in internal/storage/block_format.go with fields: FormatVersion, BlockMetadata[], InvertedIndexes, Statistics
-- [ ] T011 Create InvertedIndex structure in internal/storage/block_format.go with fields: KindToBlocks map[string][]int32, NamespaceToBlocks map[string][]int32, GroupToBlocks map[string][]int32
+- [x] T004 Define BloomFilter interface in internal/storage/filter.go with methods: Add(string), Contains(string), FalsePositiveRate() float32, Serialize() ([]byte, error), Deserialize([]byte) error
+- [x] T005 [P] Implement BloomFilter using spaolac/bloom in internal/storage/filter.go with configurable false positive rate (default 5%)
+- [x] T006 [P] Create Block data structure in internal/storage/block.go with fields: ID, Offset, Length, UncompressedLength, EventCount, TimestampMin, TimestampMax, CompressedData, Metadata
+- [x] T007 [P] Create BlockMetadata structure in internal/storage/block.go with fields: ID, BloomFilterKinds, BloomFilterNamespaces, BloomFilterGroups, KindSet, NamespaceSet, GroupSet, Checksum
+- [x] T008 Create FileHeader structure in internal/storage/block_format.go with fields: MagicBytes("RPKBLOCK"), FormatVersion, CreatedAt, CompressionAlgorithm, BlockSize, EncodingFormat, ChecksumEnabled, Reserved
+- [x] T009 Create FileFooter structure in internal/storage/block_format.go with fields: IndexSectionOffset, IndexSectionLength, Checksum, Reserved, MagicBytes("RPKEND")
+- [x] T010 Create IndexSection structure in internal/storage/block_format.go with fields: FormatVersion, BlockMetadata[], InvertedIndexes, Statistics
+- [x] T011 Create InvertedIndex structure in internal/storage/block_format.go with fields: KindToBlocks map[string][]int32, NamespaceToBlocks map[string][]int32, GroupToBlocks map[string][]int32
 
 ---
 
