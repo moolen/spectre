@@ -125,6 +125,11 @@ func (bsf *BlockStorageFile) finalizeBlock() error {
 		return fmt.Errorf("failed to get block offset: %w", err)
 	}
 
+	// Update metadata with offset
+	if block.Metadata != nil {
+		block.Metadata.Offset = block.Offset
+	}
+
 	// Write compressed data to file
 	if _, err := bsf.file.Write(block.CompressedData); err != nil {
 		return fmt.Errorf("failed to write block data: %w", err)

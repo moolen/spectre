@@ -40,6 +40,9 @@ type BlockMetadata struct {
 	// ID is the same as Block.ID for reference
 	ID int32 `json:"id"`
 
+	// Offset is the byte offset where the block data starts in the file
+	Offset int64 `json:"offset"`
+
 	// BloomFilterKinds contains resources.kinds present in block
 	BloomFilterKinds *StandardBloomFilter `json:"bloom_filter_kinds,omitempty"`
 
