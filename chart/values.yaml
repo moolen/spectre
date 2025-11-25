@@ -1,0 +1,101 @@
+# Default values for k8s-event-monitor Helm chart
+
+# Image configuration
+image:
+  repository: k8s-event-monitor
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Replica count
+replicaCount: 1
+
+# Container resource requests and limits
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+
+# Persistent storage configuration
+persistence:
+  enabled: true
+  size: 10Gi
+  mountPath: /data
+  # storageClassName: "" # Use default storage class if not specified
+
+# Configuration for the application
+config:
+  logLevel: "info"
+  kubeWatchResources:
+    - pods
+    - deployments
+    - services
+    - statefulsets
+    - daemonsets
+    - nodes
+    - replicasets
+    - configmaps
+    - secrets
+
+# Pod security and RBAC
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Probes configuration
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Environment variables
+env:
+  - name: LOG_LEVEL
+    value: "info"
+  - name: DATA_DIR
+    value: "/data"
+  - name: API_PORT
+    value: "8080"
+
+# Pod annotations
+podAnnotations: {}
+
+# Node selector for pod scheduling
+nodeSelector: {}
+
+# Tolerations for pod scheduling
+tolerations: []
+
+# Affinity rules for pod scheduling
+affinity: {}
+
+# Namespace where the app is deployed
+namespace: monitoring
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: ""  # Will use "k8s-event-monitor" if not specified
+
+# Override names
+nameOverride: ""
+fullnameOverride: ""

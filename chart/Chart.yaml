@@ -1,0 +1,17 @@
+apiVersion: v2
+name: k8s-event-monitor
+description: Kubernetes Event Monitoring and Storage System
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - kubernetes
+  - monitoring
+  - events
+  - storage
+home: https://github.com/moritz/rpk
+sources:
+  - https://github.com/moritz/rpk
+maintainers:
+  - name: rpk-team
+    email: team@rpk.local

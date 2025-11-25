@@ -1,0 +1,246 @@
+# Kubernetes Event Monitor Helm Chart
+
+A Helm chart for deploying the Kubernetes Event Monitoring and Storage System to a Kubernetes cluster.
+
+## Prerequisites
+
+- Kubernetes 1.19+
+- Helm 3+
+- A persistent volume or storage class for event data storage
+
+## Installation
+
+### Quick Start
+
+```bash
+# Add the chart repository (if hosted remotely)
+helm repo add rpk https://example.com/helm-charts
+
+# Install with default values
+helm install k8s-event-monitor rpk/k8s-event-monitor \
+  --namespace monitoring \
+  --create-namespace
+
+# Verify installation
+kubectl get pods -n monitoring
+```
+
+### Local Installation
+
+```bash
+# From the chart directory
+helm install k8s-event-monitor ./chart \
+  --namespace monitoring \
+  --create-namespace
+```
+
+## Configuration
+
+The chart provides comprehensive configuration options. Common configurations are shown below:
+
+### Basic Configuration
+
+```bash
+helm install k8s-event-monitor ./chart \
+  --namespace monitoring \
+  --set persistence.size=20Gi \
+  --set resources.limits.memory=1Gi
+```
+
+### With Custom Values File
+
+```bash
+helm install k8s-event-monitor ./chart \
+  --namespace monitoring \
+  --values custom-values.yaml
+```
+
+## Values
+
+### Global Settings
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `replicaCount` | Number of replicas | `1` |
+| `namespace` | Kubernetes namespace | `monitoring` |
+
+### Image Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `image.repository` | Image repository | `k8s-event-monitor` |
+| `image.tag` | Image tag | `latest` |
+| `image.pullPolicy` | Image pull policy | `IfNotPresent` |
+
+### Resource Management
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `resources.requests.memory` | Memory request | `128Mi` |
+| `resources.requests.cpu` | CPU request | `100m` |
+| `resources.limits.memory` | Memory limit | `512Mi` |
+| `resources.limits.cpu` | CPU limit | `500m` |
+
+### Persistence
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `persistence.enabled` | Enable persistent storage | `true` |
+| `persistence.size` | PVC size | `10Gi` |
+| `persistence.mountPath` | Mount path in container | `/data` |
+| `persistence.storageClassName` | Storage class name | (default) |
+
+### Service Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `service.type` | Service type | `ClusterIP` |
+| `service.port` | Service port | `8080` |
+| `service.targetPort` | Container port | `8080` |
+
+### Health Probes
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `livenessProbe.enabled` | Enable liveness probe | `true` |
+| `livenessProbe.initialDelaySeconds` | Initial delay | `10` |
+| `livenessProbe.periodSeconds` | Probe interval | `10` |
+| `readinessProbe.enabled` | Enable readiness probe | `true` |
+| `readinessProbe.initialDelaySeconds` | Initial delay | `5` |
+| `readinessProbe.periodSeconds` | Probe interval | `5` |
+
+### Application Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `config.logLevel` | Log level | `info` |
+| `config.kubeWatchResources` | Resources to watch | (see values.yaml) |
+
+### Security
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `securityContext.runAsNonRoot` | Run as non-root | `true` |
+| `securityContext.runAsUser` | User ID | `1000` |
+| `securityContext.fsGroup` | Filesystem group | `1000` |
+
+## Advanced Usage
+
+### Different Storage Classes
+
+```bash
+helm install k8s-event-monitor ./chart \
+  --namespace monitoring \
+  --set persistence.storageClassName=fast-ssd
+```
+
+### Custom Resource Limits
+
+```bash
+helm install k8s-event-monitor ./chart \
+  --namespace monitoring \
+  --set resources.requests.memory=256Mi \
+  --set resources.limits.memory=2Gi
+```
+
+### Node Affinity
+
+```bash
+helm install k8s-event-monitor ./chart \
+  --namespace monitoring \
+  -f - <<EOF
+nodeSelector:
+  disk: fast
+tolerations:
+  - key: dedicated
+    operator: Equal
+    value: monitoring
+    effect: NoSchedule
+EOF
+```
+
+## Verification
+
+After installation, verify the deployment:
+
+```bash
+# Check pod status
+kubectl get pods -n monitoring
+
+# View pod logs
+kubectl logs -n monitoring deployment/k8s-event-monitor -f
+
+# Port-forward to access API
+kubectl port-forward -n monitoring svc/k8s-event-monitor 8080:8080 &
+
+# Test API
+curl http://localhost:8080/v1/search?start=1&end=2
+
+# Check storage
+kubectl exec -n monitoring -it deployment/k8s-event-monitor -- df -h /data
+```
+
+## Troubleshooting
+
+### Pod Won't Start
+
+```bash
+# Check pod events
+kubectl describe pod -n monitoring -l app.kubernetes.io/name=k8s-event-monitor
+
+# View logs
+kubectl logs -n monitoring -l app.kubernetes.io/name=k8s-event-monitor
+```
+
+### RBAC Issues
+
+```bash
+# Verify service account has permissions
+kubectl auth can-i watch pods \
+  --as=system:serviceaccount:monitoring:k8s-event-monitor
+
+# Check cluster role
+kubectl describe clusterrole k8s-event-monitor
+
+# Check cluster role binding
+kubectl describe clusterrolebinding k8s-event-monitor
+```
+
+### Storage Issues
+
+```bash
+# Check PVC status
+kubectl get pvc -n monitoring
+
+# Check available storage classes
+kubectl get storageclass
+
+# Check disk usage
+kubectl exec -n monitoring -it deployment/k8s-event-monitor -- du -sh /data
+```
+
+## Upgrade
+
+```bash
+# Upgrade to new values
+helm upgrade k8s-event-monitor ./chart \
+  --namespace monitoring \
+  --values new-values.yaml
+```
+
+## Uninstall
+
+```bash
+# Remove the deployment
+helm uninstall k8s-event-monitor --namespace monitoring
+
+# Remove the namespace (optional)
+kubectl delete namespace monitoring
+```
+
+## Support
+
+For issues and questions, refer to:
+- Main repository: https://github.com/moritz/rpk
+- Feature specification: `specs/001-k8s-event-monitor/spec.md`
+- Quickstart guide: `specs/001-k8s-event-monitor/quickstart.md`

@@ -1,0 +1,5 @@
+{
+  "name": "Spectre",
+  "description": "Visual incident response platform for Kubernetes audit logs. Features an interactive timeline, resource filtering, and detailed event inspection.",
+  "requestFramePermissions": []
+}

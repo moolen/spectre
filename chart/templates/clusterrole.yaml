@@ -1,0 +1,63 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "k8s-event-monitor.fullname" . }}
+  labels:
+    {{- include "k8s-event-monitor.labels" . | nindent 4 }}
+rules:
+# Core API resources - WATCH permission for event monitoring
+- apiGroups: [""]
+  resources:
+    - pods
+    - services
+    - configmaps
+    - secrets
+    - nodes
+    - namespaces
+    - persistentvolumes
+    - persistentvolumeclaims
+  verbs: ["watch", "list", "get"]
+
+# Apps API group resources
+- apiGroups: ["apps"]
+  resources:
+    - deployments
+    - statefulsets
+    - daemonsets
+    - replicasets
+  verbs: ["watch", "list", "get"]
+
+# Batch API group resources
+- apiGroups: ["batch"]
+  resources:
+    - jobs
+    - cronjobs
+  verbs: ["watch", "list", "get"]
+
+# Storage API group resources
+- apiGroups: ["storage.k8s.io"]
+  resources:
+    - storageclasses
+  verbs: ["watch", "list", "get"]
+
+# Networking API group resources
+- apiGroups: ["networking.k8s.io"]
+  resources:
+    - networkpolicies
+    - ingresses
+  verbs: ["watch", "list", "get"]
+
+# Policy API group resources
+- apiGroups: ["policy"]
+  resources:
+    - poddisruptionbudgets
+  verbs: ["watch", "list", "get"]
+
+# RBAC API group resources
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources:
+    - roles
+    - rolebindings
+    - clusterroles
+    - clusterrolebindings
+  verbs: ["watch", "list", "get"]
