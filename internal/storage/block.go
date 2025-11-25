@@ -3,7 +3,6 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 )
 
 // Block represents a fixed-size unit of compressed event data with associated metadata
@@ -233,16 +232,9 @@ func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string) (*Bl
 	return block, nil
 }
 
-// CompressBlock compresses the block's data using the specified algorithm
-func CompressBlock(block *Block, algorithm string) (*Block, error) {
-	if algorithm == "" {
-		algorithm = "zstd" // Default algorithm
-	}
-
-	compressor, err := NewCompressor(algorithm)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create compressor: %w", err)
-	}
+// CompressBlock compresses the block's data using gzip compression
+func CompressBlock(block *Block) (*Block, error) {
+	compressor := NewCompressor()
 
 	compressedData, err := compressor.Compress(block.CompressedData)
 	if err != nil {
@@ -261,16 +253,9 @@ func CompressBlock(block *Block, algorithm string) (*Block, error) {
 	return block, nil
 }
 
-// DecompressBlock decompresses the block's data using the specified algorithm
-func DecompressBlock(block *Block, algorithm string) ([]byte, error) {
-	if algorithm == "" {
-		algorithm = "zstd" // Default algorithm
-	}
-
-	compressor, err := NewCompressor(algorithm)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create compressor: %w", err)
-	}
+// DecompressBlock decompresses the block's data using gzip decompression
+func DecompressBlock(block *Block) ([]byte, error) {
+	compressor := NewCompressor()
 
 	decompressedData, err := compressor.Decompress(block.CompressedData)
 	if err != nil {

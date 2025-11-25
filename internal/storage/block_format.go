@@ -189,8 +189,8 @@ type FileFooter struct {
 	// Checksum is CRC32 of entire file before footer, if enabled
 	Checksum string
 
-	// Reserved is 16 bytes for future extensions
-	Reserved [16]byte
+	// Reserved is 48 bytes for future extensions
+	Reserved [48]byte
 
 	// MagicBytes must be exactly "RPKEND" for EOF validation
 	MagicBytes string
@@ -215,9 +215,9 @@ func WriteFileFooter(w io.Writer, footer *FileFooter) error {
 	copy(buf[pos:pos+256], checksumBytes)
 	pos += 256
 
-	// Write reserved (16 bytes)
-	copy(buf[pos:pos+16], footer.Reserved[:])
-	pos += 16
+	// Write reserved (48 bytes)
+	copy(buf[pos:pos+48], footer.Reserved[:])
+	pos += 48
 
 	// Write magic bytes (8 bytes)
 	copy(buf[pos:pos+8], []byte(FileFooterMagic))
@@ -255,8 +255,8 @@ func ReadFileFooter(r io.Reader) (*FileFooter, error) {
 	pos += 256
 
 	// Read reserved
-	copy(footer.Reserved[:], buf[pos:pos+16])
-	pos += 16
+	copy(footer.Reserved[:], buf[pos:pos+48])
+	pos += 48
 
 	// Read magic bytes
 	footer.MagicBytes = string(bytes.TrimRight(buf[pos:pos+8], "\x00"))

@@ -58,12 +58,12 @@ func NewBloomFilter(expectedElements uint, falsePositiveRate float32) *StandardB
 
 // Add adds an element to the bloom filter
 func (b *StandardBloomFilter) Add(elem string) {
-	b.filter.AddString(elem)
+	b.filter.Add([]byte(elem))
 }
 
 // Contains returns true if element might be in the set
 func (b *StandardBloomFilter) Contains(elem string) bool {
-	return b.filter.ContainsString(elem)
+	return b.filter.Test([]byte(elem))
 }
 
 // FalsePositiveRate returns the configured false positive rate
