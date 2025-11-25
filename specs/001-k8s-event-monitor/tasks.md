@@ -115,7 +115,7 @@ description: "Implementation tasks for Kubernetes Event Monitoring and Storage S
 
 - [x] T042 [P] Implement gzip compression using klauspost/compress library in internal/storage/compression.go
 - [x] T043 [P] Configure segment size limits and buffering strategy for optimal compression in internal/storage/segment.go
-- [ ] T044 [P] Implement sparse timestamp index with binary search for O(log N) segment discovery in internal/storage/index.go
+- [x] T044 [P] Implement sparse timestamp index with binary search for O(log N) segment discovery in internal/storage/index.go
 - [x] T045 [P] Implement segment metadata index with namespace/kind/group sets in internal/storage/segment_metadata.go
 - [x] T046 Create segment filtering logic that skips segments without matching resources in internal/storage/query.go
 - [x] T047 Implement concurrent event write handling with proper synchronization in internal/watcher/event_queue.go
@@ -124,8 +124,8 @@ description: "Implementation tasks for Kubernetes Event Monitoring and Storage S
 - [x] T050 Implement cross-file query execution with efficient file discovery by time window in internal/storage/query.go
 - [x] T051 Add compression ratio tracking and statistics in file metadata in internal/storage/file_metadata.go
 - [x] T052 Add query optimization metrics (segments scanned vs skipped) in internal/api/response.go
-- [ ] T053 Implement out-of-order event handling with time-window buffering for segment boundaries in internal/watcher/event_queue.go
-- [ ] T054 Add structured logging for storage optimization and query performance in internal/storage/storage.go
+- [x] T053 Implement out-of-order event handling with time-window buffering for segment boundaries in internal/storage/segment.go
+- [x] T054 Add structured logging for storage optimization and query performance in internal/logging/logger.go
 
 **Checkpoint**: User Stories 1, 2, AND 3 complete - High-performance event capture, querying, and storage with optimization.
 
