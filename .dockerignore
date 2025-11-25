@@ -1,0 +1,47 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# Documentation
+docs/
+*.md
+README.md
+CHANGELOG.md
+
+# Dependency files
+go.sum
+vendor/
+
+# Build artifacts and temporary files
+bin/
+dist/
+build/
+*.out
+*.test
+*.tmp
+*.log
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.iml
+
+# Environment files
+.env*
+
+# Local data and development files
+/data/
+/node_modules/
+
+# Specification and planning files
+specs/
+.specify/
