@@ -14,8 +14,18 @@ const (
 	FileHeaderMagic = "RPKBLOCK"
 	FileFooterMagic = "RPKEND"
 
-	// Default format version
+	// Format versions - supports future evolution
+	// Version 1.0: Initial release with block-based compression and inverted indexing
+	// Version 1.1: (Future) Enhanced metadata
+	// Version 2.0: (Future) Protobuf encoding support
 	DefaultFormatVersion = "1.0"
+	FormatVersionV1_0    = "1.0"
+	FormatVersionV1_1    = "1.1" // Future: enhanced metadata
+	FormatVersionV2_0    = "2.0" // Future: protobuf support
+
+	// Supported versions - newer readers must handle older formats
+	MinSupportedVersion = "1.0"
+	MaxSupportedVersion = "1.0" // Currently only 1.0 fully implemented
 
 	// Default compression algorithm
 	DefaultCompressionAlgorithm = "zstd"
@@ -458,4 +468,99 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 	}
 
 	return result
+}
+
+// VersionInfo provides information about file format versions
+type VersionInfo struct {
+	Version      string
+	Description  string
+	Introduced   string
+	Features     []string
+	Deprecated   bool
+}
+
+// GetVersionInfo returns information about a specific file format version
+func GetVersionInfo(version string) *VersionInfo {
+	switch version {
+	case FormatVersionV1_0:
+		return &VersionInfo{
+			Version:     "1.0",
+			Description: "Initial release with block-based compression and inverted indexing",
+			Introduced:  "2025-11",
+			Features: []string{
+				"Block-based storage with gzip compression",
+				"Inverted indexes for kinds, namespaces, groups",
+				"Bloom filters for space-efficient filtering",
+				"MD5 checksums for block integrity",
+				"Fixed-size file header and footer",
+				"JSON-encoded index section",
+			},
+			Deprecated: false,
+		}
+	case FormatVersionV1_1:
+		return &VersionInfo{
+			Version:     "1.1",
+			Description: "Enhanced metadata and optional protobuf encoding",
+			Introduced:  "(planned)",
+			Features: []string{
+				"All 1.0 features",
+				"Enhanced metadata tracking",
+				"Support for both JSON and protobuf encoding",
+				"Improved compression algorithms",
+			},
+			Deprecated: false,
+		}
+	case FormatVersionV2_0:
+		return &VersionInfo{
+			Version:     "2.0",
+			Description: "Major format evolution with protobuf and extended features",
+			Introduced:  "(planned)",
+			Features: []string{
+				"Full protobuf support",
+				"Variable-length block sizes",
+				"Dictionary learning for compression",
+				"Distributed query support",
+			},
+			Deprecated: false,
+		}
+	default:
+		return nil
+	}
+}
+
+// ValidateVersion checks if a file version is supported
+func ValidateVersion(version string) error {
+	// Parse version to check basic format (e.g., "1.0")
+	if version == "" {
+		return fmt.Errorf("empty version string")
+	}
+
+	// Extract major version (everything before the first dot)
+	dotIndex := 0
+	for i := 0; i < len(version); i++ {
+		if version[i] == '.' {
+			dotIndex = i
+			break
+		}
+	}
+
+	if dotIndex == 0 && len(version) > 0 && version[0] != '.' {
+		dotIndex = len(version) // No dot found, use whole string as major
+	}
+
+	if dotIndex <= 0 {
+		return fmt.Errorf("invalid version format: %s", version)
+	}
+
+	majorVersion := version[0:dotIndex]
+
+	// Check if version is supported
+	// For future compatibility, allow newer minor versions of supported major versions
+	// e.g., 1.0 reader can read 1.1, 1.2, etc. files
+	if majorVersion == "1" {
+		// Allow all 1.x versions (backward compatible)
+		return nil
+	}
+
+	return fmt.Errorf("unsupported version: %s (supported: 1.x)", version)
 }

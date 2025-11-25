@@ -37,7 +37,17 @@ func (br *BlockReader) ReadFileHeader() (*FileHeader, error) {
 		return nil, fmt.Errorf("failed to seek to start: %w", err)
 	}
 
-	return ReadFileHeader(br.file)
+	header, err := ReadFileHeader(br.file)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate version
+	if err := ValidateVersion(header.FormatVersion); err != nil {
+		return nil, fmt.Errorf("version validation failed: %w", err)
+	}
+
+	return header, nil
 }
 
 // ReadFileFooter reads the file footer from the end of file
