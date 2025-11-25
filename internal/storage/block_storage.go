@@ -125,9 +125,17 @@ func (bsf *BlockStorageFile) finalizeBlock() error {
 		return fmt.Errorf("failed to get block offset: %w", err)
 	}
 
-	// Update metadata with offset
+	// Update metadata with offset and checksum
 	if block.Metadata != nil {
 		block.Metadata.Offset = block.Offset
+		// Compute checksum of uncompressed data if checksums are enabled
+		if block.UncompressedLength > 0 {
+			// Reconstruct uncompressed data by decompressing the compressed block
+			decompressedData, err := DecompressBlock(block)
+			if err == nil {
+				block.Metadata.Checksum = ComputeChecksum(decompressedData)
+			}
+		}
 	}
 
 	// Write compressed data to file

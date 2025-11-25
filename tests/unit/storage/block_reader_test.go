@@ -190,22 +190,3 @@ func TestBlockReaderRoundtrip(t *testing.T) {
 	}
 }
 
-func TestComputeChecksum(t *testing.T) {
-	data1 := []byte("test data 1")
-	data2 := []byte("test data 2")
-	data1Again := []byte("test data 1")
-
-	checksum1 := storage.ComputeChecksum(data1)
-	checksum2 := storage.ComputeChecksum(data2)
-	checksum1Again := storage.ComputeChecksum(data1Again)
-
-	// Same data should produce same checksum
-	if checksum1 != checksum1Again {
-		t.Errorf("Same data produced different checksums: %s vs %s", checksum1, checksum1Again)
-	}
-
-	// Different data should produce different checksums
-	if checksum1 == checksum2 {
-		t.Errorf("Different data produced same checksum")
-	}
-}

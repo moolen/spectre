@@ -2,6 +2,8 @@ package storage
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -238,13 +240,9 @@ func VerifyBlockChecksum(block *Block, metadata *BlockMetadata) error {
 	return nil
 }
 
-// ComputeChecksum computes a CRC32 checksum for data
+// ComputeChecksum computes an MD5 checksum for data
+// MD5 is used for integrity checking rather than cryptographic security
 func ComputeChecksum(data []byte) string {
-	// Import crc32 at top of file if not already present
-	// For now, using a simple hash as placeholder - will use actual CRC32
-	h := 0
-	for _, b := range data {
-		h = ((h << 5) + h) ^ int(b)
-	}
-	return fmt.Sprintf("%x", h)
+	hash := md5.Sum(data)
+	return hex.EncodeToString(hash[:])
 }
