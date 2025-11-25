@@ -25,31 +25,57 @@ type Segment struct {
 	namespaceSet       map[string]bool
 	kindSet            map[string]bool
 	resourceSummary    []models.ResourceMetadata
+	outOfOrderBuffer   []*models.Event // Buffer for out-of-order events
+	lastEventTime      int64            // Track last event time for reordering
+	reorderingWindowMs int64            // Time window (ms) to wait for out-of-order events
 }
 
 // NewSegment creates a new segment
 func NewSegment(id int32, compressor *Compressor, maxSize int64) *Segment {
 	return &Segment{
-		ID:              id,
-		events:          make([]*models.Event, 0),
-		logger:          logging.GetLogger("segment"),
-		compressor:      compressor,
-		maxSize:         maxSize,
-		namespaceSet:    make(map[string]bool),
-		kindSet:         make(map[string]bool),
-		resourceSummary: make([]models.ResourceMetadata, 0),
+		ID:                 id,
+		events:             make([]*models.Event, 0),
+		logger:             logging.GetLogger("segment"),
+		compressor:         compressor,
+		maxSize:            maxSize,
+		namespaceSet:       make(map[string]bool),
+		kindSet:            make(map[string]bool),
+		resourceSummary:    make([]models.ResourceMetadata, 0),
+		outOfOrderBuffer:   make([]*models.Event, 0),
+		reorderingWindowMs: 5000, // Default 5-second reordering window
 	}
 }
 
-// AddEvent adds an event to the segment
+// AddEvent adds an event to the segment with out-of-order handling
 func (s *Segment) AddEvent(event *models.Event) error {
 	// Validate event
 	if err := event.Validate(); err != nil {
 		return fmt.Errorf("invalid event: %w", err)
 	}
 
+	// Handle out-of-order events with buffering and reordering
+	if len(s.events) > 0 && event.Timestamp < s.lastEventTime {
+		// Event is out of order - check if it's within reordering window
+		timeDiff := s.lastEventTime - event.Timestamp
+		if timeDiff <= s.reorderingWindowMs {
+			// Within reordering window, buffer the event for later insertion
+			s.outOfOrderBuffer = append(s.outOfOrderBuffer, event)
+			s.logger.Debug("Buffered out-of-order event for segment %d (time_diff=%dms)", s.ID, timeDiff)
+			return nil
+		}
+		// Outside reordering window - log but still add the event
+		s.logger.Warn("Event for segment %d is severely out-of-order (time_diff=%dms), adding anyway", s.ID, timeDiff)
+	}
+
+	// Add the event to the main events list
+	s.events = append(s.events, event)
+	s.lastEventTime = event.Timestamp
+
+	// Flush buffered out-of-order events that are now in order
+	s.flushOrderedBufferedEvents()
+
 	// Update timestamps
-	if len(s.events) == 0 {
+	if len(s.events) == 1 {
 		s.startTimestamp = event.Timestamp
 		s.endTimestamp = event.Timestamp
 	} else {
@@ -61,13 +87,108 @@ func (s *Segment) AddEvent(event *models.Event) error {
 		}
 	}
 
-	// Add event
-	s.events = append(s.events, event)
-
 	// Update metadata
 	s.updateMetadata(event)
 
 	return nil
+}
+
+// flushOrderedBufferedEvents flushes buffered out-of-order events that are now in chronological order
+func (s *Segment) flushOrderedBufferedEvents() {
+	if len(s.outOfOrderBuffer) == 0 {
+		return
+	}
+
+	// Sort buffered events by timestamp
+	for i := 0; i < len(s.outOfOrderBuffer); i++ {
+		for j := i + 1; j < len(s.outOfOrderBuffer); j++ {
+			if s.outOfOrderBuffer[j].Timestamp < s.outOfOrderBuffer[i].Timestamp {
+				s.outOfOrderBuffer[i], s.outOfOrderBuffer[j] = s.outOfOrderBuffer[j], s.outOfOrderBuffer[i]
+			}
+		}
+	}
+
+	// Add buffered events that are now in order
+	remainingBuffer := make([]*models.Event, 0)
+	for _, bufferedEvent := range s.outOfOrderBuffer {
+		if bufferedEvent.Timestamp <= s.lastEventTime {
+			// This event is now in order, add it to the main events list
+			// Find the correct position to insert
+			inserted := false
+			for i := len(s.events) - 1; i >= 0; i-- {
+				if s.events[i].Timestamp <= bufferedEvent.Timestamp {
+					// Insert after this event
+					s.events = append(s.events[:i+1], append([]*models.Event{bufferedEvent}, s.events[i+1:]...)...)
+					s.updateMetadata(bufferedEvent)
+					inserted = true
+					s.logger.Debug("Flushed buffered event for segment %d into main event stream", s.ID)
+					break
+				}
+			}
+			if !inserted {
+				// Insert at beginning
+				s.events = append([]*models.Event{bufferedEvent}, s.events...)
+				s.updateMetadata(bufferedEvent)
+			}
+		} else {
+			// Still out of order, keep in buffer
+			remainingBuffer = append(remainingBuffer, bufferedEvent)
+		}
+	}
+
+	s.outOfOrderBuffer = remainingBuffer
+}
+
+// SetReorderingWindow sets the time window (in milliseconds) for buffering out-of-order events
+func (s *Segment) SetReorderingWindow(windowMs int64) {
+	s.reorderingWindowMs = windowMs
+	s.logger.Debug("Set reordering window for segment %d to %dms", s.ID, windowMs)
+}
+
+// GetBufferedEventCount returns the number of events waiting in the out-of-order buffer
+func (s *Segment) GetBufferedEventCount() int32 {
+	return int32(len(s.outOfOrderBuffer))
+}
+
+// FlushBufferedEvents forces all buffered out-of-order events into the main stream
+func (s *Segment) FlushBufferedEvents() {
+	if len(s.outOfOrderBuffer) == 0 {
+		return
+	}
+
+	s.logger.Debug("Force-flushing %d buffered events for segment %d", len(s.outOfOrderBuffer), s.ID)
+
+	// Sort all buffered events by timestamp
+	for i := 0; i < len(s.outOfOrderBuffer); i++ {
+		for j := i + 1; j < len(s.outOfOrderBuffer); j++ {
+			if s.outOfOrderBuffer[j].Timestamp < s.outOfOrderBuffer[i].Timestamp {
+				s.outOfOrderBuffer[i], s.outOfOrderBuffer[j] = s.outOfOrderBuffer[j], s.outOfOrderBuffer[i]
+			}
+		}
+	}
+
+	// Merge buffered events into main events list in sorted order
+	mergedEvents := make([]*models.Event, 0, len(s.events)+len(s.outOfOrderBuffer))
+	i, j := 0, 0
+
+	for i < len(s.events) && j < len(s.outOfOrderBuffer) {
+		if s.events[i].Timestamp <= s.outOfOrderBuffer[j].Timestamp {
+			mergedEvents = append(mergedEvents, s.events[i])
+			i++
+		} else {
+			mergedEvents = append(mergedEvents, s.outOfOrderBuffer[j])
+			j++
+		}
+	}
+
+	// Append remaining events
+	mergedEvents = append(mergedEvents, s.events[i:]...)
+	mergedEvents = append(mergedEvents, s.outOfOrderBuffer[j:]...)
+
+	s.events = mergedEvents
+	s.outOfOrderBuffer = make([]*models.Event, 0)
+
+	s.logger.Info("Flushed all buffered events into segment %d", s.ID)
 }
 
 // updateMetadata updates segment metadata with the new event
@@ -94,6 +215,11 @@ func (s *Segment) updateMetadata(event *models.Event) {
 
 // Finalize finalizes the segment by compressing the data
 func (s *Segment) Finalize() error {
+	// Flush any remaining buffered out-of-order events before finalization
+	if len(s.outOfOrderBuffer) > 0 {
+		s.FlushBufferedEvents()
+	}
+
 	if len(s.events) == 0 {
 		return fmt.Errorf("cannot finalize empty segment")
 	}
@@ -129,8 +255,8 @@ func (s *Segment) Finalize() error {
 		CompressionAlgorithm: "gzip",
 	}
 
-	s.logger.Debug("Segment %d finalized: events=%d, uncompressed=%d, compressed=%d, ratio=%.2f",
-		s.ID, len(s.events), len(s.uncompressedData), len(s.compressedData),
+	s.logger.Debug("Segment %d finalized: events=%d, buffered=%d (flushed), uncompressed=%d, compressed=%d, ratio=%.2f",
+		s.ID, len(s.events), len(s.outOfOrderBuffer), len(s.uncompressedData), len(s.compressedData),
 		s.getCompressionRatio())
 
 	return nil
