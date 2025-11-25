@@ -1,5 +1,7 @@
 package models
 
+import "sort"
+
 // SparseTimestampIndex maps timestamp ranges to segment offsets for fast temporal filtering
 type SparseTimestampIndex struct {
 	// Entries is an array of index entries sorted by timestamp
@@ -45,38 +47,34 @@ func (s *SparseTimestampIndex) Validate() error {
 }
 
 // FindSegmentsForTimeRange returns all segment IDs that might contain events in the given time range
-// Uses binary search to find the candidate segments
+// Uses binary search for O(log n) performance on large indices
 func (s *SparseTimestampIndex) FindSegmentsForTimeRange(startTime, endTime int64) []int32 {
 	if len(s.Entries) == 0 {
 		return []int32{}
 	}
 
-	// Find the first entry with timestamp >= startTime
-	startIdx := 0
-	for i, entry := range s.Entries {
-		if entry.Timestamp >= startTime {
-			if i > 0 {
-				startIdx = i - 1 // Include the segment before to catch overlaps
-			} else {
-				startIdx = 0
-			}
-			break
-		}
-		if i == len(s.Entries)-1 {
-			startIdx = i // If all timestamps are before startTime, use the last one
-		}
+	// Use binary search to find the first entry with timestamp >= startTime
+	startIdx := sort.Search(len(s.Entries), func(i int) bool {
+		return s.Entries[i].Timestamp >= startTime
+	})
+
+	// If no exact match, include the segment before to catch overlaps
+	if startIdx > 0 {
+		startIdx--
 	}
 
-	// Find the last entry with timestamp <= endTime
-	endIdx := len(s.Entries) - 1
-	for i := len(s.Entries) - 1; i >= 0; i-- {
-		if s.Entries[i].Timestamp <= endTime {
-			endIdx = i
-			break
-		}
-		if i == 0 {
-			endIdx = 0
-		}
+	// Use binary search to find the last entry with timestamp <= endTime
+	// search for the first entry > endTime, then subtract 1
+	endIdx := sort.Search(len(s.Entries), func(i int) bool {
+		return s.Entries[i].Timestamp > endTime
+	})
+
+	// If search found an element, move to previous; if not found, use last element
+	if endIdx > 0 {
+		endIdx--
+	} else if len(s.Entries) > 0 {
+		// If no entries found > endTime, use the last entry
+		endIdx = len(s.Entries) - 1
 	}
 
 	// Ensure start index doesn't exceed end index
@@ -84,7 +82,7 @@ func (s *SparseTimestampIndex) FindSegmentsForTimeRange(startTime, endTime int64
 		return []int32{}
 	}
 
-	// Collect all segment IDs in range
+	// Collect all segment IDs in range, avoiding duplicates
 	segmentIDs := make([]int32, 0)
 	seen := make(map[int32]bool)
 	for i := startIdx; i <= endIdx; i++ {
@@ -99,6 +97,7 @@ func (s *SparseTimestampIndex) FindSegmentsForTimeRange(startTime, endTime int64
 }
 
 // GetSegmentOffset returns the byte offset of a specific segment
+// Linear search is acceptable here since segment IDs are not necessarily ordered
 func (s *SparseTimestampIndex) GetSegmentOffset(segmentID int32) int64 {
 	for _, entry := range s.Entries {
 		if entry.SegmentID == segmentID {
