@@ -84,6 +84,16 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 		totalSegmentsSkipped += segmentsSkipped
 	}
 
+	// Query in-memory buffered events (unflushed data) for low-latency queries
+	qe.logger.Debug("Querying in-memory buffered events")
+	inMemoryEvents, err := qe.storage.GetInMemoryEvents(query)
+	if err != nil {
+		qe.logger.Warn("Failed to query in-memory events: %v", err)
+	} else {
+		qe.logger.Debug("Found %d events in memory", len(inMemoryEvents))
+		allEvents = append(allEvents, inMemoryEvents...)
+	}
+
 	// Filter events by time range (in case of boundary issues)
 	// Events use nanoseconds, but FilterByTimeRange expects nanoseconds, so convert query to nanoseconds
 	startTimeNs := query.StartTimestamp * 1e9
@@ -126,6 +136,11 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 	// Read file metadata and index
 	_, index, err := qe.readFileMetadata(filePath)
 	if err != nil {
+		// If file is incomplete (no footer), try to query it by scanning segments directly
+		if isIncompleteFileError(err) {
+			qe.logger.Debug("File %s is incomplete, attempting to query by scanning segments", filePath)
+			return qe.queryIncompleteFile(filePath, query)
+		}
 		return nil, 0, 0, err
 	}
 
@@ -424,76 +439,71 @@ func (qe *QueryExecutor) readFileMetadata(filePath string) (models.FileMetadata,
 	}
 
 	// Read metadata length and data
-	// Metadata ends right before the index length
+	// Metadata ends right before the index length (at the same position)
 	// Structure: [metadata_len(4)] [metadata] [index_len(4)] [index] [footer]
-	// We need to find where metadata JSON starts by searching backwards from index length position
-	metadataSearchStart := indexLenPos - 4
+	// Metadata JSON starts with {"createdAt" and ends right before index length
 	metadataSearchWindow := int64(2000) // Search up to 2KB before index length
-	if metadataSearchStart < metadataSearchWindow {
-		metadataSearchWindow = metadataSearchStart
+	if indexLenPos < metadataSearchWindow {
+		metadataSearchWindow = indexLenPos
 	}
-	
-	metadataReadStart := metadataSearchStart - metadataSearchWindow
+
+	metadataReadStart := indexLenPos - metadataSearchWindow
 	if metadataReadStart < 0 {
 		metadataReadStart = 0
 	}
-	
+
 	file.Seek(metadataReadStart, 0)
 	metadataSearchData := make([]byte, metadataSearchWindow)
 	if _, err := file.Read(metadataSearchData); err != nil {
 		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read metadata search window: %w", err)
 	}
-	
-	// Find where metadata JSON ends (right before index length)
-	// The metadata JSON should end with } right before the index length position
-	// Calculate relative position of index length in our search window
-	indexLenPosInWindow := metadataSearchStart - metadataReadStart
-	
-	// Find the last } before the index length position
-	metadataEndInWindow := bytes.LastIndex(metadataSearchData[:indexLenPosInWindow], []byte("}"))
-	if metadataEndInWindow < 0 {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("metadata JSON end marker not found")
-	}
-	
-	// Find where metadata JSON starts (look for { before the end)
-	metadataStartInWindow := bytes.LastIndex(metadataSearchData[:metadataEndInWindow+1], []byte("{"))
+
+	// Find metadata JSON start by looking for {"createdAt" marker
+	metadataStartMarker := []byte(`{"createdAt"`)
+	metadataStartInWindow := bytes.LastIndex(metadataSearchData, metadataStartMarker)
 	if metadataStartInWindow < 0 {
 		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("metadata JSON start marker not found")
 	}
-	
-	// Calculate absolute positions
+
+	// Calculate absolute position
 	metadataJSONStart := metadataReadStart + int64(metadataStartInWindow)
-	metadataJSONEnd := metadataReadStart + int64(metadataEndInWindow) + 1 // +1 to include the }
+
+	// Metadata JSON ends right before the index length field (4 bytes before indexLenPos)
+	// Structure: [metadata_len(4)] [metadata] [index_len(4)] [index] [footer]
+	metadataJSONEnd := indexLenPos - 4
 	metadataLenActual := metadataJSONEnd - metadataJSONStart
-	
+
 	// Metadata length is 4 bytes before metadata JSON start
 	metadataLenPos := metadataJSONStart - 4
 	if metadataLenPos < 0 {
 		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("metadata length position is negative")
 	}
-	
+
 	file.Seek(metadataLenPos, 0)
 	var metadataLen int32
 	if err := binary.Read(file, binary.LittleEndian, &metadataLen); err != nil {
 		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read metadata length: %w", err)
 	}
-	
+
 	if metadataLen <= 0 || metadataLen > 10*1024*1024 { // Sanity check: max 10MB metadata
 		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("invalid metadata length: %d", metadataLen)
 	}
-	
-	// Verify the length matches what we found
+
+	// Verify metadata length matches actual size
+	// Use the actual calculated length instead of stored length to avoid mismatches
+	// The stored length might be incorrect due to how it was calculated during write
 	if int64(metadataLen) != metadataLenActual {
-		qe.logger.Debug("Metadata length mismatch: stored=%d, actual=%d, using stored value", metadataLen, metadataLenActual)
+		qe.logger.Debug("Metadata length mismatch: stored=%d, actual=%d, using actual", metadataLen, metadataLenActual)
+		metadataLen = int32(metadataLenActual)
 	}
-	
+
 	// Read metadata data
 	file.Seek(metadataJSONStart, 0)
 	metadataData := make([]byte, metadataLen)
 	if _, err := file.Read(metadataData); err != nil {
 		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read metadata data: %w", err)
 	}
-	
+
 	// Verify metadata ends where index length starts
 	expectedMetadataEnd := indexLenPos
 	actualMetadataEnd := metadataJSONStart + int64(metadataLen)
@@ -544,6 +554,140 @@ func (qe *QueryExecutor) QueryForSegments(query *models.QueryRequest) ([]models.
 func (qe *QueryExecutor) getFileSegments(filePath string, query *models.QueryRequest) ([]models.StorageSegment, error) {
 	// TODO: Implement segment retrieval
 	return []models.StorageSegment{}, nil
+}
+
+// queryIncompleteFile queries an incomplete file by scanning segments directly
+// This is used for files that are still being written (no footer/index yet)
+func (qe *QueryExecutor) queryIncompleteFile(filePath string, query *models.QueryRequest) ([]models.Event, int32, int32, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	fileSize := fileInfo.Size()
+	if fileSize == 0 {
+		// Empty file, no segments to read
+		return []models.Event{}, 0, 0, nil
+	}
+
+	// Scan file for segments
+	// Segments start at offset 0 (no file header)
+	// Format: ID(4) + startTimestamp(8) + endTimestamp(8) + eventCount(4) + uncompressedSize(8) + compressedSize(8) + compressedData
+	var allEvents []models.Event
+	var segmentsScanned int32
+	var segmentsSkipped int32
+	offset := int64(0)
+	compressor := NewCompressor()
+
+	startTimeNs := query.StartTimestamp * 1e9
+	endTimeNs := query.EndTimestamp * 1e9
+
+	// Scan segments until we reach the end of the file
+	for offset < fileSize {
+		// Check if we have enough bytes for a segment header (40 bytes)
+		if fileSize-offset < 40 {
+			// Not enough data for a complete segment header
+			break
+		}
+
+		// Read segment header
+		if _, err := file.Seek(offset, 0); err != nil {
+			break
+		}
+
+		var segmentID int32
+		var startTimestamp, endTimestamp int64
+		var eventCount int32
+		var uncompressedSize, compressedSize int64
+
+		if err := binary.Read(file, binary.LittleEndian, &segmentID); err != nil {
+			break
+		}
+		if err := binary.Read(file, binary.LittleEndian, &startTimestamp); err != nil {
+			break
+		}
+		if err := binary.Read(file, binary.LittleEndian, &endTimestamp); err != nil {
+			break
+		}
+		if err := binary.Read(file, binary.LittleEndian, &eventCount); err != nil {
+			break
+		}
+		if err := binary.Read(file, binary.LittleEndian, &uncompressedSize); err != nil {
+			break
+		}
+		if err := binary.Read(file, binary.LittleEndian, &compressedSize); err != nil {
+			break
+		}
+
+		// Check if segment overlaps with query time range
+		if endTimestamp < startTimeNs || startTimestamp > endTimeNs {
+			// Skip this segment, move to next
+			offset += 40 + compressedSize
+			segmentsSkipped++
+			continue
+		}
+
+		// Check if we have enough data for the compressed segment
+		if fileSize-offset-40 < compressedSize {
+			// Segment is incomplete, stop scanning
+			break
+		}
+
+		// Read and decompress segment
+		compressedData := make([]byte, compressedSize)
+		if _, err := file.Read(compressedData); err != nil {
+			segmentsSkipped++
+			offset += 40 + compressedSize
+			continue
+		}
+
+		// Decompress and parse events
+		decompressed, err := compressor.Decompress(compressedData)
+		if err != nil {
+			segmentsSkipped++
+			offset += 40 + compressedSize
+			continue
+		}
+
+		// Parse events
+		lines := bytes.Split(decompressed, []byte("\n"))
+		for _, line := range lines {
+			if len(line) == 0 {
+				continue
+			}
+
+			var event models.Event
+			if err := json.Unmarshal(line, &event); err != nil {
+				continue
+			}
+
+			// Filter by time range
+			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+				continue
+			}
+
+			// Filter by resource filters
+			if !qe.filterEngine.MatchesFilters(&event, query.Filters) {
+				continue
+			}
+
+			allEvents = append(allEvents, event)
+		}
+
+		segmentsScanned++
+		offset += 40 + compressedSize
+	}
+
+	qe.logger.Debug("File %s (incomplete): scanned %d segments, skipped %d, found %d events",
+		filePath, segmentsScanned, segmentsSkipped, len(allEvents))
+
+	return allEvents, segmentsScanned, segmentsSkipped, nil
 }
 
 // isIncompleteFileError checks if an error indicates the file is incomplete (still being written)

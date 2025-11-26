@@ -344,3 +344,274 @@ func TestGetCandidateBlocksNoMatch(t *testing.T) {
 		t.Errorf("Expected 0 candidates, got %d", len(candidates))
 	}
 }
+
+func TestFileHeaderAllFields(t *testing.T) {
+	header := storage.NewFileHeader()
+	header.FormatVersion = "1.0"
+	header.CreatedAt = 1234567890000000000
+	header.CompressionAlgorithm = "gzip"
+	header.BlockSize = 128 * 1024
+	header.EncodingFormat = "json"
+	header.ChecksumEnabled = true
+	copy(header.Reserved[:], []byte("reserved123456"))
+
+	buf := &bytes.Buffer{}
+	if err := storage.WriteFileHeader(buf, header); err != nil {
+		t.Fatalf("Failed to write header: %v", err)
+	}
+
+	reader := bytes.NewReader(buf.Bytes())
+	header2, err := storage.ReadFileHeader(reader)
+	if err != nil {
+		t.Fatalf("Failed to read header: %v", err)
+	}
+
+	if header2.CreatedAt != header.CreatedAt {
+		t.Errorf("CreatedAt mismatch: %d vs %d", header2.CreatedAt, header.CreatedAt)
+	}
+	if header2.EncodingFormat != header.EncodingFormat {
+		t.Errorf("EncodingFormat mismatch: %s vs %s", header2.EncodingFormat, header.EncodingFormat)
+	}
+	if header2.ChecksumEnabled != header.ChecksumEnabled {
+		t.Errorf("ChecksumEnabled mismatch: %v vs %v", header2.ChecksumEnabled, header.ChecksumEnabled)
+	}
+}
+
+func TestFileHeaderEmptyVersion(t *testing.T) {
+	header := storage.NewFileHeader()
+	header.FormatVersion = ""
+
+	buf := &bytes.Buffer{}
+	if err := storage.WriteFileHeader(buf, header); err != nil {
+		t.Fatalf("Failed to write header: %v", err)
+	}
+
+	reader := bytes.NewReader(buf.Bytes())
+	header2, err := storage.ReadFileHeader(reader)
+	if err != nil {
+		t.Fatalf("Failed to read header: %v", err)
+	}
+
+	// Empty version should be read as empty string (trimmed)
+	if header2.FormatVersion != "" {
+		t.Errorf("Expected empty version, got %s", header2.FormatVersion)
+	}
+}
+
+func TestFileFooterAllFields(t *testing.T) {
+	footer := &storage.FileFooter{
+		IndexSectionOffset: 5000000,
+		IndexSectionLength: 100000,
+		Checksum:           "a" + string(make([]byte, 255)), // 256 bytes
+		MagicBytes:         "RPKEND",
+	}
+	copy(footer.Reserved[:], []byte("reserved data for future use"))
+
+	buf := &bytes.Buffer{}
+	if err := storage.WriteFileFooter(buf, footer); err != nil {
+		t.Fatalf("Failed to write footer: %v", err)
+	}
+
+	reader := bytes.NewReader(buf.Bytes())
+	footer2, err := storage.ReadFileFooter(reader)
+	if err != nil {
+		t.Fatalf("Failed to read footer: %v", err)
+	}
+
+	if footer2.IndexSectionOffset != footer.IndexSectionOffset {
+		t.Errorf("IndexSectionOffset mismatch: %d vs %d", footer2.IndexSectionOffset, footer.IndexSectionOffset)
+	}
+	if footer2.IndexSectionLength != footer.IndexSectionLength {
+		t.Errorf("IndexSectionLength mismatch: %d vs %d", footer2.IndexSectionLength, footer.IndexSectionLength)
+	}
+}
+
+func TestIndexSectionSerialization(t *testing.T) {
+	section := &storage.IndexSection{
+		FormatVersion: "1.0",
+		BlockMetadata: []*storage.BlockMetadata{
+			{
+				ID:               0,
+				TimestampMin:     1000,
+				TimestampMax:     2000,
+				EventCount:       10,
+				CompressedLength: 5000,
+				UncompressedLength: 10000,
+				KindSet:          []string{"Pod"},
+				NamespaceSet:     []string{"default"},
+			},
+		},
+		InvertedIndexes: &storage.InvertedIndex{
+			KindToBlocks:      map[string][]int32{"Pod": {0}},
+			NamespaceToBlocks: map[string][]int32{"default": {0}},
+			GroupToBlocks:     map[string][]int32{},
+		},
+		Statistics: &storage.IndexStatistics{
+			TotalBlocks:            1,
+			TotalEvents:            10,
+			TotalUncompressedBytes: 10000,
+			TotalCompressedBytes:   5000,
+			CompressionRatio:       0.5,
+			UniqueKinds:            1,
+			UniqueNamespaces:       1,
+			UniqueGroups:           0,
+			TimestampMin:           1000,
+			TimestampMax:           2000,
+		},
+	}
+
+	buf := &bytes.Buffer{}
+	bytesWritten, err := storage.WriteIndexSection(buf, section)
+	if err != nil {
+		t.Fatalf("Failed to write index section: %v", err)
+	}
+
+	if bytesWritten <= 0 {
+		t.Error("Expected bytes written > 0")
+	}
+
+	reader := bytes.NewReader(buf.Bytes())
+	section2, err := storage.ReadIndexSection(reader)
+	if err != nil {
+		t.Fatalf("Failed to read index section: %v", err)
+	}
+
+	if section2.FormatVersion != section.FormatVersion {
+		t.Errorf("FormatVersion mismatch: %s vs %s", section2.FormatVersion, section.FormatVersion)
+	}
+	if len(section2.BlockMetadata) != len(section.BlockMetadata) {
+		t.Errorf("BlockMetadata count mismatch: %d vs %d", len(section2.BlockMetadata), len(section.BlockMetadata))
+	}
+	if section2.Statistics.TotalEvents != section.Statistics.TotalEvents {
+		t.Errorf("TotalEvents mismatch: %d vs %d", section2.Statistics.TotalEvents, section.Statistics.TotalEvents)
+	}
+}
+
+func TestBuildInvertedIndexesEmpty(t *testing.T) {
+	index := storage.BuildInvertedIndexes([]*storage.BlockMetadata{})
+	if index == nil {
+		t.Fatal("Expected non-nil index")
+	}
+	if len(index.KindToBlocks) != 0 {
+		t.Errorf("Expected empty KindToBlocks, got %d", len(index.KindToBlocks))
+	}
+	if len(index.NamespaceToBlocks) != 0 {
+		t.Errorf("Expected empty NamespaceToBlocks, got %d", len(index.NamespaceToBlocks))
+	}
+	if len(index.GroupToBlocks) != 0 {
+		t.Errorf("Expected empty GroupToBlocks, got %d", len(index.GroupToBlocks))
+	}
+}
+
+func TestGetCandidateBlocksEmptyFilters(t *testing.T) {
+	metadata := []*storage.BlockMetadata{
+		{ID: 0, KindSet: []string{"Pod"}},
+		{ID: 1, KindSet: []string{"Service"}},
+	}
+	index := storage.BuildInvertedIndexes(metadata)
+
+	// Empty filters should return nil
+	candidates := storage.GetCandidateBlocks(index, map[string]string{})
+	if candidates != nil {
+		t.Errorf("Expected nil for empty filters, got %v", candidates)
+	}
+
+	// Nil index should return nil
+	candidates2 := storage.GetCandidateBlocks(nil, map[string]string{"kind": "Pod"})
+	if candidates2 != nil {
+		t.Errorf("Expected nil for nil index, got %v", candidates2)
+	}
+}
+
+func TestGetCandidateBlocksMultipleFilters(t *testing.T) {
+	metadata := []*storage.BlockMetadata{
+		{
+			ID:           0,
+			KindSet:      []string{"Pod"},
+			NamespaceSet: []string{"default"},
+			GroupSet:     []string{""},
+		},
+		{
+			ID:           1,
+			KindSet:      []string{"Pod"},
+			NamespaceSet: []string{"default"},
+			GroupSet:     []string{"apps"},
+		},
+		{
+			ID:           2,
+			KindSet:      []string{"Pod"},
+			NamespaceSet: []string{"kube-system"},
+			GroupSet:     []string{""},
+		},
+	}
+
+	index := storage.BuildInvertedIndexes(metadata)
+
+	// Query: kind=Pod AND namespace=default AND group=""
+	filters := map[string]string{
+		"kind":      "Pod",
+		"namespace": "default",
+		"group":     "",
+	}
+
+	candidates := storage.GetCandidateBlocks(index, filters)
+	if len(candidates) != 1 {
+		t.Errorf("Expected 1 candidate block, got %d", len(candidates))
+	}
+	if candidates[0] != 0 {
+		t.Errorf("Expected block 0, got %d", candidates[0])
+	}
+}
+
+func TestValidateVersion(t *testing.T) {
+	// Valid versions
+	validVersions := []string{"1.0", "1.1", "1.2", "1.99"}
+	for _, v := range validVersions {
+		if err := storage.ValidateVersion(v); err != nil {
+			t.Errorf("Version %s should be valid, got error: %v", v, err)
+		}
+	}
+
+	// Invalid versions
+	invalidVersions := []string{"", "2.0", "0.9", "invalid", "1", ".0"}
+	for _, v := range invalidVersions {
+		if err := storage.ValidateVersion(v); err == nil {
+			t.Errorf("Version %s should be invalid, but got no error", v)
+		}
+	}
+}
+
+func TestGetVersionInfo(t *testing.T) {
+	// Test v1.0
+	info := storage.GetVersionInfo("1.0")
+	if info == nil {
+		t.Fatal("Expected version info for 1.0")
+	}
+	if info.Version != "1.0" {
+		t.Errorf("Expected version 1.0, got %s", info.Version)
+	}
+	if info.Deprecated {
+		t.Error("Version 1.0 should not be deprecated")
+	}
+	if len(info.Features) == 0 {
+		t.Error("Expected features for version 1.0")
+	}
+
+	// Test v1.1 (future)
+	info2 := storage.GetVersionInfo("1.1")
+	if info2 == nil {
+		t.Fatal("Expected version info for 1.1")
+	}
+
+	// Test invalid version
+	info3 := storage.GetVersionInfo("2.0")
+	if info3 == nil {
+		t.Fatal("Expected version info for 2.0 (planned)")
+	}
+
+	// Test unknown version
+	info4 := storage.GetVersionInfo("999.0")
+	if info4 != nil {
+		t.Error("Expected nil for unknown version")
+	}
+}

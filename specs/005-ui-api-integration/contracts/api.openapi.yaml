@@ -1,0 +1,322 @@
+openapi: 3.0.0
+info:
+  title: Kubernetes Event Monitor API
+  description: API for querying Kubernetes resource audit events and status history
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Development server
+  - url: /
+    description: Relative path (for proxy)
+
+paths:
+  /v1/search:
+    get:
+      summary: Search Kubernetes resources and audit events
+      description: |
+        Retrieve Kubernetes resources with their complete audit history within a time range.
+        Optionally filter by namespace, kind, group, or version.
+      operationId: searchResources
+      parameters:
+        - name: start
+          in: query
+          required: true
+          description: Start time as Unix timestamp (seconds) or human-readable date
+          schema:
+            oneOf:
+              - type: integer
+                format: int64
+                minimum: 0
+                example: 1700000000
+              - type: string
+                example: "2 hours ago"
+
+        - name: end
+          in: query
+          required: true
+          description: End time as Unix timestamp (seconds) or human-readable date
+          schema:
+            oneOf:
+              - type: integer
+                format: int64
+                minimum: 0
+                example: 1700086400
+              - type: string
+                example: "now"
+
+        - name: namespace
+          in: query
+          required: false
+          description: Filter by Kubernetes namespace
+          schema:
+            type: string
+            example: "default"
+
+        - name: kind
+          in: query
+          required: false
+          description: Filter by resource kind
+          schema:
+            type: string
+            example: "Pod"
+
+        - name: group
+          in: query
+          required: false
+          description: Filter by API group
+          schema:
+            type: string
+            example: "apps"
+
+        - name: version
+          in: query
+          required: false
+          description: Filter by API version
+          schema:
+            type: string
+            example: "v1"
+
+      responses:
+        '200':
+          description: Successful search response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+              example:
+                resources:
+                  - id: "abc-123-def"
+                    group: "apps"
+                    version: "v1"
+                    kind: "Deployment"
+                    namespace: "default"
+                    name: "my-app"
+                    statusSegments:
+                      - startTime: 1700000000
+                        endTime: 1700003600
+                        status: "Ready"
+                        message: "Deployment is running"
+                        config:
+                          replicas: 3
+                          image: "my-app:1.0.0"
+                    events:
+                      - id: "evt-001"
+                        timestamp: 1700000100
+                        verb: "create"
+                        user: "kubectl"
+                        message: "Deployment created"
+                        details: "Initial creation"
+                count: 1
+                executionTimeMs: 245
+
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "INVALID_REQUEST"
+                message: "start timestamp is required"
+
+        '500':
+          description: Server error during query execution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "INTERNAL_ERROR"
+                message: "Failed to execute query"
+
+  /healthz:
+    get:
+      summary: Health check endpoint
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+
+components:
+  schemas:
+    SearchResponse:
+      type: object
+      required:
+        - resources
+        - count
+        - executionTimeMs
+      properties:
+        resources:
+          type: array
+          description: Array of Kubernetes resources matching the query
+          items:
+            $ref: '#/components/schemas/Resource'
+        count:
+          type: integer
+          description: Total number of resources returned
+          example: 42
+        executionTimeMs:
+          type: integer
+          format: int64
+          description: Server-side query execution time in milliseconds
+          example: 1234
+
+    Resource:
+      type: object
+      required:
+        - id
+        - group
+        - version
+        - kind
+        - namespace
+        - name
+        - statusSegments
+        - events
+      properties:
+        id:
+          type: string
+          description: Unique resource identifier (Kubernetes UID)
+          example: "abc-123-def-456"
+        group:
+          type: string
+          description: API group
+          example: "apps"
+        version:
+          type: string
+          description: API version
+          example: "v1"
+        kind:
+          type: string
+          description: Resource kind
+          example: "Deployment"
+        namespace:
+          type: string
+          description: Kubernetes namespace
+          example: "default"
+        name:
+          type: string
+          description: Resource name
+          example: "my-deployment"
+        statusSegments:
+          type: array
+          description: Timeline of status changes
+          items:
+            $ref: '#/components/schemas/StatusSegment'
+        events:
+          type: array
+          description: Audit events for this resource
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+
+    StatusSegment:
+      type: object
+      required:
+        - startTime
+        - endTime
+        - status
+        - config
+      properties:
+        startTime:
+          type: integer
+          format: int64
+          description: Segment start time (Unix seconds)
+          example: 1700000000
+        endTime:
+          type: integer
+          format: int64
+          description: Segment end time (Unix seconds)
+          example: 1700003600
+        status:
+          type: string
+          enum:
+            - Ready
+            - Warning
+            - Error
+            - Terminating
+            - Unknown
+          description: Status during this period
+          example: "Ready"
+        message:
+          type: string
+          nullable: true
+          description: Optional human-readable description
+          example: "Deployment is running successfully"
+        config:
+          type: object
+          additionalProperties: {}
+          description: Configuration snapshot at this point in time
+          example:
+            replicas: 3
+            image: "my-app:1.0.0"
+            cpuLimit: "500m"
+
+    AuditEvent:
+      type: object
+      required:
+        - id
+        - timestamp
+        - verb
+        - user
+        - message
+      properties:
+        id:
+          type: string
+          description: Unique event identifier
+          example: "evt-12345"
+        timestamp:
+          type: integer
+          format: int64
+          description: Event occurrence time (Unix seconds)
+          example: 1700000100
+        verb:
+          type: string
+          enum:
+            - create
+            - update
+            - patch
+            - delete
+            - get
+            - list
+          description: Action performed
+          example: "create"
+        user:
+          type: string
+          description: User or service account performing the action
+          example: "system:controller-manager"
+        message:
+          type: string
+          description: Description of what happened
+          example: "Deployment scaled from 1 to 3 replicas"
+        details:
+          type: string
+          nullable: true
+          description: Optional additional context or error details
+          example: "Audit ID: abc123def456"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+          enum:
+            - INVALID_REQUEST
+            - INTERNAL_ERROR
+            - NOT_FOUND
+            - METHOD_NOT_ALLOWED
+          example: "INVALID_REQUEST"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "start timestamp is required"

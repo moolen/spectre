@@ -267,6 +267,14 @@ func (s *Segment) GetEventCount() int32 {
 	return int32(len(s.events))
 }
 
+// GetEvents returns a copy of the events in the segment (thread-safe read)
+func (s *Segment) GetEvents() []*models.Event {
+	// Return a copy to avoid race conditions
+	events := make([]*models.Event, len(s.events))
+	copy(events, s.events)
+	return events
+}
+
 // GetUncompressedSize returns the uncompressed size in bytes
 func (s *Segment) GetUncompressedSize() int64 {
 	return int64(len(s.uncompressedData))

@@ -12,7 +12,6 @@ import (
 // Compressor handles compression and decompression of event data
 type Compressor struct {
 	logger *logging.Logger
-	level  gzip.Header
 }
 
 // NewCompressor creates a new compressor

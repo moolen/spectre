@@ -392,20 +392,10 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 	// For each filter, intersect the candidate blocks
 	if kind, ok := filters["kind"]; ok && kind != "" {
 		if blocks, ok := index.KindToBlocks[kind]; ok {
-			if candidates == nil {
-				candidates = make(map[int32]bool)
-				for _, b := range blocks {
-					candidates[b] = true
-				}
-			} else {
-				// Intersect with existing candidates
-				newCandidates := make(map[int32]bool)
-				for _, b := range blocks {
-					if candidates[b] {
-						newCandidates[b] = true
-					}
-				}
-				candidates = newCandidates
+			// Initialize candidates with first filter's blocks
+			candidates = make(map[int32]bool)
+			for _, b := range blocks {
+				candidates[b] = true
 			}
 		} else {
 			return nil // Kind not found, no candidates
@@ -416,11 +406,13 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 	if ns, ok := filters["namespace"]; ok && ns != "" {
 		if blocks, ok := index.NamespaceToBlocks[ns]; ok {
 			if candidates == nil {
+				// Initialize candidates with namespace filter's blocks
 				candidates = make(map[int32]bool)
 				for _, b := range blocks {
 					candidates[b] = true
 				}
 			} else {
+				// Intersect with existing candidates
 				newCandidates := make(map[int32]bool)
 				for _, b := range blocks {
 					if candidates[b] {
@@ -472,11 +464,11 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 
 // VersionInfo provides information about file format versions
 type VersionInfo struct {
-	Version      string
-	Description  string
-	Introduced   string
-	Features     []string
-	Deprecated   bool
+	Version     string
+	Description string
+	Introduced  string
+	Features    []string
+	Deprecated  bool
 }
 
 // GetVersionInfo returns information about a specific file format version

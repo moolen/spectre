@@ -26,10 +26,10 @@ tests/
 Go 1.21+: Follow standard conventions
 
 ## Recent Changes
+- 005-ui-api-integration: Added Block-based storage backend (existing in internal/storage)
 - 004-audit-timeline-ui: Added TypeScript 5.x with React 18+
 - 003-graceful-initialization: Added Go 1.21+ + Standard library (context, sync, os/signal, syscall)
 
-- 001-k8s-event-monitor: Added Go 1.21+
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

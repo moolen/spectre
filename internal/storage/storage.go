@@ -295,3 +295,81 @@ func (s *Storage) Stop(ctx context.Context) error {
 func (s *Storage) Name() string {
 	return "Storage"
 }
+
+// GetInMemoryEvents returns events from the current in-memory segment that match the query
+// This allows querying unflushed/buffered data for low-latency queries
+func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event, error) {
+	s.fileMutex.RLock()
+	defer s.fileMutex.RUnlock()
+
+	if s.currentFile == nil {
+		return []models.Event{}, nil
+	}
+
+	// Get events from the current segment (thread-safe)
+	s.currentFile.mutex.Lock()
+	currentSegment := s.currentFile.currentSegment
+	segments := make([]*Segment, len(s.currentFile.segments))
+	copy(segments, s.currentFile.segments)
+
+	// Copy events from currentSegment while holding the mutex to avoid race conditions
+	var currentSegmentEvents []*models.Event
+	if currentSegment != nil && len(currentSegment.events) > 0 {
+		currentSegmentEvents = make([]*models.Event, len(currentSegment.events))
+		copy(currentSegmentEvents, currentSegment.events)
+	}
+	s.currentFile.mutex.Unlock()
+
+	var allEvents []models.Event
+
+	// Query finalized segments that are in memory but not yet written to disk
+	// These segments are immutable (already finalized), so safe to access
+	for _, segment := range segments {
+		events := s.querySegment(segment, query)
+		allEvents = append(allEvents, events...)
+	}
+
+	// Query the current buffered segment using the copied events
+	if len(currentSegmentEvents) > 0 {
+		// Create a temporary segment-like structure for querying
+		events := s.querySegmentEvents(currentSegmentEvents, query)
+		allEvents = append(allEvents, events...)
+	}
+
+	return allEvents, nil
+}
+
+// querySegment filters events from a segment based on the query
+func (s *Storage) querySegment(segment *Segment, query *models.QueryRequest) []models.Event {
+	if segment == nil || len(segment.events) == 0 {
+		return []models.Event{}
+	}
+	return s.querySegmentEvents(segment.events, query)
+}
+
+// querySegmentEvents filters a list of events based on the query
+func (s *Storage) querySegmentEvents(events []*models.Event, query *models.QueryRequest) []models.Event {
+	if len(events) == 0 {
+		return []models.Event{}
+	}
+
+	startTimeNs := query.StartTimestamp * 1e9
+	endTimeNs := query.EndTimestamp * 1e9
+
+	var matchingEvents []models.Event
+	for _, event := range events {
+		// Filter by time range
+		if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+			continue
+		}
+
+		// Filter by resource filters using the same logic as FilterEngine
+		if !query.Filters.Matches(event.Resource) {
+			continue
+		}
+
+		matchingEvents = append(matchingEvents, *event)
+	}
+
+	return matchingEvents
+}

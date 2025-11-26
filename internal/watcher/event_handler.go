@@ -141,11 +141,8 @@ func (h *EventCaptureHandler) OnDelete(obj runtime.Object) error {
 
 // objectToJSON converts a Kubernetes object to JSON, pruning managedFields
 func (h *EventCaptureHandler) objectToJSON(obj runtime.Object) (json.RawMessage, int32, error) {
-	// Convert to unstructured first to allow pruning
-	unstructured := obj.(runtime.Object)
-
 	// Marshal to JSON
-	jsonData, err := json.Marshal(unstructured)
+	jsonData, err := json.Marshal(obj)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to marshal object to JSON: %w", err)
 	}
