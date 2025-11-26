@@ -45,8 +45,35 @@ func New(port int, queryExecutor *storage.QueryExecutor) *Server {
 
 // registerHandlers registers all HTTP handlers
 func (s *Server) registerHandlers() {
-	// Search endpoint
-	s.router.HandleFunc("/v1/search", s.handleSearch)
+	// Create handlers
+	searchHandler := NewSearchHandler(s.queryExecutor, s.logger)
+	resourceHandler := NewResourceHandler(s.queryExecutor, s.logger)
+	segmentsHandler := NewSegmentsHandler(s.queryExecutor, s.logger)
+	eventsHandler := NewEventsHandler(s.queryExecutor, s.logger)
+	metadataHandler := NewMetadataHandler(s.queryExecutor, s.logger)
+
+	// Register multi-endpoint API
+	// Core search endpoint - GET /v1/search
+	s.router.HandleFunc("/v1/search", s.withMethod(http.MethodGet, searchHandler.Handle))
+
+	// Metadata endpoint - GET /v1/metadata
+	s.router.HandleFunc("/v1/metadata", s.withMethod(http.MethodGet, metadataHandler.Handle))
+
+	// Resource endpoints - GET /v1/resources/{resourceId}, /segments, /events
+	s.router.HandleFunc("/v1/resources/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			s.handleMethodNotAllowed(w, r)
+			return
+		}
+		// Check if this is a segments or events request
+		if contains(r.URL.Path, "/segments") {
+			segmentsHandler.Handle(w, r)
+		} else if contains(r.URL.Path, "/events") {
+			eventsHandler.Handle(w, r)
+		} else {
+			resourceHandler.Handle(w, r)
+		}
+	})
 
 	// Health check endpoints
 	s.router.HandleFunc("/health", s.handleHealth)
@@ -54,6 +81,27 @@ func (s *Server) registerHandlers() {
 
 	// Root endpoint
 	s.router.HandleFunc("/", s.handleRoot)
+}
+
+// withMethod wraps a handler to enforce HTTP method
+func (s *Server) withMethod(method string, handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != method {
+			s.handleMethodNotAllowed(w, r)
+			return
+		}
+		handler(w, r)
+	}
+}
+
+// contains checks if a string contains a substring
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 // Start implements the lifecycle.Component interface
@@ -135,19 +183,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	writeJSON(w, response)
-}
-
-// handleSearch handles /v1/search requests
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	// Only allow GET
-	if r.Method != http.MethodGet {
-		s.handleMethodNotAllowed(w, r)
-		return
-	}
-
-	// Parse and validate request
-	searchHandler := NewSearchHandler(s.queryExecutor, s.logger)
-	searchHandler.Handle(w, r)
 }
 
 // handleNotFound handles 404 responses

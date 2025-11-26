@@ -44,12 +44,44 @@ func (sh *SearchHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build SearchResponse from query result
+	searchResponse := sh.buildSearchResponse(result)
+
 	// Respond with results
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, result)
+	writeJSON(w, searchResponse)
 
-	sh.logger.Debug("Search completed: events=%d, executionTime=%dms", result.Count, result.ExecutionTimeMs)
+	sh.logger.Debug("Search completed: resources=%d, executionTime=%dms", searchResponse.Count, searchResponse.ExecutionTimeMs)
+}
+
+// buildSearchResponse transforms QueryResult into SearchResponse with ResourceBuilder
+func (sh *SearchHandler) buildSearchResponse(queryResult *models.QueryResult) *models.SearchResponse {
+	resourceBuilder := storage.NewResourceBuilder()
+
+	// Build resources from events
+	resourceMap := resourceBuilder.BuildResourcesFromEvents(queryResult.Events)
+
+	// Convert map to slice (basic resources without segments/events for list view)
+	resources := make([]models.Resource, 0, len(resourceMap))
+	for _, resource := range resourceMap {
+		// Return minimal resource data for list view
+		minimalResource := models.Resource{
+			ID:        resource.ID,
+			Group:     resource.Group,
+			Version:   resource.Version,
+			Kind:      resource.Kind,
+			Namespace: resource.Namespace,
+			Name:      resource.Name,
+		}
+		resources = append(resources, minimalResource)
+	}
+
+	return &models.SearchResponse{
+		Resources:      resources,
+		Count:          len(resources),
+		ExecutionTimeMs: int64(queryResult.ExecutionTimeMs),
+	}
 }
 
 // parseQuery parses and validates query parameters

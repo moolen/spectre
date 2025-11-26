@@ -1,17 +1,15 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { FilterBar } from './components/FilterBar';
 import { Timeline } from './components/Timeline';
 import { DetailPanel } from './components/DetailPanel';
-import { generateMockData } from './services/mockData';
+import { useTimeline } from './hooks/useTimeline';
 import { K8sResource, FilterState, SelectedPoint } from './types';
 
 function App() {
-  const [resources, setResources] = useState<K8sResource[]>([]);
-  
   // Selection State
   // We track the specific resource AND the index of the segment selected
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
-  
+
   // Initial Filters
   const [filters, setFilters] = useState<FilterState>({
     kinds: [], // Empty means all
@@ -19,12 +17,15 @@ function App() {
     search: ''
   });
 
-  // Load data on mount
-  useEffect(() => {
-    // Simulate API Fetch
-    const data = generateMockData(50);
-    setResources(data);
-  }, []);
+  // Fetch timeline data from backend API
+  const { resources, loading, error } = useTimeline({
+    filters: filters.namespaces.length > 0 || filters.kinds.length > 0
+      ? {
+          namespace: filters.namespaces.length > 0 ? filters.namespaces[0] : undefined,
+          kind: filters.kinds.length > 0 ? filters.kinds[0] : undefined,
+        }
+      : undefined
+  });
 
   // Filter Logic
   const filteredResources = useMemo(() => {
@@ -105,15 +106,40 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-950 text-white overflow-hidden font-sans">
-      <FilterBar 
-        filters={filters} 
-        setFilters={setFilters} 
+      <FilterBar
+        filters={filters}
+        setFilters={setFilters}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 p-4 overflow-hidden flex flex-col" ref={containerRef}>
-          {filteredResources.length > 0 ? (
-             <Timeline 
+          {error ? (
+            <div className="flex-1 flex items-center justify-center text-red-400 flex-col gap-4">
+              <svg className="w-16 h-16 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 9v2m0 4v2m0 0v2m0-6V9m0 0V7m0 2V5m0 0h-2m2 0h2m-6 0h2m-2 0h-2m0 6h2m-2 0h-2m0 0v2m0-2v-2m0 0h2m-2 0h-2m6 0h2m-2 0h-2" />
+              </svg>
+              <div className="text-center">
+                <p className="text-lg font-semibold mb-2">Failed to load resources</p>
+                <p className="text-sm text-gray-400 mb-4">{error.message}</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : loading ? (
+            <div className="flex-1 flex items-center justify-center text-gray-400 flex-col gap-4">
+              <div className="animate-spin">
+                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+                </svg>
+              </div>
+              <p>Loading resources...</p>
+            </div>
+          ) : filteredResources.length > 0 ? (
+             <Timeline
                 resources={filteredResources}
                 width={Math.max(containerSize.width - 32, 600)} // Ensure min width
                 height={containerSize.height - 32}
@@ -130,10 +156,10 @@ function App() {
           )}
         </div>
 
-        <DetailPanel 
-            resource={selectedResource} 
+        <DetailPanel
+            resource={selectedResource}
             selectedIndex={selectedPoint?.index}
-            onClose={handleClosePanel} 
+            onClose={handleClosePanel}
         />
       </div>
     </div>
