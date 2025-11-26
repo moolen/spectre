@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kem-watch-config
+  namespace: default
+data:
+  watch-config.yaml: |
+    resources:
+      - group: ""
+        kind: Pod
+      - group: "apps"
+        kind: Deployment
+      - group: "apps"
+        kind: StatefulSet

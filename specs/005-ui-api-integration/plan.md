@@ -172,7 +172,13 @@ Frontend will convert this to K8sResource (already defined in ui/src/types.ts).
 
 ### 1.2 API Contracts
 
+API is divided into multiple endpoints for separation of concerns. Frontend will make targeted requests based on what data it needs.
+
+#### Core Search Endpoint (Resource Discovery)
+
 **Endpoint**: `GET /v1/search`
+
+**Purpose**: Return list of resources matching filters and time range (minimal data for timeline view)
 
 **Query Parameters**:
 - `start` (required): Unix timestamp or human-readable date
@@ -182,32 +188,192 @@ Frontend will convert this to K8sResource (already defined in ui/src/types.ts).
 - `group` (optional): Filter by API group
 - `version` (optional): Filter by API version
 
-**Response**: SearchResponse (JSON)
-
-**Error Responses**:
-- 400: Invalid request (missing required params, invalid timestamps)
-- 500: Internal server error (query execution failed)
-
-**Example Request**:
-```
-GET /v1/search?start=1700000000&end=1700086400&namespace=default&kind=Pod
-```
-
-**Example Response**:
+**Response**: SearchResponse with basic resource data
 ```json
 {
-  "resources": [...],
+  "resources": [
+    {
+      "id": "unique-resource-id",
+      "group": "v1",
+      "version": "Pod",
+      "kind": "Pod",
+      "namespace": "default",
+      "name": "my-pod"
+    }
+  ],
   "count": 42,
   "executionTimeMs": 1234
 }
 ```
 
+**Error Responses**:
+- 400: Invalid request (missing required params, invalid timestamps)
+- 500: Internal server error (query execution failed)
+
+---
+
+#### Resource Detail Endpoint (Status Segments + Metadata)
+
+**Endpoint**: `GET /v1/resources/{resourceId}`
+
+**Purpose**: Return detailed resource with status segments and configuration
+
+**Response**: Single Resource with statusSegments
+```json
+{
+  "id": "unique-resource-id",
+  "group": "v1",
+  "version": "Pod",
+  "kind": "Pod",
+  "namespace": "default",
+  "name": "my-pod",
+  "statusSegments": [
+    {
+      "startTime": 1700000000,
+      "endTime": 1700001000,
+      "status": "Ready",
+      "message": "Pod is running",
+      "config": {"replicas": 1}
+    }
+  ]
+}
+```
+
+**Error Responses**:
+- 404: Resource not found
+- 500: Internal server error
+
+---
+
+#### Resource Events Endpoint (Audit Trail)
+
+**Endpoint**: `GET /v1/resources/{resourceId}/events`
+
+**Purpose**: Return all audit events for a specific resource within optional time range
+
+**Query Parameters**:
+- `start` (optional): Unix timestamp
+- `end` (optional): Unix timestamp
+- `limit` (optional, default: 100): Maximum number of events to return
+
+**Response**: Array of AuditEvents
+```json
+{
+  "events": [
+    {
+      "id": "event-123",
+      "timestamp": 1700000000,
+      "verb": "create",
+      "user": "system:admin",
+      "message": "Pod created",
+      "details": "{\"reason\": \"Triggered\", \"...\"}"
+    }
+  ],
+  "count": 15,
+  "resourceId": "unique-resource-id"
+}
+```
+
+**Error Responses**:
+- 404: Resource not found
+- 400: Invalid query parameters
+- 500: Internal server error
+
+---
+
+#### Status Segments Endpoint (Timeline Visualization)
+
+**Endpoint**: `GET /v1/resources/{resourceId}/segments`
+
+**Purpose**: Return status segments for a resource (for timeline visualization)
+
+**Query Parameters**:
+- `start` (optional): Unix timestamp
+- `end` (optional): Unix timestamp
+
+**Response**: Array of StatusSegments with config snapshots
+```json
+{
+  "segments": [
+    {
+      "startTime": 1700000000,
+      "endTime": 1700001000,
+      "status": "Ready",
+      "message": "Pod is running",
+      "config": {"replicas": 1, "image": "nginx:latest"}
+    }
+  ],
+  "resourceId": "unique-resource-id",
+  "count": 5
+}
+```
+
+**Error Responses**:
+- 404: Resource not found
+- 500: Internal server error
+
+---
+
+#### Metadata Endpoint (Filters + Aggregation)
+
+**Endpoint**: `GET /v1/metadata`
+
+**Purpose**: Return available namespaces, kinds, groups, and resource counts for filter UI
+
+**Query Parameters**:
+- `start` (optional): Unix timestamp (filter to events in this range)
+- `end` (optional): Unix timestamp (filter to events in this range)
+
+**Response**: Metadata for filter UI
+```json
+{
+  "namespaces": ["default", "kube-system", "monitoring"],
+  "kinds": ["Pod", "Service", "Deployment", "StatefulSet"],
+  "groups": ["", "apps", "batch"],
+  "resourceCounts": {
+    "Pod": 42,
+    "Service": 15,
+    "Deployment": 8
+  },
+  "totalEvents": 5000,
+  "timeRange": {
+    "earliest": 1700000000,
+    "latest": 1700086400
+  }
+}
+```
+
+**Error Responses**:
+- 500: Internal server error
+
+---
+
+### Endpoint Usage Strategy
+
+**Timeline View (Initial Load)**:
+1. Call `GET /v1/search?start=X&end=Y` → Get resource list
+2. For each resource, optionally call `GET /v1/resources/{id}/segments` → Get status segments
+3. Display timeline immediately, load details on-demand
+
+**Filter Bar**:
+1. Call `GET /v1/metadata?start=X&end=Y` → Get available filters
+2. User selects filter, triggers `GET /v1/search?start=X&end=Y&namespace=default`
+
+**Detail Panel (On Resource Click)**:
+1. Call `GET /v1/resources/{id}/events` → Get audit events
+2. Display events in detail panel
+
+**Incremental Loading**:
+- `/v1/search` returns basic resource data quickly
+- Status segments loaded on-demand per resource (`/v1/resources/{id}/segments`)
+- Events loaded only when detail panel opens (`/v1/resources/{id}/events`)
+
 ### 1.3 Frontend Data Service
 
-The existing `apiClient` in ui/src/services/api.ts will be extended or replaced to:
+The existing `apiClient` in ui/src/services/api.ts will be extended with targeted methods for each endpoint:
 
 ```typescript
-// New service method
+// Search endpoint - get initial resource list
 async searchResources(
   startTime: string | number,
   endTime: string | number,
@@ -219,8 +385,36 @@ async searchResources(
   }
 ): Promise<K8sResource[]>
 
-// Converts backend response to UI format
+// Metadata endpoint - get filter options
+async getMetadata(
+  startTime?: string | number,
+  endTime?: string | number
+): Promise<{
+  namespaces: string[];
+  kinds: string[];
+  groups: string[];
+  resourceCounts: Record<string, number>;
+}>
+
+// Resource detail - get status segments
+async getResourceSegments(
+  resourceId: string,
+  startTime?: string | number,
+  endTime?: string | number
+): Promise<StatusSegment[]>
+
+// Resource events - get audit trail
+async getResourceEvents(
+  resourceId: string,
+  startTime?: string | number,
+  endTime?: string | number,
+  limit?: number
+): Promise<K8sEvent[]>
+
+// Data transformation helpers
 private transformSearchResponse(response: SearchResponse): K8sResource[]
+private transformStatusSegment(segment: ApiStatusSegment): StatusSegment
+private transformEvent(event: ApiEvent): K8sEvent
 ```
 
 ### 1.4 Frontend Hook Implementation

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { K8sResource } from '../types';
-import { generateMockData } from '../services/mockData';
+import { apiClient } from '../services/api';
 
 interface UseTimelineResult {
   resources: K8sResource[];
@@ -9,7 +9,28 @@ interface UseTimelineResult {
   refresh: () => void;
 }
 
-export const useTimeline = (): UseTimelineResult => {
+interface UseTimelineOptions {
+  filters?: {
+    namespace?: string;
+    kind?: string;
+    group?: string;
+    version?: string;
+  };
+}
+
+/**
+ * Hook to fetch and manage timeline data from the backend API.
+ *
+ * @param options - Optional filters for resource selection (namespace, kind, group, version)
+ * @returns Object containing resources, loading state, error state, and refresh function
+ *
+ * Features:
+ * - Automatically fetches data on mount and when filters change
+ * - Uses a 2-hour time window by default (current time - 2 hours)
+ * - Provides refresh callback for manual data reloads
+ * - Handles errors gracefully with logging
+ */
+export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => {
   const [resources, setResources] = useState<K8sResource[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
@@ -19,21 +40,26 @@ export const useTimeline = (): UseTimelineResult => {
       setLoading(true);
       setError(null);
 
-      // TODO: Replace with actual API call once backend is available
-      // const response = await fetch('/api/resources');
-      // const data = await response.json();
-      // setResources(data);
+      // Calculate default time range: last 2 hours
+      const now = Date.now();
+      const twoHoursAgo = now - (2 * 60 * 60 * 1000);
 
-      // For now, use mock data
-      const mockData = generateMockData(50);
-      setResources(mockData);
+      // Fetch resources from backend API
+      const data = await apiClient.searchResources(
+        twoHoursAgo,
+        now,
+        options?.filters
+      );
+
+      setResources(data);
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to fetch timeline data'));
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch timeline data';
+      setError(new Error(errorMessage));
       console.error('Timeline fetch error:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [options?.filters]);
 
   useEffect(() => {
     fetchData();
