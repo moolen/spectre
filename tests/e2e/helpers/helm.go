@@ -10,7 +10,6 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/releaseutil"
 )
 
 // HelmDeployer manages Helm chart deployments.
@@ -29,7 +28,6 @@ func NewHelmDeployer(t *testing.T, kubeConfig, namespace string) (*HelmDeployer,
 	settings.KubeContext = ""
 	settings.KubeAsUser = ""
 	settings.KubeAPIServer = ""
-	settings.Namespace = namespace
 
 	// Create action configuration
 	cfg := new(action.Configuration)
@@ -58,7 +56,6 @@ func (hd *HelmDeployer) InstallChart(releaseName, chartPath string, values map[s
 	// Create install action
 	install := action.NewInstall(hd.Config)
 	install.ReleaseName = releaseName
-	install.Namespace = hd.Config.KubeConfig.Get("").Namespace
 
 	// Install release
 	release, err := install.Run(chart, values)
