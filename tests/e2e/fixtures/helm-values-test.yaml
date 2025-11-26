@@ -1,0 +1,45 @@
+# Helm values for KEM test deployment
+# Optimized for e2e testing with reduced retention and quick feedback
+
+image:
+  repository: kem
+  tag: test-build
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Reduced resource requests/limits for test environment
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "500m"
+
+# Service configuration for port-forward access
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+# Storage configuration for test (shorter retention)
+storage:
+  type: memory
+  retention:
+    maxAge: 1h
+    maxSize: 100Mi
+
+# Pod configuration
+podAnnotations:
+  test: "true"
+
+# Environment variables for test mode
+env:
+  - name: LOG_LEVEL
+    value: "debug"
+  - name: ENABLE_METRICS
+    value: "false"
+
+# Affinity configuration (allow scheduling on any node)
+affinity: {}
