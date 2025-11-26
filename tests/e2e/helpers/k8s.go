@@ -160,6 +160,8 @@ func (k *K8sClient) WaitForPodReady(ctx context.Context, namespace, name string,
 				continue
 			}
 
+			k.t.Logf("Pod status: %+v", pod.Status)
+
 			// Check if pod is ready
 			for _, condition := range pod.Status.Conditions {
 				if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
