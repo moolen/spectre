@@ -1,6 +1,15 @@
 /**
  * Data Transformation Service
  * Converts backend API responses to frontend K8sResource format
+ *
+ * This service handles the conversion between:
+ * - Backend API models (with Unix timestamp seconds, string enums)
+ * - Frontend models (with JavaScript Date objects, typed enums)
+ *
+ * Key conversions:
+ * - Timestamps: Unix seconds (backend) → JavaScript Date (frontend) by multiplying by 1000
+ * - Status strings: Mapped to ResourceStatus enum values
+ * - Events and segments: Filtered and validated with error handling
  */
 
 import { K8sResource, ResourceStatusSegment, K8sEvent } from '../types';
@@ -130,8 +139,8 @@ export function transformStatusSegmentsWithErrorHandling(segments: StatusSegment
       // Return a placeholder segment
       return {
         status: 'Unknown',
-        startTime: new Date(),
-        endTime: new Date(),
+        start: new Date(),
+        end: new Date(),
         message: `Failed to parse segment: ${error instanceof Error ? error.message : 'unknown error'}`,
         config: {},
       };

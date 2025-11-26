@@ -18,6 +18,18 @@ interface UseTimelineOptions {
   };
 }
 
+/**
+ * Hook to fetch and manage timeline data from the backend API.
+ *
+ * @param options - Optional filters for resource selection (namespace, kind, group, version)
+ * @returns Object containing resources, loading state, error state, and refresh function
+ *
+ * Features:
+ * - Automatically fetches data on mount and when filters change
+ * - Uses a 2-hour time window by default (current time - 2 hours)
+ * - Provides refresh callback for manual data reloads
+ * - Handles errors gracefully with logging
+ */
 export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => {
   const [resources, setResources] = useState<K8sResource[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
