@@ -122,9 +122,9 @@ func TestWriteReadFileFooter(t *testing.T) {
 	original := &FileFooter{
 		IndexSectionOffset: 12345,
 		IndexSectionLength: 67890,
-		Checksum:          "abc123def456",
-		Reserved:          [48]byte{1, 2, 3},
-		MagicBytes:        FileFooterMagic,
+		Checksum:           "abc123def456",
+		Reserved:           [48]byte{1, 2, 3},
+		MagicBytes:         FileFooterMagic,
 	}
 
 	var buf bytes.Buffer
@@ -234,8 +234,8 @@ func TestBuildInvertedIndexesEmpty(t *testing.T) {
 func TestGetCandidateBlocks(t *testing.T) {
 	index := &InvertedIndex{
 		KindToBlocks: map[string][]int32{
-			"Pod":       {0, 1, 2},
-			"Service":   {0, 2},
+			"Pod":        {0, 1, 2},
+			"Service":    {0, 2},
 			"Deployment": {1},
 		},
 		NamespaceToBlocks: map[string][]int32{
@@ -338,12 +338,12 @@ func TestWriteReadIndexSection(t *testing.T) {
 		FormatVersion: "1.0",
 		BlockMetadata: []*BlockMetadata{
 			{
-				ID:            0,
-				KindSet:       []string{"Pod"},
-				NamespaceSet:  []string{"default"},
-				EventCount:    10,
-				TimestampMin:  1000,
-				TimestampMax:  2000,
+				ID:           0,
+				KindSet:      []string{"Pod"},
+				NamespaceSet: []string{"default"},
+				EventCount:   10,
+				TimestampMin: 1000,
+				TimestampMax: 2000,
 			},
 		},
 		InvertedIndexes: &InvertedIndex{
@@ -397,7 +397,7 @@ func TestValidateVersion(t *testing.T) {
 		{"valid 1.0", "1.0", false},
 		{"valid 1.1", "1.1", false},
 		{"valid 1.2", "1.2", false},
-		{"valid 1", "1", false}, // Single digit major version is allowed
+		{"valid 1", "1", true},
 		{"invalid empty", "", true},
 		{"invalid format", "invalid", true},
 		{"invalid major", "2.0", true},
@@ -443,4 +443,3 @@ func contains(slice []int32, val int32) bool {
 	}
 	return false
 }
-

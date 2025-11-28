@@ -390,7 +390,8 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 	filterCount := 0
 
 	// For each filter, intersect the candidate blocks
-	if kind, ok := filters["kind"]; ok && kind != "" {
+	// Empty strings are valid filter values
+	if kind, ok := filters["kind"]; ok {
 		if blocks, ok := index.KindToBlocks[kind]; ok {
 			// Initialize candidates with first filter's blocks
 			candidates = make(map[int32]bool)
@@ -403,7 +404,7 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 		filterCount++
 	}
 
-	if ns, ok := filters["namespace"]; ok && ns != "" {
+	if ns, ok := filters["namespace"]; ok {
 		if blocks, ok := index.NamespaceToBlocks[ns]; ok {
 			if candidates == nil {
 				// Initialize candidates with namespace filter's blocks
@@ -427,7 +428,7 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 		filterCount++
 	}
 
-	if group, ok := filters["group"]; ok && group != "" {
+	if group, ok := filters["group"]; ok {
 		if blocks, ok := index.GroupToBlocks[group]; ok {
 			if candidates == nil {
 				candidates = make(map[int32]bool)
@@ -521,14 +522,15 @@ func GetVersionInfo(version string) *VersionInfo {
 }
 
 // ValidateVersion checks if a file version is supported
+// Version format must be "major.minor" (e.g., "1.0")
 func ValidateVersion(version string) error {
 	// Parse version to check basic format (e.g., "1.0")
 	if version == "" {
 		return fmt.Errorf("empty version string")
 	}
 
-	// Extract major version (everything before the first dot)
-	dotIndex := 0
+	// Versions must contain a dot (major.minor format)
+	dotIndex := -1
 	for i := 0; i < len(version); i++ {
 		if version[i] == '.' {
 			dotIndex = i
@@ -536,15 +538,15 @@ func ValidateVersion(version string) error {
 		}
 	}
 
-	if dotIndex == 0 && len(version) > 0 && version[0] != '.' {
-		dotIndex = len(version) // No dot found, use whole string as major
-	}
-
+	// Require dot for major.minor format
 	if dotIndex <= 0 {
-		return fmt.Errorf("invalid version format: %s", version)
+		return fmt.Errorf("invalid version format: %s (must be major.minor, e.g., 1.0)", version)
 	}
 
 	majorVersion := version[0:dotIndex]
+	if len(majorVersion) == 0 {
+		return fmt.Errorf("invalid version format: %s (major version cannot be empty)", version)
+	}
 
 	// Check if version is supported
 	// For future compatibility, allow newer minor versions of supported major versions

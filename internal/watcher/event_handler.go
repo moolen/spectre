@@ -3,12 +3,15 @@ package watcher
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/moritz/rpk/internal/logging"
 	"github.com/moritz/rpk/internal/models"
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -179,10 +182,35 @@ func extractMetadata(obj runtime.Object) (models.ResourceMetadata, error) {
 		Namespace: accessor.GetNamespace(),
 	}
 
+	// Enrich Kubernetes Event objects with involvedObject UID for efficient lookups
+	if strings.EqualFold(gvk.Kind, "Event") {
+		if involvedUID := extractInvolvedObjectUID(obj); involvedUID != "" {
+			metadata.InvolvedObjectUID = involvedUID
+		}
+	}
+
 	// Validate the metadata
 	if err := metadata.Validate(); err != nil {
 		return models.ResourceMetadata{}, fmt.Errorf("invalid metadata: %w", err)
 	}
 
 	return metadata, nil
+}
+
+func extractInvolvedObjectUID(obj runtime.Object) string {
+	switch evt := obj.(type) {
+	case *corev1.Event:
+		return string(evt.InvolvedObject.UID)
+	case *unstructured.Unstructured:
+		if uid, found, err := unstructured.NestedString(evt.Object, "involvedObject", "uid"); err == nil && found {
+			return uid
+		}
+	default:
+		if u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj); err == nil {
+			if uid, found, err := unstructured.NestedString(u, "involvedObject", "uid"); err == nil && found {
+				return uid
+			}
+		}
+	}
+	return ""
 }

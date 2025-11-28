@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -206,45 +207,55 @@ func TestIntegration_InMemoryAndFileEvents(t *testing.T) {
 func TestIntegration_MultipleFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create first file
-	storage1, err := New(tmpDir, 1024*1024)
-	if err != nil {
-		t.Fatalf("failed to create storage: %v", err)
-	}
-
 	now := time.Now()
 	baseTime := now.Unix()
 
+	// Create first file with hour timestamp 2 hours ago
+	hour1 := now.Add(-2 * time.Hour)
+	hour1Timestamp := time.Date(hour1.Year(), hour1.Month(), hour1.Day(), hour1.Hour(), 0, 0, 0, hour1.Location())
+	file1Path := filepath.Join(tmpDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		hour1.Year(), hour1.Month(), hour1.Day(), hour1.Hour()))
+
+	file1, err := NewBlockStorageFile(file1Path, hour1Timestamp.Unix(), 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create first file: %v", err)
+	}
+
 	// Write events to first file
 	for i := 0; i < 10; i++ {
-		event := createTestEvent("file1-pod", "default", "Pod", now.Add(-2*time.Hour).Add(time.Duration(i)*time.Minute).UnixNano())
-		if err := storage1.WriteEvent(event); err != nil {
-			t.Fatalf("failed to write event: %v", err)
+		event := createTestEvent("file1-pod", "default", "Pod", hour1.Add(time.Duration(i)*time.Minute).UnixNano())
+		if err := file1.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event to file1: %v", err)
 		}
 	}
 
 	// Close first file
-	if err := storage1.Close(); err != nil {
-		t.Fatalf("failed to close storage: %v", err)
+	if err := file1.Close(); err != nil {
+		t.Fatalf("failed to close file1: %v", err)
 	}
 
-	// Create second file
-	storage2, err := New(tmpDir, 1024*1024)
+	// Create second file with hour timestamp 1 hour ago
+	hour2 := now.Add(-1 * time.Hour)
+	hour2Timestamp := time.Date(hour2.Year(), hour2.Month(), hour2.Day(), hour2.Hour(), 0, 0, 0, hour2.Location())
+	file2Path := filepath.Join(tmpDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		hour2.Year(), hour2.Month(), hour2.Day(), hour2.Hour()))
+
+	file2, err := NewBlockStorageFile(file2Path, hour2Timestamp.Unix(), 1024*1024)
 	if err != nil {
-		t.Fatalf("failed to create second storage: %v", err)
+		t.Fatalf("failed to create second file: %v", err)
 	}
 
 	// Write events to second file
 	for i := 0; i < 10; i++ {
-		event := createTestEvent("file2-pod", "default", "Pod", now.Add(-30*time.Minute).Add(time.Duration(i)*time.Minute).UnixNano())
-		if err := storage2.WriteEvent(event); err != nil {
-			t.Fatalf("failed to write event: %v", err)
+		event := createTestEvent("file2-pod", "default", "Pod", hour2.Add(time.Duration(i)*time.Minute).UnixNano())
+		if err := file2.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event to file2: %v", err)
 		}
 	}
 
 	// Close second file
-	if err := storage2.Close(); err != nil {
-		t.Fatalf("failed to close storage: %v", err)
+	if err := file2.Close(); err != nil {
+		t.Fatalf("failed to close file2: %v", err)
 	}
 
 	// Reopen for querying
@@ -499,4 +510,3 @@ func TestIntegration_FileManagement(t *testing.T) {
 		t.Error("expected recent files to still exist")
 	}
 }
-

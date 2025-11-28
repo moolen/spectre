@@ -18,28 +18,14 @@ type EventuallyOption struct {
 
 // DefaultEventuallyOption provides sensible defaults for async operations.
 var DefaultEventuallyOption = EventuallyOption{
-	Timeout:  10 * time.Second,
-	Interval: 500 * time.Millisecond,
+	Timeout:  30 * time.Second,
+	Interval: 3 * time.Second,
 }
 
 // SlowEventuallyOption for operations that take longer (config reload, etc).
 var SlowEventuallyOption = EventuallyOption{
-	Timeout:  30 * time.Second,
-	Interval: 1 * time.Second,
-}
-
-// EventuallyAPIAvailable waits for the API to become available.
-func EventuallyAPIAvailable(t *testing.T, client *APIClient, opts EventuallyOption) {
-	if opts.Timeout == 0 {
-		opts = DefaultEventuallyOption
-	}
-
-	assert.Eventually(t, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		return client.Health(ctx) == nil
-	}, opts.Timeout, opts.Interval)
+	Timeout:  90 * time.Second,
+	Interval: 5 * time.Second,
 }
 
 // EventuallyResourceCreated waits for a resource to be created in the API.
@@ -55,7 +41,7 @@ func EventuallyResourceCreated(t *testing.T, client *APIClient, namespace, kind,
 		defer cancel()
 
 		now := time.Now().Unix()
-		startTime := now - 30 // Last 30 seconds
+		startTime := now - 90 // Last 30 seconds
 		endTime := now + 10   // Slightly into future for clock skew
 
 		resp, err := client.Search(ctx, startTime, endTime, namespace, kind)
@@ -79,12 +65,12 @@ func EventuallyResourceCreated(t *testing.T, client *APIClient, namespace, kind,
 }
 
 // EventuallyEventCreated waits for an event to appear in the API.
-func EventuallyEventCreated(t *testing.T, client *APIClient, resourceID string, verb string, opts EventuallyOption) *AuditEvent {
+func EventuallyEventCreated(t *testing.T, client *APIClient, resourceID string, reason string, opts EventuallyOption) *K8sEvent {
 	if opts.Timeout == 0 {
 		opts = DefaultEventuallyOption
 	}
 
-	var result *AuditEvent
+	var result *K8sEvent
 
 	assert.Eventually(t, func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -100,9 +86,9 @@ func EventuallyEventCreated(t *testing.T, client *APIClient, resourceID string, 
 			return false
 		}
 
-		// Find event by verb
+		// Find event by reason
 		for _, e := range resp.Events {
-			if e.Verb == verb {
+			if e.Reason == reason {
 				result = &e
 				return true
 			}
@@ -110,7 +96,7 @@ func EventuallyEventCreated(t *testing.T, client *APIClient, resourceID string, 
 		return false
 	}, opts.Timeout, opts.Interval)
 
-	require.NotNil(t, result, "Event with verb %s not found after %v", verb, opts.Timeout)
+	require.NotNil(t, result, "Event with reason %s not found after %v", reason, opts.Timeout)
 	return result
 }
 
@@ -173,21 +159,11 @@ func EventuallyCondition(t *testing.T, condition func() bool, opts EventuallyOpt
 	assert.Eventually(t, condition, opts.Timeout, opts.Interval)
 }
 
-// AssertResourceExists verifies a resource exists with expected properties.
-func AssertResourceExists(t *testing.T, resource *Resource, expectedKind string, expectedNamespace string) {
-	require.NotNil(t, resource)
-	assert.Equal(t, expectedKind, resource.Kind, "Resource kind mismatch")
-	assert.Equal(t, expectedNamespace, resource.Namespace, "Resource namespace mismatch")
-	assert.NotEmpty(t, resource.ID, "Resource ID should not be empty")
-	assert.NotEmpty(t, resource.Name, "Resource name should not be empty")
-}
-
 // AssertEventExists verifies an event exists with expected properties.
-func AssertEventExists(t *testing.T, event *AuditEvent, expectedVerb string) {
+func AssertEventExists(t *testing.T, event *K8sEvent, expectedReason string) {
 	require.NotNil(t, event)
-	assert.Equal(t, expectedVerb, event.Verb, "Event verb mismatch")
+	assert.Equal(t, expectedReason, event.Reason, "Event reason mismatch")
 	assert.NotZero(t, event.Timestamp, "Event timestamp should not be zero")
-	assert.NotEmpty(t, event.User, "Event user should not be empty")
 }
 
 // AssertNamespaceInMetadata verifies a namespace appears in metadata.

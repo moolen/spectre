@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/moritz/rpk/internal/logging"
 	"github.com/moritz/rpk/internal/models"
@@ -31,9 +32,128 @@ type BlockStorageFile struct {
 	totalEvents       int64
 }
 
-// NewBlockStorageFile creates a new block-based storage file
+// openExistingBlockStorageFile opens an existing complete file for appending
+func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTimestamp int64, blockSizeBytes int64) (*BlockStorageFile, error) {
+	logger := logging.GetLogger("block_storage")
+
+	header := fileData.Header
+	indexSection := fileData.IndexSection
+	footer := fileData.Footer
+
+	// Calculate where blocks end (before index section)
+	blocksEndOffset := footer.IndexSectionOffset
+
+	// Open file for read/write
+	file, err := os.OpenFile(path, os.O_RDWR, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open existing file: %w", err)
+	}
+
+	// Truncate at blocks end (removes old index section and footer)
+	if err := file.Truncate(blocksEndOffset); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to truncate file for appending: %w", err)
+	}
+
+	// Seek to end of blocks for appending
+	if _, err := file.Seek(blocksEndOffset, 0); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to seek to end of blocks: %w", err)
+	}
+
+	// Reconstruct BlockStorageFile state from disk
+	blockMetadataList := indexSection.BlockMetadata
+	nextBlockID := int32(len(blockMetadataList))
+
+	// Reconstruct inverted index from metadata
+	invertedIndex := indexSection.InvertedIndexes
+	if invertedIndex == nil {
+		// Rebuild if missing
+		invertedIndex = BuildInvertedIndexes(blockMetadataList)
+	}
+
+	stats := indexSection.Statistics
+	totalEvents := int64(0)
+	totalUncompressed := int64(0)
+	totalCompressed := int64(0)
+
+	if stats != nil {
+		totalEvents = stats.TotalEvents
+		totalUncompressed = stats.TotalUncompressedBytes
+		totalCompressed = stats.TotalCompressedBytes
+	}
+
+	// Get block size from header or use provided
+	actualBlockSize := blockSizeBytes
+	if header.BlockSize > 0 {
+		actualBlockSize = int64(header.BlockSize)
+	}
+
+	bsf := &BlockStorageFile{
+		path:              path,
+		hourTimestamp:     hourTimestamp,
+		file:              file,
+		blocks:            make([]*Block, 0), // We don't need actual block data in memory
+		currentBuffer:     NewEventBuffer(actualBlockSize),
+		blockID:           nextBlockID,
+		logger:            logger,
+		blockSize:         actualBlockSize,
+		blockMetadataList: blockMetadataList,
+		index:             invertedIndex,
+		startOffset:       int64(FileHeaderSize),
+		totalEvents:       totalEvents,
+		totalUncompressed: totalUncompressed,
+		totalCompressed:   totalCompressed,
+	}
+
+	logger.InfoWithFields("Restored existing complete file for appending",
+		logging.Field("file", path),
+		logging.Field("existing_blocks", len(blockMetadataList)),
+		logging.Field("existing_events", totalEvents),
+		logging.Field("next_block_id", nextBlockID))
+
+	return bsf, nil
+}
+
+// NewBlockStorageFile creates a new block-based storage file or opens existing complete file
 func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64) (*BlockStorageFile, error) {
 	logger := logging.GetLogger("block_storage")
+
+	// Check if file already exists
+	if _, err := os.Stat(path); err == nil {
+		// File exists - check if it's complete (has footer)
+		reader, err := NewBlockReader(path)
+		if err == nil {
+			// Try to read complete file structure
+			fileData, err := reader.ReadFile()
+			reader.Close()
+
+			if err == nil {
+				// File is complete - restore state and open for appending
+				logger.Info("Found existing complete file, restoring state: %s", path)
+				return openExistingBlockStorageFile(path, fileData, hourTimestamp, blockSizeBytes)
+			}
+			// File exists but is incomplete (no footer) - likely from a crash
+			// Rename the incomplete file to preserve it (with timestamp suffix)
+			timestamp := time.Now().Unix()
+			backupPath := fmt.Sprintf("%s.incomplete.%d", path, timestamp)
+			if renameErr := os.Rename(path, backupPath); renameErr != nil {
+				logger.Warn("Failed to rename incomplete file %s to %s: %v", path, backupPath, renameErr)
+				return nil, fmt.Errorf("file %s exists but is incomplete and could not be backed up: %w", path, renameErr)
+			}
+			logger.Warn("Found incomplete file %s from previous run, renamed to %s", path, backupPath)
+		} else {
+			// File exists but couldn't read it - might be corrupted or wrong format
+			// Rename it to be safe
+			timestamp := time.Now().Unix()
+			backupPath := fmt.Sprintf("%s.corrupted.%d", path, timestamp)
+			if renameErr := os.Rename(path, backupPath); renameErr != nil {
+				logger.Warn("Failed to rename existing file %s to %s: %v", path, backupPath, renameErr)
+				return nil, fmt.Errorf("file %s exists and could not be backed up: %w", path, renameErr)
+			}
+			logger.Warn("Found existing file %s that could not be read, renamed to %s", path, backupPath)
+		}
+	}
 
 	// Create or open the file
 	file, err := os.Create(path)
@@ -167,6 +287,11 @@ func (bsf *BlockStorageFile) Close() error {
 	bsf.mutex.Lock()
 	defer bsf.mutex.Unlock()
 
+	// Check if already closed (idempotent)
+	if bsf.file == nil {
+		return nil
+	}
+
 	// Finalize current buffer if it has events
 	if bsf.currentBuffer.GetEventCount() > 0 {
 		if err := bsf.finalizeBlock(); err != nil {
@@ -186,9 +311,17 @@ func (bsf *BlockStorageFile) Close() error {
 
 	// Close the file
 	if err := bsf.file.Close(); err != nil {
-		bsf.logger.Error("Failed to close file: %v", err)
-		return err
+		// Check if error is due to file already being closed
+		// Different OSes return different error messages
+		errStr := err.Error()
+		if errStr != "file already closed" && errStr != "use of closed file" && errStr != "invalid argument" {
+			bsf.logger.Error("Failed to close file: %v", err)
+			// Don't return error for already-closed files, but mark as closed
+		}
 	}
+
+	// Mark file as closed to make subsequent calls idempotent
+	bsf.file = nil
 
 	ratio := 0.0
 	if bsf.totalUncompressed > 0 {
@@ -230,8 +363,14 @@ func (bsf *BlockStorageFile) writeIndexSection() error {
 	}
 
 	// Create statistics
+	// Use blockMetadataList length as it works for both normal operation and restored files
+	blockCount := len(bsf.blockMetadataList)
+	if blockCount == 0 && len(bsf.blocks) > 0 {
+		// Fallback to blocks if metadata list is empty (shouldn't happen normally)
+		blockCount = len(bsf.blocks)
+	}
 	stats := &IndexStatistics{
-		TotalBlocks:            int32(len(bsf.blocks)),
+		TotalBlocks:            int32(blockCount),
 		TotalEvents:            bsf.totalEvents,
 		TotalUncompressedBytes: bsf.totalUncompressed,
 		TotalCompressedBytes:   bsf.totalCompressed,
@@ -266,10 +405,10 @@ func (bsf *BlockStorageFile) writeIndexSection() error {
 
 	// Create index section
 	indexSection := &IndexSection{
-		FormatVersion:    DefaultFormatVersion,
-		BlockMetadata:    bsf.blockMetadataList,
-		InvertedIndexes:  bsf.index,
-		Statistics:       stats,
+		FormatVersion:   DefaultFormatVersion,
+		BlockMetadata:   bsf.blockMetadataList,
+		InvertedIndexes: bsf.index,
+		Statistics:      stats,
 	}
 
 	// Write index section
@@ -294,6 +433,18 @@ func (bsf *BlockStorageFile) writeIndexSection() error {
 
 // getMinTimestamp returns the minimum timestamp from all blocks
 func (bsf *BlockStorageFile) getMinTimestamp() int64 {
+	// Check blockMetadataList first (used when restored from disk)
+	if len(bsf.blockMetadataList) > 0 {
+		minTs := bsf.blockMetadataList[0].TimestampMin
+		for _, metadata := range bsf.blockMetadataList {
+			if metadata.TimestampMin > 0 && metadata.TimestampMin < minTs {
+				minTs = metadata.TimestampMin
+			}
+		}
+		return minTs
+	}
+
+	// Fall back to blocks (used during normal operation)
 	if len(bsf.blocks) == 0 {
 		return 0
 	}
@@ -309,6 +460,18 @@ func (bsf *BlockStorageFile) getMinTimestamp() int64 {
 
 // getMaxTimestamp returns the maximum timestamp from all blocks
 func (bsf *BlockStorageFile) getMaxTimestamp() int64 {
+	// Check blockMetadataList first (used when restored from disk)
+	if len(bsf.blockMetadataList) > 0 {
+		maxTs := bsf.blockMetadataList[0].TimestampMax
+		for _, metadata := range bsf.blockMetadataList {
+			if metadata.TimestampMax > maxTs {
+				maxTs = metadata.TimestampMax
+			}
+		}
+		return maxTs
+	}
+
+	// Fall back to blocks (used during normal operation)
 	if len(bsf.blocks) == 0 {
 		return 0
 	}
@@ -328,13 +491,13 @@ func (bsf *BlockStorageFile) GetMetadata() models.FileMetadata {
 	defer bsf.mutex.Unlock()
 
 	return models.FileMetadata{
-		CreatedAt:                timeNow().Unix(),
-		TotalEvents:              bsf.totalEvents,
-		TotalUncompressedBytes:   bsf.totalUncompressed,
-		TotalCompressedBytes:     bsf.totalCompressed,
-		CompressionRatio:         float32(bsf.totalCompressed) / float32(bsf.totalUncompressed + 1),
-		ResourceTypes:            bsf.getResourceTypes(),
-		Namespaces:               bsf.getNamespaces(),
+		CreatedAt:              time.Now().Unix(),
+		TotalEvents:            bsf.totalEvents,
+		TotalUncompressedBytes: bsf.totalUncompressed,
+		TotalCompressedBytes:   bsf.totalCompressed,
+		CompressionRatio:       float32(bsf.totalCompressed) / float32(bsf.totalUncompressed+1),
+		ResourceTypes:          bsf.getResourceTypes(),
+		Namespaces:             bsf.getNamespaces(),
 	}
 }
 
@@ -360,8 +523,8 @@ func (bsf *BlockStorageFile) getNamespaces() map[string]bool {
 	return result
 }
 
-// GetIndex returns a compatible index structure
-func (bsf *BlockStorageFile) GetIndex() models.SparseTimestampIndex {
+// GetSparseTimestampIndex returns a compatible index structure
+func (bsf *BlockStorageFile) GetSparseTimestampIndex() models.SparseTimestampIndex {
 	bsf.mutex.Lock()
 	defer bsf.mutex.Unlock()
 
@@ -375,7 +538,7 @@ func (bsf *BlockStorageFile) GetIndex() models.SparseTimestampIndex {
 	}
 
 	return models.SparseTimestampIndex{
-		Entries:      entries,
+		Entries:       entries,
 		TotalSegments: int32(len(bsf.blocks)),
 	}
 }

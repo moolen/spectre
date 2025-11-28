@@ -3,21 +3,20 @@ package api
 import (
 	"net/http"
 	"sort"
-	"strconv"
+	"time"
 
 	"github.com/moritz/rpk/internal/logging"
 	"github.com/moritz/rpk/internal/models"
-	"github.com/moritz/rpk/internal/storage"
 )
 
 // MetadataHandler handles /v1/metadata requests
 type MetadataHandler struct {
-	queryExecutor *storage.QueryExecutor
+	queryExecutor QueryExecutor
 	logger        *logging.Logger
 }
 
 // NewMetadataHandler creates a new metadata handler
-func NewMetadataHandler(queryExecutor *storage.QueryExecutor, logger *logging.Logger) *MetadataHandler {
+func NewMetadataHandler(queryExecutor QueryExecutor, logger *logging.Logger) *MetadataHandler {
 	return &MetadataHandler{
 		queryExecutor: queryExecutor,
 		logger:        logger,
@@ -26,28 +25,19 @@ func NewMetadataHandler(queryExecutor *storage.QueryExecutor, logger *logging.Lo
 
 // Handle handles metadata requests
 func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	// Parse optional query parameters
 	params := r.URL.Query()
-	var startTime, endTime int64 = -1, -1
-
-	if startStr := params.Get("start"); startStr != "" {
-		if val, err := strconv.ParseInt(startStr, 10, 64); err == nil {
-			startTime = val
-		}
+	startStr := params.Get("start")
+	startTime, err := ParseOptionalTimestamp(startStr, 0)
+	if err != nil {
+		mh.respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
 	}
 
-	if endStr := params.Get("end"); endStr != "" {
-		if val, err := strconv.ParseInt(endStr, 10, 64); err == nil {
-			endTime = val
-		}
-	}
-
-	// Query all events (use very large time range if not specified)
-	if startTime < 0 {
-		startTime = 0
-	}
-	if endTime < 0 {
-		endTime = 9999999999
+	endStr := params.Get("end")
+	endTime, err := ParseOptionalTimestamp(endStr, time.Now().Unix())
+	if err != nil {
+		mh.respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
 	}
 
 	query := &models.QueryRequest{

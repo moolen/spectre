@@ -7,7 +7,6 @@ import {
   SearchResponse,
   Resource,
   StatusSegment,
-  AuditEvent,
   MetadataResponse,
   EventsResponse,
   SegmentsResponse,
@@ -15,9 +14,8 @@ import {
 import { K8sResource, K8sEvent, ResourceStatusSegment } from '../types';
 import {
   transformSearchResponse,
-  transformAuditEvent,
   transformStatusSegment,
-  transformAuditEventsWithErrorHandling,
+  transformK8sEventsWithErrorHandling,
   transformStatusSegmentsWithErrorHandling,
 } from './dataTransformer';
 
@@ -53,7 +51,6 @@ export interface ApiEvent {
   timestamp: string;
   verb: 'create' | 'update' | 'patch' | 'delete' | 'get' | 'list';
   message: string;
-  user: string;
   details?: string;
 }
 
@@ -119,61 +116,10 @@ class ApiClient {
   }
 
   /**
-   * Fetch metadata (namespaces, kinds, resource counts)
+   * Get timeline data using /v1/timeline endpoint
+   * Returns full resource data with statusSegments and events for timeline visualization
    */
-  async getMetadata(): Promise<ApiMetadata> {
-    return this.request<ApiMetadata>('/api/metadata');
-  }
-
-  /**
-   * Fetch all resources
-   */
-  async getResources(
-    namespace?: string,
-    kind?: string
-  ): Promise<ApiResource[]> {
-    const params = new URLSearchParams();
-    if (namespace) params.append('namespace', namespace);
-    if (kind) params.append('kind', kind);
-
-    const query = params.toString();
-    const endpoint = query ? `/api/resources?${query}` : '/api/resources';
-
-    return this.request<ApiResource[]>(endpoint);
-  }
-
-  /**
-   * Fetch events for a specific resource
-   */
-  async getEvents(
-    resourceId: string,
-    startTime?: string,
-    endTime?: string
-  ): Promise<ApiEvent[]> {
-    const params = new URLSearchParams();
-    if (startTime) params.append('startTime', startTime);
-    if (endTime) params.append('endTime', endTime);
-
-    const query = params.toString();
-    const endpoint = query
-      ? `/api/events/${resourceId}?${query}`
-      : `/api/events/${resourceId}`;
-
-    return this.request<ApiEvent[]>(endpoint);
-  }
-
-  /**
-   * Fetch segments for a specific resource
-   */
-  async getSegments(resourceId: string): Promise<ApiSegment[]> {
-    return this.request<ApiSegment[]>(`/api/segments/${resourceId}`);
-  }
-
-  /**
-   * Search resources using /v1/search endpoint
-   * Returns transformed K8sResource[] for timeline view
-   */
-  async searchResources(
+  async getTimeline(
     startTime: string | number,
     endTime: string | number,
     filters?: {
@@ -200,7 +146,7 @@ class ApiClient {
     if (filters?.group) params.append('group', filters.group);
     if (filters?.version) params.append('version', filters.version);
 
-    const endpoint = `/v1/search?${params.toString()}`;
+    const endpoint = `/v1/timeline?${params.toString()}`;
     const response = await this.request<SearchResponse>(endpoint);
     return transformSearchResponse(response);
   }
@@ -208,7 +154,7 @@ class ApiClient {
   /**
    * Get metadata for filters
    */
-  async getMetadataV1(
+  async getMetadata(
     startTime?: string | number,
     endTime?: string | number
   ): Promise<MetadataResponse> {
@@ -234,89 +180,11 @@ class ApiClient {
 
     return this.request<MetadataResponse>(endpoint);
   }
-
-  /**
-   * Get status segments for a resource
-   */
-  async getResourceSegments(
-    resourceId: string,
-    startTime?: string | number,
-    endTime?: string | number
-  ): Promise<ResourceStatusSegment[]> {
-    const params = new URLSearchParams();
-
-    if (startTime !== undefined) {
-      const startSeconds = typeof startTime === 'number'
-        ? Math.floor(startTime / 1000)
-        : startTime;
-      params.append('start', startSeconds.toString());
-    }
-
-    if (endTime !== undefined) {
-      const endSeconds = typeof endTime === 'number'
-        ? Math.floor(endTime / 1000)
-        : endTime;
-      params.append('end', endSeconds.toString());
-    }
-
-    const endpoint = params.toString()
-      ? `/v1/resources/${resourceId}/segments?${params.toString()}`
-      : `/v1/resources/${resourceId}/segments`;
-
-    const response = await this.request<SegmentsResponse>(endpoint);
-    return transformStatusSegmentsWithErrorHandling(response.segments);
-  }
-
-  /**
-   * Get audit events for a resource
-   */
-  async getResourceEvents(
-    resourceId: string,
-    startTime?: string | number,
-    endTime?: string | number,
-    limit?: number
-  ): Promise<K8sEvent[]> {
-    const params = new URLSearchParams();
-
-    if (startTime !== undefined) {
-      const startSeconds = typeof startTime === 'number'
-        ? Math.floor(startTime / 1000)
-        : startTime;
-      params.append('start', startSeconds.toString());
-    }
-
-    if (endTime !== undefined) {
-      const endSeconds = typeof endTime === 'number'
-        ? Math.floor(endTime / 1000)
-        : endTime;
-      params.append('end', endSeconds.toString());
-    }
-
-    if (limit !== undefined) {
-      params.append('limit', limit.toString());
-    }
-
-    const endpoint = params.toString()
-      ? `/v1/resources/${resourceId}/events?${params.toString()}`
-      : `/v1/resources/${resourceId}/events`;
-
-    const response = await this.request<EventsResponse>(endpoint);
-    return transformAuditEventsWithErrorHandling(response.events);
-  }
-
-  /**
-   * Health check endpoint
-   */
-  async healthCheck(): Promise<{ status: string }> {
-    return this.request<{ status: string }>('/api/health');
-  }
 }
 
 // Create singleton instance with environment-based configuration
 const baseUrl =
-  typeof process !== 'undefined' && process.env.VITE_API_BASE
-    ? process.env.VITE_API_BASE
-    : '/v1';
+  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080');
 
 export const apiClient = new ApiClient({
   baseUrl,

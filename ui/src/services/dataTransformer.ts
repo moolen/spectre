@@ -13,7 +13,7 @@
  */
 
 import { K8sResource, ResourceStatusSegment, K8sEvent } from '../types';
-import { SearchResponse, StatusSegment, AuditEvent } from './apiTypes';
+import { SearchResponse, StatusSegment, K8sEventDTO } from './apiTypes';
 
 /**
  * Transforms backend SearchResponse to frontend K8sResource array
@@ -27,7 +27,8 @@ export function transformSearchResponse(response: SearchResponse): K8sResource[]
   return response.resources
     .filter(resource => {
       // Skip resources with missing required fields
-      if (!resource.id || !resource.kind || !resource.namespace || !resource.name) {
+      // Note: namespace can be empty for cluster-scoped resources like Nodes
+      if (!resource.id || !resource.kind || !resource.name) {
         console.warn('Skipping resource with missing fields', resource);
         return false;
       }
@@ -49,13 +50,13 @@ export function transformResourceDetail(resource: any): K8sResource {
 function transformResource(resource: any): K8sResource {
   return {
     id: resource.id,
-    group: resource.group,
-    version: resource.version,
+    group: resource.group || '',
+    version: resource.version || '',
     kind: resource.kind,
-    namespace: resource.namespace,
+    namespace: resource.namespace || '(cluster)', // Cluster-scoped resources have no namespace
     name: resource.name,
     statusSegments: resource.statusSegments?.map(transformStatusSegment) || [],
-    events: resource.events?.map(transformAuditEvent) || [],
+    events: resource.events?.map(transformK8sEvent) || [],
   };
 }
 
@@ -78,7 +79,7 @@ export function transformStatusSegment(segment: StatusSegment): ResourceStatusSe
       start: new Date(segment.startTime * 1000), // Convert Unix seconds to Date
       end: new Date(segment.endTime * 1000),
       message: segment.message || '',
-      config: segment.config || {},
+      resourceData: segment.resourceData,
     };
   } catch (error) {
     console.error('Error transforming status segment', segment, error);
@@ -87,20 +88,23 @@ export function transformStatusSegment(segment: StatusSegment): ResourceStatusSe
 }
 
 /**
- * Transforms an AuditEvent from backend to frontend format
+ * Transforms a K8sEvent from backend to frontend format
  */
-export function transformAuditEvent(event: AuditEvent): K8sEvent {
+export function transformK8sEvent(event: K8sEventDTO): K8sEvent {
   try {
     return {
       id: event.id,
       timestamp: new Date(event.timestamp * 1000), // Convert Unix seconds to Date
-      verb: event.verb,
-      user: event.user,
+      reason: event.reason || 'Unknown',
       message: event.message,
-      details: event.details || '',
+      type: event.type || 'Normal',
+      count: event.count ?? 0,
+      source: event.source,
+      firstTimestamp: event.firstTimestamp ? new Date(event.firstTimestamp * 1000) : undefined,
+      lastTimestamp: event.lastTimestamp ? new Date(event.lastTimestamp * 1000) : undefined,
     };
   } catch (error) {
-    console.error('Error transforming audit event', event, error);
+    console.error('Error transforming Kubernetes event', event, error);
     throw new Error('Failed to transform event: invalid timestamp format');
   }
 }
@@ -108,20 +112,20 @@ export function transformAuditEvent(event: AuditEvent): K8sEvent {
 /**
  * Safely transforms events with error handling
  */
-export function transformAuditEventsWithErrorHandling(events: AuditEvent[]): K8sEvent[] {
+export function transformK8sEventsWithErrorHandling(events: K8sEventDTO[]): K8sEvent[] {
   return events.map(event => {
     try {
-      return transformAuditEvent(event);
+      return transformK8sEvent(event);
     } catch (error) {
       console.warn('Failed to transform individual event, skipping', event, error);
       // Return a placeholder event so we don't break the entire list
       return {
         id: event.id,
         timestamp: new Date(),
-        verb: event.verb || 'unknown' as any,
-        user: event.user || 'unknown',
+        reason: 'Unknown',
         message: `Failed to parse event: ${error instanceof Error ? error.message : 'unknown error'}`,
-        details: '',
+        type: 'Normal',
+        count: 0,
       };
     }
   });

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: kem-watch-config
+  name: watch-config
   namespace: default
 data:
   watch-config.yaml: |

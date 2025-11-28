@@ -3,6 +3,8 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/moritz/rpk/internal/models"
 )
 
 // Block represents a fixed-size unit of compressed event data with associated metadata
@@ -112,18 +114,18 @@ type EventBuffer struct {
 // NewEventBuffer creates a new event buffer for accumulating events into a block
 func NewEventBuffer(blockSizeBytes int64) *EventBuffer {
 	return &EventBuffer{
-		events:           make([][]byte, 0),
-		metadata:         &BlockMetadata{},
-		blockSize:        blockSizeBytes,
-		currentSize:      0,
-		timestampMin:     0,
-		timestampMax:     0,
-		kindSet:          make(map[string]bool),
-		namespaceSet:     make(map[string]bool),
-		groupSet:         make(map[string]bool),
-		bloomKinds:       NewBloomFilter(1000, 0.05),
-		bloomNamespaces:  NewBloomFilter(100, 0.05),
-		bloomGroups:      NewBloomFilter(100, 0.05),
+		events:          make([][]byte, 0),
+		metadata:        &BlockMetadata{},
+		blockSize:       blockSizeBytes,
+		currentSize:     0,
+		timestampMin:    0,
+		timestampMax:    0,
+		kindSet:         make(map[string]bool),
+		namespaceSet:    make(map[string]bool),
+		groupSet:        make(map[string]bool),
+		bloomKinds:      NewBloomFilter(1000, 0.05),
+		bloomNamespaces: NewBloomFilter(100, 0.05),
+		bloomGroups:     NewBloomFilter(100, 0.05),
 	}
 }
 
@@ -193,6 +195,19 @@ func (eb *EventBuffer) GetCurrentSize() int64 {
 	return eb.currentSize
 }
 
+// GetEvents parses and returns all buffered events as Event objects
+func (eb *EventBuffer) GetEvents() ([]*models.Event, error) {
+	var events []*models.Event
+	for _, eventJSON := range eb.events {
+		var event models.Event
+		if err := json.Unmarshal(eventJSON, &event); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal buffered event: %w", err)
+		}
+		events = append(events, &event)
+	}
+	return events, nil
+}
+
 // Finalize creates a Block from the buffered events and compresses it
 func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string) (*Block, error) {
 	if len(eb.events) == 0 {
@@ -208,17 +223,17 @@ func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string) (*Bl
 
 	// Create metadata
 	metadata := &BlockMetadata{
-		ID:                     blockID,
-		BloomFilterKinds:       eb.bloomKinds,
-		BloomFilterNamespaces:  eb.bloomNamespaces,
-		BloomFilterGroups:      eb.bloomGroups,
-		KindSet:                mapToSlice(eb.kindSet),
-		NamespaceSet:           mapToSlice(eb.namespaceSet),
-		GroupSet:               mapToSlice(eb.groupSet),
-		TimestampMin:           eb.timestampMin,
-		TimestampMax:           eb.timestampMax,
-		EventCount:             int32(len(eb.events)),
-		UncompressedLength:     int64(len(uncompressedData)),
+		ID:                    blockID,
+		BloomFilterKinds:      eb.bloomKinds,
+		BloomFilterNamespaces: eb.bloomNamespaces,
+		BloomFilterGroups:     eb.bloomGroups,
+		KindSet:               mapToSlice(eb.kindSet),
+		NamespaceSet:          mapToSlice(eb.namespaceSet),
+		GroupSet:              mapToSlice(eb.groupSet),
+		TimestampMin:          eb.timestampMin,
+		TimestampMax:          eb.timestampMax,
+		EventCount:            int32(len(eb.events)),
+		UncompressedLength:    int64(len(uncompressedData)),
 	}
 
 	// Create block with uncompressed data

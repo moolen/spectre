@@ -1,25 +1,42 @@
 package storage
 
 import (
+	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/moritz/rpk/internal/logging"
 	"github.com/moritz/rpk/internal/models"
+	corev1 "k8s.io/api/core/v1"
 )
 
-// ResourceBuilder aggregates events into resources with status segments and audit events
-type ResourceBuilder struct{}
+// ResourceBuilder aggregates events into resources with status segments and related Kubernetes events
+type ResourceBuilder struct {
+	logger *logging.Logger
+}
 
 // NewResourceBuilder creates a new ResourceBuilder
 func NewResourceBuilder() *ResourceBuilder {
-	return &ResourceBuilder{}
+	return &ResourceBuilder{
+		logger: logging.GetLogger("resource_builder"),
+	}
 }
 
 // BuildResourcesFromEvents groups events by resource UID and creates Resource objects
 func (rb *ResourceBuilder) BuildResourcesFromEvents(events []models.Event) map[string]*models.Resource {
 	resources := make(map[string]*models.Resource)
 
+	// Filter out Kubernetes Event resources; they will be processed separately
+	baseEvents := make([]models.Event, 0, len(events))
 	for _, event := range events {
+		if strings.EqualFold(event.Resource.Kind, "Event") {
+			continue
+		}
+		baseEvents = append(baseEvents, event)
+	}
+
+	for _, event := range baseEvents {
 		resourceUID := event.Resource.UID
 		if resourceUID == "" {
 			continue
@@ -30,19 +47,11 @@ func (rb *ResourceBuilder) BuildResourcesFromEvents(events []models.Event) map[s
 			resource := rb.CreateResource(event)
 			resources[resourceUID] = resource
 		}
-
-		// Add event to resource
-		if resources[resourceUID].Events == nil {
-			resources[resourceUID].Events = []models.AuditEvent{}
-		}
-		resources[resourceUID].Events = append(resources[resourceUID].Events, rb.transformEvent(event))
 	}
 
 	// Build status segments for each resource
 	for uid, resource := range resources {
-		if len(resource.Events) > 0 {
-			resource.StatusSegments = rb.BuildStatusSegments(uid, events)
-		}
+		resource.StatusSegments = rb.BuildStatusSegments(uid, baseEvents)
 	}
 
 	return resources
@@ -57,7 +66,7 @@ func (rb *ResourceBuilder) CreateResource(event models.Event) *models.Resource {
 		Kind:      event.Resource.Kind,
 		Namespace: event.Resource.Namespace,
 		Name:      event.Resource.Name,
-		Events:    []models.AuditEvent{},
+		Events:    nil,
 	}
 }
 
@@ -87,13 +96,12 @@ func (rb *ResourceBuilder) BuildStatusSegments(resourceUID string, allEvents []m
 			endTime = event.Timestamp + 3600*1e9 // 1 hour after
 		}
 
-		status := rb.inferStatus(string(event.Type))
 		segment := models.StatusSegment{
-			StartTime: event.Timestamp / 1e9, // Convert to seconds
-			EndTime:   endTime / 1e9,
-			Status:    status,
-			Message:   "",
-			Config:    make(map[string]interface{}),
+			StartTime:    event.Timestamp / 1e9, // Convert to seconds
+			EndTime:      endTime / 1e9,
+			Status:       InferStatusFromResource(event.Resource.Kind, event.Data, string(event.Type)),
+			Message:      rb.generateMessage(event),
+			ResourceData: event.Data,
 		}
 		segments = append(segments, segment)
 	}
@@ -101,25 +109,115 @@ func (rb *ResourceBuilder) BuildStatusSegments(resourceUID string, allEvents []m
 	return segments
 }
 
-// BuildAuditEvents converts storage Event objects to AuditEvent objects
-func (rb *ResourceBuilder) BuildAuditEvents(events []models.Event) []models.AuditEvent {
-	var auditEvents []models.AuditEvent
-	for _, event := range events {
-		auditEvents = append(auditEvents, rb.transformEvent(event))
+// generateMessage creates a human-readable message for the segment
+func (rb *ResourceBuilder) generateMessage(event models.Event) string {
+	verb := rb.mapVerb(string(event.Type))
+
+	switch verb {
+	case "create":
+		return "Resource created"
+	case "update":
+		return "Resource updated"
+	case "delete":
+		return "Resource deleted"
+	default:
+		return "Resource modified"
 	}
-	return auditEvents
 }
 
-// transformEvent converts a models.Event to an AuditEvent
-func (rb *ResourceBuilder) transformEvent(event models.Event) models.AuditEvent {
-	return models.AuditEvent{
-		ID:        event.ID,
-		Timestamp: event.Timestamp / 1e9, // Convert nanoseconds to seconds
-		Verb:      rb.mapVerb(string(event.Type)),
-		User:      "", // Will be populated from audit logs in production
-		Message:   "",
-		Details:   "",
+// AttachK8sEvents augments resources with Kubernetes Event data matched by involvedObject UID.
+func (rb *ResourceBuilder) AttachK8sEvents(resources map[string]*models.Resource, events []models.Event) {
+	if len(resources) == 0 || len(events) == 0 {
+		return
 	}
+
+	for _, event := range events {
+		if !strings.EqualFold(event.Resource.Kind, "Event") {
+			continue
+		}
+		targetUID := event.Resource.InvolvedObjectUID
+		if targetUID == "" {
+			continue
+		}
+
+		resource, exists := resources[targetUID]
+		if !exists {
+			continue
+		}
+
+		k8sEvent, err := rb.convertK8sEvent(event)
+		if err != nil {
+			rb.logger.Warn("Failed to convert Kubernetes Event %s: %v", event.ID, err)
+			continue
+		}
+
+		resource.Events = append(resource.Events, k8sEvent)
+	}
+
+	for _, resource := range resources {
+		if len(resource.Events) == 0 {
+			continue
+		}
+		sort.Slice(resource.Events, func(i, j int) bool {
+			return resource.Events[i].Timestamp < resource.Events[j].Timestamp
+		})
+	}
+}
+
+func (rb *ResourceBuilder) convertK8sEvent(event models.Event) (models.K8sEvent, error) {
+	if len(event.Data) == 0 {
+		return models.K8sEvent{}, fmt.Errorf("event data is empty")
+	}
+
+	var kubeEvent corev1.Event
+	if err := json.Unmarshal(event.Data, &kubeEvent); err != nil {
+		return models.K8sEvent{}, fmt.Errorf("decode kubernetes event: %w", err)
+	}
+
+	firstTs := kubeEvent.FirstTimestamp.Unix()
+	lastTs := kubeEvent.LastTimestamp.Unix()
+	if firstTs == 0 && !kubeEvent.EventTime.Time.IsZero() {
+		firstTs = kubeEvent.EventTime.Unix()
+	}
+	if lastTs == 0 && !kubeEvent.EventTime.Time.IsZero() {
+		lastTs = kubeEvent.EventTime.Unix()
+	}
+
+	timestamp := event.Timestamp / 1e9
+	if lastTs > 0 {
+		timestamp = lastTs
+	} else if firstTs > 0 {
+		timestamp = firstTs
+	}
+
+	source := kubeEvent.Source.Component
+	if source == "" {
+		source = kubeEvent.ReportingController
+	}
+	if source == "" {
+		source = kubeEvent.ReportingInstance
+	}
+
+	k8sEvent := models.K8sEvent{
+		ID:             event.ID,
+		Timestamp:      timestamp,
+		Reason:         kubeEvent.Reason,
+		Message:        kubeEvent.Message,
+		Type:           kubeEvent.Type,
+		Count:          kubeEvent.Count,
+		Source:         source,
+		FirstTimestamp: firstTs,
+		LastTimestamp:  lastTs,
+	}
+
+	if k8sEvent.Reason == "" {
+		k8sEvent.Reason = "Unknown"
+	}
+	if k8sEvent.Type == "" {
+		k8sEvent.Type = "Normal"
+	}
+
+	return k8sEvent, nil
 }
 
 // mapVerb maps event type to standard API verb
@@ -133,17 +231,4 @@ func (rb *ResourceBuilder) mapVerb(eventType string) string {
 		return mapped
 	}
 	return strings.ToLower(eventType)
-}
-
-// inferStatus infers resource status from event type
-func (rb *ResourceBuilder) inferStatus(eventType string) string {
-	typeUpper := strings.ToUpper(eventType)
-	switch typeUpper {
-	case "CREATE", "UPDATE":
-		return "Ready"
-	case "DELETE":
-		return "Terminating"
-	default:
-		return "Unknown"
-	}
 }

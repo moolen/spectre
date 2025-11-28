@@ -1,51 +1,56 @@
 package models
 
+import "encoding/json"
+
 // SearchResponse represents the response from /v1/search endpoint
 type SearchResponse struct {
-	Resources      []Resource `json:"resources"`
-	Count          int        `json:"count"`
+	Resources       []Resource `json:"resources"`
+	Count           int        `json:"count"`
 	ExecutionTimeMs int64      `json:"executionTimeMs"`
 }
 
 // Resource represents a Kubernetes resource with minimal data for list view
 type Resource struct {
-	ID        string           `json:"id"`
-	Group     string           `json:"group"`
-	Version   string           `json:"version"`
-	Kind      string           `json:"kind"`
-	Namespace string           `json:"namespace"`
-	Name      string           `json:"name"`
+	ID             string          `json:"id"`
+	Group          string          `json:"group"`
+	Version        string          `json:"version"`
+	Kind           string          `json:"kind"`
+	Namespace      string          `json:"namespace"`
+	Name           string          `json:"name"`
 	StatusSegments []StatusSegment `json:"statusSegments,omitempty"`
-	Events    []AuditEvent     `json:"events,omitempty"`
+	Events         []K8sEvent      `json:"events,omitempty"`
 }
 
 // StatusSegment represents a period during which a resource maintained a specific status
 type StatusSegment struct {
-	StartTime int64                  `json:"startTime"`
-	EndTime   int64                  `json:"endTime"`
-	Status    string                 `json:"status"` // Ready, Warning, Error, Terminating, Unknown
-	Message   string                 `json:"message,omitempty"`
-	Config    map[string]interface{} `json:"config"`
+	StartTime    int64           `json:"startTime"`
+	EndTime      int64           `json:"endTime"`
+	Status       string          `json:"status"` // Ready, Warning, Error, Terminating, Unknown
+	Message      string          `json:"message,omitempty"`
+	ResourceData json.RawMessage `json:"resourceData,omitempty"`
 }
 
-// AuditEvent represents a Kubernetes audit event for a resource
-type AuditEvent struct {
-	ID        string `json:"id"`
-	Timestamp int64  `json:"timestamp"`
-	Verb      string `json:"verb"` // create, update, patch, delete, get, list
-	User      string `json:"user"`
-	Message   string `json:"message"`
-	Details   string `json:"details,omitempty"`
+// K8sEvent represents a Kubernetes Event (Kind=Event) associated with a resource
+type K8sEvent struct {
+	ID             string `json:"id"`
+	Timestamp      int64  `json:"timestamp"`
+	Reason         string `json:"reason"`
+	Message        string `json:"message"`
+	Type           string `json:"type"` // Normal, Warning
+	Count          int32  `json:"count"`
+	Source         string `json:"source,omitempty"`
+	FirstTimestamp int64  `json:"firstTimestamp,omitempty"`
+	LastTimestamp  int64  `json:"lastTimestamp,omitempty"`
 }
 
 // MetadataResponse represents the response from /v1/metadata endpoint
 type MetadataResponse struct {
-	Namespaces     []string               `json:"namespaces"`
-	Kinds          []string               `json:"kinds"`
-	Groups         []string               `json:"groups"`
-	ResourceCounts map[string]int         `json:"resourceCounts"`
-	TotalEvents    int                    `json:"totalEvents"`
-	TimeRange      TimeRangeInfo          `json:"timeRange"`
+	Namespaces     []string       `json:"namespaces"`
+	Kinds          []string       `json:"kinds"`
+	Groups         []string       `json:"groups"`
+	ResourceCounts map[string]int `json:"resourceCounts"`
+	TotalEvents    int            `json:"totalEvents"`
+	TimeRange      TimeRangeInfo  `json:"timeRange"`
 }
 
 // TimeRangeInfo contains earliest and latest event timestamps
@@ -56,9 +61,9 @@ type TimeRangeInfo struct {
 
 // EventsResponse represents the response from /v1/resources/{id}/events
 type EventsResponse struct {
-	Events     []AuditEvent `json:"events"`
-	Count      int          `json:"count"`
-	ResourceID string       `json:"resourceId"`
+	Events     []K8sEvent `json:"events"`
+	Count      int        `json:"count"`
+	ResourceID string     `json:"resourceId"`
 }
 
 // SegmentsResponse represents the response from /v1/resources/{id}/segments

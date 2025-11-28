@@ -14,8 +14,9 @@ import (
 
 // HelmDeployer manages Helm chart deployments.
 type HelmDeployer struct {
-	Config *action.Configuration
-	t      *testing.T
+	Config    *action.Configuration
+	Namespace string
+	t         *testing.T
 }
 
 // NewHelmDeployer creates a new Helm deployer.
@@ -38,32 +39,43 @@ func NewHelmDeployer(t *testing.T, kubeConfig, namespace string) (*HelmDeployer,
 	t.Logf("✓ Helm deployer created")
 
 	return &HelmDeployer{
-		Config: cfg,
-		t:      t,
+		Config:    cfg,
+		Namespace: namespace,
+		t:         t,
 	}, nil
 }
 
-// InstallChart installs a Helm chart.
-func (hd *HelmDeployer) InstallChart(releaseName, chartPath string, values map[string]interface{}) error {
-	hd.t.Logf("Installing Helm chart %s as %s", chartPath, releaseName)
-
-	// Load chart
+// InstallOrUpgrade installs/upgrades a Helm chart.
+func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values map[string]interface{}) error {
 	chart, err := loader.Load(chartPath)
 	if err != nil {
 		return fmt.Errorf("failed to load chart: %w", err)
 	}
 
-	// Create install action
-	install := action.NewInstall(hd.Config)
-	install.ReleaseName = releaseName
+	// Check if release exists
+	getAction := action.NewGet(hd.Config)
+	_, err = getAction.Run(releaseName)
+	releaseExists := err == nil
 
-	// Install release
-	release, err := install.Run(chart, values)
-	if err != nil {
-		return fmt.Errorf("failed to install chart: %w", err)
+	if releaseExists {
+		hd.t.Logf("Upgrading existing Helm release %s from %s", releaseName, chartPath)
+		upgrade := action.NewUpgrade(hd.Config)
+		_, err = upgrade.Run(releaseName, chart, values)
+		if err != nil {
+			return fmt.Errorf("failed to upgrade chart: %w", err)
+		}
+		hd.t.Logf("✓ Chart upgraded: %s", releaseName)
+	} else {
+		hd.t.Logf("Installing new Helm chart %s as %s", chartPath, releaseName)
+		install := action.NewInstall(hd.Config)
+		install.ReleaseName = releaseName
+		install.Namespace = hd.Namespace
+		_, err = install.Run(chart, values)
+		if err != nil {
+			return fmt.Errorf("failed to install chart: %w", err)
+		}
+		hd.t.Logf("✓ Chart installed: %s", releaseName)
 	}
-
-	hd.t.Logf("✓ Chart installed: %s (revision %d)", release.Name, release.Version)
 	return nil
 }
 

@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "k8s-event-monitor.fullname" . }}
+  namespace: {{ .Values.namespace }}
   labels:
     {{- include "k8s-event-monitor.labels" . | nindent 4 }}
 spec:
@@ -32,7 +33,7 @@ spec:
         args:
         - --data-dir={{ .Values.persistence.mountPath }}
         - --api-port={{ .Values.service.targetPort }}
-        - --log-level={{ .Values.config.logLevel | quote }}
+        - --log-level={{ .Values.config.logLevel }}
         - --watcher-config=/etc/watcher/watcher.yaml
         - --segment-size={{ .Values.config.segmentSize | int64 }}
         - --max-concurrent-requests={{ .Values.config.maxConcurrentRequests }}
@@ -45,7 +46,7 @@ spec:
         {{- if .Values.livenessProbe.enabled }}
         livenessProbe:
           httpGet:
-            path: /v1/search?start=1&end=2
+            path: /health
             port: http
           initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
           periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
@@ -55,7 +56,7 @@ spec:
         {{- if .Values.readinessProbe.enabled }}
         readinessProbe:
           httpGet:
-            path: /v1/search?start=1&end=2
+            path: /ready
             port: http
           initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
           periodSeconds: {{ .Values.readinessProbe.periodSeconds }}

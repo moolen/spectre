@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-// APIClient provides methods to interact with the KEM API.
 type APIClient struct {
 	BaseURL string
 	Client  *http.Client
@@ -20,20 +19,20 @@ type APIClient struct {
 
 // SearchResponse matches the /v1/search endpoint response.
 type SearchResponse struct {
-	Resources        []Resource `json:"resources"`
-	Count            int        `json:"count"`
-	ExecutionTimeMs  int        `json:"executionTimeMs"`
+	Resources       []Resource `json:"resources"`
+	Count           int        `json:"count"`
+	ExecutionTimeMs int        `json:"executionTimeMs"`
 }
 
 // Resource represents a Kubernetes resource with audit events.
 type Resource struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Kind            string          `json:"kind"`
-	APIVersion      string          `json:"apiVersion"`
-	Namespace       string          `json:"namespace"`
-	StatusSegments  []StatusSegment `json:"statusSegments"`
-	Events          []AuditEvent    `json:"events"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Kind           string          `json:"kind"`
+	APIVersion     string          `json:"apiVersion"`
+	Namespace      string          `json:"namespace"`
+	StatusSegments []StatusSegment `json:"statusSegments"`
+	Events         []K8sEvent      `json:"events"`
 }
 
 // StatusSegment represents a period of consistent resource status.
@@ -45,24 +44,27 @@ type StatusSegment struct {
 	Config    map[string]interface{} `json:"config"`
 }
 
-// AuditEvent represents a Kubernetes audit event.
-type AuditEvent struct {
-	ID        string `json:"id"`
-	Timestamp int64  `json:"timestamp"`
-	Verb      string `json:"verb"`
-	User      string `json:"user"`
-	Message   string `json:"message"`
-	Details   string `json:"details,omitempty"`
+// K8sEvent represents a Kubernetes Event (Kind=Event).
+type K8sEvent struct {
+	ID             string `json:"id"`
+	Timestamp      int64  `json:"timestamp"`
+	Reason         string `json:"reason"`
+	Message        string `json:"message"`
+	Type           string `json:"type"`
+	Count          int32  `json:"count"`
+	Source         string `json:"source,omitempty"`
+	FirstTimestamp int64  `json:"firstTimestamp,omitempty"`
+	LastTimestamp  int64  `json:"lastTimestamp,omitempty"`
 }
 
 // MetadataResponse matches the /v1/metadata endpoint response.
 type MetadataResponse struct {
-	Namespaces    []string           `json:"namespaces"`
-	Kinds         []string           `json:"kinds"`
-	Groups        []string           `json:"groups"`
-	ResourceCounts map[string]int    `json:"resourceCounts"`
-	TotalEvents   int                `json:"totalEvents"`
-	TimeRange     TimeRange          `json:"timeRange"`
+	Namespaces     []string       `json:"namespaces"`
+	Kinds          []string       `json:"kinds"`
+	Groups         []string       `json:"groups"`
+	ResourceCounts map[string]int `json:"resourceCounts"`
+	TotalEvents    int            `json:"totalEvents"`
+	TimeRange      TimeRange      `json:"timeRange"`
 }
 
 // TimeRange represents earliest and latest timestamps.
@@ -80,9 +82,9 @@ type SegmentsResponse struct {
 
 // EventsResponse represents the /v1/resources/{id}/events response.
 type EventsResponse struct {
-	Events     []AuditEvent `json:"events"`
-	Count      int          `json:"count"`
-	ResourceID string       `json:"resourceId"`
+	Events     []K8sEvent `json:"events"`
+	Count      int        `json:"count"`
+	ResourceID string     `json:"resourceId"`
 }
 
 // NewAPIClient creates a new API client.

@@ -86,7 +86,7 @@ func TestBlockStorageWriteReadRoundtrip(t *testing.T) {
 	}
 
 	// Verify index
-	index := bsf.GetIndex()
+	index := bsf.GetSparseTimestampIndex()
 	if index.TotalSegments != blockCount {
 		t.Errorf("Index total segments mismatch: %d vs %d", index.TotalSegments, blockCount)
 	}

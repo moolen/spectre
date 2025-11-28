@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { K8sResource } from '../types';
 
-// IMPORTANT: In a real app, never expose API keys on the client. 
+// IMPORTANT: In a real app, never expose API keys on the client.
 // This should be proxied through a backend.
 // For this environment, we assume process.env.API_KEY is available.
 
@@ -25,12 +25,12 @@ Resource: ${r.kind}/${r.namespace}/${r.name}
 Significant Events:
 ${errorSegments.map(s => `- [${s.start.toISOString()} to ${s.end.toISOString()}] Status: ${s.status} (${s.message})`).join('\n')}
 Recent Audit Logs:
-${r.events.slice(-5).map(e => `- ${e.timestamp.toISOString()}: ${e.verb} by ${e.user} - ${e.message}`).join('\n')}
+${r.events.slice(-5).map(e => `- ${e.timestamp.toISOString()}: ${e.verb} - ${e.message}`).join('\n')}
 `;
   }).join('\n---\n');
 
   const prompt = `
-You are a Kubernetes Site Reliability Engineer Expert. 
+You are a Kubernetes Site Reliability Engineer Expert.
 Analyze the following partial audit log summary for a potential incident.
 Focus on identifying root causes, cascading failures, or anomalous patterns.
 

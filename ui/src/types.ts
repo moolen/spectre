@@ -9,10 +9,13 @@ export enum ResourceStatus {
 export interface K8sEvent {
   id: string;
   timestamp: Date;
-  verb: 'create' | 'update' | 'patch' | 'delete' | 'get' | 'list';
+  reason: string;
   message: string;
-  user: string;
-  details?: string;
+  type: 'Normal' | 'Warning' | string;
+  count: number;
+  source?: string;
+  firstTimestamp?: Date;
+  lastTimestamp?: Date;
 }
 
 export interface ResourceStatusSegment {
@@ -20,7 +23,7 @@ export interface ResourceStatusSegment {
   end: Date;
   status: ResourceStatus;
   message?: string;
-  config: Record<string, any>;
+  resourceData?: Record<string, any>;
 }
 
 export interface K8sResource {
@@ -45,4 +48,9 @@ export interface FilterState {
 export interface SelectedPoint {
   resourceId: string;
   index: number;
+}
+
+export interface TimeRange {
+  start: Date;
+  end: Date;
 }

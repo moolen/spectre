@@ -64,3 +64,10 @@ ui/dist/
 ui/.vite/
 ui/coverage/
 *.tsbuildinfo
+
+./benchmark-data/
+
+
+TODO.md
+benchmark-data/
+data/

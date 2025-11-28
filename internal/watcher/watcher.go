@@ -2,6 +2,8 @@ package watcher
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"sync"
@@ -32,6 +34,13 @@ type Watcher struct {
 	eventHandler    EventHandler
 	watchers        map[string]context.CancelFunc // Track active watchers by key
 	watchersMutex   sync.RWMutex
+	// namespaceFilters maps GVR string to set of allowed namespaces (empty set means all namespaces)
+	namespaceFilters map[string]map[string]bool
+	namespaceMutex   sync.RWMutex
+
+	// Readiness tracking
+	readinessMutex      sync.RWMutex
+	initialLoadComplete bool // Flag to indicate initial load is done (prevents reset on hot-reload)
 }
 
 // EventHandler is called when a resource event occurs
@@ -57,6 +66,8 @@ func New(handler EventHandler, configPath string) (*Watcher, error) {
 		return nil, err
 	}
 
+	logger.Info("restConfig.ServerName: %s", restConfig.ServerName)
+
 	// Create dynamic client
 	dynamicClient, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
@@ -72,14 +83,16 @@ func New(handler EventHandler, configPath string) (*Watcher, error) {
 	}
 
 	w := &Watcher{
-		dynamicClient:   dynamicClient,
-		discoveryClient: discoveryClient,
-		restConfig:      restConfig,
-		configPath:      configPath,
-		stopChan:        make(chan struct{}),
-		logger:          logger,
-		eventHandler:    handler,
-		watchers:        make(map[string]context.CancelFunc),
+		dynamicClient:       dynamicClient,
+		discoveryClient:     discoveryClient,
+		restConfig:          restConfig,
+		configPath:          configPath,
+		stopChan:            make(chan struct{}),
+		logger:              logger,
+		eventHandler:        handler,
+		watchers:            make(map[string]context.CancelFunc),
+		namespaceFilters:    make(map[string]map[string]bool),
+		initialLoadComplete: false,
 	}
 
 	logger.Info("Watcher created successfully")
@@ -155,34 +168,98 @@ func (w *Watcher) loadAndStartWatchers(ctx context.Context) error {
 	}
 	w.watchersMutex.Unlock()
 
-	// Start watchers for each resource
+	// Clear namespace filters
+	w.namespaceMutex.Lock()
+	w.namespaceFilters = make(map[string]map[string]bool)
+	w.namespaceMutex.Unlock()
+
+	// Group resources by GVR
+	type gvrKey struct {
+		group    string
+		version  string
+		kind     string
+		resource string
+	}
+	type gvrInfo struct {
+		gvr        schema.GroupVersionResource
+		namespaced bool
+		namespaces map[string]bool // empty means all namespaces
+		kind       string
+	}
+
+	gvrMap := make(map[gvrKey]*gvrInfo)
+
+	// First pass: resolve all GVRs and collect namespace filters
 	for _, resource := range watcherConfig.Resources {
-		if err := w.startResourceWatcher(ctx, resource); err != nil {
-			w.logger.Error("Failed to start watcher for %s/%s/%s: %v", resource.Group, resource.Version, resource.Kind, err)
-			// Continue with other resources even if one fails
+		gvr, namespaced, err := w.resolveGVR(schema.GroupVersionKind{
+			Group:   resource.Group,
+			Version: resource.Version,
+			Kind:    resource.Kind,
+		})
+		if err != nil {
+			w.logger.Error("Failed to resolve GVR for %s/%s/%s: %v", resource.Group, resource.Version, resource.Kind, err)
+			continue
+		}
+
+		key := gvrKey{
+			group:    gvr.Group,
+			version:  gvr.Version,
+			kind:     resource.Kind,
+			resource: gvr.Resource,
+		}
+
+		info, exists := gvrMap[key]
+		if !exists {
+			info = &gvrInfo{
+				gvr:        gvr,
+				namespaced: namespaced,
+				namespaces: make(map[string]bool),
+				kind:       resource.Kind,
+			}
+			gvrMap[key] = info
+		}
+
+		// Add namespace filter if specified
+		if namespaced && resource.Namespace != "" {
+			info.namespaces[resource.Namespace] = true
+		}
+		// If namespace is empty for a namespaced resource, it means watch all namespaces
+		// We'll handle this by leaving namespaces map empty
+	}
+
+	// Second pass: start one watcher per GVR
+	for key, info := range gvrMap {
+		// Store namespace filters
+		gvrString := fmt.Sprintf("%s/%s/%s", key.group, key.version, key.resource)
+		w.namespaceMutex.Lock()
+		if len(info.namespaces) > 0 {
+			w.namespaceFilters[gvrString] = info.namespaces
+		} else {
+			// Empty map means watch all namespaces (for namespaced resources)
+			w.namespaceFilters[gvrString] = make(map[string]bool)
+		}
+		w.namespaceMutex.Unlock()
+
+		// Start watcher for this GVR
+		if err := w.startGVRWatcher(ctx, info.gvr, info.namespaced, info.kind); err != nil {
+			w.logger.Error("Failed to start watcher for %s: %v", gvrString, err)
 		}
 	}
+
+	// Mark initial load as complete after starting all watchers
+	// we do not keep track of the individual watchers, because some CRDs might not exist yet
+	// this should not fail the initial load and affect the readiness of the watcher
+	w.readinessMutex.Lock()
+	w.initialLoadComplete = true
+	w.readinessMutex.Unlock()
 
 	return nil
 }
 
-// startResourceWatcher starts a watcher for a single resource configuration
-func (w *Watcher) startResourceWatcher(ctx context.Context, resource config.Resource) error {
-	// Resolve GVK to GVR
-	gvr, namespaced, err := w.resolveGVR(schema.GroupVersionKind{
-		Group:   resource.Group,
-		Version: resource.Version,
-		Kind:    resource.Kind,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to resolve GVR: %w", err)
-	}
-
-	// Create watcher key for tracking
-	watcherKey := fmt.Sprintf("%s/%s/%s", resource.Group, resource.Version, resource.Kind)
-	if resource.Namespace != "" {
-		watcherKey = fmt.Sprintf("%s/%s/%s/%s", resource.Group, resource.Version, resource.Kind, resource.Namespace)
-	}
+// startGVRWatcher starts a watcher for a single GVR (watching all namespaces for namespaced resources)
+func (w *Watcher) startGVRWatcher(ctx context.Context, gvr schema.GroupVersionResource, namespaced bool, kind string) error {
+	// Create watcher key for tracking (GVR only, no namespace)
+	watcherKey := fmt.Sprintf("%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
 
 	// Create context for this watcher
 	watcherCtx, cancel := context.WithCancel(ctx)
@@ -198,14 +275,16 @@ func (w *Watcher) startResourceWatcher(ctx context.Context, resource config.Reso
 		defer w.wg.Done()
 		defer cancel()
 
-		namespace := resource.Namespace
-		if !namespaced {
-			// Cluster-scoped resources ignore namespace
-			namespace = ""
+		// For namespaced resources, use empty namespace to watch all namespaces
+		// For cluster-scoped resources, namespace is already empty
+		namespace := ""
+		if namespaced {
+			w.logger.Info("Starting watcher for %s (all namespaces, filtering client-side)", watcherKey)
+		} else {
+			w.logger.Info("Starting watcher for %s (cluster-scoped)", watcherKey)
 		}
 
-		w.logger.Info("Starting watcher for %s (namespace: %s)", watcherKey, namespace)
-		if err := w.watchLoop(watcherCtx, gvr, namespace, resource.Kind); err != nil {
+		if err := w.watchLoop(watcherCtx, gvr, namespace, kind, namespaced, watcherKey); err != nil {
 			if watcherCtx.Err() == nil {
 				w.logger.Error("Watcher for %s failed: %v", watcherKey, err)
 			}
@@ -247,13 +326,35 @@ func (w *Watcher) resolveGVR(gvk schema.GroupVersionKind) (schema.GroupVersionRe
 }
 
 // watchLoop performs a raw List/Watch loop for a resource without caching
-func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource, namespace, kind string) error {
+func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource, namespace, kind string, namespaced bool, watcherKey string) error {
 	// Get the resource interface
+	// For namespaced resources watching all namespaces, use empty namespace
+	// For cluster-scoped resources, namespace is already empty
 	var resourceInterface dynamic.ResourceInterface
 	if namespace == "" {
 		resourceInterface = w.dynamicClient.Resource(gvr)
 	} else {
 		resourceInterface = w.dynamicClient.Resource(gvr).Namespace(namespace)
+	}
+
+	// Get namespace filters for this GVR
+	gvrString := fmt.Sprintf("%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
+	w.namespaceMutex.RLock()
+	allowedNamespaces := w.namespaceFilters[gvrString]
+	w.namespaceMutex.RUnlock()
+
+	// Helper function to check if a namespace is allowed
+	shouldProcess := func(objNamespace string) bool {
+		if !namespaced {
+			// Cluster-scoped resources are always processed
+			return true
+		}
+		// If allowedNamespaces is empty, watch all namespaces
+		if len(allowedNamespaces) == 0 {
+			return true
+		}
+		// Check if namespace is in the allowed set
+		return allowedNamespaces[objNamespace]
 	}
 
 	// Retry loop for handling connection drops
@@ -287,6 +388,12 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 			default:
 			}
 
+			// Filter by namespace if needed
+			objNamespace := items[i].GetNamespace()
+			if !shouldProcess(objNamespace) {
+				continue
+			}
+
 			if err := w.eventHandler.OnAdd(&items[i]); err != nil {
 				w.logger.Error("Error handling Add event: %v", err)
 			}
@@ -312,6 +419,12 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 				case <-w.stopChan:
 					return fmt.Errorf("watcher stopped")
 				default:
+				}
+
+				// Filter by namespace if needed
+				objNamespace := items[i].GetNamespace()
+				if !shouldProcess(objNamespace) {
+					continue
 				}
 
 				if err := w.eventHandler.OnAdd(&items[i]); err != nil {
@@ -366,6 +479,14 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 					continue
 				}
 
+				w.logger.Debug("Watch event: %s %s/%s", event.Type, unstructuredObj.GetNamespace(), unstructuredObj.GetName())
+				// Filter by namespace if needed
+				objNamespace := unstructuredObj.GetNamespace()
+				if !shouldProcess(objNamespace) {
+					w.logger.Debug("Skipping event: %s %s/%s", event.Type, unstructuredObj.GetNamespace(), unstructuredObj.GetName())
+					continue
+				}
+
 				switch event.Type {
 				case watch.Added:
 					if err := w.eventHandler.OnAdd(unstructuredObj); err != nil {
@@ -398,11 +519,13 @@ func (w *Watcher) hotReloadLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	var lastModTime time.Time
+	// Use content hash instead of modification time for reliable detection
+	// of ConfigMap changes in Kubernetes (symlink-based mounts)
+	var lastContentHash string
 
-	// Get initial mod time
-	if info, err := os.Stat(w.configPath); err == nil {
-		lastModTime = info.ModTime()
+	// Get initial content hash
+	if content, err := os.ReadFile(w.configPath); err == nil {
+		lastContentHash = hashContent(content)
 	}
 
 	for {
@@ -412,16 +535,17 @@ func (w *Watcher) hotReloadLoop(ctx context.Context) {
 		case <-w.stopChan:
 			return
 		case <-ticker.C:
-			// Check if file has changed
-			info, err := os.Stat(w.configPath)
+			// Check if file content has changed
+			content, err := os.ReadFile(w.configPath)
 			if err != nil {
-				w.logger.Warn("Failed to stat config file %s: %v", w.configPath, err)
+				w.logger.Warn("Failed to read config file %s: %v", w.configPath, err)
 				continue
 			}
 
-			if info.ModTime().After(lastModTime) {
+			currentHash := hashContent(content)
+			if currentHash != lastContentHash {
 				w.logger.Info("Config file changed, reloading watchers")
-				lastModTime = info.ModTime()
+				lastContentHash = currentHash
 
 				if err := w.loadAndStartWatchers(ctx); err != nil {
 					w.logger.Error("Failed to reload watchers: %v", err)
@@ -431,6 +555,12 @@ func (w *Watcher) hotReloadLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// hashContent computes a SHA256 hash of the content for change detection
+func hashContent(content []byte) string {
+	hash := sha256.Sum256(content)
+	return hex.EncodeToString(hash[:])
 }
 
 // Name implements the lifecycle.Component interface
@@ -459,4 +589,11 @@ func buildClientConfig() (*rest.Config, error) {
 	}
 
 	return config, nil
+}
+
+// IsReady returns true when all expected watchers are started and have completed initial List processing
+func (w *Watcher) IsReady() bool {
+	w.readinessMutex.RLock()
+	defer w.readinessMutex.RUnlock()
+	return w.initialLoadComplete
 }

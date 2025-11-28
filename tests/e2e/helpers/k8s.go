@@ -30,6 +30,9 @@ func NewK8sClient(t *testing.T, kubeConfigPath string) (*K8sClient, error) {
 		return nil, fmt.Errorf("failed to build kube config: %w", err)
 	}
 
+	config.QPS = -1
+	config.Burst = 200
+
 	// Create clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -160,8 +163,6 @@ func (k *K8sClient) WaitForPodReady(ctx context.Context, namespace, name string,
 				continue
 			}
 
-			k.t.Logf("Pod status: %+v", pod.Status)
-
 			// Check if pod is ready
 			for _, condition := range pod.Status.Conditions {
 				if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
@@ -173,6 +174,69 @@ func (k *K8sClient) WaitForPodReady(ctx context.Context, namespace, name string,
 	}
 }
 
+// WaitForDeploymentReady waits for a deployment to be ready with all replicas available.
+func (k *K8sClient) WaitForDeploymentReady(ctx context.Context, namespace, name string, timeout time.Duration) error {
+	k.t.Logf("Waiting for deployment to be ready: %s/%s", namespace, name)
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for deployment %s/%s to be ready", namespace, name)
+		case <-ticker.C:
+			deployment, err := k.GetDeployment(ctx, namespace, name)
+			if err != nil {
+				continue
+			}
+
+			// Check if deployment is ready:
+			// 1. ObservedGeneration must match Generation (deployment controller has processed the latest spec)
+			// 2. ReadyReplicas must equal desired replicas
+			// 3. AvailableReplicas must be at least the desired replicas
+			desiredReplicas := int32(1) // default if replicas is nil
+			if deployment.Spec.Replicas != nil {
+				desiredReplicas = *deployment.Spec.Replicas
+			}
+
+			if deployment.Status.ObservedGeneration >= deployment.Generation &&
+				deployment.Status.ReadyReplicas == desiredReplicas &&
+				deployment.Status.AvailableReplicas >= desiredReplicas {
+				k.t.Logf("✓ Deployment is ready: %s/%s (replicas: %d/%d available, %d/%d ready)",
+					namespace, name,
+					deployment.Status.AvailableReplicas, desiredReplicas,
+					deployment.Status.ReadyReplicas, desiredReplicas)
+				return nil
+			}
+		}
+	}
+}
+
+// AnnotatePod annotates a pod with a given set of annotations.
+func (k *K8sClient) AnnotatePod(ctx context.Context, namespace, name string, annotations map[string]string) error {
+	k.t.Logf("Annotating pod %s/%s with annotations: %v", namespace, name, annotations)
+
+	pod, err := k.GetPod(ctx, namespace, name)
+	if err != nil {
+		return fmt.Errorf("failed to get pod: %w", err)
+	}
+
+	for k, v := range annotations {
+		pod.Annotations[k] = v
+	}
+	_, err = k.Clientset.CoreV1().Pods(namespace).Update(ctx, pod, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update pod: %w", err)
+	}
+
+	k.t.Logf("✓ Pod annotated: %s/%s", namespace, name)
+	return nil
+}
+
 // GetClusterVersion returns the Kubernetes version.
 func (k *K8sClient) GetClusterVersion(ctx context.Context) (string, error) {
 	version, err := k.Clientset.Discovery().ServerVersion()
@@ -180,4 +244,23 @@ func (k *K8sClient) GetClusterVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return version.GitVersion, nil
+}
+
+// UpdateConfigMap updates the data in an existing ConfigMap.
+func (k *K8sClient) UpdateConfigMap(ctx context.Context, namespace, name string, data map[string]string) error {
+	k.t.Logf("Updating ConfigMap %s/%s", namespace, name)
+
+	cm, err := k.Clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get ConfigMap: %w", err)
+	}
+
+	cm.Data = data
+	_, err = k.Clientset.CoreV1().ConfigMaps(namespace).Update(ctx, cm, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update ConfigMap: %w", err)
+	}
+
+	k.t.Logf("✓ ConfigMap updated: %s/%s", namespace, name)
+	return nil
 }

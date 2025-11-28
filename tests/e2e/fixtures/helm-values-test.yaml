@@ -1,14 +1,22 @@
-# Helm values for KEM test deployment
-# Optimized for e2e testing with reduced retention and quick feedback
+config:
+  logLevel: debug
+
+  watcher:
+    resources:
+      - group: ""
+        version: "v1"
+        kind: "Pod"
+      - group: "apps"
+        version: "v1"
+        kind: "Deployment"
 
 image:
-  repository: kem
+  repository: spectre
   tag: test-build
   pullPolicy: IfNotPresent
 
 replicaCount: 1
 
-# Reduced resource requests/limits for test environment
 resources:
   requests:
     memory: "64Mi"
@@ -17,29 +25,21 @@ resources:
     memory: "256Mi"
     cpu: "500m"
 
-# Service configuration for port-forward access
 service:
   type: ClusterIP
   port: 8080
   targetPort: 8080
 
-# Storage configuration for test (shorter retention)
 storage:
   type: memory
   retention:
     maxAge: 1h
     maxSize: 100Mi
 
-# Pod configuration
 podAnnotations:
   test: "true"
 
-# Environment variables for test mode
 env:
   - name: LOG_LEVEL
     value: "debug"
-  - name: ENABLE_METRICS
-    value: "false"
 
-# Affinity configuration (allow scheduling on any node)
-affinity: {}

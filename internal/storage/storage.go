@@ -16,14 +16,13 @@ import (
 type Storage struct {
 	dataDir     string
 	logger      *logging.Logger
-	compressor  *Compressor
-	currentFile *StorageFile
+	currentFile *BlockStorageFile
 	fileMutex   sync.RWMutex
-	segmentSize int64
+	blockSize   int64
 }
 
 // New creates a new Storage instance
-func New(dataDir string, segmentSize int64) (*Storage, error) {
+func New(dataDir string, blockSize int64) (*Storage, error) {
 	logger := logging.GetLogger("storage")
 
 	// Create data directory if it doesn't exist
@@ -33,10 +32,9 @@ func New(dataDir string, segmentSize int64) (*Storage, error) {
 	}
 
 	s := &Storage{
-		dataDir:     dataDir,
-		logger:      logger,
-		compressor:  NewCompressor(),
-		segmentSize: segmentSize,
+		dataDir:   dataDir,
+		logger:    logger,
+		blockSize: blockSize,
 	}
 
 	logger.Info("Storage initialized with directory: %s", dataDir)
@@ -66,7 +64,7 @@ func (s *Storage) WriteEvent(event *models.Event) error {
 }
 
 // getOrCreateCurrentFile gets or creates the storage file for the current hour
-func (s *Storage) getOrCreateCurrentFile() (*StorageFile, error) {
+func (s *Storage) getOrCreateCurrentFile() (*BlockStorageFile, error) {
 	now := time.Now()
 	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location())
 
@@ -83,7 +81,7 @@ func (s *Storage) getOrCreateCurrentFile() (*StorageFile, error) {
 		filePath := filepath.Join(s.dataDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
 			now.Year(), now.Month(), now.Day(), now.Hour()))
 
-		newFile, err := NewStorageFile(filePath, currentHour.Unix(), s.compressor, s.segmentSize)
+		newFile, err := NewBlockStorageFile(filePath, currentHour.Unix(), s.blockSize)
 		if err != nil {
 			return nil, err
 		}
@@ -101,41 +99,16 @@ func (s *Storage) Close() error {
 	defer s.fileMutex.Unlock()
 
 	if s.currentFile != nil {
+		// Close is idempotent, so safe to call multiple times
 		if err := s.currentFile.Close(); err != nil {
 			s.logger.Error("Failed to close storage file: %v", err)
-			return err
+			// Don't return error if already closed
 		}
+		s.currentFile = nil
 	}
 
 	s.logger.Info("Storage closed")
 	return nil
-}
-
-// GetEventsByTimeRange retrieves events within a time range
-func (s *Storage) GetEventsByTimeRange(startTime, endTime int64, filters models.QueryFilters) ([]models.Event, error) {
-	s.fileMutex.RLock()
-	defer s.fileMutex.RUnlock()
-
-	var results []models.Event
-
-	// Find all storage files that overlap with the time range
-	files, err := s.getStorageFiles()
-	if err != nil {
-		return nil, err
-	}
-
-	// Filter events from each file
-	for _, filePath := range files {
-		fileEvents, err := s.readEventsFromFile(filePath, startTime, endTime, filters)
-		if err != nil {
-			s.logger.Error("Failed to read events from file %s: %v", filePath, err)
-			continue
-		}
-
-		results = append(results, fileEvents...)
-	}
-
-	return results, nil
 }
 
 // getStorageFiles returns all storage files in the data directory
@@ -154,13 +127,6 @@ func (s *Storage) getStorageFiles() ([]string, error) {
 	}
 
 	return files, nil
-}
-
-// readEventsFromFile reads and filters events from a specific file
-func (s *Storage) readEventsFromFile(filePath string, startTime, endTime int64, filters models.QueryFilters) ([]models.Event, error) {
-	// TODO: Implement file reading and filtering logic
-	// For now, return empty results
-	return []models.Event{}, nil
 }
 
 // GetStorageStats returns statistics about the storage
@@ -296,8 +262,9 @@ func (s *Storage) Name() string {
 	return "Storage"
 }
 
-// GetInMemoryEvents returns events from the current in-memory segment that match the query
+// GetInMemoryEvents returns events from the current in-memory buffer that match the query
 // This allows querying unflushed/buffered data for low-latency queries
+// For restored files, it also includes events from restored blocks that are still on disk
 func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event, error) {
 	s.fileMutex.RLock()
 	defer s.fileMutex.RUnlock()
@@ -306,49 +273,46 @@ func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event,
 		return []models.Event{}, nil
 	}
 
-	// Get events from the current segment (thread-safe)
-	s.currentFile.mutex.Lock()
-	currentSegment := s.currentFile.currentSegment
-	segments := make([]*Segment, len(s.currentFile.segments))
-	copy(segments, s.currentFile.segments)
+	var allEvents []*models.Event
 
-	// Copy events from currentSegment while holding the mutex to avoid race conditions
-	var currentSegmentEvents []*models.Event
-	if currentSegment != nil && len(currentSegment.events) > 0 {
-		currentSegmentEvents = make([]*models.Event, len(currentSegment.events))
-		copy(currentSegmentEvents, currentSegment.events)
+	// Get events from restored blocks if file was restored (has blockMetadataList but blocks is empty)
+	s.currentFile.mutex.Lock()
+	hasRestoredBlocks := len(s.currentFile.blockMetadataList) > 0 && len(s.currentFile.blocks) == 0
+	if hasRestoredBlocks {
+		// File was restored - read events from restored blocks on disk
+		restoredEvents, err := s.readEventsFromRestoredBlocks(s.currentFile, query)
+		if err != nil {
+			s.currentFile.mutex.Unlock()
+			s.logger.Warn("Failed to read events from restored blocks: %v", err)
+			// Continue with just buffer events
+		} else {
+			allEvents = append(allEvents, restoredEvents...)
+		}
+	}
+
+	// Get events from the current buffer
+	currentBuffer := s.currentFile.currentBuffer
+	if currentBuffer != nil && currentBuffer.GetEventCount() > 0 {
+		bufferEvents, err := currentBuffer.GetEvents()
+		if err != nil {
+			s.currentFile.mutex.Unlock()
+			s.logger.Error("Failed to get events from buffer: %v", err)
+			return []models.Event{}, err
+		}
+		allEvents = append(allEvents, bufferEvents...)
 	}
 	s.currentFile.mutex.Unlock()
 
-	var allEvents []models.Event
-
-	// Query finalized segments that are in memory but not yet written to disk
-	// These segments are immutable (already finalized), so safe to access
-	for _, segment := range segments {
-		events := s.querySegment(segment, query)
-		allEvents = append(allEvents, events...)
+	// Filter events based on the query
+	if len(allEvents) == 0 {
+		return []models.Event{}, nil
 	}
 
-	// Query the current buffered segment using the copied events
-	if len(currentSegmentEvents) > 0 {
-		// Create a temporary segment-like structure for querying
-		events := s.querySegmentEvents(currentSegmentEvents, query)
-		allEvents = append(allEvents, events...)
-	}
-
-	return allEvents, nil
+	return s.filterEvents(allEvents, query), nil
 }
 
-// querySegment filters events from a segment based on the query
-func (s *Storage) querySegment(segment *Segment, query *models.QueryRequest) []models.Event {
-	if segment == nil || len(segment.events) == 0 {
-		return []models.Event{}
-	}
-	return s.querySegmentEvents(segment.events, query)
-}
-
-// querySegmentEvents filters a list of events based on the query
-func (s *Storage) querySegmentEvents(events []*models.Event, query *models.QueryRequest) []models.Event {
+// filterEvents filters a list of events based on the query
+func (s *Storage) filterEvents(events []*models.Event, query *models.QueryRequest) []models.Event {
 	if len(events) == 0 {
 		return []models.Event{}
 	}
@@ -372,4 +336,87 @@ func (s *Storage) querySegmentEvents(events []*models.Event, query *models.Query
 	}
 
 	return matchingEvents
+}
+
+// readEventsFromRestoredBlocks reads events from restored blocks on disk
+// This is used when a file was restored from a complete file and is open for appending
+func (s *Storage) readEventsFromRestoredBlocks(bsf *BlockStorageFile, query *models.QueryRequest) ([]*models.Event, error) {
+	if len(bsf.blockMetadataList) == 0 {
+		return []*models.Event{}, nil
+	}
+
+	// Open file for reading (separate from the write handle)
+	reader, err := NewBlockReader(bsf.path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create block reader: %w", err)
+	}
+	defer reader.Close()
+
+	var allEvents []*models.Event
+	startTimeNs := query.StartTimestamp * 1e9
+	endTimeNs := query.EndTimestamp * 1e9
+
+	// Convert query filters to map format for block matching
+	filters := make(map[string]string)
+	if query.Filters.Kind != "" {
+		filters["kind"] = query.Filters.Kind
+	}
+	if query.Filters.Namespace != "" {
+		filters["namespace"] = query.Filters.Namespace
+	}
+	if query.Filters.Group != "" {
+		filters["group"] = query.Filters.Group
+	}
+
+	// Get candidate blocks using inverted index (if available)
+	var candidateBlockIDs []int32
+	if bsf.index != nil && len(filters) > 0 {
+		candidateBlockIDs = GetCandidateBlocks(bsf.index, filters)
+	} else {
+		// No filters or no index - include all blocks
+		for _, meta := range bsf.blockMetadataList {
+			candidateBlockIDs = append(candidateBlockIDs, meta.ID)
+		}
+	}
+
+	// Read events from candidate blocks
+	for _, blockID := range candidateBlockIDs {
+		// Find metadata for this block
+		var metadata *BlockMetadata
+		for _, bm := range bsf.blockMetadataList {
+			if bm.ID == blockID {
+				metadata = bm
+				break
+			}
+		}
+
+		if metadata == nil {
+			continue
+		}
+
+		// Check time range overlap
+		if metadata.TimestampMax < startTimeNs || metadata.TimestampMin > endTimeNs {
+			continue
+		}
+
+		// Read block events
+		events, err := reader.ReadBlockEvents(metadata)
+		if err != nil {
+			s.logger.Warn("Failed to read restored block %d: %v", blockID, err)
+			continue
+		}
+
+		// Filter events based on the query
+		for _, event := range events {
+			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+				continue
+			}
+			if !query.Filters.Matches(event.Resource) {
+				continue
+			}
+			allEvents = append(allEvents, event)
+		}
+	}
+
+	return allEvents, nil
 }

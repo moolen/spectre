@@ -41,39 +41,27 @@ config:
   # Each resource specifies Group/Version/Kind and optional namespace
   watcher:
     resources:
-      # Example: Core v1 Pods (cluster-wide)
       - group: ""
         version: "v1"
         kind: "Pod"
-      # Example: Apps v1 Deployments in default namespace
       - group: "apps"
         version: "v1"
         kind: "Deployment"
-        namespace: "default"
-      # Example: Core v1 Services (cluster-wide)
       - group: ""
         version: "v1"
         kind: "Service"
-      # Example: Core v1 Nodes (cluster-scoped, namespace ignored)
       - group: ""
         version: "v1"
         kind: "Node"
-      # Example: Apps v1 StatefulSets (cluster-wide)
       - group: "apps"
         version: "v1"
         kind: "StatefulSet"
-      # Example: Apps v1 DaemonSets (cluster-wide)
       - group: "apps"
         version: "v1"
         kind: "DaemonSet"
-      # Example: Core v1 ConfigMaps (cluster-wide)
       - group: ""
         version: "v1"
         kind: "ConfigMap"
-      # Example: Core v1 Secrets (cluster-wide)
-      - group: ""
-        version: "v1"
-        kind: "Secret"
 
 # Pod security and RBAC
 securityContext:

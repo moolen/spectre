@@ -222,12 +222,44 @@ func (sfd *StorageFileData) GetEvents(filters map[string]string) ([]*models.Even
 			return nil, fmt.Errorf("failed to read block %d: %w", blockID, err)
 		}
 
-		allEvents = append(allEvents, events...)
+		// Filter events based on the filter criteria
+		// Block-level filtering is just an optimization - we still need to filter individual events
+		for _, event := range events {
+			if matchesFilters(event, filters) {
+				allEvents = append(allEvents, event)
+			}
+		}
 	}
 
 	return allEvents, nil
 }
 
+// matchesFilters checks if an event matches all filter criteria
+func matchesFilters(event *models.Event, filters map[string]string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+
+	if kind, ok := filters["kind"]; ok {
+		if event.Resource.Kind != kind {
+			return false
+		}
+	}
+
+	if ns, ok := filters["namespace"]; ok {
+		if event.Resource.Namespace != ns {
+			return false
+		}
+	}
+
+	if group, ok := filters["group"]; ok {
+		if event.Resource.Group != group {
+			return false
+		}
+	}
+
+	return true
+}
 
 // VerifyBlockChecksum verifies a block's checksum if checksums are enabled
 func VerifyBlockChecksum(block *Block, metadata *BlockMetadata) error {

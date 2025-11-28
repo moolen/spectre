@@ -19,7 +19,7 @@ export interface Resource {
   namespace: string;
   name: string;
   statusSegments?: StatusSegment[];
-  events?: AuditEvent[];
+  events?: K8sEventDTO[];
 }
 
 // Status segment for timeline visualization
@@ -28,17 +28,20 @@ export interface StatusSegment {
   endTime: number;    // Unix seconds
   status: 'Ready' | 'Warning' | 'Error' | 'Terminating' | 'Unknown';
   message?: string;
-  config: Record<string, any>;
+  resourceData?: Record<string, any>;
 }
 
-// Audit event for resource trail
-export interface AuditEvent {
+// Kubernetes Event payload
+export interface K8sEventDTO {
   id: string;
   timestamp: number;  // Unix seconds
-  verb: 'create' | 'update' | 'patch' | 'delete' | 'get' | 'list';
-  user: string;
+  reason: string;
   message: string;
-  details?: string;
+  type: 'Normal' | 'Warning' | string;
+  count: number;
+  source?: string;
+  firstTimestamp?: number;
+  lastTimestamp?: number;
 }
 
 // Metadata response for filters
@@ -59,7 +62,7 @@ export interface TimeRangeInfo {
 
 // Events response for resource audit trail
 export interface EventsResponse {
-  events: AuditEvent[];
+  events: K8sEventDTO[];
   count: number;
   resourceId: string;
 }
