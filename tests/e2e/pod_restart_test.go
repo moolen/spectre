@@ -48,6 +48,13 @@ func TestScenarioPodRestart(t *testing.T) {
 	err = helpers.WaitForAppReady(ctx, testCtx.K8sClient, "monitoring", testCtx.ReleaseName)
 	require.NoError(t, err, "failed to wait for app to be ready")
 
+	// Re-establish port-forward to the new pod (the old one was connected to the deleted pod)
+	err = testCtx.ReconnectPortForward()
+	require.NoError(t, err, "failed to reconnect port-forward after pod restart")
+
+	// Update the apiClient reference since ReconnectPortForward creates a new one
+	apiClient = testCtx.APIClient
+
 	resource1 = helpers.EventuallyResourceCreated(t, apiClient, testNamespace, "Deployment", deployment1.Name, helpers.DefaultEventuallyOption)
 	require.NotNil(t, resource1)
 

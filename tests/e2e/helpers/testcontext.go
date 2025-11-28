@@ -50,6 +50,37 @@ func (tc *TestContext) Cleanup() {
 	})
 }
 
+// ReconnectPortForward stops the existing port-forward and creates a new one
+// to a new pod. This is useful after pod restarts when the original port-forward
+// connection is lost. It also updates the APIClient with the new URL.
+func (tc *TestContext) ReconnectPortForward() error {
+	tc.t.Helper()
+
+	// Stop the old port-forward if it exists
+	if tc.PortForward != nil {
+		if err := tc.PortForward.Stop(); err != nil {
+			tc.t.Logf("Warning: failed to stop old port-forward: %v", err)
+		}
+	}
+
+	// Create a new port-forward
+	serviceName := fmt.Sprintf("%s-k8s-event-monitor", tc.ReleaseName)
+	portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetKubeConfig(), tc.Namespace, serviceName, defaultServicePort)
+	if err != nil {
+		return fmt.Errorf("failed to create new port-forward: %w", err)
+	}
+
+	if err := portForwarder.WaitForReady(30 * time.Second); err != nil {
+		return fmt.Errorf("service not reachable via new port-forward: %w", err)
+	}
+
+	tc.PortForward = portForwarder
+	tc.APIClient = NewAPIClient(tc.t, portForwarder.GetURL())
+
+	tc.t.Logf("✓ Port-forward reconnected to new pod")
+	return nil
+}
+
 // SetupE2ETest provisions an isolated Kind cluster, deploys the app via Helm, and
 // returns a fully configured test context for scenarios to build upon.
 func SetupE2ETest(t *testing.T) *TestContext {
