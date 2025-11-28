@@ -16,7 +16,6 @@
 
 # Dependency directories
 vendor/
-go.sum
 
 # Build artifacts
 bin/
