@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // Block represents a fixed-size unit of compressed event data with associated metadata

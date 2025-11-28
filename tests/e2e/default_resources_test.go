@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/tests/e2e/helpers"
+	"github.com/moolen/spectre/tests/e2e/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,13 +30,14 @@ func TestScenarioDefaultResources(t *testing.T) {
 	testNamespace2 := "test-alternate"
 
 	for _, ns := range []string{testNamespace1, testNamespace2} {
+		ns := ns // capture loop variable for closure
 		err := k8sClient.CreateNamespace(ctx, ns)
 		require.NoError(t, err, "failed to create namespace %s", ns)
-		defer func(namespace string) {
-			if err := k8sClient.DeleteNamespace(context.Background(), namespace); err != nil {
-				t.Logf("Warning: failed to delete namespace %s: %v", namespace, err)
+		t.Cleanup(func() {
+			if err := k8sClient.DeleteNamespace(context.Background(), ns); err != nil {
+				t.Logf("Warning: failed to delete namespace %s: %v", ns, err)
 			}
-		}(ns)
+		})
 	}
 
 	deployment, err := helpers.CreateTestDeployment(ctx, t, k8sClient, testNamespace1)

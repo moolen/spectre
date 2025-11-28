@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 // TestNewCompressor tests compressor creation

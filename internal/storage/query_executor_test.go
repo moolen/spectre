@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 func TestQueryExecutorExecute_EmptyStorage(t *testing.T) {

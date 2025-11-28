@@ -54,4 +54,3 @@ func ParseOptionalTimestamp(timestampStr string, defaultVal int64) (int64, error
 
 	return ParseTimestamp(timestampStr, "timestamp")
 }
-

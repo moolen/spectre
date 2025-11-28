@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/tests/e2e/helpers"
+	"github.com/moolen/spectre/tests/e2e/helpers"
 	"github.com/playwright-community/playwright-go"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +16,6 @@ func TestUITimelinePageNavigation(t *testing.T) {
 	}
 	helpers.EnsurePlaywrightInstalled(t)
 	testCtx := helpers.SetupE2ETest(t)
-	defer testCtx.Cleanup()
 	uiURL := testCtx.PortForward.GetURL()
 
 	bt, err := helpers.NewBrowserTest(t)
@@ -59,7 +58,6 @@ func TestUITimelineDataLoading(t *testing.T) {
 	}
 	helpers.EnsurePlaywrightInstalled(t)
 	testCtx := helpers.SetupE2ETest(t)
-	defer testCtx.Cleanup()
 
 	// Create a test deployment to have some data
 	deployment, err := helpers.CreateTestDeployment(t.Context(), t, testCtx.K8sClient, testCtx.Namespace)

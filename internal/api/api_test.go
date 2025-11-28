@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // mockQueryExecutor is a mock implementation of QueryExecutor for testing
@@ -420,8 +420,8 @@ func TestMetadataHandler_Handle(t *testing.T) {
 		validate    func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
-			name:   "valid metadata request",
-			method: http.MethodGet,
+			name:        "valid metadata request",
+			method:      http.MethodGet,
 			queryParams: url.Values{},
 			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
 				return &models.QueryResult{
@@ -473,8 +473,8 @@ func TestMetadataHandler_Handle(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
-			name:   "empty metadata",
-			method: http.MethodGet,
+			name:        "empty metadata",
+			method:      http.MethodGet,
 			queryParams: url.Values{},
 			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
 				return &models.QueryResult{
@@ -519,8 +519,8 @@ func TestMetadataHandler_Handle(t *testing.T) {
 			wantErrCode: "INVALID_REQUEST",
 		},
 		{
-			name:   "executor error",
-			method: http.MethodGet,
+			name:        "executor error",
+			method:      http.MethodGet,
 			queryParams: url.Values{},
 			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
 				return nil, &ValidationError{message: "executor failed"}
@@ -529,8 +529,8 @@ func TestMetadataHandler_Handle(t *testing.T) {
 			wantErrCode: "INTERNAL_ERROR",
 		},
 		{
-			name:   "sorted metadata fields",
-			method: http.MethodGet,
+			name:        "sorted metadata fields",
+			method:      http.MethodGet,
 			queryParams: url.Values{},
 			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
 				return &models.QueryResult{
@@ -777,11 +777,11 @@ func TestParseTimestamp(t *testing.T) {
 
 func TestParseOptionalTimestamp(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
+		name       string
+		input      string
 		defaultVal int64
-		want      int64
-		wantError bool
+		want       int64
+		wantError  bool
 	}{
 		{"empty string returns default", "", 100, 100, false},
 		{"valid timestamp", "2000", 100, 2000, false},
@@ -921,9 +921,9 @@ func TestCORS_Middleware(t *testing.T) {
 	server := New(8080, mockExecutor, mockChecker)
 
 	tests := []struct {
-		name          string
-		method        string
-		checkHeaders  func(*testing.T, *httptest.ResponseRecorder)
+		name         string
+		method       string
+		checkHeaders func(*testing.T, *httptest.ResponseRecorder)
 	}{
 		{
 			"CORS headers present",

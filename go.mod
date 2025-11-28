@@ -1,4 +1,4 @@
-module github.com/moritz/rpk
+module github.com/moolen/spectre
 
 go 1.24.1
 

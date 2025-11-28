@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/tests/e2e/helpers"
+	"github.com/moolen/spectre/tests/e2e/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +41,9 @@ func TestScenarioPodRestart(t *testing.T) {
 	require.NoError(t, err, "failed to list pods")
 	require.Greater(t, len(podList.Items), 0, "should have at least one pod")
 	podName := podList.Items[0].Name
-	testCtx.K8sClient.DeletePod(ctx, testNamespace, podName)
+	if err := testCtx.K8sClient.DeletePod(ctx, "monitoring", podName); err != nil {
+		t.Logf("Warning: failed to delete pod %s: %v", podName, err)
+	}
 
 	err = helpers.WaitForAppReady(ctx, testCtx.K8sClient, "monitoring", testCtx.ReleaseName)
 	require.NoError(t, err, "failed to wait for app to be ready")

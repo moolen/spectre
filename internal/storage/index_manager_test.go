@@ -241,4 +241,3 @@ func TestIndexManagerMultipleEntries_SameSegmentID(t *testing.T) {
 		t.Errorf("expected offset 100 (from second entry), got %d", offset)
 	}
 }
-

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 func TestStorageGetInMemoryEvents_Empty(t *testing.T) {

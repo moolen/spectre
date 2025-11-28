@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
@@ -174,8 +175,13 @@ func (mh *ManifestHelper) ParseYAML(manifest string) ([]map[string]interface{}, 
 			continue
 		}
 
-		// TODO: Parse each YAML document into a structured format
-		// For now, this is a placeholder for the real implementation
+		var resource map[string]interface{}
+		if err := yaml.Unmarshal(doc, &resource); err != nil {
+			return nil, fmt.Errorf("failed to parse YAML document: %w", err)
+		}
+		if len(resource) > 0 {
+			resources = append(resources, resource)
+		}
 	}
 
 	return resources, nil

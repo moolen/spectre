@@ -3,8 +3,8 @@ package storage
 import (
 	"testing"
 
-	"github.com/moritz/rpk/internal/models"
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 // TestNewIndexManager tests index manager creation
@@ -68,11 +68,11 @@ func TestFindSegmentsInTimeRange(t *testing.T) {
 		expectedCount int
 	}{
 		{"full range", 0, 6000, 5},
-		{"partial range", 2000, 4000, 4},    // entries 1, 2, 3, 4 (includes 1 < 2000, and 2, 3, 4 in range)
+		{"partial range", 2000, 4000, 4}, // entries 1, 2, 3, 4 (includes 1 < 2000, and 2, 3, 4 in range)
 		{"single segment", 1000, 1000, 1},
 		{"before all", 0, 999, 0},
-		{"after all", 6000, 7000, 5},        // includes all (conservative - all < 6000)
-		{"narrow range", 2500, 3500, 3},     // entries 1, 2, 3 (1 < 2500, 2 < 2500, 3 in range)
+		{"after all", 6000, 7000, 5},    // includes all (conservative - all < 6000)
+		{"narrow range", 2500, 3500, 3}, // entries 1, 2, 3 (1 < 2500, 2 < 2500, 3 in range)
 	}
 
 	for _, tc := range testCases {
@@ -267,10 +267,10 @@ func TestSparseIndexFindSegments(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name          string
-		startTime     int64
-		endTime       int64
-		minSegments   int
+		name        string
+		startTime   int64
+		endTime     int64
+		minSegments int
 	}{
 		{"full range", 0, 5000, 1},
 		{"partial range", 2000, 3500, 1},

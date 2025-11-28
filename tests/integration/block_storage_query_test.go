@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 // TestQueryBlockFiltering creates a storage file with multiple kinds and namespaces,
@@ -49,7 +49,7 @@ func TestQueryBlockFiltering(t *testing.T) {
 
 	// 50 Service events, only in kube-system/kube-public
 	for i := 0; i < 50; i++ {
-		namespace := namespaces[1 + (i%2)] // kube-system or kube-public
+		namespace := namespaces[1+(i%2)] // kube-system or kube-public
 		event := createTestEventWithKindNamespaceQuery(eventCount, hourTimestamp+int64(eventCount), "Service", namespace)
 		if err := bsf.WriteEvent(event); err != nil {
 			t.Fatalf("Failed to write event: %v", err)
@@ -311,4 +311,3 @@ func getGroupForKindQuery(kind string) string {
 		return ""
 	}
 }
-

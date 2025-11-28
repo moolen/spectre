@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // QueryExecutor executes queries against stored events

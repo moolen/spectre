@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/tests/e2e/helpers"
+	"github.com/moolen/spectre/tests/e2e/helpers"
 	"github.com/playwright-community/playwright-go"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +16,6 @@ func TestUIDetailPanelInteraction(t *testing.T) {
 	}
 	helpers.EnsurePlaywrightInstalled(t)
 	testCtx := helpers.SetupE2ETest(t)
-	defer testCtx.Cleanup()
 
 	ctx := t.Context()
 

@@ -6,22 +6,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/moritz/rpk/internal/logging"
+	"github.com/moolen/spectre/internal/logging"
 )
 
 // Manager orchestrates the lifecycle of multiple components with dependency awareness.
 // It ensures components are started in the correct dependency order and stopped
 // in reverse dependency order, with timeout protection to prevent indefinite hangs.
 type Manager struct {
-	components         []Component
-	dependencies       map[Component][]Component // component -> its dependencies
-	reverseDepMap      map[Component][]Component // component -> what depends on it
-	running            map[Component]bool        // tracks which components are currently running
-	shutdownTimeout    time.Duration
-	mu                 sync.RWMutex
-	logger             *logging.Logger
-	registrationMutex  sync.Mutex // ensures register is not called during start/stop
-	startedComponents  []Component // track the order in which components started (for cleanup)
+	components        []Component
+	dependencies      map[Component][]Component // component -> its dependencies
+	reverseDepMap     map[Component][]Component // component -> what depends on it
+	running           map[Component]bool        // tracks which components are currently running
+	shutdownTimeout   time.Duration
+	mu                sync.RWMutex
+	logger            *logging.Logger
+	registrationMutex sync.Mutex  // ensures register is not called during start/stop
+	startedComponents []Component // track the order in which components started (for cleanup)
 }
 
 // NewManager creates a new lifecycle manager with default 30-second shutdown timeout.

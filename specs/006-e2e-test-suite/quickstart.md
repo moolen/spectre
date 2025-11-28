@@ -54,7 +54,7 @@ Expected output:
 === RUN   TestScenarioDynamicConfig
 ...
 --- PASS: all tests (4m32s)
-ok      github.com/moritz/rpk/tests/e2e
+ok      github.com/moolen/spectre/tests/e2e
 ```
 
 ### 3. That's It!
@@ -232,7 +232,7 @@ docker system prune  # Free up space if needed
 --- PASS: TestScenarioDefaultResources (120.50s)
 
 PASS
-ok    github.com/moritz/rpk/tests/e2e/scenarios  120.50s
+ok    github.com/moolen/spectre/tests/e2e/scenarios  120.50s
 ```
 
 ### Test Failure Output

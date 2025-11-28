@@ -41,7 +41,7 @@ func EventuallyResourceCreated(t *testing.T, client *APIClient, namespace, kind,
 		defer cancel()
 
 		now := time.Now().Unix()
-		startTime := now - 90 // Last 30 seconds
+		startTime := now - 90 // Last 90 seconds
 		endTime := now + 10   // Slightly into future for clock skew
 
 		resp, err := client.Search(ctx, startTime, endTime, namespace, kind)

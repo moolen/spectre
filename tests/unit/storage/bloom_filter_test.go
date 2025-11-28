@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 func TestBloomFilterAdd(t *testing.T) {

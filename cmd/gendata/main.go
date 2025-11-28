@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/moritz/rpk/internal/models"
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 const (

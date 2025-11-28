@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/moritz/rpk/internal/logging"
+	"github.com/moolen/spectre/internal/logging"
 )
 
 // ReadinessChecker is an interface for checking component readiness

@@ -1,8 +1,8 @@
 package storage
 
 import (
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // FilterEngine handles filtering of events based on query filters

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/moritz/rpk/internal/config"
-	"github.com/moritz/rpk/internal/logging"
+	"github.com/moolen/spectre/internal/config"
+	"github.com/moolen/spectre/internal/logging"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"

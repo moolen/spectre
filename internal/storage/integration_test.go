@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // TestIntegration_WriteAndQuery tests the complete flow of writing events and querying them

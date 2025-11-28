@@ -273,6 +273,6 @@ kubectl delete namespace monitoring
 ## Support
 
 For issues and questions, refer to:
-- Main repository: https://github.com/moritz/rpk
+- Main repository: https://github.com/moolen/spectre
 - Feature specification: `specs/001-k8s-event-monitor/spec.md`
 - Quickstart guide: `specs/001-k8s-event-monitor/quickstart.md`

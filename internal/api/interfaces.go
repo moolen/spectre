@@ -1,6 +1,6 @@
 package api
 
-import "github.com/moritz/rpk/internal/models"
+import "github.com/moolen/spectre/internal/models"
 
 // QueryExecutor defines the interface for executing queries against stored events
 type QueryExecutor interface {

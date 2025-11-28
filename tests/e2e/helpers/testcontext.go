@@ -136,21 +136,19 @@ func SetupE2ETest(t *testing.T) *TestContext {
 	return ctx
 }
 
-func UpdateHelmRelease(tc *TestContext, overrides map[string]interface{}) {
+func UpdateHelmRelease(tc *TestContext, overrides map[string]interface{}) error {
 	values, _, err := loadHelmValues()
 	if err != nil {
-		tc.Cleanup()
-		tc.t.Fatalf("failed to load Helm values: %v", err)
+		return fmt.Errorf("failed to load Helm values: %w", err)
 	}
 	values = mergeMaps(values, overrides)
 	if err := ensureHelmRelease(tc.t, tc.Cluster.GetKubeConfig(), tc.Namespace, tc.ReleaseName, values); err != nil {
-		tc.Cleanup()
-		tc.t.Fatalf("failed to deploy: %v", err)
+		return fmt.Errorf("failed to deploy: %w", err)
 	}
 	if err := WaitForAppReady(tc.t.Context(), tc.K8sClient, tc.Namespace, tc.ReleaseName); err != nil {
-		tc.Cleanup()
-		tc.t.Fatalf("deployment not ready: %v", err)
+		return fmt.Errorf("deployment not ready: %w", err)
 	}
+	return nil
 }
 
 func mergeMaps(maps ...map[string]interface{}) map[string]interface{} {

@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 func TestReadFileHeader(t *testing.T) {
@@ -126,8 +126,8 @@ func TestBlockReaderRoundtrip(t *testing.T) {
 		BlockMetadata:   []*storage.BlockMetadata{},
 		InvertedIndexes: &storage.InvertedIndex{},
 		Statistics: &storage.IndexStatistics{
-			TotalBlocks:     0,
-			TotalEvents:     0,
+			TotalBlocks:      0,
+			TotalEvents:      0,
 			CompressionRatio: 1.0,
 		},
 	}
@@ -189,4 +189,3 @@ func TestBlockReaderRoundtrip(t *testing.T) {
 		t.Errorf("Expected format version 1.0, got %s", indexSection2.FormatVersion)
 	}
 }
-

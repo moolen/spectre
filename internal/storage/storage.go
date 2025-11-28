@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // Storage manages persistent event storage

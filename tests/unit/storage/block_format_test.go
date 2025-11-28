@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 func TestFileHeaderSerialization(t *testing.T) {
@@ -117,14 +117,14 @@ func TestFileFooterMagicValidation(t *testing.T) {
 
 func TestBlockMetadataCreation(t *testing.T) {
 	metadata := &storage.BlockMetadata{
-		ID:             0,
-		TimestampMin:   time.Now().UnixNano(),
-		TimestampMax:   time.Now().Add(time.Hour).UnixNano(),
-		EventCount:     100,
-		Checksum:       "abc123",
-		KindSet:        []string{"Pod", "Deployment"},
-		NamespaceSet:   []string{"default", "kube-system"},
-		GroupSet:       []string{"apps", "core"},
+		ID:                 0,
+		TimestampMin:       time.Now().UnixNano(),
+		TimestampMax:       time.Now().Add(time.Hour).UnixNano(),
+		EventCount:         100,
+		Checksum:           "abc123",
+		KindSet:            []string{"Pod", "Deployment"},
+		NamespaceSet:       []string{"default", "kube-system"},
+		GroupSet:           []string{"apps", "core"},
 		CompressedLength:   60000,
 		UncompressedLength: 256000,
 	}
@@ -431,14 +431,14 @@ func TestIndexSectionSerialization(t *testing.T) {
 		FormatVersion: "1.0",
 		BlockMetadata: []*storage.BlockMetadata{
 			{
-				ID:               0,
-				TimestampMin:     1000,
-				TimestampMax:     2000,
-				EventCount:       10,
-				CompressedLength: 5000,
+				ID:                 0,
+				TimestampMin:       1000,
+				TimestampMax:       2000,
+				EventCount:         10,
+				CompressedLength:   5000,
 				UncompressedLength: 10000,
-				KindSet:          []string{"Pod"},
-				NamespaceSet:     []string{"default"},
+				KindSet:            []string{"Pod"},
+				NamespaceSet:       []string{"default"},
 			},
 		},
 		InvertedIndexes: &storage.InvertedIndex{

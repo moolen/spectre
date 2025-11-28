@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 // TimelineHandler handles /v1/timeline requests

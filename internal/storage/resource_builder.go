@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 	corev1 "k8s.io/api/core/v1"
 )
 

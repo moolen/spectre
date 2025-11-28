@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // DemoQueryExecutor implements the QueryExecutor interface for demo mode

@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/moritz/rpk/internal/api"
-	"github.com/moritz/rpk/internal/config"
-	"github.com/moritz/rpk/internal/demo"
-	"github.com/moritz/rpk/internal/lifecycle"
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/storage"
-	"github.com/moritz/rpk/internal/watcher"
+	"github.com/moolen/spectre/internal/api"
+	"github.com/moolen/spectre/internal/config"
+	"github.com/moolen/spectre/internal/demo"
+	"github.com/moolen/spectre/internal/lifecycle"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/storage"
+	"github.com/moolen/spectre/internal/watcher"
 )
 
 // Version is the application version

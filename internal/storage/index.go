@@ -3,8 +3,8 @@ package storage
 import (
 	"fmt"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // IndexManager manages sparse timestamp indexes for segments

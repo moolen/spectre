@@ -9,7 +9,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // BlockReader handles reading and decompressing blocks from storage files

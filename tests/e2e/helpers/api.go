@@ -115,6 +115,7 @@ func (a *APIClient) Search(ctx context.Context, startTime, endTime int64, namesp
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	var result SearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -136,6 +137,7 @@ func (a *APIClient) GetMetadata(ctx context.Context, startTime, endTime *int64) 
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	var result MetadataResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -153,6 +155,7 @@ func (a *APIClient) GetResource(ctx context.Context, resourceID string) (*Resour
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	var result Resource
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -174,6 +177,7 @@ func (a *APIClient) GetSegments(ctx context.Context, resourceID string, startTim
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	var result SegmentsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -206,6 +210,7 @@ func (a *APIClient) GetEvents(ctx context.Context, resourceID string, startTime,
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	var result EventsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

@@ -18,7 +18,7 @@ type TestCluster struct {
 	Name       string
 	KubeConfig string
 	Context    string
-	t           *testing.T
+	t          *testing.T
 }
 
 // CreateKindCluster creates a new Kind cluster with a unique name.
@@ -62,7 +62,7 @@ func CreateKindCluster(t *testing.T, clusterName string) (*TestCluster, error) {
 		Name:       clusterName,
 		KubeConfig: kubeConfigPath,
 		Context:    fmt.Sprintf("kind-%s", clusterName),
-		t:           t,
+		t:          t,
 	}, nil
 }
 
@@ -70,7 +70,7 @@ func CreateKindCluster(t *testing.T, clusterName string) (*TestCluster, error) {
 func (tc *TestCluster) Delete() error {
 	tc.t.Logf("Deleting Kind cluster: %s", tc.Name)
 
-	if err := tc.Provider.Delete(tc.Name, kubeConfigPath(tc.KubeConfig)); err != nil {
+	if err := tc.Provider.Delete(tc.Name, tc.KubeConfig); err != nil {
 		// Log but don't fail if deletion is already in progress
 		if !strings.Contains(err.Error(), "does not exist") {
 			return fmt.Errorf("failed to delete cluster: %w", err)
@@ -94,13 +94,4 @@ func (tc *TestCluster) GetContext() string {
 // GetKubeConfig returns the path to the kubeconfig file.
 func (tc *TestCluster) GetKubeConfig() string {
 	return tc.KubeConfig
-}
-
-// kubeConfigPath returns the kubeconfig path for the given Kind cluster.
-func kubeConfigPath(kubeconfigPath string) string {
-	// Kind provider expects empty string for default kubeconfig location
-	if kubeconfigPath == "" {
-		return ""
-	}
-	return kubeconfigPath
 }

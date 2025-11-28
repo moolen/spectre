@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 func TestNewEventBuffer(t *testing.T) {
@@ -280,5 +280,3 @@ func TestMapToSliceEmpty(t *testing.T) {
 		t.Error("expected nil for empty map")
 	}
 }
-
-

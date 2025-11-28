@@ -137,13 +137,15 @@ func (pf *PortForwarder) run(kubeConfigPath string) error {
 func (pf *PortForwarder) WaitForReady(timeout time.Duration) error {
 	pf.t.Logf("Waiting for service to be ready at %s", pf.GetURL())
 
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-time.After(timeout):
+		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for service at %s", pf.GetURL())
 		case <-ticker.C:
 			resp, err := http.Get(pf.GetURL() + "/health")
@@ -153,10 +155,6 @@ func (pf *PortForwarder) WaitForReady(timeout time.Duration) error {
 					pf.t.Logf("✓ Service is ready")
 					return nil
 				}
-			}
-
-			if time.Now().After(deadline) {
-				return fmt.Errorf("service not responding within timeout")
 			}
 		}
 	}

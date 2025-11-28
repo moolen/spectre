@@ -14,12 +14,12 @@ import (
 
 // DeploymentBuilder helps construct Kubernetes Deployment objects.
 type DeploymentBuilder struct {
-	name       string
-	namespace  string
-	image      string
-	replicas   int32
-	labels     map[string]string
-	t          *testing.T
+	name      string
+	namespace string
+	image     string
+	replicas  int32
+	labels    map[string]string
+	t         *testing.T
 }
 
 // NewDeploymentBuilder creates a new deployment builder.
@@ -102,12 +102,12 @@ func (b *DeploymentBuilder) Build() *appsv1.Deployment {
 
 // StatefulSetBuilder helps construct Kubernetes StatefulSet objects.
 type StatefulSetBuilder struct {
-	name       string
-	namespace  string
-	image      string
-	replicas   int32
-	labels     map[string]string
-	t          *testing.T
+	name      string
+	namespace string
+	image     string
+	replicas  int32
+	labels    map[string]string
+	t         *testing.T
 }
 
 // NewStatefulSetBuilder creates a new statefulset builder.

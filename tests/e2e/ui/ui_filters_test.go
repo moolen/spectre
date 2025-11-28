@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/tests/e2e/helpers"
+	"github.com/moolen/spectre/tests/e2e/helpers"
 	"github.com/playwright-community/playwright-go"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,6 @@ func TestUIFilterByNamespace(t *testing.T) {
 
 	helpers.EnsurePlaywrightInstalled(t)
 	testCtx := helpers.SetupE2ETest(t)
-	defer testCtx.Cleanup()
 
 	// Create deployments in different namespaces
 	ctx := t.Context()
@@ -153,7 +152,6 @@ func TestUIFilterByKind(t *testing.T) {
 
 	helpers.EnsurePlaywrightInstalled(t)
 	testCtx := helpers.SetupE2ETest(t)
-	defer testCtx.Cleanup()
 
 	ctx := t.Context()
 
@@ -238,7 +236,6 @@ func TestUISearchFilter(t *testing.T) {
 
 	helpers.EnsurePlaywrightInstalled(t)
 	testCtx := helpers.SetupE2ETest(t)
-	defer testCtx.Cleanup()
 
 	ctx := t.Context()
 

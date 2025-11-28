@@ -5,8 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // MetadataHandler handles /v1/metadata requests
