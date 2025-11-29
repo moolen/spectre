@@ -1,0 +1,817 @@
+{
+  "version": 1,
+  "timeRange": {
+    "earliestOffsetSec": 0,
+    "latestOffsetSec": 10805
+  },
+  "resources": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440007",
+      "group": "",
+      "version": "v1",
+      "kind": "ConfigMap",
+      "namespace": "default",
+      "name": "app-config",
+      "statusSegments": [
+        {
+          "startOffsetSec": 0,
+          "endOffsetSec": 7200,
+          "status": "Ready",
+          "message": "Resource created",
+          "resourceData": {
+            "apiVersion": "v1",
+            "data": {
+              "app.conf": "debug=false\nlogLevel=info"
+            },
+            "kind": "ConfigMap",
+            "metadata": {
+              "name": "app-config",
+              "namespace": "default",
+              "uid": "550e8400-e29b-41d4-a716-446655440007"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 7200,
+          "endOffsetSec": 10800,
+          "status": "Ready",
+          "message": "Resource updated",
+          "resourceData": {
+            "data": {
+              "app.conf": "debug=false\nlogLevel=debug"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "group": "apps",
+      "version": "v1",
+      "kind": "Deployment",
+      "namespace": "default",
+      "name": "api-service",
+      "statusSegments": [
+        {
+          "startOffsetSec": 0,
+          "endOffsetSec": 2,
+          "status": "Ready",
+          "message": "Resource created",
+          "resourceData": {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {
+              "name": "api-service",
+              "namespace": "default",
+              "uid": "550e8400-e29b-41d4-a716-446655440001"
+            },
+            "spec": {
+              "replicas": 3,
+              "selector": {
+                "matchLabels": {
+                  "app": "api-service"
+                }
+              },
+              "template": {
+                "spec": {
+                  "containers": [
+                    {
+                      "image": "myregistry.azurecr.io/api:typo",
+                      "name": "api"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "startOffsetSec": 2,
+          "endOffsetSec": 305,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "conditions": [
+                {
+                  "message": "ReplicaSet \"api-service-5d4f7b\" has timed out progressing.",
+                  "reason": "ProgressDeadlineExceeded",
+                  "status": "False",
+                  "type": "Progressing"
+                }
+              ],
+              "unavailableReplicas": 3
+            }
+          }
+        },
+        {
+          "startOffsetSec": 305,
+          "endOffsetSec": 335,
+          "status": "Ready",
+          "message": "Resource updated",
+          "resourceData": {
+            "spec": {
+              "template": {
+                "spec": {
+                  "containers": [
+                    {
+                      "image": "myregistry.azurecr.io/api:v1.2.3",
+                      "name": "api"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "startOffsetSec": 335,
+          "endOffsetSec": 3935,
+          "status": "Ready",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "availableReplicas": 3,
+              "conditions": [
+                {
+                  "message": "Deployment has minimum availability.",
+                  "reason": "MinimumReplicasAvailable",
+                  "status": "True",
+                  "type": "Available"
+                }
+              ],
+              "readyReplicas": 3,
+              "replicas": 3,
+              "updatedReplicas": 3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440003",
+      "group": "helm.toolkit.fluxcd.io",
+      "version": "v2beta1",
+      "kind": "HelmRelease",
+      "namespace": "monitoring",
+      "name": "prometheus-stack",
+      "statusSegments": [
+        {
+          "startOffsetSec": 0,
+          "endOffsetSec": 5,
+          "status": "Ready",
+          "message": "Resource created",
+          "resourceData": {
+            "apiVersion": "helm.toolkit.fluxcd.io/v2beta1",
+            "kind": "HelmRelease",
+            "metadata": {
+              "name": "prometheus-stack",
+              "namespace": "monitoring",
+              "uid": "550e8400-e29b-41d4-a716-446655440003"
+            },
+            "spec": {
+              "chart": "prometheus-community/kube-prometheus-stack",
+              "values": {
+                "prometheus": {
+                  "retention": "15d"
+                }
+              }
+            }
+          }
+        },
+        {
+          "startOffsetSec": 5,
+          "endOffsetSec": 15,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "apiVersion": "helm.toolkit.fluxcd.io/v2beta1",
+            "kind": "HelmRelease",
+            "metadata": {
+              "name": "prometheus-stack",
+              "namespace": "monitoring",
+              "uid": "550e8400-e29b-41d4-a716-446655440003"
+            },
+            "spec": {
+              "chart": "prometheus-community/kube-prometheus-stack",
+              "values": {
+                "prometheus": {
+                  "retention": "15d"
+                }
+              }
+            },
+            "status": {
+              "conditions": [
+                {
+                  "message": "installing Helm release",
+                  "reason": "Progressing",
+                  "status": "Unknown",
+                  "type": "Ready"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "startOffsetSec": 15,
+          "endOffsetSec": 45,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "apiVersion": "helm.toolkit.fluxcd.io/v2beta1",
+            "kind": "HelmRelease",
+            "metadata": {
+              "name": "prometheus-stack",
+              "namespace": "monitoring",
+              "uid": "550e8400-e29b-41d4-a716-446655440003"
+            },
+            "spec": {
+              "chart": "prometheus-community/kube-prometheus-stack",
+              "values": {
+                "prometheus": {
+                  "retention": "30d"
+                }
+              }
+            },
+            "status": {
+              "conditions": [
+                {
+                  "message": "installing Helm release",
+                  "reason": "Progressing",
+                  "status": "Unknown",
+                  "type": "Ready"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "startOffsetSec": 45,
+          "endOffsetSec": 945,
+          "status": "Error",
+          "message": "Resource updated",
+          "resourceData": {
+            "apiVersion": "helm.toolkit.fluxcd.io/v2beta1",
+            "kind": "HelmRelease",
+            "metadata": {
+              "name": "prometheus-stack",
+              "namespace": "monitoring",
+              "uid": "550e8400-e29b-41d4-a716-446655440003"
+            },
+            "spec": {
+              "chart": "prometheus-community/kube-prometheus-stack",
+              "values": {
+                "prometheus": {
+                  "retention": "30d"
+                }
+              }
+            },
+            "status": {
+              "conditions": [
+                {
+                  "message": "Helm upgrade failed: could not find a ready Kubernetes api-server to connect to",
+                  "reason": "HelmInstallFailed",
+                  "status": "False",
+                  "type": "Ready"
+                }
+              ],
+              "lastAttemptedRevision": "54.0.0"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 945,
+          "endOffsetSec": 4545,
+          "status": "Ready",
+          "message": "Resource updated",
+          "resourceData": {
+            "apiVersion": "helm.toolkit.fluxcd.io/v2beta1",
+            "kind": "HelmRelease",
+            "metadata": {
+              "name": "prometheus-stack",
+              "namespace": "monitoring",
+              "uid": "550e8400-e29b-41d4-a716-446655440003"
+            },
+            "spec": {
+              "chart": "prometheus-community/kube-prometheus-stack",
+              "values": {
+                "prometheus": {
+                  "retention": "30d"
+                }
+              }
+            },
+            "status": {
+              "conditions": [
+                {
+                  "message": "Release reconciliation succeeded",
+                  "reason": "ReconciliationSucceeded",
+                  "status": "True",
+                  "type": "Ready"
+                }
+              ],
+              "lastAppliedRevision": "54.0.0"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440002",
+      "group": "",
+      "version": "v1",
+      "kind": "Node",
+      "namespace": "",
+      "name": "worker-node-2",
+      "statusSegments": [
+        {
+          "startOffsetSec": 0,
+          "endOffsetSec": 3600,
+          "status": "Ready",
+          "message": "Resource created",
+          "resourceData": {
+            "apiVersion": "v1",
+            "kind": "Node",
+            "metadata": {
+              "name": "worker-node-2",
+              "uid": "550e8400-e29b-41d4-a716-446655440002"
+            },
+            "status": {
+              "conditions": [
+                {
+                  "status": "True",
+                  "type": "Ready"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "startOffsetSec": 3600,
+          "endOffsetSec": 10805,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "conditions": [
+                {
+                  "message": "/var/lib/kubelet is at 90% capacity",
+                  "reason": "KubeletHasDiskPressure",
+                  "status": "True",
+                  "type": "DiskPressure"
+                },
+                {
+                  "status": "True",
+                  "type": "Ready"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "startOffsetSec": 10805,
+          "endOffsetSec": 14405,
+          "status": "Ready",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "conditions": [
+                {
+                  "message": "kubelet has no disk pressure",
+                  "reason": "KubeletHasNoDiskPressure",
+                  "status": "False",
+                  "type": "DiskPressure"
+                },
+                {
+                  "status": "True",
+                  "type": "Ready"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440004",
+      "group": "",
+      "version": "v1",
+      "kind": "Pod",
+      "namespace": "default",
+      "name": "worker-queue-processor-abc123",
+      "statusSegments": [
+        {
+          "startOffsetSec": 0,
+          "endOffsetSec": 2,
+          "status": "Ready",
+          "message": "Resource created",
+          "resourceData": {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+              "name": "worker-queue-processor-abc123",
+              "namespace": "default",
+              "uid": "550e8400-e29b-41d4-a716-446655440004"
+            },
+            "spec": {
+              "containers": [
+                {
+                  "image": "myapp:v1",
+                  "name": "worker"
+                }
+              ],
+              "restartPolicy": "Always"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 2,
+          "endOffsetSec": 12,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "state": {
+                    "running": {
+                      "startedAt": "1970-01-01T00:00:02Z"
+                    }
+                  }
+                }
+              ],
+              "phase": "Running"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 12,
+          "endOffsetSec": 14,
+          "status": "Error",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "restartCount": 1,
+                  "state": {
+                    "terminated": {
+                      "exitCode": 1,
+                      "message": "Process died with exit code 1",
+                      "reason": "Error"
+                    }
+                  }
+                }
+              ],
+              "phase": "Failed"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 14,
+          "endOffsetSec": 17,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "restartCount": 1,
+                  "state": {
+                    "waiting": {
+                      "message": "back-off restarting failed container worker",
+                      "reason": "CrashLoopBackOff"
+                    }
+                  }
+                }
+              ],
+              "phase": "Unknown"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 17,
+          "endOffsetSec": 27,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "state": {
+                    "running": {
+                      "startedAt": "1970-01-01T00:00:17Z"
+                    }
+                  }
+                }
+              ],
+              "phase": "Running"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 27,
+          "endOffsetSec": 29,
+          "status": "Error",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "restartCount": 2,
+                  "state": {
+                    "terminated": {
+                      "exitCode": 1,
+                      "message": "Process died with exit code 1",
+                      "reason": "Error"
+                    }
+                  }
+                }
+              ],
+              "phase": "Failed"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 29,
+          "endOffsetSec": 32,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "restartCount": 2,
+                  "state": {
+                    "waiting": {
+                      "message": "back-off restarting failed container worker",
+                      "reason": "CrashLoopBackOff"
+                    }
+                  }
+                }
+              ],
+              "phase": "Unknown"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 32,
+          "endOffsetSec": 42,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "state": {
+                    "running": {
+                      "startedAt": "1970-01-01T00:00:32Z"
+                    }
+                  }
+                }
+              ],
+              "phase": "Running"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 42,
+          "endOffsetSec": 44,
+          "status": "Error",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "restartCount": 3,
+                  "state": {
+                    "terminated": {
+                      "exitCode": 1,
+                      "message": "Process died with exit code 1",
+                      "reason": "Error"
+                    }
+                  }
+                }
+              ],
+              "phase": "Failed"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 44,
+          "endOffsetSec": 3644,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "containerStatuses": [
+                {
+                  "name": "worker",
+                  "restartCount": 3,
+                  "state": {
+                    "waiting": {
+                      "message": "back-off restarting failed container worker",
+                      "reason": "CrashLoopBackOff"
+                    }
+                  }
+                }
+              ],
+              "phase": "Unknown"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440006",
+      "group": "",
+      "version": "v1",
+      "kind": "Service",
+      "namespace": "default",
+      "name": "web-frontend",
+      "statusSegments": [
+        {
+          "startOffsetSec": 0,
+          "endOffsetSec": 5,
+          "status": "Ready",
+          "message": "Resource created",
+          "resourceData": {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {
+              "name": "web-frontend",
+              "namespace": "default",
+              "uid": "550e8400-e29b-41d4-a716-446655440006"
+            },
+            "spec": {
+              "ports": [
+                {
+                  "port": 80,
+                  "targetPort": 8080
+                }
+              ],
+              "selector": {
+                "app": "web-frontend"
+              },
+              "type": "LoadBalancer"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 5,
+          "endOffsetSec": 3605,
+          "status": "Ready",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "loadBalancer": {
+                "ingress": [
+                  {
+                    "hostname": "web-frontend.elb.amazonaws.com"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440005",
+      "group": "apps",
+      "version": "v1",
+      "kind": "StatefulSet",
+      "namespace": "data",
+      "name": "postgres-database",
+      "statusSegments": [
+        {
+          "startOffsetSec": 0,
+          "endOffsetSec": 15,
+          "status": "Ready",
+          "message": "Resource created",
+          "resourceData": {
+            "apiVersion": "apps/v1",
+            "kind": "StatefulSet",
+            "metadata": {
+              "name": "postgres-database",
+              "namespace": "data",
+              "uid": "550e8400-e29b-41d4-a716-446655440005"
+            },
+            "spec": {
+              "replicas": 3,
+              "selector": {
+                "matchLabels": {
+                  "app": "postgres-database"
+                }
+              },
+              "serviceName": "postgres"
+            }
+          }
+        },
+        {
+          "startOffsetSec": 15,
+          "endOffsetSec": 30,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "observedGeneration": 1,
+              "readyReplicas": 0,
+              "replicas": 1
+            }
+          }
+        },
+        {
+          "startOffsetSec": 30,
+          "endOffsetSec": 45,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "observedGeneration": 1,
+              "readyReplicas": 1,
+              "replicas": 2
+            }
+          }
+        },
+        {
+          "startOffsetSec": 45,
+          "endOffsetSec": 75,
+          "status": "Warning",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "observedGeneration": 1,
+              "readyReplicas": 2,
+              "replicas": 3
+            }
+          }
+        },
+        {
+          "startOffsetSec": 75,
+          "endOffsetSec": 3675,
+          "status": "Ready",
+          "message": "Resource updated",
+          "resourceData": {
+            "status": {
+              "conditions": [
+                {
+                  "message": "StatefulSet replicas are ready",
+                  "reason": "AllReplicasReady",
+                  "status": "True",
+                  "type": "Ready"
+                }
+              ],
+              "currentReplicas": 3,
+              "observedGeneration": 1,
+              "readyReplicas": 3,
+              "replicas": 3
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "namespaces": [
+      "",
+      "data",
+      "default",
+      "monitoring"
+    ],
+    "kinds": [
+      "ConfigMap",
+      "Deployment",
+      "Event",
+      "HelmRelease",
+      "Node",
+      "Pod",
+      "Service",
+      "StatefulSet"
+    ],
+    "groups": [
+      "",
+      "apps",
+      "helm.toolkit.fluxcd.io"
+    ],
+    "resourceCounts": {
+      "ConfigMap": 2,
+      "Deployment": 4,
+      "Event": 8,
+      "HelmRelease": 5,
+      "Node": 3,
+      "Pod": 10,
+      "Service": 2,
+      "StatefulSet": 5
+    },
+    "totalEvents": 39
+  },
+  "maxOffsetSeconds": 14405
+}

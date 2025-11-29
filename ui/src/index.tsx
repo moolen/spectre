@@ -10,9 +10,10 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
+const baseName = (import.meta.env.BASE_URL ?? '/') as string;
 root.render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={baseName}>
       <SettingsProvider>
         <App />
       </SettingsProvider>

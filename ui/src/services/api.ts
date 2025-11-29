@@ -18,6 +18,7 @@ import {
   transformK8sEventsWithErrorHandling,
   transformStatusSegmentsWithErrorHandling,
 } from './dataTransformer';
+import { buildDemoMetadata, buildDemoTimelineResponse, TimelineFilters } from '../demo/demoDataService';
 
 export interface ApiMetadata {
   namespaces: string[];
@@ -122,20 +123,11 @@ class ApiClient {
   async getTimeline(
     startTime: string | number,
     endTime: string | number,
-    filters?: {
-      namespace?: string;
-      kind?: string;
-      group?: string;
-      version?: string;
-    }
+    filters?: TimelineFilters
   ): Promise<K8sResource[]> {
     // Convert milliseconds to Unix seconds if needed
-    const startSeconds = typeof startTime === 'number'
-      ? Math.floor(startTime / 1000)
-      : startTime;
-    const endSeconds = typeof endTime === 'number'
-      ? Math.floor(endTime / 1000)
-      : endTime;
+    const startSeconds = normalizeToSeconds(startTime);
+    const endSeconds = normalizeToSeconds(endTime);
 
     const params = new URLSearchParams();
     params.append('start', startSeconds.toString());
@@ -147,8 +139,14 @@ class ApiClient {
     if (filters?.version) params.append('version', filters.version);
 
     const endpoint = `/v1/timeline?${params.toString()}`;
-    const response = await this.request<SearchResponse>(endpoint);
-    return transformSearchResponse(response);
+    try {
+      const response = await this.request<SearchResponse>(endpoint);
+      return transformSearchResponse(response);
+    } catch (error) {
+      console.warn('Falling back to embedded demo timeline data:', error);
+      const fallbackResponse = buildDemoTimelineResponse(startSeconds, filters);
+      return transformSearchResponse(fallbackResponse);
+    }
   }
 
   /**
@@ -160,25 +158,31 @@ class ApiClient {
   ): Promise<MetadataResponse> {
     const params = new URLSearchParams();
 
-    if (startTime !== undefined) {
-      const startSeconds = typeof startTime === 'number'
-        ? Math.floor(startTime / 1000)
-        : startTime;
-      params.append('start', startSeconds.toString());
+    const normalizedStart = startTime !== undefined ? normalizeToSeconds(startTime) : undefined;
+    const normalizedEnd = endTime !== undefined ? normalizeToSeconds(endTime) : undefined;
+
+    if (normalizedStart !== undefined) {
+      params.append('start', normalizedStart.toString());
     }
 
-    if (endTime !== undefined) {
-      const endSeconds = typeof endTime === 'number'
-        ? Math.floor(endTime / 1000)
-        : endTime;
-      params.append('end', endSeconds.toString());
+    if (normalizedEnd !== undefined) {
+      params.append('end', normalizedEnd.toString());
     }
 
     const endpoint = params.toString()
       ? `/v1/metadata?${params.toString()}`
       : '/v1/metadata';
 
-    return this.request<MetadataResponse>(endpoint);
+    try {
+      return await this.request<MetadataResponse>(endpoint);
+    } catch (error) {
+      console.warn('Falling back to embedded demo metadata:', error);
+      const fallbackStart =
+        normalizedStart ?? Math.floor(Date.now() / 1000) - 2 * 60 * 60;
+      const fallbackEnd =
+        normalizedEnd ?? fallbackStart + 2 * 60 * 60;
+      return buildDemoMetadata(fallbackStart, fallbackEnd);
+    }
   }
 }
 
@@ -193,3 +197,21 @@ export const apiClient = new ApiClient({
 
 // Export for testing/mocking
 export { ApiClient };
+
+function normalizeToSeconds(value: string | number): number {
+  if (typeof value === 'number') {
+    return Math.floor(value / 1000);
+  }
+
+  const numeric = Number(value);
+  if (!Number.isNaN(numeric)) {
+    return Math.floor(numeric);
+  }
+
+  const parsedDate = new Date(value);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return Math.floor(parsedDate.getTime() / 1000);
+  }
+
+  throw new Error(`Unable to parse timestamp value: ${value}`);
+}
