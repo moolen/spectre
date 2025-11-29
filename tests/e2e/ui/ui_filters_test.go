@@ -44,9 +44,14 @@ func TestUIFilterByNamespace(t *testing.T) {
 	dep2, err := helpers.CreateTestDeployment(ctx, t, testCtx.K8sClient, namespace2)
 	require.NoError(t, err, "failed to create deployment in namespace 2")
 
-	// Wait for both resources to be available
+	// Wait for both resources to be available in API
 	helpers.EventuallyResourceCreated(t, testCtx.APIClient, namespace1, "Deployment", dep1.Name, helpers.DefaultEventuallyOption)
 	helpers.EventuallyResourceCreated(t, testCtx.APIClient, namespace2, "Deployment", dep2.Name, helpers.DefaultEventuallyOption)
+
+	// Wait additional time for storage to fully index the resources
+	// The API may return resources from memory before they're fully written to storage
+	t.Log("Waiting for storage to index new resources...")
+	time.Sleep(5 * time.Second)
 
 	uiURL := testCtx.PortForward.GetURL()
 	t.Logf("Testing namespace filter at %s", uiURL)
@@ -68,19 +73,41 @@ func TestUIFilterByNamespace(t *testing.T) {
 		State: playwright.LoadStateNetworkidle,
 	}))
 
-	// Helper to check visibility
-	assertVisible := func(text string) {
-		// Use Locator with text: selector for SVG compatibility
+	// Helper to poll for text to appear (with retry for async data loading)
+	waitForTextExists := func(text string, timeout time.Duration) error {
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
+			if err == nil && count > 0 {
+				return nil
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		return fmt.Errorf("text %q not found after %v", text, timeout)
+	}
+
+	// Helper to check if text exists (immediate check)
+	assertTextExists := func(text string) {
 		count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
 		require.NoError(t, err)
-		require.Greater(t, count, 0, "expected %s to be visible", text)
+		require.Greater(t, count, 0, "expected %s to exist in page", text)
 	}
-	assertHidden := func(text string) {
-		// Should not be present if filtered out
+	assertTextNotExists := func(text string) {
 		count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
 		require.NoError(t, err)
-		require.Equal(t, 0, count, "expected %s to be hidden (count 0)", text)
+		require.Equal(t, 0, count, "expected %s to not exist in page", text)
 	}
+
+	// Wait for the specific test resources to appear in timeline (may need polling as data loads async)
+	t.Log("Waiting for test resources to appear in timeline...")
+	err = waitForTextExists(namespace1, 30*time.Second)
+	require.NoError(t, err, "timed out waiting for %s to appear in timeline", namespace1)
+	err = waitForTextExists(namespace2, 30*time.Second)
+	require.NoError(t, err, "timed out waiting for %s to appear in timeline", namespace2)
+
+	// Verify both namespaces appear initially
+	assertTextExists(namespace1)
+	assertTextExists(namespace2)
 
 	// 1. Open Namespace Dropdown
 	nsDropdown := bt.Page.GetByRole("button", playwright.PageGetByRoleOptions{Name: "All Namespaces"})
@@ -93,10 +120,12 @@ func TestUIFilterByNamespace(t *testing.T) {
 	// Close dropdown by pressing escape
 	require.NoError(t, bt.Page.Keyboard().Press("Escape"))
 
+	// Wait for filter to apply
+	time.Sleep(500 * time.Millisecond)
+
 	t.Logf("Verifying %s is visible and %s is hidden", namespace1, namespace2)
-	// We can check for the namespace text itself which usually appears in the resource row
-	assertVisible(namespace1)
-	assertHidden(namespace2)
+	assertTextExists(namespace1)
+	assertTextNotExists(namespace2)
 
 	// 3. Switch to namespace 2
 	require.NoError(t, nsDropdown.Click())
@@ -111,9 +140,12 @@ func TestUIFilterByNamespace(t *testing.T) {
 
 	require.NoError(t, bt.Page.Keyboard().Press("Escape"))
 
+	// Wait for filter to apply
+	time.Sleep(500 * time.Millisecond)
+
 	t.Logf("Verifying %s is visible and %s is hidden", namespace2, namespace1)
-	assertVisible(namespace2)
-	assertHidden(namespace1)
+	assertTextExists(namespace2)
+	assertTextNotExists(namespace1)
 
 	// 4. Clear filters
 	// Open dropdown
@@ -126,22 +158,17 @@ func TestUIFilterByNamespace(t *testing.T) {
 	require.NoError(t, bt.Page.Keyboard().Press("Escape"))
 
 	// Verify filter is cleared (Label should be "All Namespaces" without count)
-	// Note: The button text might be "All Namespaces" or "All Namespaces (0)"?
-	// The component says: selected.length === 0 ? label : ...
-	// So it should be "All Namespaces".
 	text, err := nsDropdown.InnerText()
 	require.NoError(t, err)
 	require.Equal(t, "All Namespaces", text)
 
 	// Wait for the UI to update after clearing filters
-	require.NoError(t, bt.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-		State: playwright.LoadStateNetworkidle,
-	}))
+	time.Sleep(500 * time.Millisecond)
 
 	// 5. Verify both are visible
 	t.Log("Verifying both namespaces are visible")
-	assertVisible(namespace1)
-	assertVisible(namespace2)
+	assertTextExists(namespace1)
+	assertTextExists(namespace2)
 }
 
 // TestUIFilterByKind tests resource kind filtering functionality
@@ -165,12 +192,14 @@ func TestUIFilterByKind(t *testing.T) {
 	_, err = testCtx.K8sClient.CreateDeployment(ctx, testCtx.Namespace, deployment2)
 	require.NoError(t, err, "failed to create deployment 2")
 
-	// Wait for resources to be created/synced
+	// Wait for resources to be created/synced in API
 	helpers.EventuallyResourceCreated(t, testCtx.APIClient, testCtx.Namespace, "Deployment", deployment1.Name, helpers.DefaultEventuallyOption)
 	helpers.EventuallyResourceCreated(t, testCtx.APIClient, testCtx.Namespace, "Deployment", deployment2.Name, helpers.DefaultEventuallyOption)
 
-	// Also wait for Pods to appear (created by the deployments)
-	time.Sleep(5 * time.Second) // Give pods time to be created and tracked
+	// Wait additional time for storage to fully index the resources
+	// The API may return resources from memory before they're fully written to storage
+	t.Log("Waiting for storage to index new resources...")
+	time.Sleep(5 * time.Second)
 
 	uiURL := testCtx.PortForward.GetURL()
 	t.Logf("Testing kind filter at %s", uiURL)
@@ -191,6 +220,24 @@ func TestUIFilterByKind(t *testing.T) {
 	require.NoError(t, bt.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 		State: playwright.LoadStateNetworkidle,
 	}))
+
+	// Helper to poll for text to appear (with retry for async data loading)
+	waitForTextExists := func(text string, timeout time.Duration) error {
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
+			if err == nil && count > 0 {
+				return nil
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		return fmt.Errorf("text %q not found after %v", text, timeout)
+	}
+
+	// Wait for timeline resources to appear before interacting with filters
+	t.Log("Waiting for resources to appear in the timeline...")
+	err = waitForTextExists(deployment1.Name, 30*time.Second)
+	require.NoError(t, err, "timed out waiting for deployment to appear in UI")
 
 	// 2. Open Kind Dropdown
 	kindDropdown := bt.Page.GetByRole("button", playwright.PageGetByRoleOptions{Name: "All Kinds"})
@@ -253,9 +300,14 @@ func TestUISearchFilter(t *testing.T) {
 	_, err = testCtx.K8sClient.CreateDeployment(ctx, testCtx.Namespace, otherDep)
 	require.NoError(t, err, "failed to create other deployment")
 
-	// Wait for resources
+	// Wait for resources to be available in API
 	helpers.EventuallyResourceCreated(t, testCtx.APIClient, testCtx.Namespace, "Deployment", targetName, helpers.DefaultEventuallyOption)
 	helpers.EventuallyResourceCreated(t, testCtx.APIClient, testCtx.Namespace, "Deployment", otherName, helpers.DefaultEventuallyOption)
+
+	// Wait additional time for storage to fully index the resources
+	// The API may return resources from memory before they're fully written to storage
+	t.Log("Waiting for storage to index new resources...")
+	time.Sleep(5 * time.Second)
 
 	uiURL := testCtx.PortForward.GetURL()
 	t.Logf("Testing search filter at %s", uiURL)
@@ -277,40 +329,64 @@ func TestUISearchFilter(t *testing.T) {
 		State: playwright.LoadStateNetworkidle,
 	}))
 
-	// Helper to check visibility
-	assertVisible := func(text string) {
-		// Use Locator with text: selector for SVG compatibility
-		count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
-		require.NoError(t, err)
-		require.Greater(t, count, 0, "expected %s to be visible", text)
-	}
-	assertHidden := func(text string) {
-		// Should not be present if filtered out
-		count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
-		require.NoError(t, err)
-		require.Equal(t, 0, count, "expected %s to be hidden (count 0)", text)
+	// Helper to poll for text to appear (with retry for async data loading)
+	waitForTextExists := func(text string, timeout time.Duration) error {
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
+			if err == nil && count > 0 {
+				return nil
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		return fmt.Errorf("text %q not found after %v", text, timeout)
 	}
 
-	// Initially both should be visible
+	// Helper to check if text exists (immediate check)
+	assertTextExists := func(text string) {
+		count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
+		require.NoError(t, err)
+		require.Greater(t, count, 0, "expected %s to exist in page", text)
+	}
+	assertTextNotExists := func(text string) {
+		count, err := bt.Page.Locator(fmt.Sprintf("text=%s", text)).Count()
+		require.NoError(t, err)
+		require.Equal(t, 0, count, "expected %s to not exist in page", text)
+	}
+
+	// Wait for the specific test resources to appear in timeline (may need polling as data loads async)
+	t.Log("Waiting for test resources to appear in timeline...")
+	err = waitForTextExists(targetName, 30*time.Second)
+	require.NoError(t, err, "timed out waiting for %s to appear in timeline", targetName)
+	err = waitForTextExists(otherName, 30*time.Second)
+	require.NoError(t, err, "timed out waiting for %s to appear in timeline", otherName)
+
+	// Verify both resources appear in the timeline
 	t.Log("Verifying both resources are initially visible")
-	assertVisible(targetName)
-	assertVisible(otherName)
+	assertTextExists(targetName)
+	assertTextExists(otherName)
 
 	// 2. Find search input and type target name
 	// The search input usually has a placeholder "Search resources by name..."
 	searchInput := bt.Page.GetByPlaceholder("Search resources by name...")
 	require.NoError(t, searchInput.Fill(targetName))
 
+	// Wait for filter to apply
+	time.Sleep(500 * time.Millisecond)
+
 	// 3. Verify target is visible and other is hidden
 	t.Logf("Verifying %s is visible and %s is hidden after search", targetName, otherName)
-	assertVisible(targetName)
-	assertHidden(otherName)
+	assertTextExists(targetName)
+	assertTextNotExists(otherName)
 
 	// 4. Clear search
 	require.NoError(t, searchInput.Fill(""))
 
+	// Wait for filter to clear
+	time.Sleep(500 * time.Millisecond)
+
 	// 5. Verify both are visible again
 	t.Log("Verifying both resources are visible after clearing search")
-	assertVisible(targetName)
-	assertVisible(otherName)
+	assertTextExists(targetName)
+	assertTextExists(otherName)
 }
