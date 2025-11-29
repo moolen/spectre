@@ -123,39 +123,34 @@ make docker-build
 make docker-run
 ```
 
-### Demo Mode
+### Demo Mode (no cluster required)
 
-Want to see Spectre in action without setting up Kubernetes? Use **demo mode** to serve a complete dataset of realistic Kubernetes events:
+Spectre ships with a curated set of Kubernetes events (`internal/demo/`) that can be served without connecting to a live cluster. Demo mode only starts the API/UI stack, so you can explore the product UI immediately.
 
+**Run directly with Go**
 ```bash
-# Run with demo data (no Kubernetes setup needed)
-docker run -p 8080:8080 spectre:latest -- --demo
+# Start demo mode without building binaries
+go run ./cmd/main.go --demo --api-port 8080
 
-# Or with custom port
-docker run -p 9000:9000 spectre:latest -- --demo --api-port 9000
-
-# Then open http://localhost:8080 in your browser
+# Or build once and re-run quickly
+go build -o bin/spectre ./cmd/main.go
+bin/spectre --demo --api-port 9000 --log-level debug
 ```
 
-**Demo mode includes:**
-- Multiple resource types: Deployments, Pods, StatefulSets, Services, ConfigMaps, HelmReleases, Nodes
-- Real-world failure scenarios:
-  - Misconfigured container images (ImagePullBackOff)
-  - Node disk pressure conditions
-  - HelmRelease update failures
-  - Pod crash loops
-- Successful deployment and scaling operations
-- Distributed events across 7 days of simulated history
-- Full filtering and search capabilities
-
-**Local development demo mode:**
+**Run with Docker**
 ```bash
-# Build and run with demo data
-make build
-./main --demo --log-level debug
+# Build the image (only needed once)
+docker build -t spectre-demo .
 
-# Open http://localhost:8080
+# Launch the container in demo mode
+docker run --rm -p 8080:8080 spectre-demo --demo
 ```
+
+Then open `http://localhost:8080` (or the port you passed via `--api-port`) in your browser. You will find:
+- Multiple resource types (Deployments, Pods, StatefulSets, Services, ConfigMaps, Nodes, HelmReleases)
+- Real-world failure scenarios (ImagePullBackOff, disk pressure, Helm rollback, crash loops)
+- Successful deployment/scaling events across seven days of simulated history
+- Full filtering/search support identical to a live cluster
 
 ## Architecture
 
