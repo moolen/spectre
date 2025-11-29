@@ -2,6 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "k8s-event-monitor.fullname" . }}
+  namespace: {{ .Values.namespace }}
   labels:
     {{- include "k8s-event-monitor.labels" . | nindent 4 }}
 data:

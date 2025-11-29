@@ -1,7 +1,23 @@
 /**
  * API Client Service
- * Communicates with the backend API at /internal/api
+ * Communicates with the backend API at /v1
  */
+
+import {
+  SearchResponse,
+  Resource,
+  StatusSegment,
+  MetadataResponse,
+  EventsResponse,
+  SegmentsResponse,
+} from './apiTypes';
+import { K8sResource, K8sEvent, ResourceStatusSegment } from '../types';
+import {
+  transformSearchResponse,
+  transformStatusSegment,
+  transformK8sEventsWithErrorHandling,
+  transformStatusSegmentsWithErrorHandling,
+} from './dataTransformer';
 
 export interface ApiMetadata {
   namespaces: string[];
@@ -35,7 +51,6 @@ export interface ApiEvent {
   timestamp: string;
   verb: 'create' | 'update' | 'patch' | 'delete' | 'get' | 'list';
   message: string;
-  user: string;
   details?: string;
 }
 
@@ -77,8 +92,9 @@ class ApiClient {
       });
 
       if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
         throw new Error(
-          `API Error: ${response.status} ${response.statusText}`
+          `API Error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`
         );
       }
 
@@ -86,7 +102,10 @@ class ApiClient {
     } catch (error) {
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
-          throw new Error(`Request timeout (${this.timeout}ms)`);
+          throw new Error(`Request timeout (${this.timeout}ms) - Backend server may be unavailable`);
+        }
+        if (error.message.includes('Failed to fetch')) {
+          throw new Error('Network error - Unable to connect to backend server. Please check that the server is running.');
         }
         throw error;
       }
@@ -97,69 +116,75 @@ class ApiClient {
   }
 
   /**
-   * Fetch metadata (namespaces, kinds, resource counts)
+   * Get timeline data using /v1/timeline endpoint
+   * Returns full resource data with statusSegments and events for timeline visualization
    */
-  async getMetadata(): Promise<ApiMetadata> {
-    return this.request<ApiMetadata>('/api/metadata');
-  }
+  async getTimeline(
+    startTime: string | number,
+    endTime: string | number,
+    filters?: {
+      namespace?: string;
+      kind?: string;
+      group?: string;
+      version?: string;
+    }
+  ): Promise<K8sResource[]> {
+    // Convert milliseconds to Unix seconds if needed
+    const startSeconds = typeof startTime === 'number'
+      ? Math.floor(startTime / 1000)
+      : startTime;
+    const endSeconds = typeof endTime === 'number'
+      ? Math.floor(endTime / 1000)
+      : endTime;
 
-  /**
-   * Fetch all resources
-   */
-  async getResources(
-    namespace?: string,
-    kind?: string
-  ): Promise<ApiResource[]> {
     const params = new URLSearchParams();
-    if (namespace) params.append('namespace', namespace);
-    if (kind) params.append('kind', kind);
+    params.append('start', startSeconds.toString());
+    params.append('end', endSeconds.toString());
 
-    const query = params.toString();
-    const endpoint = query ? `/api/resources?${query}` : '/api/resources';
+    if (filters?.namespace) params.append('namespace', filters.namespace);
+    if (filters?.kind) params.append('kind', filters.kind);
+    if (filters?.group) params.append('group', filters.group);
+    if (filters?.version) params.append('version', filters.version);
 
-    return this.request<ApiResource[]>(endpoint);
+    const endpoint = `/v1/timeline?${params.toString()}`;
+    const response = await this.request<SearchResponse>(endpoint);
+    return transformSearchResponse(response);
   }
 
   /**
-   * Fetch events for a specific resource
+   * Get metadata for filters
    */
-  async getEvents(
-    resourceId: string,
-    startTime?: string,
-    endTime?: string
-  ): Promise<ApiEvent[]> {
+  async getMetadata(
+    startTime?: string | number,
+    endTime?: string | number
+  ): Promise<MetadataResponse> {
     const params = new URLSearchParams();
-    if (startTime) params.append('startTime', startTime);
-    if (endTime) params.append('endTime', endTime);
 
-    const query = params.toString();
-    const endpoint = query
-      ? `/api/events/${resourceId}?${query}`
-      : `/api/events/${resourceId}`;
+    if (startTime !== undefined) {
+      const startSeconds = typeof startTime === 'number'
+        ? Math.floor(startTime / 1000)
+        : startTime;
+      params.append('start', startSeconds.toString());
+    }
 
-    return this.request<ApiEvent[]>(endpoint);
-  }
+    if (endTime !== undefined) {
+      const endSeconds = typeof endTime === 'number'
+        ? Math.floor(endTime / 1000)
+        : endTime;
+      params.append('end', endSeconds.toString());
+    }
 
-  /**
-   * Fetch segments for a specific resource
-   */
-  async getSegments(resourceId: string): Promise<ApiSegment[]> {
-    return this.request<ApiSegment[]>(`/api/segments/${resourceId}`);
-  }
+    const endpoint = params.toString()
+      ? `/v1/metadata?${params.toString()}`
+      : '/v1/metadata';
 
-  /**
-   * Health check endpoint
-   */
-  async healthCheck(): Promise<{ status: string }> {
-    return this.request<{ status: string }>('/api/health');
+    return this.request<MetadataResponse>(endpoint);
   }
 }
 
 // Create singleton instance with environment-based configuration
 const baseUrl =
-  typeof process !== 'undefined' && process.env.VITE_API_BASE
-    ? process.env.VITE_API_BASE
-    : '/api';
+  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080');
 
 export const apiClient = new ApiClient({
   baseUrl,

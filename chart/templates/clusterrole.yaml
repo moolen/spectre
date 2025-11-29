@@ -61,3 +61,13 @@ rules:
     - clusterroles
     - clusterrolebindings
   verbs: ["watch", "list", "get"]
+
+# Dynamically grant access to configured watcher resources
+{{- $watchResources := .Values.config.watcher.resources | default list }}
+{{- range $watchResources }}
+- apiGroups:
+    - {{ default "" .group | quote }}
+  resources:
+    - {{ include "k8s-event-monitor.kindToResource" . }}
+  verbs: ["watch", "list", "get"]
+{{- end }}

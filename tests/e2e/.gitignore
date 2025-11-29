@@ -1,0 +1,52 @@
+# Test binaries and artifacts
+*.test
+*.o
+*.a
+*.so
+*.dylib
+
+# Go build cache
+.cache/
+
+# Kubeconfig files and cluster state
+kubeconfig
+*.kubeconfig
+kind-*.yaml
+
+# Docker and cluster artifacts
+.kube/
+.docker/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary test files
+/tmp/
+*.tmp
+
+# Test coverage
+*.cover
+coverage.out
+coverage.html
+
+# Helm chart artifacts
+charts/
+*.tgz
+
+# Environment files
+.env
+.env.local
+
+# Logs
+*.log
+test-*.log
+
+# Common testing artifacts
+__pycache__/
+*.pyc
+node_modules/

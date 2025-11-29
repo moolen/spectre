@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 func TestBlockStorageWriteReadRoundtrip(t *testing.T) {
@@ -86,7 +86,7 @@ func TestBlockStorageWriteReadRoundtrip(t *testing.T) {
 	}
 
 	// Verify index
-	index := bsf.GetIndex()
+	index := bsf.GetSparseTimestampIndex()
 	if index.TotalSegments != blockCount {
 		t.Errorf("Index total segments mismatch: %d vs %d", index.TotalSegments, blockCount)
 	}

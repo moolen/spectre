@@ -1,0 +1,45 @@
+config:
+  logLevel: debug
+
+  watcher:
+    resources:
+      - group: ""
+        version: "v1"
+        kind: "Pod"
+      - group: "apps"
+        version: "v1"
+        kind: "Deployment"
+
+image:
+  repository: spectre
+  tag: test-build
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "500m"
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+storage:
+  type: memory
+  retention:
+    maxAge: 1h
+    maxSize: 100Mi
+
+podAnnotations:
+  test: "true"
+
+env:
+  - name: LOG_LEVEL
+    value: "debug"
+

@@ -1,37 +1,13 @@
 package storage
 
 import (
+	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
-
-func TestNewQueryExecutor(t *testing.T) {
-	tmpDir := t.TempDir()
-	storage, err := New(tmpDir, 1024*1024)
-	if err != nil {
-		t.Fatalf("failed to create storage: %v", err)
-	}
-	defer storage.Close()
-
-	executor := NewQueryExecutor(storage)
-	if executor == nil {
-		t.Fatal("expected non-nil QueryExecutor")
-	}
-	if executor.storage != storage {
-		t.Error("storage not set correctly")
-	}
-	if executor.filterEngine == nil {
-		t.Error("filterEngine not initialized")
-	}
-	if executor.metadataIndex == nil {
-		t.Error("metadataIndex not initialized")
-	}
-	if executor.indexManager == nil {
-		t.Error("indexManager not initialized")
-	}
-}
 
 func TestQueryExecutorExecute_EmptyStorage(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -384,51 +360,60 @@ func TestQueryExecutorExecute_TimeRangeFiltering(t *testing.T) {
 
 func TestQueryExecutorExecute_MultipleFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	storage, err := New(tmpDir, 1024*1024)
-	if err != nil {
-		t.Fatalf("failed to create storage: %v", err)
-	}
-	defer storage.Close()
 
-	// Write events and close to create multiple files
 	now := time.Now()
 	baseTime := now.Unix()
 
-	// Create first file
-	for i := 0; i < 5; i++ {
-		event := createTestEvent("pod1", "default", "Pod", now.Add(-2*time.Hour).Add(time.Duration(i)*time.Minute).UnixNano())
-		if err := storage.WriteEvent(event); err != nil {
-			t.Fatalf("failed to write event: %v", err)
-		}
-	}
+	// Create first file with hour timestamp 2 hours ago
+	hour1 := now.Add(-2 * time.Hour)
+	hour1Timestamp := time.Date(hour1.Year(), hour1.Month(), hour1.Day(), hour1.Hour(), 0, 0, 0, hour1.Location())
+	file1Path := filepath.Join(tmpDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		hour1.Year(), hour1.Month(), hour1.Day(), hour1.Hour()))
 
-	// Close to finalize first file
-	if err := storage.Close(); err != nil {
-		t.Fatalf("failed to close storage: %v", err)
-	}
-
-	// Reopen to create new file
-	storage, err = New(tmpDir, 1024*1024)
+	file1, err := NewBlockStorageFile(file1Path, hour1Timestamp.Unix(), 1024*1024)
 	if err != nil {
-		t.Fatalf("failed to recreate storage: %v", err)
+		t.Fatalf("failed to create first file: %v", err)
 	}
-	defer storage.Close()
 
-	// Create second file
+	// Write events to first file
 	for i := 0; i < 5; i++ {
-		event := createTestEvent("pod2", "default", "Pod", now.Add(-30*time.Minute).Add(time.Duration(i)*time.Minute).UnixNano())
-		if err := storage.WriteEvent(event); err != nil {
-			t.Fatalf("failed to write event: %v", err)
+		event := createTestEvent("pod1", "default", "Pod", hour1.Add(time.Duration(i)*time.Minute).UnixNano())
+		if err := file1.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event to file1: %v", err)
 		}
 	}
 
-	// Close to finalize
-	if err := storage.Close(); err != nil {
-		t.Fatalf("failed to close storage: %v", err)
+	// Close first file
+	if err := file1.Close(); err != nil {
+		t.Fatalf("failed to close file1: %v", err)
+	}
+
+	// Create second file with hour timestamp 1 hour ago
+	hour2 := now.Add(-1 * time.Hour)
+	hour2Timestamp := time.Date(hour2.Year(), hour2.Month(), hour2.Day(), hour2.Hour(), 0, 0, 0, hour2.Location())
+	file2Path := filepath.Join(tmpDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		hour2.Year(), hour2.Month(), hour2.Day(), hour2.Hour()))
+
+	file2, err := NewBlockStorageFile(file2Path, hour2Timestamp.Unix(), 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create second file: %v", err)
+	}
+
+	// Write events to second file
+	for i := 0; i < 5; i++ {
+		event := createTestEvent("pod2", "default", "Pod", hour2.Add(time.Duration(i)*time.Minute).UnixNano())
+		if err := file2.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event to file2: %v", err)
+		}
+	}
+
+	// Close second file
+	if err := file2.Close(); err != nil {
+		t.Fatalf("failed to close file2: %v", err)
 	}
 
 	// Reopen for querying
-	storage, err = New(tmpDir, 1024*1024)
+	storage, err := New(tmpDir, 1024*1024)
 	if err != nil {
 		t.Fatalf("failed to recreate storage: %v", err)
 	}
@@ -690,4 +675,3 @@ func TestQueryExecutorExecute_NonExistentDirectory(t *testing.T) {
 		t.Errorf("expected 0 events in empty directory, got %d", result.Count)
 	}
 }
-

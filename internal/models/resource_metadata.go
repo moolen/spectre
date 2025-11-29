@@ -21,6 +21,9 @@ type ResourceMetadata struct {
 
 	// UID is the unique identifier within the cluster
 	UID string `json:"uid"`
+
+	// InvolvedObjectUID links Kubernetes Event objects to the resource they describe
+	InvolvedObjectUID string `json:"involvedObjectUid,omitempty"`
 }
 
 // Validate checks that the resource metadata has all required fields

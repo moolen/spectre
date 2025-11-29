@@ -58,3 +58,25 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Convert a Kind name into the Kubernetes REST resource string. Accepts an object
+with optional "resource" override and "kind" fallback.
+*/}}
+{{- define "k8s-event-monitor.kindToResource" -}}
+{{- $override := default "" .resource -}}
+{{- if $override }}
+{{- lower $override -}}
+{{- else }}
+{{- $kind := lower (default "" .kind) -}}
+{{- if eq $kind "" -}}
+{{- "" -}}
+{{- else if eq $kind "ingress" -}}
+ingresses
+{{- else if hasSuffix $kind "s" -}}
+{{ $kind }}
+{{- else -}}
+{{ printf "%ss" $kind }}
+{{- end -}}
+{{- end -}}
+{{- end }}

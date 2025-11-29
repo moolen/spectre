@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/klauspost/compress/gzip"
-	"github.com/moritz/rpk/internal/logging"
+	"github.com/moolen/spectre/internal/logging"
 )
 
 // Compressor handles compression and decompression of event data

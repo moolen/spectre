@@ -1,9 +1,10 @@
-.PHONY: help build run test clean docker-build docker-run deploy watch lint fmt vet
+.PHONY: help build build-ui run test clean docker-build docker-run deploy watch lint fmt vet
 
 # Default target
 help:
 	@echo "Kubernetes Event Monitor - Available targets:"
 	@echo "  build          - Build the application binary"
+	@echo "  build-ui       - Build the React UI"
 	@echo "  run            - Run the application locally"
 	@echo "  test           - Run all tests"
 	@echo "  test-unit      - Run unit tests only"
@@ -35,8 +36,14 @@ build:
 	@go build -o $(BINARY_PATH) ./cmd/main.go
 	@echo "Build complete: $(BINARY_PATH)"
 
+# Build the React UI
+build-ui:
+	@echo "Building React UI..."
+	@cd ui && npm ci && npm run build
+	@echo "UI build complete: ui/dist"
+
 # Run the application locally
-run: build
+run: build build-ui
 	@echo "Running $(BINARY_NAME)..."
 	@mkdir -p $(DATA_DIR)
 	@export KUBECONFIG=$(KUBECONFIG); \
@@ -94,7 +101,7 @@ lint:
 	@echo "Lint complete"
 
 # Build Docker image
-docker-build: build
+docker-build: build build-ui
 	@echo "Building Docker image $(DOCKER_IMAGE)..."
 	@docker build -t $(DOCKER_IMAGE) .
 	@echo "Docker image built: $(DOCKER_IMAGE)"
@@ -114,6 +121,22 @@ deploy:
 		--values $(CHART_PATH)/values.yaml
 	@echo "Deployment complete. Check status:"
 	@kubectl get pods -n $(NAMESPACE)
+
+.PHONY: benchmark
+benchmark:
+	@echo "Generating data..."
+	rm -rf ./benchmark-data
+	go run ./cmd/gendata --output-dir ./benchmark-data \
+	--event-count 1000000 --duration-hours 24 \
+	--segment-size 1048576 --distribution skewed
+
+	go run ./cmd/main.go \
+		--data-dir ./benchmark-data \
+		--api-port 8080 \
+		--log-level debug \
+		--watcher-config ./hack/watcher.yaml \
+		--segment-size 1048576 \
+		--max-concurrent-requests 100
 
 # Watch and rebuild on file changes (requires entr)
 watch:

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 func TestNewFilterEngine(t *testing.T) {
@@ -288,4 +288,3 @@ func createEventWithTimestamp(timestamp int64) models.Event {
 		},
 	}
 }
-

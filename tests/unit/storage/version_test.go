@@ -3,7 +3,7 @@ package storage
 import (
 	"testing"
 
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 func TestValidateVersionV1_0(t *testing.T) {

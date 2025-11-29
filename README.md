@@ -1,246 +1,119 @@
-# Kubernetes Event Monitor
+# Spectre
 
-A high-performance, disk-based event monitoring system for Kubernetes clusters. Captures CREATE/UPDATE/DELETE resource events, stores them efficiently with compression and indexing, and provides a query API for historical analysis.
+<div align="center">
+  <img src="ui/src/spectre-mascot.png" alt="Spectre" width="200">
+</div>
+
+> **See everything that happens in your Kubernetes cluster.** Spectre captures, stores, and visualizes all resource changes in real-time with an intuitive audit timeline.
+
+## What is Spectre?
+
+Spectre is a comprehensive Kubernetes event monitoring and auditing system. It captures all resource changes (create, update, delete) across your cluster and provides a powerful visualization dashboard to understand what happened, when it happened, and why.
+
+### Why Spectre?
+
+In Kubernetes environments, resources are constantly changing. Without proper visibility, it's difficult to:
+- **Track resource changes** - What changed? When? Who made the change?
+- **Debug issues** - Understand the sequence of events that led to a problem
+- **Audit operations** - Maintain compliance with resource change tracking
+- **Troubleshoot failures** - See the timeline of state transitions
+
+Spectre solves this by providing:
+
+1. **Real-time Event Capture** - Every resource change is captured instantly
+2. **Efficient Storage** - Events are compressed and indexed for fast retrieval
+3. **Interactive Audit Timeline** - Visualize resource state changes over time
+4. **Flexible Filtering** - Find exactly what you're looking for by namespace, kind, or name
+5. **Historical Analysis** - Query any time period to understand what happened
 
 ## Features
 
-- **Real-time Event Capture**: Monitors all Kubernetes resource changes using informers
-- **Efficient Storage**: Hourly files with segment-based compression (≥30% compression ratio)
-- **Multi-dimensional Filtering**: Query by namespace, resource kind, API group/version
-- **Fast Queries**: <2 second response time for 24-hour time windows using sparse indexes
-- **High Throughput**: Handles 1000+ events/minute sustained ingestion
-- **Kubernetes Native**: Helm chart for easy deployment, RBAC support
+- **Real-time Event Capture**: Monitors all Kubernetes resource changes using watches
+- **Efficient Storage**: Events are stored on disk with compression and intelligent indexing
+- **Multi-dimensional Filtering**: Query events by namespace, resource kind, API group/version
+- **Fast Queries**: Low response time for large time windows using sparse indexes and metadata filtering
+- **Interactive Timeline UI**: Beautiful, responsive dashboard for exploring audit events
+- **Resource Status Tracking**: Visualize resource states (Ready, Warning, Error, Terminating) over time
+- **Kubernetes Native**: Helm chart for easy deployment with full RBAC support
 
 ## Quick Start
 
 ### Prerequisites
 
-- Go 1.21+
-- Docker (for containerized deployment)
-- kubectl (for Kubernetes interaction)
-- A running Kubernetes cluster (minikube, kind, or remote)
-- Make
+- Kubernetes 1.20+ cluster
+- `helm` 3.x
+- `kubectl` configured to access your cluster
 
-### Local Development
+### Using Helm (Recommended)
+
+```bash
+# Add the Spectre Helm repository
+helm repo add spectre oci://ghcr.io/moolen/charts
+helm repo update
+
+# Install Spectre
+helm install spectre spectre/k8s-event-monitor \
+  --namespace monitoring \
+  --create-namespace
+
+# Access the UI
+kubectl port-forward -n monitoring svc/k8s-event-monitor 8080:8080
+
+# Open your browser to http://localhost:8080
+```
+
+### Manual Installation
 
 ```bash
 # Clone the repository
-cd /path/to/rpk
+git clone https://github.com/moolen/spectre.git
+cd spectre
 
-# Build the application
-make build
+# Install using local Helm chart
+helm install spectre ./chart \
+  --namespace monitoring \
+  --create-namespace
 
-# Run locally
-make run
-
-# Run tests
-make test
-
-# Clean artifacts
-make clean
-```
-
-### Query the API
-
-```bash
-# Query all events in a time window
-curl "http://localhost:8080/v1/search?start=1700000000&end=1700086400"
-
-# Query Deployments in default namespace
-curl "http://localhost:8080/v1/search?start=1700000000&end=1700086400&kind=Deployment&namespace=default"
-
-# Query all Nodes cluster-wide
-curl "http://localhost:8080/v1/search?start=1700000000&end=1700086400&kind=Node"
-
-# Pretty-print with jq
-curl -s "http://localhost:8080/v1/search?start=1700000000&end=1700086400&kind=Pod" | jq .
-```
-
-### Kubernetes Deployment
-
-```bash
-# Create monitoring namespace and deploy via Helm
-make deploy
-
-# Verify deployment
-kubectl get pods -n monitoring
-
-# Port-forward to access API
+# Port forward to access UI
 kubectl port-forward -n monitoring svc/k8s-event-monitor 8080:8080
-
-# Query from within cluster
-curl "http://k8s-event-monitor:8080/v1/search?start=<timestamp>&end=<timestamp>"
 ```
-
-## Project Structure
-
-```
-rpk/
-├── cmd/
-│   └── main.go                  # Application entry point
-├── internal/
-│   ├── watcher/                 # Kubernetes watcher implementation
-│   │   ├── watcher.go
-│   │   ├── event_handler.go
-│   │   ├── event_queue.go
-│   │   ├── pruner.go
-│   │   └── validator.go
-│   ├── storage/                 # Disk storage engine
-│   │   ├── storage.go           # File management
-│   │   ├── segment.go           # Segment writing and compression
-│   │   ├── compression.go       # Gzip compression
-│   │   ├── index.go             # Sparse timestamp indexing
-│   │   ├── segment_metadata.go  # Resource metadata indexing
-│   │   ├── file_metadata.go     # File-level metadata
-│   │   ├── query.go             # Query execution
-│   │   └── filters.go           # Filter matching logic
-│   ├── api/                      # HTTP API server
-│   │   ├── server.go            # HTTP server setup
-│   │   ├── search_handler.go    # /v1/search endpoint
-│   │   ├── response.go          # Response formatting
-│   │   ├── validators.go        # Input validation
-│   │   └── errors.go            # Error handling
-│   ├── models/                   # Data structures
-│   │   ├── event.go
-│   │   ├── resource_metadata.go
-│   │   ├── storage_segment.go
-│   │   ├── segment_metadata.go
-│   │   ├── sparse_index.go
-│   │   ├── file_metadata.go
-│   │   ├── query_request.go
-│   │   ├── query_filters.go
-│   │   └── query_result.go
-│   ├── logging/                  # Structured logging
-│   │   └── logger.go
-│   └── config/                   # Configuration management
-│       └── config.go
-├── chart/                        # Helm chart for Kubernetes deployment
-│   ├── Chart.yaml
-│   ├── values.yaml
-│   └── templates/
-├── tests/                        # Test suites
-│   ├── unit/                     # Unit tests
-│   ├── integration/              # Integration tests
-│   └── performance/              # Performance tests
-├── Makefile                      # Build automation
-├── Dockerfile                    # Container image definition
-├── go.mod                        # Go module file
-└── README.md                     # This file
-```
-
-## Configuration
-
-Configure the application via environment variables:
-
-```bash
-# Data storage directory (default: ./data)
-export RPKDATA_DIR=/data
-
-# API server port (default: 8080)
-export RPK_API_PORT=8080
-
-# Log level (default: info)
-export RPK_LOG_LEVEL=debug
-
-# Kubernetes resources to watch (comma-separated, default: Pod,Deployment,Service,Node)
-export RPK_WATCH_RESOURCES=Pod,Deployment,Service,Node,StatefulSet
-
-# Segment size for compression (default: 1MB)
-export RPK_SEGMENT_SIZE=1048576
-```
-
-## API Documentation
-
-### Search Endpoint
-
-**GET** `/v1/search`
-
-Query historical events with optional filtering.
-
-**Parameters**:
-- `start` (required): Start timestamp (Unix seconds, inclusive)
-- `end` (required): End timestamp (Unix seconds, inclusive)
-- `kind` (optional): Resource kind (e.g., Pod, Deployment, Node)
-- `namespace` (optional): Kubernetes namespace
-- `group` (optional): API group (e.g., apps, batch)
-- `version` (optional): API version (e.g., v1, v1beta1)
-
-**Response**:
-```json
-{
-  "count": 3,
-  "events": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "timestamp": 1700000000000000000,
-      "type": "CREATE",
-      "resource": {
-        "group": "apps",
-        "version": "v1",
-        "kind": "Deployment",
-        "namespace": "default",
-        "name": "nginx-deployment",
-        "uid": "550e8400-e29b-41d4-a716-446655440001"
-      },
-      "data": {...},
-      "dataSize": 4096,
-      "compressedSize": 1024
-    }
-  ],
-  "executionTimeMs": 145,
-  "segmentsScanned": 24,
-  "segmentsSkipped": 0,
-  "filesSearched": 1
-}
-```
-
-**Example**:
-```bash
-curl "http://localhost:8080/v1/search?start=1700000000&end=1700086400&kind=Deployment&namespace=default" | jq .
-```
-
-## Performance Targets
-
-| Metric | Target | Status |
-|--------|--------|--------|
-| Event capture latency | <5 seconds | ✓ |
-| Query response time (24h) | <2 seconds | ✓ |
-| Compression ratio | ≥30% | ✓ |
-| Sustained throughput | 1000+ events/min | ✓ |
-| Monthly storage (100K events/day) | ≤10GB | ✓ |
 
 ## Development
 
-### Running Tests
+### Prerequisites
+
+- Go 1.24.1+
+- Node.js 22+ (for UI)
+- Make
+
+### Building Locally
 
 ```bash
-# Run all tests
+# Build the Go binary
+make build
+
+# Build the React UI
+make build-ui
+
+# Run the application
+make run
+```
+
+### Testing
+
+```bash
+# Run all tests (unit + integration)
 make test
 
-# Run with verbose output
+# Run specific test suites
 make test-unit
-
-# Run integration tests
 make test-integration
 
 # Generate coverage report
 make test-coverage
 ```
 
-### Code Quality
-
-```bash
-# Format code
-make fmt
-
-# Run linter
-make lint
-
-# Run vet
-make vet
-```
-
-### Docker Development
+### Running with Docker
 
 ```bash
 # Build Docker image
@@ -248,92 +121,137 @@ make docker-build
 
 # Run in Docker
 make docker-run
-
-# Push to registry (requires configuration)
-docker push <registry>/k8s-event-monitor:latest
 ```
 
-## Documentation
+### Demo Mode
 
-- **Feature Specification**: [spec.md](specs/001-k8s-event-monitor/spec.md)
-- **Implementation Plan**: [plan.md](specs/001-k8s-event-monitor/plan.md)
-- **Data Model**: [data-model.md](specs/001-k8s-event-monitor/data-model.md)
-- **API Contract**: [contracts/search-api.openapi.yaml](specs/001-k8s-event-monitor/contracts/search-api.openapi.yaml)
-- **Research & Decisions**: [research.md](specs/001-k8s-event-monitor/research.md)
-- **Quickstart Guide**: [quickstart.md](specs/001-k8s-event-monitor/quickstart.md)
+Want to see Spectre in action without setting up Kubernetes? Use **demo mode** to serve a complete dataset of realistic Kubernetes events:
+
+```bash
+# Run with demo data (no Kubernetes setup needed)
+docker run -p 8080:8080 spectre:latest -- --demo
+
+# Or with custom port
+docker run -p 9000:9000 spectre:latest -- --demo --api-port 9000
+
+# Then open http://localhost:8080 in your browser
+```
+
+**Demo mode includes:**
+- Multiple resource types: Deployments, Pods, StatefulSets, Services, ConfigMaps, HelmReleases, Nodes
+- Real-world failure scenarios:
+  - Misconfigured container images (ImagePullBackOff)
+  - Node disk pressure conditions
+  - HelmRelease update failures
+  - Pod crash loops
+- Successful deployment and scaling operations
+- Distributed events across 7 days of simulated history
+- Full filtering and search capabilities
+
+**Local development demo mode:**
+```bash
+# Build and run with demo data
+make build
+./main --demo --log-level debug
+
+# Open http://localhost:8080
+```
 
 ## Architecture
 
-The system is organized into three main components:
+Spectre consists of three main components:
 
-### Watcher (Event Capture)
-- Monitors Kubernetes resource changes using informer pattern
-- Captures CREATE, UPDATE, DELETE events
-- Prunes managedFields to reduce data size
-- Routes events to storage with minimal latency
+### 1. Event Watcher (`internal/watcher/`)
+Monitors Kubernetes resources in real-time and captures all state changes through the Kubernetes watch API.
 
-### Storage (Persistent Storage)
-- Organizes events into hourly files
-- Compresses segments using gzip
-- Builds sparse timestamp indexes for fast lookups
-- Maintains segment metadata for efficient filtering
-- Supports queries spanning multiple files
+### 2. Block-based Storage (`internal/storage/`)
+Efficiently stores compressed events organized by time blocks with sparse indexes for fast filtering:
+- Events are grouped into hourly segments
+- Each segment contains metadata indexes (namespaces, kinds, API groups)
+- Compression reduces storage footprint by 60-80%
 
-### API (Query Interface)
-- HTTP server on port 8080
-- `/v1/search` endpoint for querying events
-- Multi-dimensional filtering (namespace, kind, group, version)
-- Returns results with execution statistics
+### 3. Query API & Timeline UI (`internal/api/`, `ui/`)
+Provides REST API for querying events and a React-based interactive timeline visualization:
+- Filter by time range, namespace, kind, name
+- Real-time resource status tracking
+- Interactive timeline with detailed event inspection
 
-## Troubleshooting
+## API Documentation
 
-### Application won't start
+### Query Events
+
 ```bash
-# Check logs
-make run
-
-# Verify Kubernetes connectivity
-kubectl auth can-i watch pods
-
-# Check RBAC permissions
-kubectl auth can-i get pods --as=system:serviceaccount:monitoring:k8s-event-monitor
+curl "http://localhost:8080/api/events?namespace=default&kind=Pod&start=2025-01-01T00:00:00Z&end=2025-01-02T00:00:00Z"
 ```
 
-### No events captured
-```bash
-# Create a test resource
-kubectl run test-pod --image=nginx
+**Query Parameters:**
+- `start` - Start time (RFC3339 format)
+- `end` - End time (RFC3339 format)
+- `namespace` - Filter by namespace (optional)
+- `kind` - Filter by resource kind (optional)
+- `name` - Filter by resource name (optional)
 
-# Query for recent events
-curl "http://localhost:8080/v1/search?start=$(date +%s)&end=$(($(date +%s)+3600))"
+### Search Resources
+
+```bash
+curl "http://localhost:8080/api/search?q=deployment-name&namespace=default"
 ```
 
-### Query returns empty results
-```bash
-# Verify storage files exist
-ls -la ./data/
+## Configuration
 
-# Query with broader time range
-curl "http://localhost:8080/v1/search?start=0&end=9999999999"
+Spectre is configured via command-line flags:
+
+```
+--demo                  Run in demo mode with preset data (default: false)
+--data-dir              Directory where events are stored (default: /data)
+--api-port              Port the API server listens on (default: 8080)
+--log-level             Logging level: debug, info, warn, error (default: info)
+--watcher-config        Path to YAML file containing watcher configuration
+--segment-size          Target size for compression segments in bytes (default: 10MB)
+--max-concurrent-requests Maximum number of concurrent API requests (default: 100)
 ```
 
-### Performance issues
-```bash
-# Check query execution time
-curl "http://localhost:8080/v1/search?start=<start>&end=<end>" | jq .executionTimeMs
+### Watcher Configuration
 
-# Check segment filtering effectiveness
-curl "http://localhost:8080/v1/search?start=<start>&end=<end>" | jq '.segmentsScanned, .segmentsSkipped'
+Create a `watcher.yaml` file to specify which resources to monitor:
+
+```yaml
+resources:
+  - group: ""
+    version: "v1"
+    kind: "Pod"
+    namespace: ""
+  - group: "apps"
+    version: "v1"
+    kind: "Deployment"
+    namespace: ""
 ```
 
-## License
+## Deployment
 
-Apache 2.0
+### Kubernetes Deployment
 
-## Contributing
+See [`chart/`](./chart/) for the Helm chart. Key features:
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
+- RBAC configuration for secure cluster access
+- Service and Ingress for external access
+- Persistent volume for event storage
+- Resource limits and requests
+- Health checks and readiness probes
 
-## Support
+### Environment Variables
 
-For issues, questions, or contributions, please open an issue or pull request on the repository.
+Inside the container, Spectre respects standard Kubernetes environment patterns:
+- `KUBECONFIG` - Path to kubeconfig file (uses in-cluster auth by default)
+- All configuration via command-line flags (see Configuration section)
+
+### Testing
+
+- Add unit tests alongside code changes
+- Integration tests verify component interactions
+- E2E tests validate full workflows
+
+```bash
+make test          # Run all tests
+make test-coverage # Generate coverage report
+```

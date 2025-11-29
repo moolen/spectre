@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // EventQueue buffers events and handles concurrent event arrivals
 type EventQueue struct {
-	queue      chan *models.Event
-	logger     *logging.Logger
-	wg         sync.WaitGroup
+	queue        chan *models.Event
+	logger       *logging.Logger
+	wg           sync.WaitGroup
 	maxQueueSize int
-	processFunc func(*models.Event) error
+	processFunc  func(*models.Event) error
 }
 
 // NewEventQueue creates a new event queue

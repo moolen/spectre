@@ -1,36 +1,28 @@
 package storage
 
 import (
-	"bytes"
-	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // QueryExecutor executes queries against stored events
 type QueryExecutor struct {
-	logger        *logging.Logger
-	storage       *Storage
-	filterEngine  *FilterEngine
-	metadataIndex *SegmentMetadataIndex
-	indexManager  *IndexManager
+	logger       *logging.Logger
+	storage      *Storage
+	filterEngine *FilterEngine
 }
 
 // NewQueryExecutor creates a new query executor
 func NewQueryExecutor(storage *Storage) *QueryExecutor {
 	return &QueryExecutor{
-		logger:        logging.GetLogger("query"),
-		storage:       storage,
-		filterEngine:  NewFilterEngine(),
-		metadataIndex: NewSegmentMetadataIndex(),
-		indexManager:  NewIndexManager(),
+		logger:       logging.GetLogger("query"),
+		storage:      storage,
+		filterEngine: NewFilterEngine(),
 	}
 }
 
@@ -131,12 +123,32 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 	return result, nil
 }
 
-// queryFile queries a single storage file
+// queryFile queries a single storage file (supports both block storage and legacy segment formats)
 func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) ([]models.Event, int32, int32, error) {
-	// Read file metadata and index
-	_, index, err := qe.readFileMetadata(filePath)
+	// Try to open file using BlockReader (block storage format)
+	reader, err := NewBlockReader(filePath)
 	if err != nil {
-		// If file is incomplete (no footer), try to query it by scanning segments directly
+		// If it's not a valid block storage file, try legacy segment format
+		if isInvalidBlockFormatError(err) {
+			return nil, 0, 0, fmt.Errorf("file %s is not block storage format", filePath)
+		}
+		// If file is incomplete (no footer), try to query it
+		if isIncompleteFileError(err) {
+			qe.logger.Debug("File %s is incomplete, attempting to query by scanning segments", filePath)
+			return qe.queryIncompleteFile(filePath, query)
+		}
+		return nil, 0, 0, err
+	}
+	defer reader.Close()
+
+	// Read complete file structure
+	fileData, err := reader.ReadFile()
+	if err != nil {
+		reader.Close() // Close before trying legacy format
+		// If it's not a valid block storage file, try legacy segment format
+		if isInvalidBlockFormatError(err) {
+			return nil, 0, 0, fmt.Errorf("file %s is not block storage format", filePath)
+		}
 		if isIncompleteFileError(err) {
 			qe.logger.Debug("File %s is incomplete, attempting to query by scanning segments", filePath)
 			return qe.queryIncompleteFile(filePath, query)
@@ -144,380 +156,71 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 		return nil, 0, 0, err
 	}
 
-	qe.logger.Debug("File %s: index has %d entries, %d total segments", filePath, len(index.Entries), index.TotalSegments)
-	if len(index.Entries) > 0 {
-		firstEntry := index.Entries[0]
-		qe.logger.Debug("File %s: first index entry: segmentID=%d, timestamp=%d ns (%.2f s)",
-			filePath, firstEntry.SegmentID, firstEntry.Timestamp, float64(firstEntry.Timestamp)/1e9)
-	}
+	qe.logger.Debug("File %s: has %d blocks", filePath, len(fileData.IndexSection.BlockMetadata))
 
 	var results []models.Event
 	var segmentsScanned int32
 	var segmentsSkipped int32
 
-	// Find candidate segments based on time range
-	// Index entries use nanoseconds (from event timestamps), query is in seconds
+	// Query time range in nanoseconds
 	startTimeNs := query.StartTimestamp * 1e9
 	endTimeNs := query.EndTimestamp * 1e9
-	qe.logger.Debug("File %s: searching for segments in time range [%d ns (%.2f s), %d ns (%.2f s)]",
-		filePath, startTimeNs, float64(startTimeNs)/1e9, endTimeNs, float64(endTimeNs)/1e9)
 
-	// Log index entries for debugging
-	if len(index.Entries) > 0 {
-		qe.logger.Debug("File %s: index entries:", filePath)
-		for i, entry := range index.Entries {
-			qe.logger.Debug("  [%d] segmentID=%d, timestamp=%d ns (%.2f s), offset=%d",
-				i, entry.SegmentID, entry.Timestamp, float64(entry.Timestamp)/1e9, entry.Offset)
-		}
-	}
-
-	candidateSegments := index.FindSegmentsForTimeRange(startTimeNs, endTimeNs)
-	qe.logger.Debug("File %s: found %d candidate segments", filePath, len(candidateSegments))
-	for _, segID := range candidateSegments {
-		qe.logger.Debug("File %s: candidate segment ID: %d", filePath, segID)
-	}
-
-	// Open the file for reading segments
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// Create compressor for decompression
-	compressor := NewCompressor()
-
-	// Filter segments based on resource filters and load events
-	for _, segmentID := range candidateSegments {
-		// Get segment offset from index
-		offset := index.GetSegmentOffset(segmentID)
-		if offset < 0 {
-			qe.logger.Warn("Segment %d not found in index for file %s", segmentID, filePath)
+	// Iterate through blocks
+	for _, blockMeta := range fileData.IndexSection.BlockMetadata {
+		// Check if block overlaps with query time range
+		if blockMeta.TimestampMax < startTimeNs || blockMeta.TimestampMin > endTimeNs {
+			qe.logger.Debug("File %s: skipping block %d (time range [%d, %d] outside query [%d, %d])",
+				filePath, blockMeta.ID, blockMeta.TimestampMin, blockMeta.TimestampMax, startTimeNs, endTimeNs)
 			segmentsSkipped++
 			continue
 		}
 
-		// Check segment metadata to skip non-matching segments (if available)
-		// Note: metadataIndex is not currently populated from file, so we skip this check
-		// TODO: Populate metadataIndex from file metadata when reading
-		if qe.metadataIndex != nil {
-			if _, ok := qe.metadataIndex.GetSegmentMetadata(segmentID); ok {
-				qe.logger.Debug("File %s: segment %d has metadata, checking if can skip", filePath, segmentID)
-				if qe.metadataIndex.CanSegmentBeSkipped(segmentID, query.Filters) {
-					qe.logger.Debug("File %s: skipping segment %d based on metadata filters", filePath, segmentID)
-					segmentsSkipped++
-					continue
-				}
-			} else {
-				qe.logger.Debug("File %s: segment %d has no metadata in index, will load anyway", filePath, segmentID)
-			}
+		// Check if block matches resource filters using metadata
+		if !qe.blockMatchesFilters(blockMeta, query.Filters) {
+			qe.logger.Debug("File %s: skipping block %d (metadata doesn't match filters)", filePath, blockMeta.ID)
+			segmentsSkipped++
+			continue
+		}
+
+		// Read and decompress block
+		events, err := reader.ReadBlockEvents(blockMeta)
+		if err != nil {
+			qe.logger.Warn("Failed to read block %d from file %s: %v", blockMeta.ID, filePath, err)
+			segmentsSkipped++
+			continue
 		}
 
 		segmentsScanned++
 
-		// Load and filter events from segment
-		qe.logger.Debug("File %s: loading segment %d from offset %d", filePath, segmentID, offset)
-		segmentEvents, err := qe.loadSegmentEvents(file, offset, compressor, query)
-		if err != nil {
-			qe.logger.Warn("Failed to load segment %d from file %s: %v", segmentID, filePath, err)
-			continue
+		// Filter events by time range and resource filters
+		var blockEvents []models.Event
+		for _, event := range events {
+			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+				continue
+			}
+
+			if !qe.filterEngine.MatchesFilters(event, query.Filters) {
+				continue
+			}
+
+			blockEvents = append(blockEvents, *event)
 		}
 
-		qe.logger.Debug("File %s: segment %d loaded %d events", filePath, segmentID, len(segmentEvents))
-		results = append(results, segmentEvents...)
+		qe.logger.Debug("File %s: block %d loaded %d events (after filtering)", filePath, blockMeta.ID, len(blockEvents))
+		results = append(results, blockEvents...)
 	}
 
 	return results, segmentsScanned, segmentsSkipped, nil
 }
 
-// loadSegmentEvents loads events from a segment at the given offset
-func (qe *QueryExecutor) loadSegmentEvents(file *os.File, offset int64, compressor *Compressor, query *models.QueryRequest) ([]models.Event, error) {
-	// Seek to segment offset
-	if _, err := file.Seek(offset, 0); err != nil {
-		return nil, fmt.Errorf("failed to seek to segment: %w", err)
+// isInvalidBlockFormatError checks if an error indicates the file is not in block storage format
+func isInvalidBlockFormatError(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	// Read segment header
-	// Format: ID(4) + startTimestamp(8) + endTimestamp(8) + eventCount(4) + uncompressedSize(8) + compressedSize(8) = 40 bytes
-	var segmentID int32
-	var startTimestamp, endTimestamp int64
-	var eventCount int32
-	var uncompressedSize, compressedSize int64
-
-	if err := binary.Read(file, binary.LittleEndian, &segmentID); err != nil {
-		return nil, fmt.Errorf("failed to read segment ID: %w", err)
-	}
-	if err := binary.Read(file, binary.LittleEndian, &startTimestamp); err != nil {
-		return nil, fmt.Errorf("failed to read start timestamp: %w", err)
-	}
-	if err := binary.Read(file, binary.LittleEndian, &endTimestamp); err != nil {
-		return nil, fmt.Errorf("failed to read end timestamp: %w", err)
-	}
-	if err := binary.Read(file, binary.LittleEndian, &eventCount); err != nil {
-		return nil, fmt.Errorf("failed to read event count: %w", err)
-	}
-	if err := binary.Read(file, binary.LittleEndian, &uncompressedSize); err != nil {
-		return nil, fmt.Errorf("failed to read uncompressed size: %w", err)
-	}
-	if err := binary.Read(file, binary.LittleEndian, &compressedSize); err != nil {
-		return nil, fmt.Errorf("failed to read compressed size: %w", err)
-	}
-
-	// Quick check: if segment is completely outside time range, skip it
-	// Segment timestamps are in nanoseconds (from event timestamps), query is in seconds
-	startTimeNs := query.StartTimestamp * 1e9
-	endTimeNs := query.EndTimestamp * 1e9
-	if endTimestamp < startTimeNs || startTimestamp > endTimeNs {
-		qe.logger.Debug("Segment %d: outside time range [%d, %d] ns, segment=[%d, %d] ns", segmentID, startTimeNs, endTimeNs, startTimestamp, endTimestamp)
-		return []models.Event{}, nil
-	}
-
-	// Read compressed data
-	compressedData := make([]byte, compressedSize)
-	if _, err := file.Read(compressedData); err != nil {
-		return nil, fmt.Errorf("failed to read compressed data: %w", err)
-	}
-
-	// Decompress the data
-	decompressed, err := compressor.Decompress(compressedData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decompress segment data: %w", err)
-	}
-
-	// Parse events from newline-delimited JSON
-	var allEvents []models.Event
-	lines := bytes.Split(decompressed, []byte("\n"))
-	qe.logger.Debug("Segment %d: decompressed %d bytes, split into %d lines", segmentID, len(decompressed), len(lines))
-
-	var eventsParsed, eventsFilteredTime, eventsFilteredResource int
-
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
-
-		var event models.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			qe.logger.Warn("Failed to unmarshal event: %v", err)
-			continue
-		}
-		eventsParsed++
-
-		// Filter by time range
-		if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
-			eventsFilteredTime++
-			continue
-		}
-
-		// Filter by resource filters
-		if !qe.filterEngine.MatchesFilters(&event, query.Filters) {
-			eventsFilteredResource++
-			continue
-		}
-
-		allEvents = append(allEvents, event)
-	}
-
-	qe.logger.Debug("Segment events: parsed=%d, filtered_time=%d, filtered_resource=%d, final=%d",
-		eventsParsed, eventsFilteredTime, eventsFilteredResource, len(allEvents))
-
-	return allEvents, nil
-}
-
-// readFileMetadata reads metadata and index from a file
-func (qe *QueryExecutor) readFileMetadata(filePath string) (models.FileMetadata, models.SparseTimestampIndex, error) {
-	// Open the file for reading
-	file, err := os.Open(filePath)
-	if err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// Get file size
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to stat file: %w", err)
-	}
-	fileSize := fileInfo.Size()
-
-	// Read the footer to find where metadata starts
-	// Footer is "RPK_EOF" (7 bytes)
-	footerSize := int64(7)
-
-	// Check if file is large enough to have a footer
-	// Minimum file size: header + at least footer marker
-	minFileSize := footerSize
-	if fileSize < minFileSize {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("file too small or incomplete (size: %d, minimum: %d)", fileSize, minFileSize)
-	}
-
-	// Seek to read footer
-	footerOffset := fileSize - footerSize
-	if footerOffset < 0 {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("file too small to contain footer (size: %d)", fileSize)
-	}
-
-	if _, err := file.Seek(footerOffset, 0); err != nil {
-		// File might be incomplete (still being written) - return a specific error
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("file incomplete or still being written: %w", err)
-	}
-
-	footer := make([]byte, footerSize)
-	if _, err := file.Read(footer); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read footer: %w", err)
-	}
-
-	if string(footer) != "RPK_EOF" {
-		// Footer doesn't exist yet - file is incomplete
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("file incomplete: footer not found (file may still be being written)")
-	}
-
-	// File structure: [data] [metadata_len(4)] [metadata] [index_len(4)] [index] [footer(7)]
-	// To read backwards, we need to find where the index JSON starts
-	// The index JSON ends with } right before RPK_EOF, so we search backwards for {"entries
-	// Read a reasonable chunk before the footer to find the index JSON start
-	searchWindow := int64(1000) // Read up to 1KB before footer to find index
-	if fileSize < searchWindow+footerSize {
-		searchWindow = fileSize - footerSize
-	}
-
-	readStart := fileSize - footerSize - searchWindow
-	if readStart < 0 {
-		readStart = 0
-	}
-
-	file.Seek(readStart, 0)
-	searchData := make([]byte, searchWindow)
-	if _, err := file.Read(searchData); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read search window: %w", err)
-	}
-
-	// Find the index JSON start by looking for {"entries
-	indexStartMarker := []byte(`{"entries`)
-	indexStartInWindow := bytes.LastIndex(searchData, indexStartMarker)
-	if indexStartInWindow < 0 {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("index JSON start marker not found")
-	}
-
-	// Calculate absolute position of index JSON start
-	indexJSONStart := readStart + int64(indexStartInWindow)
-
-	// The index length is 4 bytes before the index JSON
-	indexLenPos := indexJSONStart - 4
-	if indexLenPos < 0 {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("index length position is negative")
-	}
-
-	// Read index length
-	file.Seek(indexLenPos, 0)
-	var indexLen int32
-	if err := binary.Read(file, binary.LittleEndian, &indexLen); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read index length: %w", err)
-	}
-
-	if indexLen <= 0 || indexLen > 10*1024*1024 { // Sanity check: max 10MB index
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("invalid index length: %d", indexLen)
-	}
-
-	// Verify the index JSON length matches (index ends right before footer)
-	expectedIndexLen := fileSize - footerSize - indexJSONStart
-	if int64(indexLen) != expectedIndexLen {
-		qe.logger.Debug("Index length mismatch: stored=%d, expected=%d, using stored value", indexLen, expectedIndexLen)
-	}
-
-	// Read index data
-	file.Seek(indexJSONStart, 0)
-	indexData := make([]byte, indexLen)
-	if _, err := file.Read(indexData); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read index data: %w", err)
-	}
-
-	// Parse index JSON
-	var index models.SparseTimestampIndex
-	if err := json.Unmarshal(indexData, &index); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to unmarshal index: %w", err)
-	}
-
-	// Read metadata length and data
-	// Metadata ends right before the index length (at the same position)
-	// Structure: [metadata_len(4)] [metadata] [index_len(4)] [index] [footer]
-	// Metadata JSON starts with {"createdAt" and ends right before index length
-	metadataSearchWindow := int64(2000) // Search up to 2KB before index length
-	if indexLenPos < metadataSearchWindow {
-		metadataSearchWindow = indexLenPos
-	}
-
-	metadataReadStart := indexLenPos - metadataSearchWindow
-	if metadataReadStart < 0 {
-		metadataReadStart = 0
-	}
-
-	file.Seek(metadataReadStart, 0)
-	metadataSearchData := make([]byte, metadataSearchWindow)
-	if _, err := file.Read(metadataSearchData); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read metadata search window: %w", err)
-	}
-
-	// Find metadata JSON start by looking for {"createdAt" marker
-	metadataStartMarker := []byte(`{"createdAt"`)
-	metadataStartInWindow := bytes.LastIndex(metadataSearchData, metadataStartMarker)
-	if metadataStartInWindow < 0 {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("metadata JSON start marker not found")
-	}
-
-	// Calculate absolute position
-	metadataJSONStart := metadataReadStart + int64(metadataStartInWindow)
-
-	// Metadata JSON ends right before the index length field (4 bytes before indexLenPos)
-	// Structure: [metadata_len(4)] [metadata] [index_len(4)] [index] [footer]
-	metadataJSONEnd := indexLenPos - 4
-	metadataLenActual := metadataJSONEnd - metadataJSONStart
-
-	// Metadata length is 4 bytes before metadata JSON start
-	metadataLenPos := metadataJSONStart - 4
-	if metadataLenPos < 0 {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("metadata length position is negative")
-	}
-
-	file.Seek(metadataLenPos, 0)
-	var metadataLen int32
-	if err := binary.Read(file, binary.LittleEndian, &metadataLen); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read metadata length: %w", err)
-	}
-
-	if metadataLen <= 0 || metadataLen > 10*1024*1024 { // Sanity check: max 10MB metadata
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("invalid metadata length: %d", metadataLen)
-	}
-
-	// Verify metadata length matches actual size
-	// Use the actual calculated length instead of stored length to avoid mismatches
-	// The stored length might be incorrect due to how it was calculated during write
-	if int64(metadataLen) != metadataLenActual {
-		qe.logger.Debug("Metadata length mismatch: stored=%d, actual=%d, using actual", metadataLen, metadataLenActual)
-		metadataLen = int32(metadataLenActual)
-	}
-
-	// Read metadata data
-	file.Seek(metadataJSONStart, 0)
-	metadataData := make([]byte, metadataLen)
-	if _, err := file.Read(metadataData); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to read metadata data: %w", err)
-	}
-
-	// Verify metadata ends where index length starts
-	expectedMetadataEnd := indexLenPos
-	actualMetadataEnd := metadataJSONStart + int64(metadataLen)
-	if actualMetadataEnd != expectedMetadataEnd {
-		qe.logger.Debug("Metadata end mismatch: expected=%d, actual=%d", expectedMetadataEnd, actualMetadataEnd)
-	}
-
-	// Parse metadata JSON
-	var metadata models.FileMetadata
-	if err := json.Unmarshal(metadataData, &metadata); err != nil {
-		return models.FileMetadata{}, models.SparseTimestampIndex{}, fmt.Errorf("failed to unmarshal metadata: %w", err)
-	}
-
-	return metadata, index, nil
+	errStr := err.Error()
+	return strings.Contains(errStr, "invalid file header magic bytes")
 }
 
 // QueryCount returns the number of events matching the query
@@ -529,165 +232,128 @@ func (qe *QueryExecutor) QueryCount(query *models.QueryRequest) (int64, error) {
 	return int64(result.Count), nil
 }
 
-// QueryForSegments queries and returns segments that match the query
-func (qe *QueryExecutor) QueryForSegments(query *models.QueryRequest) ([]models.StorageSegment, error) {
-	files, err := qe.storage.getStorageFiles()
-	if err != nil {
-		return nil, err
-	}
-
-	var segments []models.StorageSegment
-
-	for _, filePath := range files {
-		fileSegments, err := qe.getFileSegments(filePath, query)
-		if err != nil {
-			qe.logger.Warn("Failed to get segments from file %s: %v", filePath, err)
-			continue
-		}
-		segments = append(segments, fileSegments...)
-	}
-
-	return segments, nil
-}
-
-// getFileSegments gets segments from a file that match the query
-func (qe *QueryExecutor) getFileSegments(filePath string, query *models.QueryRequest) ([]models.StorageSegment, error) {
-	// TODO: Implement segment retrieval
-	return []models.StorageSegment{}, nil
-}
-
-// queryIncompleteFile queries an incomplete file by scanning segments directly
-// This is used for files that are still being written (no footer/index yet)
+// queryIncompleteFile queries an incomplete block storage file
+// Block storage files require the index section to locate blocks, so truly incomplete files
+// (still being written with no footer) cannot be queried - we skip them.
+// This function attempts to read the file as a complete block storage file first.
 func (qe *QueryExecutor) queryIncompleteFile(filePath string, query *models.QueryRequest) ([]models.Event, int32, int32, error) {
-	file, err := os.Open(filePath)
+	// Try to read file using BlockReader - it may actually be complete
+	reader, err := NewBlockReader(filePath)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to open file: %w", err)
+		// File is truly incomplete or corrupted
+		qe.logger.Debug("File %s cannot be read: %v", filePath, err)
+		return []models.Event{}, 0, 0, nil
 	}
-	defer file.Close()
+	defer reader.Close()
 
-	fileInfo, err := file.Stat()
+	fileData, err := reader.ReadFile()
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	fileSize := fileInfo.Size()
-	if fileSize == 0 {
-		// Empty file, no segments to read
+		// File is incomplete - no valid footer/index
+		qe.logger.Debug("File %s has no valid index: %v", filePath, err)
 		return []models.Event{}, 0, 0, nil
 	}
 
-	// Scan file for segments
-	// Segments start at offset 0 (no file header)
-	// Format: ID(4) + startTimestamp(8) + endTimestamp(8) + eventCount(4) + uncompressedSize(8) + compressedSize(8) + compressedData
+	// File is actually complete! Query it using block metadata
 	var allEvents []models.Event
-	var segmentsScanned int32
-	var segmentsSkipped int32
-	offset := int64(0)
-	compressor := NewCompressor()
+	var blocksScanned int32
+	var blocksSkipped int32
 
 	startTimeNs := query.StartTimestamp * 1e9
 	endTimeNs := query.EndTimestamp * 1e9
 
-	// Scan segments until we reach the end of the file
-	for offset < fileSize {
-		// Check if we have enough bytes for a segment header (40 bytes)
-		if fileSize-offset < 40 {
-			// Not enough data for a complete segment header
-			break
-		}
-
-		// Read segment header
-		if _, err := file.Seek(offset, 0); err != nil {
-			break
-		}
-
-		var segmentID int32
-		var startTimestamp, endTimestamp int64
-		var eventCount int32
-		var uncompressedSize, compressedSize int64
-
-		if err := binary.Read(file, binary.LittleEndian, &segmentID); err != nil {
-			break
-		}
-		if err := binary.Read(file, binary.LittleEndian, &startTimestamp); err != nil {
-			break
-		}
-		if err := binary.Read(file, binary.LittleEndian, &endTimestamp); err != nil {
-			break
-		}
-		if err := binary.Read(file, binary.LittleEndian, &eventCount); err != nil {
-			break
-		}
-		if err := binary.Read(file, binary.LittleEndian, &uncompressedSize); err != nil {
-			break
-		}
-		if err := binary.Read(file, binary.LittleEndian, &compressedSize); err != nil {
-			break
-		}
-
-		// Check if segment overlaps with query time range
-		if endTimestamp < startTimeNs || startTimestamp > endTimeNs {
-			// Skip this segment, move to next
-			offset += 40 + compressedSize
-			segmentsSkipped++
+	for _, blockMeta := range fileData.IndexSection.BlockMetadata {
+		// Check if block overlaps with query time range
+		if blockMeta.TimestampMax < startTimeNs || blockMeta.TimestampMin > endTimeNs {
+			blocksSkipped++
 			continue
 		}
 
-		// Check if we have enough data for the compressed segment
-		if fileSize-offset-40 < compressedSize {
-			// Segment is incomplete, stop scanning
-			break
-		}
-
-		// Read and decompress segment
-		compressedData := make([]byte, compressedSize)
-		if _, err := file.Read(compressedData); err != nil {
-			segmentsSkipped++
-			offset += 40 + compressedSize
+		// Check if block matches resource filters using metadata
+		if !qe.blockMatchesFilters(blockMeta, query.Filters) {
+			blocksSkipped++
 			continue
 		}
 
-		// Decompress and parse events
-		decompressed, err := compressor.Decompress(compressedData)
+		// Read and decompress block
+		events, err := reader.ReadBlockEvents(blockMeta)
 		if err != nil {
-			segmentsSkipped++
-			offset += 40 + compressedSize
+			qe.logger.Warn("Failed to read block %d from file %s: %v", blockMeta.ID, filePath, err)
+			blocksSkipped++
 			continue
 		}
 
-		// Parse events
-		lines := bytes.Split(decompressed, []byte("\n"))
-		for _, line := range lines {
-			if len(line) == 0 {
-				continue
-			}
-
-			var event models.Event
-			if err := json.Unmarshal(line, &event); err != nil {
-				continue
-			}
-
-			// Filter by time range
+		// Filter events by time range and resource filters
+		for _, event := range events {
 			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
 				continue
 			}
 
-			// Filter by resource filters
-			if !qe.filterEngine.MatchesFilters(&event, query.Filters) {
+			if !qe.filterEngine.MatchesFilters(event, query.Filters) {
 				continue
 			}
 
-			allEvents = append(allEvents, event)
+			allEvents = append(allEvents, *event)
 		}
 
-		segmentsScanned++
-		offset += 40 + compressedSize
+		blocksScanned++
 	}
 
-	qe.logger.Debug("File %s (incomplete): scanned %d segments, skipped %d, found %d events",
-		filePath, segmentsScanned, segmentsSkipped, len(allEvents))
+	qe.logger.Debug("File %s (incomplete): scanned %d blocks, skipped %d, found %d events",
+		filePath, blocksScanned, blocksSkipped, len(allEvents))
 
-	return allEvents, segmentsScanned, segmentsSkipped, nil
+	return allEvents, blocksScanned, blocksSkipped, nil
+}
+
+// blockMatchesFilters checks if a block might contain matching events based on its metadata
+func (qe *QueryExecutor) blockMatchesFilters(blockMeta *BlockMetadata, filters models.QueryFilters) bool {
+	// If no filters, block matches
+	if filters.Kind == "" && filters.Namespace == "" && filters.Group == "" {
+		return true
+	}
+
+	// Check kind filter
+	if filters.Kind != "" {
+		found := false
+		for _, kind := range blockMeta.KindSet {
+			if kind == filters.Kind {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	// Check namespace filter
+	if filters.Namespace != "" {
+		found := false
+		for _, ns := range blockMeta.NamespaceSet {
+			if ns == filters.Namespace {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	// Check group filter
+	if filters.Group != "" {
+		found := false
+		for _, group := range blockMeta.GroupSet {
+			if group == filters.Group {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	return true
 }
 
 // isIncompleteFileError checks if an error indicates the file is incomplete (still being written)

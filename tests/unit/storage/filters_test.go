@@ -3,8 +3,8 @@ package storage
 import (
 	"testing"
 
-	"github.com/moritz/rpk/internal/models"
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 // TestNewFilterEngine tests filter engine creation
@@ -243,32 +243,32 @@ func TestMatchesFilters(t *testing.T) {
 			matches: true,
 		},
 		{
-			name: "matching kind",
+			name:    "matching kind",
 			filters: models.QueryFilters{Kind: "Deployment"},
 			matches: true,
 		},
 		{
-			name: "non-matching kind",
+			name:    "non-matching kind",
 			filters: models.QueryFilters{Kind: "Pod"},
 			matches: false,
 		},
 		{
-			name: "matching namespace",
+			name:    "matching namespace",
 			filters: models.QueryFilters{Namespace: "default"},
 			matches: true,
 		},
 		{
-			name: "non-matching namespace",
+			name:    "non-matching namespace",
 			filters: models.QueryFilters{Namespace: "kube-system"},
 			matches: false,
 		},
 		{
-			name: "matching group and kind",
+			name:    "matching group and kind",
 			filters: models.QueryFilters{Group: "apps", Kind: "Deployment"},
 			matches: true,
 		},
 		{
-			name: "partial match (group matches, kind doesn't)",
+			name:    "partial match (group matches, kind doesn't)",
 			filters: models.QueryFilters{Group: "apps", Kind: "Pod"},
 			matches: false,
 		},
@@ -331,10 +331,10 @@ func TestAreFiltersCompatible(t *testing.T) {
 	fe := storage.NewFilterEngine()
 
 	testCases := []struct {
-		name        string
-		filters1    models.QueryFilters
-		filters2    models.QueryFilters
-		compatible  bool
+		name       string
+		filters1   models.QueryFilters
+		filters2   models.QueryFilters
+		compatible bool
 	}{
 		{
 			name:       "both empty",
@@ -377,7 +377,7 @@ func TestAreFiltersCompatible(t *testing.T) {
 			filters1: models.QueryFilters{
 				Kind: "Pod",
 			},
-			filters2: models.QueryFilters{},
+			filters2:   models.QueryFilters{},
 			compatible: true,
 		},
 	}
@@ -400,19 +400,19 @@ func TestFilterEventsByGroup(t *testing.T) {
 		{
 			Resource: models.ResourceMetadata{
 				Group: "apps",
-				Kind: "Deployment",
+				Kind:  "Deployment",
 			},
 		},
 		{
 			Resource: models.ResourceMetadata{
 				Group: "batch",
-				Kind: "Job",
+				Kind:  "Job",
 			},
 		},
 		{
 			Resource: models.ResourceMetadata{
 				Group: "apps",
-				Kind: "StatefulSet",
+				Kind:  "StatefulSet",
 			},
 		},
 	}
@@ -437,19 +437,19 @@ func TestFilterEventsByVersion(t *testing.T) {
 		{
 			Resource: models.ResourceMetadata{
 				Version: "v1",
-				Kind: "Pod",
+				Kind:    "Pod",
 			},
 		},
 		{
 			Resource: models.ResourceMetadata{
 				Version: "v1beta1",
-				Kind: "Pod",
+				Kind:    "Pod",
 			},
 		},
 		{
 			Resource: models.ResourceMetadata{
 				Version: "v1",
-				Kind: "Deployment",
+				Kind:    "Deployment",
 			},
 		},
 	}

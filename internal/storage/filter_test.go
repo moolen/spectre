@@ -244,4 +244,3 @@ func TestBloomFilterEmpty(t *testing.T) {
 		t.Error("deserialized empty filter should not contain items")
 	}
 }
-

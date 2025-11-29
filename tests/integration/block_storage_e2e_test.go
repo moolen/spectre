@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
-	"github.com/moritz/rpk/internal/storage"
+	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 // TestEndToEndBlockStorage verifies the complete lifecycle:
@@ -55,7 +55,7 @@ func TestEndToEndBlockStorage(t *testing.T) {
 			t.Fatalf("Failed to write event %d: %v", i, err)
 		}
 
-		if (i + 1) % 25000 == 0 {
+		if (i+1)%25000 == 0 {
 			t.Logf("Written %d events", i+1)
 		}
 	}

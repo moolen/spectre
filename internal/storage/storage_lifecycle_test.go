@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 func TestStorageGetInMemoryEvents_Empty(t *testing.T) {
@@ -457,55 +457,3 @@ func TestStorageDeleteOldFiles_KeepRecent(t *testing.T) {
 		t.Error("expected recent file to be kept")
 	}
 }
-
-func TestStorageGetEventsByTimeRange(t *testing.T) {
-	tmpDir := t.TempDir()
-	storage, err := New(tmpDir, 1024*1024)
-	if err != nil {
-		t.Fatalf("failed to create storage: %v", err)
-	}
-	defer storage.Close()
-
-	// Write events
-	now := time.Now()
-	baseTime := now.Unix()
-	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod2", "default", "Pod", now.Add(-20*time.Minute).UnixNano()),
-	}
-
-	for _, event := range events {
-		if err := storage.WriteEvent(event); err != nil {
-			t.Fatalf("failed to write event: %v", err)
-		}
-	}
-
-	// Close to finalize
-	if err := storage.Close(); err != nil {
-		t.Fatalf("failed to close storage: %v", err)
-	}
-
-	// Reopen
-	storage, err = New(tmpDir, 1024*1024)
-	if err != nil {
-		t.Fatalf("failed to recreate storage: %v", err)
-	}
-	defer storage.Close()
-
-	// Query by time range
-	startTime := (baseTime - 3600) * 1e9 // Convert to nanoseconds
-	endTime := baseTime * 1e9
-	filters := models.QueryFilters{}
-
-	results, err := storage.GetEventsByTimeRange(startTime, endTime, filters)
-	if err != nil {
-		t.Fatalf("GetEventsByTimeRange failed: %v", err)
-	}
-
-	// Note: This currently returns empty (see TODO in storage.go)
-	// This test documents the current behavior
-	if len(results) > 0 {
-		t.Logf("GetEventsByTimeRange returned %d events", len(results))
-	}
-}
-

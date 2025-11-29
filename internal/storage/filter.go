@@ -34,11 +34,11 @@ type BloomFilter interface {
 
 // StandardBloomFilter implements BloomFilter using bits-and-blooms/bloom
 type StandardBloomFilter struct {
-	filter             *bloom.BloomFilter
-	falsePositiveRate  float32
-	expectedElements   uint
-	serializedBitset   []byte
-	hashFunctions      uint
+	filter            *bloom.BloomFilter
+	falsePositiveRate float32
+	expectedElements  uint
+	serializedBitset  []byte
+	hashFunctions     uint
 }
 
 // NewBloomFilter creates a new bloom filter with specified expected elements and FP rate
@@ -98,11 +98,11 @@ func (b *StandardBloomFilter) MarshalJSON() ([]byte, error) {
 	bitsetBase64 := base64.StdEncoding.EncodeToString(serialized)
 
 	jsonData := map[string]interface{}{
-		"size_bits":               b.filter.BitSet().Len(),
-		"hash_functions":          b.hashFunctions,
-		"bitset":                  bitsetBase64,
-		"false_positive_rate":     b.falsePositiveRate,
-		"expected_elements":       b.expectedElements,
+		"size_bits":           b.filter.BitSet().Len(),
+		"hash_functions":      b.hashFunctions,
+		"bitset":              bitsetBase64,
+		"false_positive_rate": b.falsePositiveRate,
+		"expected_elements":   b.expectedElements,
 	}
 
 	return json.Marshal(jsonData)

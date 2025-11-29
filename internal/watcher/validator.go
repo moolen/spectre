@@ -3,8 +3,8 @@ package watcher
 import (
 	"fmt"
 
-	"github.com/moritz/rpk/internal/logging"
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // EventValidator validates captured events
@@ -89,10 +89,10 @@ func (v *EventValidator) LogValidationError(event *models.Event, err error) {
 // GetValidationSummary returns a summary of validation for a batch
 func (v *EventValidator) GetValidationSummary(events []models.Event) map[string]int {
 	summary := map[string]int{
-		"total":    len(events),
-		"valid":    0,
-		"invalid":  0,
-		"by_type":  0,
+		"total":   len(events),
+		"valid":   0,
+		"invalid": 0,
+		"by_type": 0,
 	}
 
 	for _, event := range events {

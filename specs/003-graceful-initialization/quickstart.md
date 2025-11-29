@@ -83,10 +83,10 @@ package main
 
 import (
     "context"
-    "github.com/moritz/rpk/internal/lifecycle"
-    "github.com/moritz/rpk/internal/storage"
-    "github.com/moritz/rpk/internal/watcher"
-    "github.com/moritz/rpk/internal/api"
+    "github.com/moolen/spectre/internal/lifecycle"
+    "github.com/moolen/spectre/internal/storage"
+    "github.com/moolen/spectre/internal/watcher"
+    "github.com/moolen/spectre/internal/api"
 )
 
 func main() {
@@ -246,7 +246,7 @@ manager.Register(storageComp)
 All lifecycle events are logged automatically. Enable debug logging for detailed diagnostics:
 
 ```go
-import "github.com/moritz/rpk/internal/logging"
+import "github.com/moolen/spectre/internal/logging"
 
 // Set log level to debug
 logging.Initialize("debug")

@@ -363,5 +363,3 @@ func TestComputeChecksum(t *testing.T) {
 		t.Error("expected different checksum for different data")
 	}
 }
-
-

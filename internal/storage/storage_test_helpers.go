@@ -3,7 +3,7 @@ package storage
 import (
 	"encoding/json"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // createTestEvent creates a test event with the given parameters
@@ -23,4 +23,3 @@ func createTestEvent(name, namespace, kind string, timestamp int64) *models.Even
 		Data: json.RawMessage(`{"test": "data"}`),
 	}
 }
-

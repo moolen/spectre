@@ -9,9 +9,9 @@ keywords:
   - monitoring
   - events
   - storage
-home: https://github.com/moritz/rpk
+home: https://github.com/moolen/spectre
 sources:
-  - https://github.com/moritz/rpk
+  - https://github.com/moolen/spectre
 maintainers:
   - name: rpk-team
     email: team@rpk.local

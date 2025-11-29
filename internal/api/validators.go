@@ -3,7 +3,7 @@ package api
 import (
 	"fmt"
 
-	"github.com/moritz/rpk/internal/models"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // Validator validates API request parameters
