@@ -1,0 +1,55 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: vault
+  namespace: flux-system
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: vault
+      version: "0.25.0"
+      sourceRef:
+        kind: HelmRepository
+        name: hashicorp
+        namespace: flux-system
+  values:
+    global:
+      enabled: true
+    server:
+      enabled: true
+      dataStorage:
+        enabled: true
+        size: 10Gi
+        storageClass: "standard"
+      auditStorage:
+        enabled: false
+      ha:
+        enabled: false
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 250m
+          memory: 256Mi
+      dev:
+        enabled: true
+      extraEnvironmentVars:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+    ui:
+      enabled: true
+      service:
+        enabled: true
+  targetNamespace: vault
+  install:
+    createNamespace: false
+  dependsOn:
+  - name: external-secrets
+    namespace: flux-system

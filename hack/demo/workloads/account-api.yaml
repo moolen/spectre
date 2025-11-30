@@ -1,0 +1,51 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: account-api-config
+  namespace: workloads
+data:
+  DATABASE_HOST: "localhost"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "accounts"
+  LOG_LEVEL: "info"
+  JWT_SECRET: "demo_jwt_secret_key"
+  AUTH_PROVIDER: "oauth2"
+  OAUTH_ENDPOINT: "https://auth.example.com"
+  SESSION_STORE: "redis"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-api
+  namespace: workloads
+  labels:
+    app: account-api
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: account-api
+  template:
+    metadata:
+      labels:
+        app: account-api
+        version: v1
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+      - name: account-api
+        image: busybox:1.35
+        command: ["sleep", "infinity"]
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 50m
+            memory: 32Mi
+        envFrom:
+        - configMapRef:
+            name: account-api-config
