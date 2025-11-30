@@ -57,7 +57,7 @@ func Initialize(levelStr string) {
 
 	globalLogger = &Logger{
 		level: level,
-		name:  "rpk",
+		name:  "spectre",
 	}
 }
 

@@ -675,3 +675,516 @@ func TestQueryExecutorExecute_NonExistentDirectory(t *testing.T) {
 		t.Errorf("expected 0 events in empty directory, got %d", result.Count)
 	}
 }
+
+func TestQueryExecutorExecute_OpenFileWithoutIndexAndClosedFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	now := time.Now()
+	baseTime := now.Unix()
+
+	// === PART 1: Create and close a file with some events (has index/footer) ===
+	hour1 := now.Add(-2 * time.Hour)
+	hour1Timestamp := time.Date(hour1.Year(), hour1.Month(), hour1.Day(), hour1.Hour(), 0, 0, 0, hour1.Location())
+	closedFilePath := filepath.Join(tmpDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		hour1.Year(), hour1.Month(), hour1.Day(), hour1.Hour()))
+
+	closedFile, err := NewBlockStorageFile(closedFilePath, hour1Timestamp.Unix(), 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create closed file: %v", err)
+	}
+
+	// Write events to closed file
+	closedFileEvents := []*models.Event{
+		createTestEvent("closed-pod1", "default", "Pod", hour1.Add(0*time.Minute).UnixNano()),
+		createTestEvent("closed-pod2", "default", "Pod", hour1.Add(1*time.Minute).UnixNano()),
+		createTestEvent("closed-svc1", "default", "Service", hour1.Add(2*time.Minute).UnixNano()),
+	}
+	for _, event := range closedFileEvents {
+		if err := closedFile.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event to closed file: %v", err)
+		}
+	}
+
+	// Close the file to finalize with footer and index
+	if err := closedFile.Close(); err != nil {
+		t.Fatalf("failed to close file: %v", err)
+	}
+
+	// === PART 2: Create a storage instance and write events to an open file (no index/footer) ===
+	storage, err := New(tmpDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Write events that stay in the open file's buffer (not closed = no footer/index)
+	openFileEvents := []*models.Event{
+		createTestEvent("open-pod1", "default", "Pod", now.Add(0*time.Minute).UnixNano()),
+		createTestEvent("open-pod2", "default", "Pod", now.Add(1*time.Minute).UnixNano()),
+		createTestEvent("open-svc1", "kube-system", "Service", now.Add(2*time.Minute).UnixNano()),
+	}
+	for _, event := range openFileEvents {
+		if err := storage.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event to open file: %v", err)
+		}
+	}
+
+	// DON'T close storage - so the current file remains open with no footer/index
+
+	// === PART 3: Query for all events (both closed file and open file) ===
+	executor := NewQueryExecutor(storage)
+	query := &models.QueryRequest{
+		StartTimestamp: baseTime - 10800, // 3 hours ago
+		EndTimestamp:   baseTime + 3600,   // 1 hour in future
+		Filters:        models.QueryFilters{},
+	}
+
+	result, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// === PART 4: Verify that we got events from BOTH the closed file AND the open file ===
+	expectedEventCount := len(closedFileEvents) + len(openFileEvents) // 3 + 3 = 6
+	if result.Count < int32(expectedEventCount) {
+		t.Errorf("expected at least %d events (from closed and open files), got %d",
+			expectedEventCount, result.Count)
+	}
+
+	// Verify we got events from the open file
+	openFileEventNames := map[string]bool{
+		"open-pod1": false,
+		"open-pod2": false,
+		"open-svc1": false,
+	}
+	closedFileEventNames := map[string]bool{
+		"closed-pod1": false,
+		"closed-pod2": false,
+		"closed-svc1": false,
+	}
+
+	for _, event := range result.Events {
+		if _, exists := openFileEventNames[event.Resource.Name]; exists {
+			openFileEventNames[event.Resource.Name] = true
+		}
+		if _, exists := closedFileEventNames[event.Resource.Name]; exists {
+			closedFileEventNames[event.Resource.Name] = true
+		}
+	}
+
+	// Check that we got events from the open file
+	for eventName, found := range openFileEventNames {
+		if !found {
+			t.Errorf("event from OPEN file '%s' was not found in query results - BUG CONFIRMED: open files without index are not being queried", eventName)
+		}
+	}
+
+	// Check that we got events from the closed file too
+	for eventName, found := range closedFileEventNames {
+		if !found {
+			t.Errorf("event from CLOSED file '%s' was not found in query results", eventName)
+		}
+	}
+
+	storage.Close()
+}
+
+func TestQueryExecutorExecute_OpenFileRestoredBlocksAndNewEvents(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	now := time.Now()
+	baseTime := now.Unix()
+
+	// === PART 1: Create initial storage and write some events, then close ===
+	storage1, err := New(tmpDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create initial storage: %v", err)
+	}
+
+	initialEvents := []*models.Event{
+		createTestEvent("initial-pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("initial-pod2", "default", "Pod", now.Add(-25*time.Minute).UnixNano()),
+	}
+	for _, event := range initialEvents {
+		if err := storage1.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write initial event: %v", err)
+		}
+	}
+
+	// Close to finalize the file with index/footer
+	if err := storage1.Close(); err != nil {
+		t.Fatalf("failed to close initial storage: %v", err)
+	}
+
+	// === PART 2: Reopen storage (file now has restored blocks + index) and add new events ===
+	storage2, err := New(tmpDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to reopen storage: %v", err)
+	}
+
+	// Add new events to the reopened file (has restored blocks but new events in buffer)
+	newEvents := []*models.Event{
+		createTestEvent("new-pod1", "default", "Pod", now.Add(-10*time.Minute).UnixNano()),
+		createTestEvent("new-svc1", "kube-system", "Service", now.Add(-5*time.Minute).UnixNano()),
+	}
+	for _, event := range newEvents {
+		if err := storage2.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write new event: %v", err)
+		}
+	}
+
+	// Don't close storage2 - file has restored blocks + new unbuffered events
+
+	// === PART 3: Query for all events ===
+	executor := NewQueryExecutor(storage2)
+	query := &models.QueryRequest{
+		StartTimestamp: baseTime - 7200, // 2 hours ago
+		EndTimestamp:   baseTime + 3600,  // 1 hour in future
+		Filters:        models.QueryFilters{},
+	}
+
+	result, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// === PART 4: Verify we get BOTH initial events (restored blocks) and new events (buffer) ===
+	expectedEventCount := len(initialEvents) + len(newEvents) // 2 + 2 = 4
+	if result.Count < int32(expectedEventCount) {
+		t.Errorf("expected at least %d events (initial + new), got %d",
+			expectedEventCount, result.Count)
+	}
+
+	// Verify all events are present
+	allEventNames := map[string]bool{
+		"initial-pod1": false,
+		"initial-pod2": false,
+		"new-pod1":     false,
+		"new-svc1":     false,
+	}
+
+	for _, event := range result.Events {
+		if _, exists := allEventNames[event.Resource.Name]; exists {
+			allEventNames[event.Resource.Name] = true
+		}
+	}
+
+	for eventName, found := range allEventNames {
+		if !found {
+			t.Errorf("event '%s' was not found in query results", eventName)
+		}
+	}
+
+	storage2.Close()
+}
+
+func TestQueryExecutorExecute_OnlyRestoredBlocksNoNewEvents(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	now := time.Now()
+	baseTime := now.Unix()
+
+	// === PART 1: Create initial storage and write some events, then close ===
+	storage1, err := New(tmpDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create initial storage: %v", err)
+	}
+
+	initialEvents := []*models.Event{
+		createTestEvent("initial-pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("initial-pod2", "default", "Pod", now.Add(-25*time.Minute).UnixNano()),
+		createTestEvent("initial-svc1", "default", "Service", now.Add(-20*time.Minute).UnixNano()),
+	}
+	for _, event := range initialEvents {
+		if err := storage1.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write initial event: %v", err)
+		}
+	}
+
+	// Close to finalize the file with index/footer
+	if err := storage1.Close(); err != nil {
+		t.Fatalf("failed to close initial storage: %v", err)
+	}
+
+	// === PART 2: Reopen storage (file now has restored blocks) ===
+	storage2, err := New(tmpDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to reopen storage: %v", err)
+	}
+
+	// DON'T add any new events - just restored blocks, no new buffer events
+	// Don't close storage2 - file has restored blocks but no new events
+
+	// === PART 3: Query for restored events only ===
+	executor := NewQueryExecutor(storage2)
+	query := &models.QueryRequest{
+		StartTimestamp: baseTime - 7200, // 2 hours ago
+		EndTimestamp:   baseTime + 3600,  // 1 hour in future
+		Filters:        models.QueryFilters{},
+	}
+
+	result, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// === PART 4: Verify we get ONLY the restored events (not new events since there are none) ===
+	expectedEventCount := len(initialEvents) // 3
+	if result.Count < int32(expectedEventCount) {
+		t.Errorf("expected at least %d restored events (no new events were added), got %d",
+			expectedEventCount, result.Count)
+	}
+
+	// Verify all initial events are present
+	allEventNames := map[string]bool{
+		"initial-pod1": false,
+		"initial-pod2": false,
+		"initial-svc1": false,
+	}
+
+	for _, event := range result.Events {
+		if _, exists := allEventNames[event.Resource.Name]; exists {
+			allEventNames[event.Resource.Name] = true
+		}
+	}
+
+	for eventName, found := range allEventNames {
+		if !found {
+			t.Errorf("restored event '%s' was not found in query results - BUG: restored blocks from open file are not accessible", eventName)
+		}
+	}
+
+	storage2.Close()
+}
+
+func TestQueryExecutorExecute_WithNamespaceFilterOnOpenFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	now := time.Now()
+	baseTime := now.Unix()
+
+	// === PART 1: Create and close a file with events in different namespaces ===
+	storage1, err := New(tmpDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	closedFileEvents := []*models.Event{
+		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod2", "kube-system", "Pod", now.Add(-25*time.Minute).UnixNano()),
+	}
+	for _, event := range closedFileEvents {
+		if err := storage1.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event: %v", err)
+		}
+	}
+	if err := storage1.Close(); err != nil {
+		t.Fatalf("failed to close storage: %v", err)
+	}
+
+	// === PART 2: Reopen and add events to open file with different namespaces ===
+	storage2, err := New(tmpDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to reopen storage: %v", err)
+	}
+
+	openFileEvents := []*models.Event{
+		createTestEvent("pod3", "default", "Pod", now.Add(-10*time.Minute).UnixNano()),
+		createTestEvent("pod4", "kube-system", "Pod", now.Add(-5*time.Minute).UnixNano()),
+	}
+	for _, event := range openFileEvents {
+		if err := storage2.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event: %v", err)
+		}
+	}
+
+	// === PART 3: Query with namespace filter ===
+	executor := NewQueryExecutor(storage2)
+	query := &models.QueryRequest{
+		StartTimestamp: baseTime - 7200,
+		EndTimestamp:   baseTime + 3600,
+		Filters:        models.QueryFilters{Namespace: "default"},
+	}
+
+	result, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// === PART 4: Verify we get filtered events from BOTH restored blocks and open buffer ===
+	// Expected: pod1 (closed, default) + pod3 (open, default) = 2
+	expectedEventCount := 2
+	if result.Count < int32(expectedEventCount) {
+		t.Errorf("expected at least %d events from 'default' namespace, got %d",
+			expectedEventCount, result.Count)
+	}
+
+	// Verify all events are from the correct namespace
+	for _, event := range result.Events {
+		if event.Resource.Namespace != "default" {
+			t.Errorf("got event from '%s' namespace, expected 'default'", event.Resource.Namespace)
+		}
+	}
+
+	// Verify we got the specific events
+	expectedNames := map[string]bool{
+		"pod1": false,
+		"pod3": false,
+	}
+
+	for _, event := range result.Events {
+		if _, exists := expectedNames[event.Resource.Name]; exists {
+			expectedNames[event.Resource.Name] = true
+		}
+	}
+
+	for eventName, found := range expectedNames {
+		if !found {
+			t.Errorf("expected event '%s' not found in query results", eventName)
+		}
+	}
+
+	storage2.Close()
+}
+
+func TestQueryExecutorExecute_CurrentFileStillBeingWritten(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	now := time.Now()
+	baseTime := now.Unix()
+
+	// === PART 1: Create storage and write events WITHOUT closing ===
+	// This simulates a fresh start where the current file is still being written
+	storage, err := New(tmpDir, 1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Write multiple events that will be flushed to disk in blocks
+	// but the file will NOT have a footer (because storage is still open)
+	events := []*models.Event{
+		createTestEvent("pod1", "default", "Pod", now.Add(-5*time.Minute).UnixNano()),
+		createTestEvent("pod2", "default", "Pod", now.Add(-4*time.Minute).UnixNano()),
+		createTestEvent("pod3", "default", "Pod", now.Add(-3*time.Minute).UnixNano()),
+		createTestEvent("pod4", "default", "Pod", now.Add(-2*time.Minute).UnixNano()),
+		createTestEvent("pod5", "default", "Pod", now.Add(-1*time.Minute).UnixNano()),
+	}
+	for _, event := range events {
+		if err := storage.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event: %v", err)
+		}
+	}
+
+	// === PART 2: Query WITHOUT closing storage ===
+	// The file is still open, has no footer, but has events in memory + on disk
+	executor := NewQueryExecutor(storage)
+	query := &models.QueryRequest{
+		StartTimestamp: baseTime - 600, // 10 minutes ago
+		EndTimestamp:   baseTime,        // now
+		Filters:        models.QueryFilters{},
+	}
+
+	result, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// === PART 3: Verify we can query the current file while it's still being written ===
+	// Expected: All 5 events should be retrievable
+	expectedEventCount := len(events)
+	if result.Count < int32(expectedEventCount) {
+		t.Errorf("BUG CONFIRMED: expected %d events from current file while it's being written, got %d. "+
+			"This is the actual bug - the current file should be queryable even without a footer!",
+			expectedEventCount, result.Count)
+	}
+
+	// Verify all events are present
+	foundEvents := make(map[string]bool)
+	for _, event := range result.Events {
+		foundEvents[event.Resource.Name] = true
+	}
+
+	for i := 1; i <= 5; i++ {
+		podName := fmt.Sprintf("pod%d", i)
+		if !foundEvents[podName] {
+			t.Errorf("event '%s' not found in results", podName)
+		}
+	}
+
+	storage.Close()
+}
+
+func TestQueryExecutorExecute_CurrentFileFinalizedBlocksNotInMemory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	now := time.Now()
+	baseTime := now.Unix()
+
+	// === PART 1: Write events with a smaller block size to force finalization ===
+	// Using a very small block size (1KB) to force events into multiple blocks
+	smallBlockSize := int64(1024)
+	storage, err := New(tmpDir, smallBlockSize)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+
+	// Create large events that will force block finalization
+	// Each event is ~150 bytes, so 1KB blocks will have ~6-7 events before finalizing
+	largeEvents := make([]*models.Event, 20)
+	for i := 0; i < 20; i++ {
+		largeEvents[i] = createTestEvent(
+			fmt.Sprintf("pod%d-with-long-name-to-make-event-bigger", i),
+			"default",
+			"Pod",
+			now.Add(time.Duration(-20+i)*time.Minute).UnixNano(),
+		)
+	}
+
+	// Write all events (some will be finalized into blocks, some in buffer)
+	for _, event := range largeEvents {
+		if err := storage.WriteEvent(event); err != nil {
+			t.Fatalf("failed to write event: %v", err)
+		}
+	}
+
+	// At this point:
+	// - Some events are in finalized blocks (written to disk, in s.currentFile.blocks)
+	// - Some events are still in the currentBuffer
+	// - No footer has been written (file is still open)
+
+	// === PART 2: Query the current file while it's still being written ===
+	executor := NewQueryExecutor(storage)
+	query := &models.QueryRequest{
+		StartTimestamp: baseTime - 2400,  // 40 minutes ago
+		EndTimestamp:   baseTime + 3600,   // 1 hour in future
+		Filters:        models.QueryFilters{},
+	}
+
+	result, err := executor.Execute(query)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// === PART 3: Verify we get ALL events (from both finalized blocks and buffer) ===
+	// Expected: All 20 events should be retrievable
+	expectedEventCount := len(largeEvents)
+	if result.Count < int32(expectedEventCount) {
+		t.Errorf("BUG: expected %d events (some from finalized blocks, some from buffer), got %d. "+
+			"The bug is that finalized blocks are not being queried when file has no footer",
+			expectedEventCount, result.Count)
+	}
+
+	// Verify all events are present
+	foundEvents := make(map[string]bool)
+	for _, event := range result.Events {
+		foundEvents[event.Resource.Name] = true
+	}
+
+	for i := 0; i < 20; i++ {
+		podName := fmt.Sprintf("pod%d-with-long-name-to-make-event-bigger", i)
+		if !foundEvents[podName] {
+			t.Errorf("event '%s' not found in results (likely in a finalized block that wasn't queried)", podName)
+		}
+	}
+
+	storage.Close()
+}

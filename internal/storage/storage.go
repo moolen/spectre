@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,7 +61,6 @@ func (s *Storage) WriteEvent(event *models.Event) error {
 		return err
 	}
 
-	s.logger.Debug("Event written for %s/%s", event.Resource.Kind, event.Resource.Name)
 	return nil
 }
 
@@ -287,6 +288,54 @@ func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event,
 			// Continue with just buffer events
 		} else {
 			allEvents = append(allEvents, restoredEvents...)
+		}
+	}
+
+	// Get events from finalized blocks that are in memory (current file still being written)
+	// These blocks have been finalized to disk but the file hasn't been closed with a footer yet
+	if len(s.currentFile.blocks) > 0 {
+		startTimeNs := query.StartTimestamp * 1e9
+		endTimeNs := query.EndTimestamp * 1e9
+
+		for _, block := range s.currentFile.blocks {
+			if block.Metadata == nil {
+				continue
+			}
+
+			// Check time range overlap
+			if block.Metadata.TimestampMax < startTimeNs || block.Metadata.TimestampMin > endTimeNs {
+				continue
+			}
+
+			// Decompress the block data
+			decompressedData, err := DecompressBlock(block)
+			if err != nil {
+				s.logger.Warn("Failed to decompress finalized block: %v", err)
+				continue
+			}
+
+			// Parse events from newline-delimited JSON (NDJSON)
+			lines := bytes.Split(decompressedData, []byte("\n"))
+			for _, line := range lines {
+				if len(line) == 0 {
+					continue // Skip empty lines
+				}
+
+				var event *models.Event
+				if err := json.Unmarshal(line, &event); err != nil {
+					s.logger.Warn("Failed to unmarshal event from finalized block: %v", err)
+					continue
+				}
+
+				// Filter by time range and resource filters
+				if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+					continue
+				}
+				if !query.Filters.Matches(event.Resource) {
+					continue
+				}
+				allEvents = append(allEvents, event)
+			}
 		}
 	}
 
