@@ -582,6 +582,19 @@ export const Timeline: React.FC<TimelineProps> = ({
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
 
+    // Update Segments
+    // Use theme-aware outline color: dark in dark theme, dark in light theme for visibility
+    const outlineColor = theme === 'light' ? '#1e293b' : '#ffffff';
+    svg.selectAll('.segment')
+        .attr('stroke', (d: any) => {
+          const isSel = selectedPoint && d.resourceId === selectedPoint.resourceId && d.index === selectedPoint.index;
+          return isSel ? outlineColor : 'none';
+        })
+        .attr('stroke-width', (d: any) => {
+          const isSel = selectedPoint && d.resourceId === selectedPoint.resourceId && d.index === selectedPoint.index;
+          return isSel ? 3 : 0;
+        });
+
     // Update Events
     svg.selectAll('.event-dot')
         .attr('fill', (d: any) => highlightedEventIds.includes(d.id) ? '#fbbf24' : '#f8fafc') // amber-400 vs slate-50
@@ -592,7 +605,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .filter((d: any) => highlightedEventIds.includes(d.id))
         .raise();
 
-  }, [selectedPoint, highlightedEventIds, themeColors]);
+  }, [selectedPoint, highlightedEventIds, themeColors, theme]);
 
   // Track previous sidebar width to detect panel closing
   const prevSidebarWidth = useRef(0);
