@@ -173,20 +173,23 @@ export const Timeline: React.FC<TimelineProps> = ({
     const labelGroup = svg.append('g')
       .attr('transform', `translate(0, ${MARGIN.top})`);
 
-    // Sidebar Background
+    // Sidebar Background - re-read from CSS to ensure theme is applied
+    const sidebarBg = getComputedStyle(document.documentElement).getPropertyValue('--color-sidebar-bg').trim() || themeColors.sidebar;
     labelGroup.append('rect')
         .attr('width', MARGIN.left - 2)
         .attr('height', Math.max(height, contentHeight + MARGIN.top + MARGIN.bottom))
         .attr('y', -MARGIN.top)
-        .attr('fill', themeColors.sidebar)
+        .attr('fill', sidebarBg)
         .attr('stroke', 'none');
 
+    // Border color - re-read from CSS to ensure theme is applied
+    const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border-soft').trim() || themeColors.border;
     labelGroup.append('line')
         .attr('x1', MARGIN.left - 1)
         .attr('x2', MARGIN.left - 1)
         .attr('y1', -MARGIN.top)
         .attr('y2', Math.max(height, contentHeight + MARGIN.top + MARGIN.bottom))
-        .attr('stroke', themeColors.border)
+        .attr('stroke', borderColor)
         .attr('stroke-width', 1);
 
     // --- Draw Labels ---
@@ -212,11 +215,15 @@ export const Timeline: React.FC<TimelineProps> = ({
     // Calculate max width for text (leave padding on right)
     const maxTextWidth = MARGIN.left - 40;
 
+    // Text colors - re-read from CSS to ensure theme is applied
+    const textPrimary = getComputedStyle(document.documentElement).getPropertyValue('--color-text-primary').trim() || themeColors.textPrimary;
+    const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || themeColors.textMuted;
+
     // Resource name with truncation and tooltip
     const nameText = labels.append('text')
       .attr('x', 0)
       .attr('y', yScale.bandwidth() / 2 - 6)
-      .attr('fill', themeColors.textPrimary)
+      .attr('fill', textPrimary)
       .style('font-size', '13px')
       .style('font-weight', '600')
       .style('dominant-baseline', 'middle')
@@ -252,7 +259,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       .text(d => `${d.kind} • ${d.namespace}`)
       .attr('x', 0)
       .attr('y', yScale.bandwidth() / 2 + 10)
-      .attr('fill', themeColors.textMuted)
+      .attr('fill', textMuted)
       .style('font-size', '11px')
       .style('dominant-baseline', 'middle');
 
@@ -364,7 +371,14 @@ export const Timeline: React.FC<TimelineProps> = ({
 
         contentGroup.selectAll<SVGRectElement, any>('.segment')
             .attr('x', d => newXScale(d.start))
-            .attr('width', d => Math.max(4, newXScale(d.end) - newXScale(d.start)));
+            .attr('width', d => {
+                const calculatedWidth = newXScale(d.end) - newXScale(d.start);
+                // Give terminating/deleted resources a minimal visible length
+                if (d.status === 'Terminating') {
+                    return 2;
+                }
+                return Math.max(4, calculatedWidth);
+            });
 
         contentGroup.selectAll<SVGCircleElement, any>('.event-dot')
             .attr('cx', d => newXScale(d.timestamp));
