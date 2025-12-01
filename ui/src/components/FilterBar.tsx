@@ -193,11 +193,14 @@ const MultiSelectDropdown = ({
                 }`}
                 aria-haspopup="listbox"
                 aria-expanded={isOpen}
+                title={selected.length > 0 ? selected.join(', ') : ''}
             >
                 <span className="truncate max-w-[120px]">
                     {selected.length === 0
                         ? label
-                        : `${label} (${selected.length})`}
+                        : selected.length === 1
+                        ? selected[0]
+                        : `${selected.join(', ')}`}
                 </span>
                 <svg
                     className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
