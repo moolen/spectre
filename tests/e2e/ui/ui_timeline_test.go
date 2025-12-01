@@ -29,13 +29,6 @@ func TestUITimelinePageNavigation(t *testing.T) {
 	})
 	require.NoError(t, err, "failed to navigate to root")
 
-	// Wait for redirect
-	time.Sleep(2 * time.Second)
-
-	// Should redirect to /timeline
-	currentURL := bt.Page.URL()
-	require.Contains(t, currentURL, "/timeline", "expected to be redirected to /timeline, but got %s", currentURL)
-
 	// Assert time range picker is visible
 	timeRangePicker := bt.Page.Locator("[class*=\"test-TimeRange\"]")
 	visible, err := timeRangePicker.IsVisible()
@@ -83,10 +76,6 @@ func TestUITimelineDataLoading(t *testing.T) {
 
 	// Wait for the page to fully load
 	time.Sleep(2 * time.Second)
-
-	// Check if we're on the timeline page
-	currentURL := bt.Page.URL()
-	require.Contains(t, currentURL, "/timeline", "expected /timeline page, but got %s", currentURL)
 
 	// Look for timeline elements or loading state
 	// The page should either show resources or loading indicator

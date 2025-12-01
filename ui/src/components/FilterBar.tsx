@@ -380,7 +380,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeR
                 </svg>
             </div>
             <div>
-                <h1 className="text-xl font-bold tracking-tight text-white leading-none">Spectre</h1>
+                <h1 className="text-xl font-bold tracking-tight text-[var(--color-text-primary)] leading-none">Spectre</h1>
             </div>
         </div>
 

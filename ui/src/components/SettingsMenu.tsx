@@ -63,13 +63,11 @@ export const SettingsMenu: React.FC = () => {
       </div>
       <span
         className={`inline-flex h-5 w-10 items-center rounded-full p-0.5 transition-colors ${
-          checked ? 'bg-brand-500' : 'bg-[var(--color-border-soft)]'
+          checked ? 'bg-brand-500 justify-end' : 'bg-[var(--color-border-soft)] justify-start'
         }`}
       >
         <span
-          className={`h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
-            checked ? 'translate-x-5' : 'translate-x-0'
-          }`}
+          className="h-4 w-4 rounded-full bg-white shadow transition-transform"
         />
       </span>
     </button>

@@ -15,7 +15,7 @@ interface TimelineProps {
 
 const MARGIN = { top: 40, right: 30, bottom: 20, left: 240 };
 const ROW_HEIGHT_DEFAULT = 48;
-const ROW_HEIGHT_COMPACT = 36;
+const ROW_HEIGHT_COMPACT = 24;
 
 export const Timeline: React.FC<TimelineProps> = ({
     resources,
@@ -33,7 +33,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   const { compactMode, formatTime, theme } = useSettings();
 
   const rowHeight = compactMode ? ROW_HEIGHT_COMPACT : ROW_HEIGHT_DEFAULT;
-  const bandPadding = compactMode ? 0.25 : 0.4;
+  const bandPadding = compactMode ? 0.15 : 0.4;
 
   const themeColors = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -173,18 +173,23 @@ export const Timeline: React.FC<TimelineProps> = ({
     const labelGroup = svg.append('g')
       .attr('transform', `translate(0, ${MARGIN.top})`);
 
-    // Sidebar Background - re-read from CSS to ensure theme is applied
-    const sidebarBg = getComputedStyle(document.documentElement).getPropertyValue('--color-sidebar-bg').trim() || themeColors.sidebar;
+    // Read sidebar colors from CSS to ensure theme is applied
+    const styles = getComputedStyle(document.documentElement);
+    const sidebarBg = styles.getPropertyValue('--color-sidebar-bg').trim() || themeColors.sidebar;
+    const borderColor = styles.getPropertyValue('--color-border-soft').trim() || themeColors.border;
+
+    // Sidebar Background - read from CSS to ensure theme is applied
     labelGroup.append('rect')
+        .attr('data-element', 'sidebar-bg')
         .attr('width', MARGIN.left - 2)
         .attr('height', Math.max(height, contentHeight + MARGIN.top + MARGIN.bottom))
         .attr('y', -MARGIN.top)
         .attr('fill', sidebarBg)
         .attr('stroke', 'none');
 
-    // Border color - re-read from CSS to ensure theme is applied
-    const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border-soft').trim() || themeColors.border;
+    // Border color - read from CSS to ensure theme is applied
     labelGroup.append('line')
+        .attr('data-element', 'sidebar-border')
         .attr('x1', MARGIN.left - 1)
         .attr('x2', MARGIN.left - 1)
         .attr('y1', -MARGIN.top)
@@ -220,11 +225,17 @@ export const Timeline: React.FC<TimelineProps> = ({
     const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || themeColors.textMuted;
 
     // Resource name with truncation and tooltip
+    const nameFontSize = compactMode ? '10px' : '13px';
+    const kindFontSize = compactMode ? '8px' : '11px';
+    const nameY = compactMode ? yScale.bandwidth() / 2 - 2 : yScale.bandwidth() / 2 - 6;
+    const kindY = compactMode ? yScale.bandwidth() / 2 + 6 : yScale.bandwidth() / 2 + 10;
+
     const nameText = labels.append('text')
+      .attr('data-element', 'label-name')
       .attr('x', 0)
-      .attr('y', yScale.bandwidth() / 2 - 6)
+      .attr('y', nameY)
       .attr('fill', textPrimary)
-      .style('font-size', '13px')
+      .style('font-size', nameFontSize)
       .style('font-weight', '600')
       .style('dominant-baseline', 'middle')
       .each(function(d) {
@@ -256,11 +267,12 @@ export const Timeline: React.FC<TimelineProps> = ({
       .text(d => d.name);
 
     labels.append('text')
+      .attr('data-element', 'label-kind-ns')
       .text(d => `${d.kind} • ${d.namespace}`)
       .attr('x', 0)
-      .attr('y', yScale.bandwidth() / 2 + 10)
+      .attr('y', kindY)
       .attr('fill', textMuted)
-      .style('font-size', '11px')
+      .style('font-size', kindFontSize)
       .style('dominant-baseline', 'middle');
 
     labels.append('line')
@@ -268,7 +280,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('x2', MARGIN.left - 40)
         .attr('y1', yScale.bandwidth() + yScale.padding() * yScale.step() / 2)
         .attr('y2', yScale.bandwidth() + yScale.padding() * yScale.step() / 2)
-        .attr('stroke', themeColors.border)
+        .attr('stroke', borderColor)
         .attr('stroke-width', 1);
 
     // --- Draw Content ---
@@ -300,7 +312,9 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('y', 0)
         .attr('height', yScale.bandwidth())
         .attr('rx', 4)
-        .attr('fill', s => STATUS_COLORS[s.status]);
+        .attr('fill', s => STATUS_COLORS[s.status])
+        .attr('stroke', 'none')
+        .attr('stroke-width', 0);
         // Note: stroke/selection is handled in separate effect
 
     // Events
@@ -503,24 +517,70 @@ export const Timeline: React.FC<TimelineProps> = ({
     // Apply initial transform if exists
     svg.call(zoom.transform, currentTransform);
 
-  }, [sortedResources, width, height, timeDomain, themeColors]); // Only re-run if data/layout changes
+  }, [sortedResources, width, height, timeDomain, themeColors, theme, rowHeight, bandPadding]); // Only re-run if data/layout or display settings change
+
+  // Theme Update Effect: Update all theme-dependent colors when theme changes
+  useEffect(() => {
+    if (!svgRef.current) return;
+
+    // Use requestAnimationFrame to ensure CSS has been applied
+    const frame = requestAnimationFrame(() => {
+      const svg = d3.select(svgRef.current);
+
+      // Read current CSS values directly from document
+      const styles = getComputedStyle(document.documentElement);
+      const sidebarBg = styles.getPropertyValue('--color-sidebar-bg').trim();
+      const borderColor = styles.getPropertyValue('--color-border-soft').trim();
+      const textPrimary = styles.getPropertyValue('--color-text-primary').trim();
+      const textMuted = styles.getPropertyValue('--color-text-muted').trim();
+      const gridLine = styles.getPropertyValue('--color-grid-line').trim();
+      const appBg = styles.getPropertyValue('--color-app-bg').trim();
+
+      // Update sidebar background
+      svg.selectAll('[data-element="sidebar-bg"]')
+        .attr('fill', sidebarBg || themeColors.sidebar);
+
+      // Update sidebar border
+      svg.selectAll('[data-element="sidebar-border"]')
+        .attr('stroke', borderColor || themeColors.border);
+
+      // Update sidebar text colors
+      svg.selectAll('[data-element="label-name"]')
+        .attr('fill', textPrimary || themeColors.textPrimary);
+
+      svg.selectAll('[data-element="label-kind-ns"]')
+        .attr('fill', textMuted || themeColors.textMuted);
+
+      // Update axis tick lines and text
+      svg.selectAll('.tick line')
+        .attr('stroke', gridLine || themeColors.grid);
+
+      svg.selectAll('.tick text')
+        .attr('fill', textPrimary || themeColors.textPrimary);
+
+      // Update sticky axis text color
+      if (stickyAxisRef.current) {
+        d3.select(stickyAxisRef.current).selectAll('.tick text')
+          .attr('fill', textPrimary || themeColors.textPrimary);
+      }
+
+      // Update row guide lines
+      svg.selectAll('.row-guide')
+        .attr('stroke', borderColor || themeColors.border);
+
+      // Update event dot appearance
+      svg.selectAll('.event-dot')
+        .attr('stroke', appBg || themeColors.appBg);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [theme]);
 
   // Secondary Effect: Style Updates (Selection & Highlights)
   // This runs whenever selection changes, without re-drawing the whole chart
   useEffect(() => {
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
-
-    // Update Segments
-    svg.selectAll('.segment')
-        .attr('stroke', (d: any) => {
-             const isSel = selectedPoint && d.resourceId === selectedPoint.resourceId && d.index === selectedPoint.index;
-             return isSel ? '#ffffff' : themeColors.appBg;
-        })
-        .attr('stroke-width', (d: any) => {
-             const isSel = selectedPoint && d.resourceId === selectedPoint.resourceId && d.index === selectedPoint.index;
-             return isSel ? 3 : 1;
-        });
 
     // Update Events
     svg.selectAll('.event-dot')
