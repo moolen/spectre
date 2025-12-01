@@ -1,0 +1,51 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: android-bff-config
+  namespace: workloads
+data:
+  PLATFORM: "android"
+  API_GATEWAY_URL: "https://api.example.com"
+  LOG_LEVEL: "info"
+  CACHE_STRATEGY: "aggressive"
+  TIMEOUT: "15s"
+  ENABLE_ANALYTICS: "true"
+  ANALYTICS_ENDPOINT: "https://analytics.example.com"
+  MIN_API_LEVEL: "21"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: android-bff
+  namespace: workloads
+  labels:
+    app: android-bff
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: android-bff
+  template:
+    metadata:
+      labels:
+        app: android-bff
+        version: v1
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+      - name: android-bff
+        image: busybox:1.35
+        command: ["sleep", "infinity"]
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: 150m
+            memory: 96Mi
+          requests:
+            cpu: 75m
+            memory: 48Mi
+        envFrom:
+        - configMapRef:
+            name: android-bff-config

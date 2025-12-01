@@ -1,0 +1,49 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-api-config
+  namespace: workloads
+data:
+  DATABASE_HOST: "localhost"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "payment"
+  LOG_LEVEL: "info"
+  STRIPE_API_KEY: "sk_test_fake_key_payment"
+  WEBHOOK_URL: "https://api.example.com/webhooks/payment"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: workloads
+  labels:
+    app: payment-api
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-api
+  template:
+    metadata:
+      labels:
+        app: payment-api
+        version: v1
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+      - name: payment-api
+        image: busybox:1.35
+        command: ["sleep", "infinity"]
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 50m
+            memory: 32Mi
+        envFrom:
+        - configMapRef:
+            name: payment-api-config

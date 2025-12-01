@@ -479,7 +479,6 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 					continue
 				}
 
-				w.logger.Debug("Watch event: %s %s/%s", event.Type, unstructuredObj.GetNamespace(), unstructuredObj.GetName())
 				// Filter by namespace if needed
 				objNamespace := unstructuredObj.GetNamespace()
 				if !shouldProcess(objNamespace) {

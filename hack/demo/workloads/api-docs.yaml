@@ -1,0 +1,49 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-docs-config
+  namespace: workloads
+data:
+  API_TITLE: "E-Commerce Platform API"
+  API_VERSION: "v1.0.0"
+  DOCS_ENDPOINT: "/docs"
+  SWAGGER_UI_ENABLED: "true"
+  LOG_LEVEL: "info"
+  CACHE_TIMEOUT: "3600"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-docs
+  namespace: workloads
+  labels:
+    app: api-docs
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-docs
+  template:
+    metadata:
+      labels:
+        app: api-docs
+        version: v1
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+      - name: api-docs
+        image: busybox:1.35
+        command: ["sleep", "infinity"]
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 50m
+            memory: 32Mi
+        envFrom:
+        - configMapRef:
+            name: api-docs-config

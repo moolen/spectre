@@ -1,0 +1,49 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cart-api-config
+  namespace: workloads
+data:
+  REDIS_HOST: "redis.default.svc.cluster.local"
+  REDIS_PORT: "6379"
+  LOG_LEVEL: "info"
+  SESSION_TIMEOUT: "3600"
+  PRODUCT_SERVICE_URL: "http://product-api.workloads.svc.cluster.local"
+  CACHE_TTL: "300"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart-api
+  namespace: workloads
+  labels:
+    app: cart-api
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cart-api
+  template:
+    metadata:
+      labels:
+        app: cart-api
+        version: v1
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+      - name: cart-api
+        image: busybox:1.35
+        command: ["sleep", "infinity"]
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 50m
+            memory: 32Mi
+        envFrom:
+        - configMapRef:
+            name: cart-api-config

@@ -68,7 +68,6 @@ func (h *EventCaptureHandler) OnAdd(obj runtime.Object) error {
 		return err
 	}
 
-	h.logger.Debug("Captured CREATE event for %s/%s", metadata.Kind, metadata.Name)
 	return nil
 }
 
@@ -103,7 +102,6 @@ func (h *EventCaptureHandler) OnUpdate(oldObj, newObj runtime.Object) error {
 		return err
 	}
 
-	h.logger.Debug("Captured UPDATE event for %s/%s", metadata.Kind, metadata.Name)
 	return nil
 }
 
@@ -138,7 +136,6 @@ func (h *EventCaptureHandler) OnDelete(obj runtime.Object) error {
 		return err
 	}
 
-	h.logger.Debug("Captured DELETE event for %s/%s", metadata.Kind, metadata.Name)
 	return nil
 }
 
