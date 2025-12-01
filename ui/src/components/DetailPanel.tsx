@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { K8sResource } from '../types';
 import { diffJsonWithContext, DiffLine } from '../utils/jsonDiff';
 import { useSettings } from '../hooks/useSettings';
@@ -32,12 +32,72 @@ const DiffLineView = ({ line }: { line: DiffLine }) => {
   );
 };
 
-const ConfigDiff = ({
+const FullDocumentDiff = ({
   current,
   previous,
 }: {
   current?: Record<string, any>;
   previous?: Record<string, any>;
+}) => {
+  // Get the full diff - we'll use a large context to show everything
+  const fullJsonDiff = useMemo(() => {
+    // Create a full diff by comparing the entire documents
+    // This will include all lines with their diff types
+    const prev = previous ? JSON.stringify(previous, null, 2).split('\n') : [];
+    const curr = current ? JSON.stringify(current, null, 2).split('\n') : [];
+
+    // Simple line-by-line comparison
+    const result: DiffLine[] = [];
+    const maxLines = Math.max(prev.length, curr.length);
+
+    for (let i = 0; i < maxLines; i++) {
+      const prevLine = prev[i];
+      const currLine = curr[i];
+
+      if (prevLine === undefined) {
+        // Only in current
+        result.push({ type: 'add', content: currLine });
+      } else if (currLine === undefined) {
+        // Only in previous
+        result.push({ type: 'remove', content: prevLine });
+      } else if (prevLine === currLine) {
+        // Same in both
+        result.push({ type: 'context', content: prevLine });
+      } else {
+        // Different
+        result.push({ type: 'remove', content: prevLine });
+        result.push({ type: 'add', content: currLine });
+      }
+    }
+
+    return result;
+  }, [previous, current]);
+
+  if (!current && !previous) {
+    return (
+      <div className="bg-[var(--color-surface-secondary)] p-3 rounded border border-[var(--color-border-soft)] text-xs text-[var(--color-text-muted)] italic">
+        Configuration details unavailable for this transition.
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-[var(--color-surface-secondary)] p-2 rounded border border-[var(--color-border-soft)] font-mono text-xs overflow-x-auto">
+      {fullJsonDiff.map((line, index) => (
+        <DiffLineView key={`${line.type}-${index}`} line={line} />
+      ))}
+    </div>
+  );
+};
+
+const ConfigDiff = ({
+  current,
+  previous,
+  showFullDiff = false,
+}: {
+  current?: Record<string, any>;
+  previous?: Record<string, any>;
+  showFullDiff?: boolean;
 }) => {
   const diff = useMemo(() => diffJsonWithContext(previous, current), [previous, current]);
 
@@ -47,6 +107,10 @@ const ConfigDiff = ({
         Configuration details unavailable for this transition.
       </div>
     );
+  }
+
+  if (showFullDiff) {
+    return <FullDocumentDiff current={current} previous={previous} />;
   }
 
   if (diff.length === 0) {
@@ -68,6 +132,39 @@ const ConfigDiff = ({
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedIndex = 0, onClose }) => {
   const { formatTime } = useSettings();
+  const [showFullDiff, setShowFullDiff] = useState(false);
+  const [width, setWidth] = useState(384); // Default w-96 = 24rem = 384px
+  const [isResizing, setIsResizing] = useState(false);
+
+  const MIN_WIDTH = 300;
+  const MAX_WIDTH = 800;
+
+  // Handle resize on mouse move
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Calculate new width based on mouse position from right edge
+      const newWidth = window.innerWidth - e.clientX;
+
+      // Constrain width between min and max
+      if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) {
+        setWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
 
   // Handle Escape key to close panel
   useEffect(() => {
@@ -90,7 +187,17 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedInde
   const previousSegment = selectedIndex > 0 ? resource.statusSegments[selectedIndex - 1] : null;
 
   return (
-    <div className="fixed inset-y-0 right-0 w-96 bg-[var(--color-surface-elevated)] border-l border-[var(--color-border-soft)] shadow-2xl transform transition-transform duration-300 ease-in-out z-50 overflow-y-auto flex flex-col text-[var(--color-text-primary)] DetailPanel">
+    <div
+      className="fixed inset-y-0 right-0 bg-[var(--color-surface-elevated)] border-l border-[var(--color-border-soft)] shadow-2xl transform transition-transform duration-300 ease-in-out z-50 overflow-y-auto flex flex-col text-[var(--color-text-primary)] DetailPanel"
+      style={{ width: `${width}px` }}
+    >
+      {/* Resize Handle */}
+      <div
+        onMouseDown={() => setIsResizing(true)}
+        className={`absolute left-0 top-0 bottom-0 w-1 hover:w-1.5 hover:bg-blue-500/50 transition-all cursor-col-resize ${
+          isResizing ? 'bg-blue-500 w-1.5' : 'bg-transparent'
+        }`}
+      />
       <div className="p-6 flex-1">
         {/* Header */}
         <div className="flex justify-between items-start mb-6">
@@ -137,10 +244,23 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedInde
 
             {/* Config Diff */}
             <div className="mb-4">
-                <div className="text-sm text-[var(--color-text-muted)] uppercase tracking-wider font-semibold mb-2">Configuration Changes</div>
+                <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm text-[var(--color-text-muted)] uppercase tracking-wider font-semibold">Configuration Changes</div>
+                    <button
+                        onClick={() => setShowFullDiff(!showFullDiff)}
+                        className={`text-xs px-2 py-1 rounded transition-colors ${
+                            showFullDiff
+                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                                : 'bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] border border-[var(--color-border-soft)] hover:bg-[var(--color-surface-active)]'
+                        }`}
+                    >
+                        {showFullDiff ? 'Full Document' : 'Diff View'}
+                    </button>
+                </div>
                 <ConfigDiff
                   current={currentSegment.resourceData}
                   previous={previousSegment?.resourceData}
+                  showFullDiff={showFullDiff}
                 />
             </div>
         </div>
