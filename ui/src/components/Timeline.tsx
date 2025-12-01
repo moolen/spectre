@@ -26,6 +26,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     timeRange
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
+  const stickyAxisRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null);
@@ -168,10 +169,6 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     const brushGroup = mainGroup.append('g')
       .attr('class', 'brush');
-
-    const xAxisGroup = mainGroup.append('g')
-      .attr('class', 'x-axis')
-      .attr('transform', `translate(0, -10)`);
 
     const labelGroup = svg.append('g')
       .attr('transform', `translate(0, ${MARGIN.top})`);
@@ -336,15 +333,21 @@ export const Timeline: React.FC<TimelineProps> = ({
             .tickSizeOuter(0)
             .tickFormat((date: any) => formatTime(date));
 
-        xAxisGroup.call(axis)
-            .call(g => g.select('.domain').remove())
-            .call(g => g.selectAll('.tick line').attr('stroke', themeColors.grid).attr('stroke-width', 2).attr('y2', -5))
-            .call(g => g.selectAll('.tick text')
-                .attr('fill', themeColors.textPrimary)
-                .attr('font-weight', '600')
-                .attr('font-size', '12px')
-                .attr('dy', '-8px')
-            );
+        // Update sticky axis
+        if (stickyAxisRef.current) {
+            const stickyAxis = d3.select(stickyAxisRef.current);
+            const stickyAxisGroup = stickyAxis.select('g#sticky-axis');
+
+            stickyAxisGroup.call(axis)
+                .call(g => g.select('.domain').remove())
+                .call(g => g.selectAll('.tick line').attr('stroke', themeColors.grid).attr('stroke-width', 2).attr('y2', -5))
+                .call(g => g.selectAll('.tick text')
+                    .attr('fill', themeColors.textPrimary)
+                    .attr('font-weight', '600')
+                    .attr('font-size', '12px')
+                    .attr('dy', '-8px')
+                );
+        }
 
         const gridAxis = d3.axisBottom(newXScale)
             .ticks(Math.max(width / 120, 2))
@@ -642,8 +645,20 @@ export const Timeline: React.FC<TimelineProps> = ({
       ref={containerRef}
       className="w-full h-full bg-[var(--color-surface-secondary)] rounded-lg shadow-inner border border-[var(--color-border-soft)] custom-scrollbar relative overflow-y-auto overflow-x-hidden transition-colors duration-300"
     >
-      <div className="sticky top-0 left-0 right-0 z-20 pointer-events-none flex justify-end p-2 bg-gradient-to-b from-[color:rgba(0,0,0,0.35)] to-transparent">
-        <div className="text-xs text-[var(--color-text-muted)] bg-[var(--color-surface-elevated)]/80 backdrop-blur px-2 py-1 rounded border border-[var(--color-border-soft)] shadow-sm mr-4">
+      <svg
+        ref={stickyAxisRef}
+        width={width}
+        height={MARGIN.top}
+        className="sticky top-0 left-0 right-0 block bg-[var(--color-surface-secondary)] border-b border-[var(--color-border-soft)] z-10"
+        style={{ pointerEvents: 'none' }}
+      >
+        <g
+          id="sticky-axis"
+          transform={`translate(${MARGIN.left},${MARGIN.top})`}
+        />
+      </svg>
+      <div className="fixed right-0 z-20 pointer-events-none flex justify-end p-2" style={{ top: `112px` }}>
+        <div className="text-xs text-[var(--color-text-muted)] bg-[var(--color-surface-elevated)]/90 backdrop-blur px-2 py-1 rounded border border-[var(--color-border-soft)] shadow-sm mr-4">
           Drag to Zoom • Shift+Scroll to Pan Time • Double-click Reset • Arrow Keys to Navigate
         </div>
       </div>
@@ -652,6 +667,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         width={width}
         height={Math.max(height, sortedResources.length * rowHeight + MARGIN.top + MARGIN.bottom)}
         className="block"
+        style={{ overflow: 'visible' }}
       />
       {tooltip && (
         <div
