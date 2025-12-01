@@ -80,13 +80,13 @@ func BuildTimelineURL(baseURL string, duration time.Duration) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		// If baseURL is invalid, just return a constructed string
-		return fmt.Sprintf("%s/timeline?start=%s&end=%s",
+		return fmt.Sprintf("%s/?start=%s&end=%s",
 			baseURL,
 			url.QueryEscape(startTime.UTC().Format(time.RFC3339)),
 			url.QueryEscape(endTime.UTC().Format(time.RFC3339)))
 	}
 
-	u.Path = "/timeline"
+	u.Path = "/"
 	q := u.Query()
 	q.Set("start", startTime.UTC().Format(time.RFC3339))
 	q.Set("end", endTime.UTC().Format(time.RFC3339))

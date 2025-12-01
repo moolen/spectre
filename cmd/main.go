@@ -11,7 +11,6 @@ import (
 
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/config"
-	"github.com/moolen/spectre/internal/demo"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
@@ -24,7 +23,6 @@ const Version = "0.1.0"
 func main() {
 	// Parse command line flags
 	version := flag.Bool("version", false, "Show version and exit")
-	demoMode := flag.Bool("demo", false, "Run in demo mode with preset data")
 	dataDir := flag.String("data-dir", "/data", "Directory where events are stored")
 	apiPort := flag.Int("api-port", 8080, "Port the API server listens on")
 	logLevel := flag.String("log-level", "info", "Logging level (debug, info, warn, error)")
@@ -61,13 +59,6 @@ func main() {
 
 	logger.Info("Starting Kubernetes Event Monitor v%s", Version)
 	logger.Debug("Configuration loaded: DataDir=%s, APIPort=%d, LogLevel=%s", cfg.DataDir, cfg.APIPort, cfg.LogLevel)
-
-	// Check if running in demo mode
-	if *demoMode {
-		logger.Info("Running in demo mode with preset data")
-		runDemoMode(*cfg, logger, *apiPort)
-		os.Exit(0)
-	}
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
@@ -135,45 +126,4 @@ func main() {
 	manager.Stop(shutdownCtx)
 	logger.Info("Shutdown complete")
 	os.Exit(0)
-}
-
-// runDemoMode starts the API server with demo data (no storage or watcher components)
-func runDemoMode(cfg config.Config, logger *logging.Logger, apiPort int) {
-	manager := lifecycle.NewManager()
-	logger.Info("Lifecycle manager created")
-	demoExecutor := demo.NewDemoQueryExecutor()
-	apiComponent := api.New(apiPort, demoExecutor, nil)
-	logger.Info("API server component created (demo mode, no watcher)")
-
-	if err := manager.Register(apiComponent); err != nil {
-		logger.Error("Failed to register API server component: %v", err)
-		fmt.Fprintf(os.Stderr, "API server registration error: %v\n", err)
-		os.Exit(1)
-	}
-
-	logger.Info("All components registered")
-	ctx, cancel := context.WithCancel(context.Background())
-	if err := manager.Start(ctx); err != nil {
-		logger.Error("Failed to start components: %v", err)
-		fmt.Fprintf(os.Stderr, "Startup error: %v\n", err)
-		os.Exit(1)
-	}
-
-	logger.Info("Demo mode started successfully")
-	logger.Info("Listening for API requests on port %d", apiPort)
-
-	// Set up signal handling for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Wait for shutdown signal
-	<-sigChan
-	logger.Info("Shutdown signal received, gracefully shutting down...")
-	cancel()
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	manager.Stop(shutdownCtx)
-	logger.Info("Shutdown complete")
 }

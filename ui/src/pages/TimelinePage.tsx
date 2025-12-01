@@ -86,16 +86,9 @@ function TimelinePage() {
     }
   }, [persistedKinds, persistedNamespaces, search, setKinds, setNamespaces]);
 
-  // Memoize the API filters object to prevent unnecessary re-renders
-  const apiFilters = useMemo(() => {
-    if (filters.namespaces.length > 0 || filters.kinds.length > 0) {
-      return {
-        namespace: filters.namespaces.length > 0 ? filters.namespaces[0] : undefined,
-        kind: filters.kinds.length > 0 ? filters.kinds[0] : undefined,
-      };
-    }
-    return undefined;
-  }, [filters.namespaces, filters.kinds]);
+  // Don't filter at the API level - filter client-side instead
+  // This allows selecting multiple kinds/namespaces
+  const apiFilters = undefined;
 
   const [refreshToken, setRefreshToken] = useState(0);
   const { autoRefresh } = useSettings();

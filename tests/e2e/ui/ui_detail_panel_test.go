@@ -43,13 +43,6 @@ func TestUIDetailPanelInteraction(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
-	// Check if we're on the timeline page
-	currentURL := bt.Page.URL()
-	require.Contains(t, currentURL, "/timeline", "expected /timeline page, but got %s", currentURL)
-
-	// Wait for timeline to load
-	time.Sleep(2 * time.Second)
-
 	// Wait for resources to be visible
 	// We'll click on the resource label which has a direct click handler
 	// that opens the detail panel for the last segment (Timeline.tsx:185-188)
