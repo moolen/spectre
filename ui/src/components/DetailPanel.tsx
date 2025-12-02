@@ -188,8 +188,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedInde
 
   return (
     <div
-      className="fixed inset-y-0 right-0 bg-[var(--color-surface-elevated)] border-l border-[var(--color-border-soft)] shadow-2xl transform transition-transform duration-300 ease-in-out z-50 overflow-y-auto flex flex-col text-[var(--color-text-primary)] DetailPanel"
-      style={{ width: `${width}px` }}
+      className="fixed right-0 bg-[var(--color-surface-elevated)] border-l border-[var(--color-border-soft)] shadow-2xl transform transition-transform duration-300 ease-in-out z-50 overflow-y-auto flex flex-col text-[var(--color-text-primary)] DetailPanel"
+      style={{ width: `${width}px`, top: '73px', bottom: 0 }}
     >
       {/* Resize Handle */}
       <div
