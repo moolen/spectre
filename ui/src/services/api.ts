@@ -173,11 +173,7 @@ class ApiClient {
       )) {
         console.warn('Falling back to embedded demo timeline data:', error);
         // For fallback, we need numeric timestamps
-        const startSeconds = typeof startTime === 'string' && !isHumanFriendlyExpression(startTime)
-          ? normalizeToSeconds(startTime)
-          : typeof startTime === 'number'
-          ? Math.floor(startTime / 1000)
-          : Math.floor(Date.now() / 1000) - 7200; // Default 2h ago
+        const startSeconds = Math.floor(Date.now() / 1000) - 3600; // Default 1h ago
         const fallbackResponse = buildDemoTimelineResponse(startSeconds, filters);
         return transformSearchResponse(fallbackResponse);
       }
