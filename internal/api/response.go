@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 )
 
 // writeJSON writes a JSON response to the response writer
@@ -10,6 +11,19 @@ func writeJSON(w io.Writer, data interface{}) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(data)
+}
+
+// writeError sends an error response
+func writeError(w http.ResponseWriter, statusCode int, errorCode, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	response := map[string]string{
+		"error":   errorCode,
+		"message": message,
+	}
+
+	writeJSON(w, response)
 }
 
 // ResponseFormatter formats API responses

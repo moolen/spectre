@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -185,6 +186,8 @@ func (s *Storage) ListFiles() ([]string, error) {
 }
 
 // DeleteOldFiles deletes storage files older than the specified age
+// This method uses the hour timestamp from the filename rather than file modification time
+// to properly handle imported historical data
 func (s *Storage) DeleteOldFiles(maxAgeHours int) error {
 	s.fileMutex.Lock()
 	defer s.fileMutex.Unlock()
@@ -196,23 +199,59 @@ func (s *Storage) DeleteOldFiles(maxAgeHours int) error {
 
 	now := time.Now()
 	maxAge := time.Duration(maxAgeHours) * time.Hour
+	cutoffTime := now.Add(-maxAge)
 
 	for _, filePath := range files {
-		info, err := os.Stat(filePath)
+		// Extract hour timestamp from filename to handle imported data correctly
+		hourTimestamp, err := s.extractHourFromFilename(filePath)
 		if err != nil {
+			// If we can't parse the filename, fall back to file modification time
+			s.logger.Warn("Failed to extract hour from filename %s, using mod time: %v", filePath, err)
+			info, statErr := os.Stat(filePath)
+			if statErr != nil {
+				continue
+			}
+			if now.Sub(info.ModTime()) > maxAge {
+				if err := os.Remove(filePath); err != nil {
+					s.logger.Error("Failed to delete old file %s: %v", filePath, err)
+				} else {
+					s.logger.Info("Deleted old storage file: %s", filePath)
+				}
+			}
 			continue
 		}
 
-		if now.Sub(info.ModTime()) > maxAge {
+		// Check if the hour represented by this file is older than the cutoff
+		fileTime := time.Unix(hourTimestamp, 0)
+		if fileTime.Before(cutoffTime) {
 			if err := os.Remove(filePath); err != nil {
 				s.logger.Error("Failed to delete old file %s: %v", filePath, err)
 			} else {
-				s.logger.Info("Deleted old storage file: %s", filePath)
+				s.logger.Info("Deleted old storage file: %s (hour: %s)", filePath, fileTime.Format("2006-01-02 15:04"))
 			}
 		}
 	}
 
 	return nil
+}
+
+// extractHourFromFilename extracts the hour timestamp from a filename
+// Expected format: YYYY-MM-DD-HH.bin
+func (s *Storage) extractHourFromFilename(filePath string) (int64, error) {
+	filename := filepath.Base(filePath)
+	// Remove .bin extension
+	filename = strings.TrimSuffix(filename, ".bin")
+
+	// Parse the date components
+	var year, month, day, hour int
+	_, err := fmt.Sscanf(filename, "%04d-%02d-%02d-%02d", &year, &month, &day, &hour)
+	if err != nil {
+		return 0, fmt.Errorf("invalid filename format: %w", err)
+	}
+
+	// Create time and convert to Unix timestamp
+	t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
+	return t.Unix(), nil
 }
 
 // Start implements the lifecycle.Component interface

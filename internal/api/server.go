@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 // ReadinessChecker is an interface for checking component readiness
@@ -22,16 +23,23 @@ type Server struct {
 	server           *http.Server
 	logger           *logging.Logger
 	queryExecutor    QueryExecutor
+	storage          *storage.Storage
 	router           *http.ServeMux
 	readinessChecker ReadinessChecker
 }
 
 // New creates a new API server
 func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecker) *Server {
+	return NewWithStorage(port, queryExecutor, nil, readinessChecker)
+}
+
+// NewWithStorage creates a new API server with storage export/import capabilities
+func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker) *Server {
 	s := &Server{
 		port:             port,
 		logger:           logging.GetLogger("api"),
 		queryExecutor:    queryExecutor,
+		storage:          storage,
 		router:           http.NewServeMux(),
 		readinessChecker: readinessChecker,
 	}
@@ -65,6 +73,14 @@ func (s *Server) registerHandlers() {
 	s.router.HandleFunc("/v1/metadata", s.withMethod(http.MethodGet, metadataHandler.Handle))
 	s.router.HandleFunc("/health", s.handleHealth)
 	s.router.HandleFunc("/ready", s.handleReady)
+
+	// Register export/import handlers if storage is available
+	if s.storage != nil {
+		exportHandler := NewExportHandler(s.storage, s.logger)
+		importHandler := NewImportHandler(s.storage, s.logger)
+		s.router.HandleFunc("/v1/storage/export", s.withMethod(http.MethodGet, exportHandler.Handle))
+		s.router.HandleFunc("/v1/storage/import", s.withMethod(http.MethodPost, importHandler.Handle))
+	}
 
 	// Serve static UI files and handle SPA routing
 	// This must be registered last so it acts as a catch-all
