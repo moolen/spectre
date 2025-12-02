@@ -19,7 +19,10 @@ import {
   transformStatusSegmentsWithErrorHandling,
 } from './dataTransformer';
 import { buildDemoMetadata, buildDemoTimelineResponse, TimelineFilters } from '../demo/demoDataService';
-import { isHumanFriendlyExpression } from '../utils/timeParsing';
+import { isHumanFriendlyExpression, parseTimeExpression } from '../utils/timeParsing';
+
+// Check if demo mode is enabled at build time
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 export interface ApiMetadata {
   namespaces: string[];
@@ -136,6 +139,23 @@ class ApiClient {
     endTime: string | number,
     filters?: TimelineFilters
   ): Promise<K8sResource[]> {
+    // In demo mode, use demo data directly
+    if (DEMO_MODE) {
+      // Handle human-friendly expressions in demo mode
+      let startSeconds: number;
+      if (typeof startTime === 'string' && isHumanFriendlyExpression(startTime)) {
+        const parsedDate = parseTimeExpression(startTime);
+        if (!parsedDate) {
+          throw new Error(`Unable to parse timestamp value: ${startTime}`);
+        }
+        startSeconds = Math.floor(parsedDate.getTime() / 1000);
+      } else {
+        startSeconds = normalizeToSeconds(startTime);
+      }
+      const response = buildDemoTimelineResponse(startSeconds, filters);
+      return transformSearchResponse(response);
+    }
+
     const params = new URLSearchParams();
 
     // If startTime/endTime are strings that look like human-friendly expressions, pass them through
@@ -169,7 +189,8 @@ class ApiClient {
         error.message.includes('Network error') ||
         error.message.includes('timeout') ||
         error.message.includes('Failed to fetch') ||
-        error.message.includes('<!DOCTYPE')
+        error.message.includes('<!DOCTYPE') ||
+        error.message.includes('404')
       )) {
         console.warn('Falling back to embedded demo timeline data:', error);
         // For fallback, we need numeric timestamps
@@ -189,6 +210,40 @@ class ApiClient {
     startTime?: string | number,
     endTime?: string | number
   ): Promise<MetadataResponse> {
+    // In demo mode, use demo data directly
+    if (DEMO_MODE) {
+      let startSeconds: number;
+      if (startTime !== undefined) {
+        if (typeof startTime === 'string' && isHumanFriendlyExpression(startTime)) {
+          const parsedDate = parseTimeExpression(startTime);
+          if (!parsedDate) {
+            throw new Error(`Unable to parse timestamp value: ${startTime}`);
+          }
+          startSeconds = Math.floor(parsedDate.getTime() / 1000);
+        } else {
+          startSeconds = normalizeToSeconds(startTime);
+        }
+      } else {
+        startSeconds = Math.floor(Date.now() / 1000) - 2 * 60 * 60;
+      }
+
+      let endSeconds: number;
+      if (endTime !== undefined) {
+        if (typeof endTime === 'string' && isHumanFriendlyExpression(endTime)) {
+          const parsedDate = parseTimeExpression(endTime);
+          if (!parsedDate) {
+            throw new Error(`Unable to parse timestamp value: ${endTime}`);
+          }
+          endSeconds = Math.floor(parsedDate.getTime() / 1000);
+        } else {
+          endSeconds = normalizeToSeconds(endTime);
+        }
+      } else {
+        endSeconds = startSeconds + 2 * 60 * 60;
+      }
+      return buildDemoMetadata(startSeconds, endSeconds);
+    }
+
     const params = new URLSearchParams();
 
     if (startTime !== undefined) {
@@ -244,6 +299,10 @@ class ApiClient {
     clusterId?: string;
     instanceId?: string;
   }): Promise<Blob> {
+    // Export is not available in demo mode
+    if (DEMO_MODE) {
+      throw new Error('Export is not available in demo mode');
+    }
     const params = new URLSearchParams();
     params.append('from', options.from);
     params.append('to', options.to);
@@ -308,6 +367,10 @@ class ApiClient {
       overwrite?: boolean;
     }
   ): Promise<{ total_events: number; imported_files: number }> {
+    // Import is not available in demo mode
+    if (DEMO_MODE) {
+      throw new Error('Import is not available in demo mode');
+    }
     const params = new URLSearchParams();
     if (options?.validate !== undefined) {
       params.append('validate', options.validate.toString());
