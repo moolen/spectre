@@ -1,35 +1,33 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { TimeRange } from '../types';
 import { useSettings } from '../hooks/useSettings';
+import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
+import { TimeInputWithCalendar } from './TimeInputWithCalendar';
+import { validateTimeRange, formatDateTimeForInput } from '../utils/timeParsing';
 
 interface TimeRangeDropdownProps {
   currentRange: TimeRange;
-  onConfirm: (range: TimeRange) => void;
+  onConfirm: (range: TimeRange, rawStart?: string, rawEnd?: string) => void;
+  rawStart?: string;
+  rawEnd?: string;
 }
 
 const PRESETS = [
-  { label: 'Last 15min', minutes: 15 },
-  { label: 'Last 30min', minutes: 30 },
-  { label: 'Last 60min', minutes: 60 },
-  { label: 'Last 3h', minutes: 180 },
+  { label: 'Last 15min', minutes: 15, relative: 'now-15m' },
+  { label: 'Last 30min', minutes: 30, relative: 'now-30m' },
+  { label: 'Last 60min', minutes: 60, relative: 'now-60m' },
+  { label: 'Last 3h', minutes: 180, relative: 'now-3h' },
 ];
 
-const formatDateTimeLocal = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
-
-export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRange, onConfirm }) => {
+export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRange, onConfirm, rawStart, rawEnd }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [startTime, setStartTime] = useState<string>('');
-  const [endTime, setEndTime] = useState<string>('');
+  const [startInput, setStartInput] = useState<string>('');
+  const [endInput, setEndInput] = useState<string>('');
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { timeFormat } = useSettings();
+  const { preset: persistedPreset, savePreset } = usePersistedQuickPreset();
 
   const rangeLabel = useMemo(() => {
     const formatDate = (date: Date) => {
@@ -42,22 +40,41 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
       });
       return `${month} ${day}, ${formatter.format(date)}`;
     };
+
+    // If raw expressions are available, use them for the label
+    if (rawStart && rawEnd) {
+      return `${rawStart} to ${rawEnd}`;
+    }
+    if (rawStart) {
+      return `${rawStart} to ${formatDate(currentRange.end)}`;
+    }
+    if (rawEnd) {
+      return `${formatDate(currentRange.start)} to ${rawEnd}`;
+    }
+
+    // Fall back to formatted dates if no raw expressions
     return `${formatDate(currentRange.start)} - ${formatDate(currentRange.end)}`;
-  }, [currentRange, timeFormat]);
+  }, [currentRange, timeFormat, rawStart, rawEnd]);
 
   useEffect(() => {
-    setStartTime(formatDateTimeLocal(currentRange.start));
-    setEndTime(formatDateTimeLocal(currentRange.end));
-    // Check if current range matches a preset
-    const now = new Date();
-    const rangeDuration = now.getTime() - currentRange.start.getTime();
-    const matchingPreset = PRESETS.find(p => {
-      const presetDuration = p.minutes * 60 * 1000;
-      // Allow 1 second tolerance for matching
-      return Math.abs(rangeDuration - presetDuration) < 1000;
-    });
-    setSelectedPreset(matchingPreset ? matchingPreset.minutes : null);
-  }, [currentRange]);
+    // Use raw expressions if available, otherwise format the Date objects
+    setStartInput(rawStart || formatDateTimeForInput(currentRange.start));
+    setEndInput(rawEnd || formatDateTimeForInput(currentRange.end));
+    setValidationError(null);
+    // Use persisted preset if available, otherwise check if current range matches a preset
+    if (persistedPreset) {
+      setSelectedPreset(persistedPreset);
+    } else {
+      const now = new Date();
+      const rangeDuration = now.getTime() - currentRange.start.getTime();
+      const matchingPreset = PRESETS.find(p => {
+        const presetDuration = p.minutes * 60 * 1000;
+        // Allow 1 second tolerance for matching
+        return Math.abs(rangeDuration - presetDuration) < 1000;
+      });
+      setSelectedPreset(matchingPreset ? matchingPreset.minutes : null);
+    }
+  }, [currentRange, persistedPreset, rawStart, rawEnd]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -69,36 +86,44 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handlePreset = (minutes: number) => {
-    const end = new Date();
-    const start = new Date(end.getTime() - minutes * 60 * 1000);
-    setStartTime(formatDateTimeLocal(start));
-    setEndTime(formatDateTimeLocal(end));
+  const handlePreset = (minutes: number, relative: string) => {
+    const startExpr = relative;
+    const endExpr = 'now';
+
+    setStartInput(startExpr);
+    setEndInput(endExpr);
     setSelectedPreset(minutes);
+    setValidationError(null);
+
+    // Save preset to localStorage
+    savePreset(minutes);
+
+    // Parse to Date objects for onConfirm
+    const validation = validateTimeRange(startExpr, endExpr);
+    if (validation.valid === false) {
+      setValidationError(validation.error);
+      return;
+    }
+
     // Immediately confirm the preset selection and close dropdown
-    onConfirm({ start, end });
+    onConfirm({ start: validation.start, end: validation.end }, startExpr, endExpr);
     setIsOpen(false);
   };
 
   const handleCustomInputChange = () => {
     setSelectedPreset(null); // Clear preset selection when custom inputs are changed
+    setValidationError(null);
   };
 
   const handleConfirm = () => {
-    const start = new Date(startTime);
-    const end = new Date(endTime);
+    const validation = validateTimeRange(startInput, endInput);
 
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      alert('Please select valid start and end times');
+    if (validation.valid === false) {
+      setValidationError(validation.error);
       return;
     }
 
-    if (start >= end) {
-      alert('Start time must be before end time');
-      return;
-    }
-
-    onConfirm({ start, end });
+    onConfirm({ start: validation.start, end: validation.end }, startInput, endInput);
     setIsOpen(false);
   };
 
@@ -137,7 +162,7 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
                 return (
                   <button
                     key={preset.minutes}
-                    onClick={() => handlePreset(preset.minutes)}
+                    onClick={() => handlePreset(preset.minutes, preset.relative)}
                     className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all ${
                       isSelected
                         ? 'bg-brand-600 border-brand-500 text-white ring-1 ring-brand-500/20'
@@ -157,31 +182,30 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
               Custom Range
             </label>
             <div className="space-y-2">
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Start Time</label>
-                <input
-                  type="datetime-local"
-                  value={startTime}
-                  onChange={(e) => {
-                    setStartTime(e.target.value);
-                    handleCustomInputChange();
-                  }}
-                  className="w-full px-3 py-1.5 text-sm border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-[var(--color-text-muted)] mb-1">End Time</label>
-                <input
-                  type="datetime-local"
-                  value={endTime}
-                  onChange={(e) => {
-                    setEndTime(e.target.value);
-                    handleCustomInputChange();
-                  }}
-                  className="w-full px-3 py-1.5 text-sm border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                />
-              </div>
+              <TimeInputWithCalendar
+                value={startInput}
+                onChange={(value) => {
+                  setStartInput(value);
+                  handleCustomInputChange();
+                }}
+                label="Start Time"
+                placeholder="e.g., 2h ago, 2025-12-02 13:00"
+              />
+              <TimeInputWithCalendar
+                value={endInput}
+                onChange={(value) => {
+                  setEndInput(value);
+                  handleCustomInputChange();
+                }}
+                label="End Time"
+                placeholder="e.g., now, 2025-12-02 15:00"
+              />
             </div>
+            {validationError && (
+              <div className="mt-2 text-xs text-red-400 bg-red-900/20 border border-red-500/40 rounded px-2 py-1">
+                {validationError}
+              </div>
+            )}
           </div>
 
           {/* Confirm Button */}

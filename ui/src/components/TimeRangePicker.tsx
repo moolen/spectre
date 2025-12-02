@@ -1,76 +1,81 @@
 import React, { useState, useEffect } from 'react';
 import { TimeRange } from '../types';
 import spectreMascot from '../spectre-mascot.png';
+import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
+import { TimeInputWithCalendar } from './TimeInputWithCalendar';
+import { validateTimeRange, formatDateTimeForInput } from '../utils/timeParsing';
 
 interface TimeRangePickerProps {
-  onConfirm: (range: TimeRange) => void;
+  onConfirm: (range: TimeRange, rawStart?: string, rawEnd?: string) => void;
   initialRange?: TimeRange;
 }
 
 const PRESETS = [
-  { label: 'Last 15min', minutes: 15 },
-  { label: 'Last 30min', minutes: 30 },
-  { label: 'Last 60min', minutes: 60 },
-  { label: 'Last 3h', minutes: 180 },
+  { label: 'Last 15min', minutes: 15, relative: 'now-15m' },
+  { label: 'Last 30min', minutes: 30, relative: 'now-30m' },
+  { label: 'Last 60min', minutes: 60, relative: 'now-60m' },
+  { label: 'Last 3h', minutes: 180, relative: 'now-3h' },
 ];
 
 export const TimeRangePicker: React.FC<TimeRangePickerProps> = ({ onConfirm, initialRange }) => {
-  const [startTime, setStartTime] = useState<string>('');
-  const [endTime, setEndTime] = useState<string>('');
+  const [startInput, setStartInput] = useState<string>('');
+  const [endInput, setEndInput] = useState<string>('');
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const { savePreset } = usePersistedQuickPreset();
 
   // Initialize with default (last 2 hours) or provided range
   useEffect(() => {
     if (initialRange) {
-      setStartTime(formatDateTimeLocal(initialRange.start));
-      setEndTime(formatDateTimeLocal(initialRange.end));
+      setStartInput(formatDateTimeForInput(initialRange.start));
+      setEndInput(formatDateTimeForInput(initialRange.end));
     } else {
       const now = new Date();
       const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
-      setStartTime(formatDateTimeLocal(twoHoursAgo));
-      setEndTime(formatDateTimeLocal(now));
+      setStartInput(formatDateTimeForInput(twoHoursAgo));
+      setEndInput(formatDateTimeForInput(now));
     }
     setSelectedPreset(null); // Reset preset selection when range changes externally
+    setValidationError(null);
   }, [initialRange]);
 
-  const formatDateTimeLocal = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-  };
+  const handlePreset = (minutes: number, relative: string) => {
+    const startExpr = relative;
+    const endExpr = 'now';
 
-  const handlePreset = (minutes: number) => {
-    const end = new Date();
-    const start = new Date(end.getTime() - minutes * 60 * 1000);
-    setStartTime(formatDateTimeLocal(start));
-    setEndTime(formatDateTimeLocal(end));
+    setStartInput(startExpr);
+    setEndInput(endExpr);
     setSelectedPreset(minutes);
+    setValidationError(null);
+
+    // Save preset to localStorage
+    savePreset(minutes);
+
+    // Parse to Date objects for onConfirm
+    const validation = validateTimeRange(startExpr, endExpr);
+    if (validation.error || !validation.start || !validation.end) {
+      setValidationError(validation.error || 'Failed to parse time range');
+      return;
+    }
+
     // Immediately confirm the preset selection
-    onConfirm({ start, end });
+    onConfirm({ start: validation.start, end: validation.end }, startExpr, endExpr);
   };
 
   const handleCustomInputChange = () => {
     setSelectedPreset(null); // Clear preset selection when custom inputs are changed
+    setValidationError(null);
   };
 
   const handleConfirm = () => {
-    const start = new Date(startTime);
-    const end = new Date(endTime);
+    const validation = validateTimeRange(startInput, endInput);
 
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      alert('Please select valid start and end times');
+    if (validation.error || !validation.start || !validation.end) {
+      setValidationError(validation.error || 'Invalid time range');
       return;
     }
 
-    if (start >= end) {
-      alert('Start time must be before end time');
-      return;
-    }
-
-    onConfirm({ start, end });
+    onConfirm({ start: validation.start, end: validation.end }, startInput, endInput);
   };
 
   return (
@@ -100,22 +105,22 @@ export const TimeRangePicker: React.FC<TimeRangePickerProps> = ({ onConfirm, ini
             Quick Presets
           </label>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {PRESETS.map((preset) => {
-              const isSelected = selectedPreset === preset.minutes;
-              return (
-                <button
-                  key={preset.minutes}
-                  onClick={() => handlePreset(preset.minutes)}
-                  className={`px-4 py-2 text-sm font-medium rounded-md border transition-all ${
-                    isSelected
-                      ? 'bg-brand-600 border-brand-500 text-white ring-1 ring-brand-500/20'
-                      : 'border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:border-brand-500 hover:text-brand-200'
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              );
-            })}
+              {PRESETS.map((preset) => {
+                const isSelected = selectedPreset === preset.minutes;
+                return (
+                  <button
+                    key={preset.minutes}
+                    onClick={() => handlePreset(preset.minutes, preset.relative)}
+                    className={`px-4 py-2 text-sm font-medium rounded-md border transition-all ${
+                      isSelected
+                        ? 'bg-brand-600 border-brand-500 text-white ring-1 ring-brand-500/20'
+                        : 'border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:border-brand-500 hover:text-brand-200'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
           </div>
         </div>
 
@@ -125,31 +130,32 @@ export const TimeRangePicker: React.FC<TimeRangePickerProps> = ({ onConfirm, ini
             Custom Range
           </label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-[var(--color-text-muted)] mb-1">Start Time</label>
-              <input
-                type="datetime-local"
-                value={startTime}
-                onChange={(e) => {
-                  setStartTime(e.target.value);
-                  handleCustomInputChange();
-                }}
-                className="w-full px-4 py-2 border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-[var(--color-text-muted)] mb-1">End Time</label>
-              <input
-                type="datetime-local"
-                value={endTime}
-                onChange={(e) => {
-                  setEndTime(e.target.value);
-                  handleCustomInputChange();
-                }}
-                className="w-full px-4 py-2 border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
+            <TimeInputWithCalendar
+              value={startInput}
+              onChange={(value) => {
+                setStartInput(value);
+                handleCustomInputChange();
+              }}
+              label="Start Time"
+              placeholder="e.g., 2h ago, 2025-12-02 13:00"
+              className="w-full"
+            />
+            <TimeInputWithCalendar
+              value={endInput}
+              onChange={(value) => {
+                setEndInput(value);
+                handleCustomInputChange();
+              }}
+              label="End Time"
+              placeholder="e.g., now, 2025-12-02 15:00"
+              className="w-full"
+            />
           </div>
+          {validationError && (
+            <div className="mt-3 text-sm text-red-400 bg-red-900/20 border border-red-500/40 rounded px-3 py-2">
+              {validationError}
+            </div>
+          )}
         </div>
 
         {/* Confirm Button */}

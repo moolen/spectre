@@ -103,4 +103,3 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("Export completed successfully")
 }
-

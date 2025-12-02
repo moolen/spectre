@@ -7,9 +7,11 @@ interface FilterBarProps {
   filters: FilterState;
   setFilters: React.Dispatch<React.SetStateAction<FilterState>>;
   timeRange: TimeRange;
-  onTimeRangeChange: (range: TimeRange) => void;
+  onTimeRangeChange: (range: TimeRange, rawStart?: string, rawEnd?: string) => void;
   availableNamespaces: string[];
   availableKinds: string[];
+  rawStart?: string;
+  rawEnd?: string;
 }
 
 const MultiSelectDropdown = ({
@@ -306,7 +308,7 @@ const MultiSelectDropdown = ({
     );
 };
 
-export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeRange, onTimeRangeChange, availableNamespaces, availableKinds }) => {
+export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeRange, onTimeRangeChange, availableNamespaces, availableKinds, rawStart, rawEnd }) => {
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFilters(prev => ({ ...prev, search: e.target.value }));
@@ -425,6 +427,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeR
             <TimeRangeDropdown
                 currentRange={timeRange}
                 onConfirm={onTimeRangeChange}
+                rawStart={rawStart}
+                rawEnd={rawEnd}
             />
             <SettingsMenu />
         </div>

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
@@ -212,6 +213,60 @@ func TestSearchHandler_Handle(t *testing.T) {
 			wantStatus:  http.StatusBadRequest,
 			wantErrCode: "INVALID_REQUEST",
 		},
+		{
+			name:   "valid search with human-friendly timestamps",
+			method: http.MethodGet,
+			queryParams: url.Values{
+				"start": {"2h ago"},
+				"end":   {"now"},
+			},
+			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
+				// Verify timestamps are parsed correctly
+				if q.StartTimestamp < 0 || q.EndTimestamp < 0 {
+					t.Errorf("timestamps should be non-negative: start=%d, end=%d", q.StartTimestamp, q.EndTimestamp)
+				}
+				if q.StartTimestamp >= q.EndTimestamp {
+					t.Errorf("start should be before end: start=%d, end=%d", q.StartTimestamp, q.EndTimestamp)
+				}
+				// Verify timestamps are recent (within last 3 hours)
+				now := time.Now().Unix()
+				if q.EndTimestamp < now-300 || q.EndTimestamp > now+300 {
+					t.Errorf("end timestamp should be close to now (%d), got %d", now, q.EndTimestamp)
+				}
+				expectedStart := time.Now().Add(-2 * time.Hour).Unix()
+				if q.StartTimestamp < expectedStart-300 || q.StartTimestamp > expectedStart+300 {
+					t.Errorf("start timestamp should be close to 2h ago (%d), got %d", expectedStart, q.StartTimestamp)
+				}
+				return &models.QueryResult{
+					Events:          []models.Event{},
+					Count:           0,
+					ExecutionTimeMs: 5,
+				}, nil
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:   "mixed timestamp formats",
+			method: http.MethodGet,
+			queryParams: url.Values{
+				"start": {"1000"},
+				"end":   {"now"},
+			},
+			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
+				if q.StartTimestamp != 1000 {
+					t.Errorf("expected start=1000, got %d", q.StartTimestamp)
+				}
+				if q.EndTimestamp < 0 {
+					t.Errorf("end timestamp should be non-negative, got %d", q.EndTimestamp)
+				}
+				return &models.QueryResult{
+					Events:          []models.Event{},
+					Count:           0,
+					ExecutionTimeMs: 5,
+				}, nil
+			},
+			wantStatus: http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
@@ -372,6 +427,39 @@ func TestTimelineHandler_Handle(t *testing.T) {
 			},
 			wantStatus:  http.StatusInternalServerError,
 			wantErrCode: "INTERNAL_ERROR",
+		},
+		{
+			name:   "valid timeline request with human-friendly timestamps",
+			method: http.MethodGet,
+			queryParams: url.Values{
+				"start": {"1h ago"},
+				"end":   {"now"},
+			},
+			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
+				// Verify timestamps are parsed correctly
+				if q.StartTimestamp < 0 || q.EndTimestamp < 0 {
+					t.Errorf("timestamps should be non-negative: start=%d, end=%d", q.StartTimestamp, q.EndTimestamp)
+				}
+				if q.StartTimestamp >= q.EndTimestamp {
+					t.Errorf("start should be before end: start=%d, end=%d", q.StartTimestamp, q.EndTimestamp)
+				}
+				// Return appropriate results based on query type
+				if q.Filters.Kind == "Event" {
+					return &models.QueryResult{
+						Events:          []models.Event{},
+						Count:           0,
+						ExecutionTimeMs: 5,
+					}, nil
+				}
+				return &models.QueryResult{
+					Events: []models.Event{
+						createTestEvent("1", "Pod", "default", "test-pod", 1500000000000),
+					},
+					Count:           1,
+					ExecutionTimeMs: 10,
+				}, nil
+			},
+			wantStatus: http.StatusOK,
 		},
 	}
 
@@ -567,6 +655,55 @@ func TestMetadataHandler_Handle(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:   "metadata with human-friendly time range",
+			method: http.MethodGet,
+			queryParams: url.Values{
+				"start": {"2h ago"},
+				"end":   {"now"},
+			},
+			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
+				// Verify timestamps are parsed correctly
+				if q.StartTimestamp < 0 || q.EndTimestamp < 0 {
+					t.Errorf("timestamps should be non-negative: start=%d, end=%d", q.StartTimestamp, q.EndTimestamp)
+				}
+				if q.StartTimestamp >= q.EndTimestamp {
+					t.Errorf("start should be before end: start=%d, end=%d", q.StartTimestamp, q.EndTimestamp)
+				}
+				// Verify timestamps are recent
+				now := time.Now().Unix()
+				if q.EndTimestamp < now-300 || q.EndTimestamp > now+300 {
+					t.Errorf("end timestamp should be close to now (%d), got %d", now, q.EndTimestamp)
+				}
+				return &models.QueryResult{
+					Events: []models.Event{
+						createTestEvent("1", "Pod", "default", "pod1", 1500000000000),
+					},
+					Count:           1,
+					ExecutionTimeMs: 5,
+				}, nil
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:   "metadata with only start as human-friendly",
+			method: http.MethodGet,
+			queryParams: url.Values{
+				"start": {"yesterday"},
+			},
+			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
+				// Start should be parsed, end should be default (now)
+				if q.StartTimestamp < 0 {
+					t.Errorf("start timestamp should be non-negative, got %d", q.StartTimestamp)
+				}
+				return &models.QueryResult{
+					Events:          []models.Event{},
+					Count:           0,
+					ExecutionTimeMs: 5,
+				}, nil
+			},
+			wantStatus: http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
@@ -756,6 +893,86 @@ func TestParseTimestamp(t *testing.T) {
 				t.Errorf("expected non-negative timestamp, got %d", ts)
 			}
 		}},
+		{"human readable date - now", "now", "start", false, func(t *testing.T, ts int64) {
+			now := time.Now().Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < now-300 || ts > now+300 {
+				t.Errorf("expected timestamp close to %d, got %d (diff: %d seconds)", now, ts, ts-now)
+			}
+		}},
+		{"human readable date - 2h ago", "2h ago", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().Add(-2 * time.Hour).Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < expected-300 || ts > expected+300 {
+				t.Errorf("expected timestamp close to %d (2h ago), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"human readable date - 1 hour ago", "1 hour ago", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().Add(-1 * time.Hour).Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < expected-300 || ts > expected+300 {
+				t.Errorf("expected timestamp close to %d (1h ago), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"human readable date - last week", "last week", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().AddDate(0, 0, -7).Unix()
+			// Allow 1 day tolerance for "last week" interpretation
+			if ts < expected-86400 || ts > expected+86400 {
+				t.Errorf("expected timestamp close to %d (last week), got %d", expected, ts)
+			}
+		}},
+		{"human readable date - 30 minutes ago", "30 minutes ago", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().Add(-30 * time.Minute).Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < expected-300 || ts > expected+300 {
+				t.Errorf("expected timestamp close to %d (30m ago), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"composite format - now-2h", "now-2h", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().Add(-2 * time.Hour).Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < expected-300 || ts > expected+300 {
+				t.Errorf("expected timestamp close to %d (now-2h), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"composite format - now-30m", "now-30m", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().Add(-30 * time.Minute).Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < expected-300 || ts > expected+300 {
+				t.Errorf("expected timestamp close to %d (now-30m), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"composite format - now-1d", "now-1d", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().AddDate(0, 0, -1).Unix()
+			// Allow 1 hour tolerance for test execution time
+			if ts < expected-3600 || ts > expected+3600 {
+				t.Errorf("expected timestamp close to %d (now-1d), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"composite format - now-5hours (with spaces)", "now - 5hours", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().Add(-5 * time.Hour).Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < expected-300 || ts > expected+300 {
+				t.Errorf("expected timestamp close to %d (now-5hours), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"composite format - now-10minutes (with spaces)", "now - 10minutes", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().Add(-10 * time.Minute).Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < expected-300 || ts > expected+300 {
+				t.Errorf("expected timestamp close to %d (now-10minutes), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"composite format - case insensitive", "NOW-2H", "start", false, func(t *testing.T, ts int64) {
+			expected := time.Now().Add(-2 * time.Hour).Unix()
+			// Allow 5 minute tolerance for test execution time
+			if ts < expected-300 || ts > expected+300 {
+				t.Errorf("expected timestamp close to %d (NOW-2H), got %d (diff: %d seconds)", expected, ts, ts-expected)
+			}
+		}},
+		{"composite format - invalid (missing duration)", "now-", "start", true, nil},
+		{"composite format - invalid (wrong base)", "today-2h", "start", false, nil}, // Should fall back to go-dateparser
+		{"composite format - invalid duration", "now-xyz", "start", true, nil},
 		{"invalid format", "not-a-date-or-number", "start", true, nil},
 	}
 
@@ -780,13 +997,33 @@ func TestParseOptionalTimestamp(t *testing.T) {
 		name       string
 		input      string
 		defaultVal int64
-		want       int64
 		wantError  bool
+		validate   func(*testing.T, int64, int64) // result, defaultVal
 	}{
-		{"empty string returns default", "", 100, 100, false},
-		{"valid timestamp", "2000", 100, 2000, false},
-		{"invalid timestamp", "invalid", 100, 100, true},
-		{"negative timestamp", "-1", 100, 100, true},
+		{"empty string returns default", "", 100, false, func(t *testing.T, result, defaultVal int64) {
+			if result != defaultVal {
+				t.Errorf("expected default %d, got %d", defaultVal, result)
+			}
+		}},
+		{"valid timestamp", "2000", 100, false, func(t *testing.T, result, defaultVal int64) {
+			if result != 2000 {
+				t.Errorf("expected 2000, got %d", result)
+			}
+		}},
+		{"invalid timestamp", "invalid", 100, true, nil},
+		{"negative timestamp", "-1", 100, true, nil},
+		{"human readable - now", "now", 100, false, func(t *testing.T, result, defaultVal int64) {
+			now := time.Now().Unix()
+			if result < now-300 || result > now+300 {
+				t.Errorf("expected timestamp close to %d (now), got %d", now, result)
+			}
+		}},
+		{"human readable - 1h ago", "1h ago", 100, false, func(t *testing.T, result, defaultVal int64) {
+			expected := time.Now().Add(-1 * time.Hour).Unix()
+			if result < expected-300 || result > expected+300 {
+				t.Errorf("expected timestamp close to %d (1h ago), got %d", expected, result)
+			}
+		}},
 	}
 
 	for _, tt := range tests {
@@ -798,8 +1035,8 @@ func TestParseOptionalTimestamp(t *testing.T) {
 			if !tt.wantError && err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			if !tt.wantError && result != tt.want {
-				t.Errorf("expected %d, got %d", tt.want, result)
+			if !tt.wantError && tt.validate != nil {
+				tt.validate(t, result, tt.defaultVal)
 			}
 		})
 	}

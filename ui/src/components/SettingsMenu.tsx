@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AutoRefreshOption, TimeFormat, useSettings } from '../hooks/useSettings';
+import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
 
 const AUTO_REFRESH_LABELS: Record<AutoRefreshOption, string> = {
   off: 'Off',
-  '30s': 'Every 30s',
-  '60s': 'Every 1m',
-  '300s': 'Every 5m'
+  '30s': '30s',
+  '60s': '1m',
+  '300s': '5m'
 };
 
 interface ExportFormData {
@@ -29,6 +30,8 @@ export const SettingsMenu: React.FC = () => {
     autoRefresh,
     setAutoRefresh
   } = useSettings();
+
+  const { preset } = usePersistedQuickPreset();
 
   const [isOpen, setIsOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -278,12 +281,12 @@ export const SettingsMenu: React.FC = () => {
             <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
               Auto-refresh
             </div>
-            <div className="space-y-2">
+            <div className="flex gap-2">
               {(['off', '30s', '60s', '300s'] as AutoRefreshOption[]).map((option) => (
                 <button
                   key={option}
                   onClick={() => setAutoRefresh(option)}
-                  className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
+                  className={`flex-1 px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
                     autoRefresh === option
                       ? 'border-brand-500 bg-[var(--color-surface-active)] text-[var(--color-text-primary)]'
                       : 'border-[var(--color-border-soft)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'

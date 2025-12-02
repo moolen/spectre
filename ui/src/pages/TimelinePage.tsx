@@ -7,8 +7,10 @@ import { TimeRangePicker } from '../components/TimeRangePicker';
 import { useTimeline } from '../hooks/useTimeline';
 import { useMetadata } from '../hooks/useMetadata';
 import { usePersistedFilters } from '../hooks/usePersistedFilters';
+import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
 import { K8sResource, FilterState, SelectedPoint, TimeRange } from '../types';
 import { useSettings } from '../hooks/useSettings';
+import { parseTimeExpression } from '../utils/timeParsing';
 
 const AUTO_REFRESH_INTERVALS: Record<string, number> = {
   off: 0,
@@ -19,33 +21,99 @@ const AUTO_REFRESH_INTERVALS: Record<string, number> = {
 
 function TimelinePage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const initialTimeRangeRef = useRef<TimeRange | null>(null);
+  const [timeRange, setTimeRange] = useState<TimeRange | null>(null);
+  const [rawTimeExpressions, setRawTimeExpressions] = useState<{ start?: string; end?: string }>({});
+  const originalUrlParamsRef = useRef<{ start?: string; end?: string } | null>(null);
 
-  // Parse time range from URL
-  const timeRange = useMemo<TimeRange | null>(() => {
+  // Parse time range from URL only once on mount
+  useEffect(() => {
     const startParam = searchParams.get('start');
     const endParam = searchParams.get('end');
 
     if (!startParam || !endParam) {
-      return null;
+      setTimeRange(null);
+      setRawTimeExpressions({});
+      originalUrlParamsRef.current = null;
+      return;
     }
 
-    const start = new Date(startParam);
-    const end = new Date(endParam);
+    // Store original URL parameters to preserve format
+    originalUrlParamsRef.current = { start: startParam, end: endParam };
 
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
-      return null;
+    // Try parsing as human-friendly expressions first, then fall back to ISO dates
+    let start = parseTimeExpression(startParam);
+    let end = parseTimeExpression(endParam);
+
+    // If human-friendly parsing failed, try ISO date parsing
+    if (!start) {
+      const isoStart = new Date(startParam);
+      if (!isNaN(isoStart.getTime())) {
+        start = isoStart;
+      }
     }
 
-    return { start, end };
-  }, [searchParams]);
+    if (!end) {
+      const isoEnd = new Date(endParam);
+      if (!isNaN(isoEnd.getTime())) {
+        end = isoEnd;
+      }
+    }
 
-  // Update URL when time range changes
-  const handleTimeRangeChange = (range: TimeRange) => {
-    setSearchParams({
-      start: range.start.toISOString(),
-      end: range.end.toISOString()
+    // Validate that we have valid dates and start < end
+    if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+      setTimeRange(null);
+      setRawTimeExpressions({});
+      originalUrlParamsRef.current = null;
+      return;
+    }
+
+    const range = { start, end };
+    initialTimeRangeRef.current = range;
+    setTimeRange(range);
+
+    // Store raw expressions if they were successfully parsed as human-friendly
+    // Check by seeing if parseTimeExpression returns a non-null value
+    const parsedStart = parseTimeExpression(startParam);
+    const parsedEnd = parseTimeExpression(endParam);
+    setRawTimeExpressions({
+      start: parsedStart !== null ? startParam : undefined,
+      end: parsedEnd !== null ? endParam : undefined,
     });
+  }, []); // Only run once on mount, ignore searchParams changes
+
+  // Update URL when time range changes (from time picker)
+  const handleTimeRangeChange = (range: TimeRange, rawStart?: string, rawEnd?: string) => {
+    // If raw expressions are provided (human-friendly), use them in URL
+    // Otherwise, use ISO date strings
+    const startParam = rawStart || range.start.toISOString();
+    const endParam = rawEnd || range.end.toISOString();
+
+    setSearchParams({
+      start: startParam,
+      end: endParam
+    });
+    // Also update the local state and initial ref
+    initialTimeRangeRef.current = range;
+    setTimeRange(range);
+    // Store raw expressions for API calls
+    setRawTimeExpressions({ start: rawStart, end: rawEnd });
   };
+
+  // Handle visible range changes from zoom/pan
+  // Don't update URL - preserve the original format (human-friendly or ISO)
+  // The URL should only change when user explicitly uses the date picker
+  const handleVisibleTimeRangeChange = (range: TimeRange) => {
+    // Do nothing - preserve the original URL parameters
+    // This prevents the URL from being overwritten with ISO dates when the timeline
+    // adjusts its visible range or initializes
+  };
+
+  // Handle zoom detection - clear the persisted preset when user zooms/pans
+  const { clearPreset } = usePersistedQuickPreset();
+  const handleZoomDetected = useCallback(() => {
+    clearPreset();
+  }, [clearPreset]);
 
   // Fetch metadata (namespaces and kinds) for the time range
   const { namespaces: availableNamespaces, kinds: availableKinds } = useMetadata(timeRange);
@@ -109,6 +177,8 @@ function TimelinePage() {
   const { resources, loading, error } = useTimeline({
     startTime: timeRange?.start,
     endTime: timeRange?.end,
+    rawStart: rawTimeExpressions.start,
+    rawEnd: rawTimeExpressions.end,
     filters: apiFilters,
     refreshToken
   });
@@ -186,6 +256,8 @@ function TimelinePage() {
         onTimeRangeChange={handleTimeRangeChange}
         availableNamespaces={availableNamespaces}
         availableKinds={availableKinds}
+        rawStart={rawTimeExpressions.start}
+        rawEnd={rawTimeExpressions.end}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -223,6 +295,8 @@ function TimelinePage() {
                 highlightedEventIds={relevantEventIds}
                 sidebarWidth={selectedPoint ? 384 : 0}
                 timeRange={timeRange}
+                onVisibleTimeRangeChange={handleVisibleTimeRangeChange}
+                onZoomDetected={handleZoomDetected}
              />
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500 flex-col">
