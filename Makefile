@@ -1,10 +1,11 @@
-.PHONY: help build build-ui run test clean docker-build docker-run deploy watch lint fmt vet
+.PHONY: help build build-ui build-mcp run test clean docker-build docker-run deploy watch lint fmt vet
 
 # Default target
 help:
 	@echo "Kubernetes Event Monitor - Available targets:"
 	@echo "  build          - Build the application binary"
 	@echo "  build-ui       - Build the React UI"
+	@echo "  build-mcp      - Build the MCP server for Claude integration"
 	@echo "  run            - Run the application locally"
 	@echo "  test           - Run all tests"
 	@echo "  test-unit      - Run unit tests only"
@@ -22,6 +23,8 @@ help:
 # Variables
 BINARY_NAME=k8s-event-monitor
 BINARY_PATH=bin/$(BINARY_NAME)
+MCP_BINARY_NAME=spectre-mcp
+MCP_BINARY_PATH=bin/$(MCP_BINARY_NAME)
 IMAGE_NAME=k8s-event-monitor
 IMAGE_TAG=latest
 DOCKER_IMAGE=$(IMAGE_NAME):$(IMAGE_TAG)
@@ -41,6 +44,14 @@ build-ui:
 	@echo "Building React UI..."
 	@cd ui && npm ci && npm run build
 	@echo "UI build complete: ui/dist"
+
+# Build the MCP server
+build-mcp:
+	@echo "Building $(MCP_BINARY_NAME)..."
+	@mkdir -p bin
+	@go build -o $(MCP_BINARY_PATH) ./cmd/mcp-server
+	@echo "Build complete: $(MCP_BINARY_PATH)"
+	@echo "Start with: ./$(MCP_BINARY_PATH) --spectre-url http://localhost:8080"
 
 # Run the application locally
 run: build build-ui
