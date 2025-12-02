@@ -215,6 +215,11 @@ func ensureHelmRelease(t *testing.T, kubeConfig, namespace, releaseName string, 
 	return helm.InstallOrUpgrade(releaseName, chartPath, values)
 }
 
+// LoadHelmValues loads the test Helm values file and returns the values map and image reference
+func LoadHelmValues() (map[string]interface{}, string, error) {
+	return loadHelmValues()
+}
+
 func loadHelmValues() (map[string]interface{}, string, error) {
 	valuesPath, err := repoPath(helmValuesFixturePath)
 	if err != nil {
@@ -249,6 +254,11 @@ func extractImageReference(values map[string]interface{}) string {
 	}
 
 	return fmt.Sprintf("%s:%s", repo, tag)
+}
+
+// BuildAndLoadTestImage builds and loads a Docker image into the Kind cluster
+func BuildAndLoadTestImage(t *testing.T, clusterName, imageRef string) error {
+	return buildAndLoadTestImage(t, clusterName, imageRef)
 }
 
 func buildAndLoadTestImage(t *testing.T, clusterName, imageRef string) error {
@@ -313,6 +323,11 @@ func isPodReady(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+// RepoPath returns the absolute path to a file relative to the repository root
+func RepoPath(relative string) (string, error) {
+	return repoPath(relative)
 }
 
 func repoPath(relative string) (string, error) {

@@ -79,7 +79,7 @@ func main() {
 	}
 	logger.Info("Watcher component created")
 
-	apiComponent := api.New(cfg.APIPort, storage.NewQueryExecutor(storageComponent), watcherComponent)
+	apiComponent := api.NewWithStorage(cfg.APIPort, storage.NewQueryExecutor(storageComponent), storageComponent, watcherComponent)
 	logger.Info("API server component created")
 
 	if err := manager.Register(storageComponent); err != nil {

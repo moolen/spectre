@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -400,19 +401,16 @@ func TestStorageDeleteOldFiles(t *testing.T) {
 	}
 	defer storage.Close()
 
-	// Create a file manually with old timestamp
-	oldFile := filepath.Join(tmpDir, "2020-01-01-00.bin")
+	// Create a file with an old hour timestamp (48 hours ago)
+	oldTime := time.Now().Add(-48 * time.Hour)
+	oldFileName := fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		oldTime.Year(), oldTime.Month(), oldTime.Day(), oldTime.Hour())
+	oldFile := filepath.Join(tmpDir, oldFileName)
 	file, err := os.Create(oldFile)
 	if err != nil {
 		t.Fatalf("failed to create old file: %v", err)
 	}
 	file.Close()
-
-	// Set old modification time
-	oldTime := time.Now().Add(-48 * time.Hour)
-	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
-		t.Fatalf("failed to set file time: %v", err)
-	}
 
 	// Delete files older than 24 hours
 	if err := storage.DeleteOldFiles(24); err != nil {
@@ -433,19 +431,16 @@ func TestStorageDeleteOldFiles_KeepRecent(t *testing.T) {
 	}
 	defer storage.Close()
 
-	// Create a recent file
-	recentFile := filepath.Join(tmpDir, "2025-01-01-00.bin")
+	// Create a file with a recent hour timestamp (1 hour ago)
+	recentTime := time.Now().Add(-1 * time.Hour)
+	recentFileName := fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		recentTime.Year(), recentTime.Month(), recentTime.Day(), recentTime.Hour())
+	recentFile := filepath.Join(tmpDir, recentFileName)
 	file, err := os.Create(recentFile)
 	if err != nil {
 		t.Fatalf("failed to create recent file: %v", err)
 	}
 	file.Close()
-
-	// Set recent modification time
-	recentTime := time.Now().Add(-1 * time.Hour)
-	if err := os.Chtimes(recentFile, recentTime, recentTime); err != nil {
-		t.Fatalf("failed to set file time: %v", err)
-	}
 
 	// Delete files older than 24 hours
 	if err := storage.DeleteOldFiles(24); err != nil {
