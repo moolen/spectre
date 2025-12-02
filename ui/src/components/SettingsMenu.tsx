@@ -1,18 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AutoRefreshOption, TimeFormat, useSettings } from '../hooks/useSettings';
+import { TimeFormat, useSettings } from '../hooks/useSettings';
 import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
-
-const AUTO_REFRESH_LABELS: Record<AutoRefreshOption, string> = {
-  off: 'Off',
-  '30s': '30s',
-  '60s': '1m',
-  '300s': '5m'
-};
+import { TimeInputWithCalendar } from './TimeInputWithCalendar';
+import { parseTimeExpression, validateTimeRange } from '../utils/timeParsing';
+import { apiClient } from '../services/api';
 
 interface ExportFormData {
-  from: string; // ISO datetime string for datetime-local input
-  to: string;   // ISO datetime string for datetime-local input
+  from: string; // Human-friendly date string (e.g., "2h ago", "2024-01-01 13:00")
+  to: string;   // Human-friendly date string (e.g., "now", "2024-01-01 15:00")
   includeOpenHour: boolean;
   compression: boolean;
   clusterId: string;
@@ -27,8 +23,6 @@ export const SettingsMenu: React.FC = () => {
     setTimeFormat,
     compactMode,
     setCompactMode,
-    autoRefresh,
-    setAutoRefresh
   } = useSettings();
 
   const { preset } = usePersistedQuickPreset();
@@ -44,22 +38,9 @@ export const SettingsMenu: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [exportForm, setExportForm] = useState<ExportFormData>(() => {
-    const now = new Date();
-    const yesterday = new Date(now.getTime() - 86400000); // 24 hours ago
-
-    // Format as datetime-local string (YYYY-MM-DDTHH:mm)
-    const formatDatetimeLocal = (date: Date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const hours = String(date.getHours()).padStart(2, '0');
-      const minutes = String(date.getMinutes()).padStart(2, '0');
-      return `${year}-${month}-${day}T${hours}:${minutes}`;
-    };
-
     return {
-      from: formatDatetimeLocal(yesterday),
-      to: formatDatetimeLocal(now),
+      from: '1d ago',
+      to: 'now',
       includeOpenHour: true,
       compression: true,
       clusterId: '',
@@ -97,35 +78,29 @@ export const SettingsMenu: React.FC = () => {
     setExportError(null);
 
     try {
-      // Convert datetime-local strings to Unix timestamps (seconds)
-      const fromTimestamp = Math.floor(new Date(exportForm.from).getTime() / 1000);
-      const toTimestamp = Math.floor(new Date(exportForm.to).getTime() / 1000);
-
-      // Validate timestamps
-      if (isNaN(fromTimestamp) || isNaN(toTimestamp)) {
-        throw new Error('Invalid date/time values');
+      // Validate time range using the same validation as other date pickers
+      const validation = validateTimeRange(exportForm.from, exportForm.to);
+      if (validation.valid === false) {
+        throw new Error(validation.error);
       }
 
-      if (fromTimestamp >= toTimestamp) {
+      // TypeScript now knows validation.valid is true, so we have start and end
+      const { start, end } = validation;
+      if (start >= end) {
         throw new Error('Start time must be before end time');
       }
 
-      const params = new URLSearchParams();
-      params.append('from', fromTimestamp.toString());
-      params.append('to', toTimestamp.toString());
-      params.append('include_open_hour', exportForm.includeOpenHour.toString());
-      params.append('compression', exportForm.compression.toString());
-      if (exportForm.clusterId) params.append('cluster_id', exportForm.clusterId);
-      if (exportForm.instanceId) params.append('instance_id', exportForm.instanceId);
+      // Use API client to export data
+      const blob = await apiClient.exportData({
+        from: exportForm.from,
+        to: exportForm.to,
+        includeOpenHour: exportForm.includeOpenHour,
+        compression: exportForm.compression,
+        clusterId: exportForm.clusterId || undefined,
+        instanceId: exportForm.instanceId || undefined,
+      });
 
-      const baseUrl = window.location.origin;
-      const response = await fetch(`${baseUrl}/v1/storage/export?${params.toString()}`);
-
-      if (!response.ok) {
-        throw new Error(`Export failed: ${response.status} ${response.statusText}`);
-      }
-
-      const blob = await response.blob();
+      // Download the blob
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -155,21 +130,12 @@ export const SettingsMenu: React.FC = () => {
     setImportMessage(null);
 
     try {
-      const baseUrl = window.location.origin;
-      const response = await fetch(`${baseUrl}/v1/storage/import?validate=true&overwrite=true`, {
-        method: 'POST',
-        body: file,
-        headers: {
-          'Content-Type': 'application/gzip'
-        }
+      // Use API client to import data
+      const result = await apiClient.importData(file, {
+        validate: true,
+        overwrite: true,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Import failed: ${response.status} - ${errorText}`);
-      }
-
-      const result = await response.json();
       setImportMessage({
         type: 'success',
         text: `Successfully imported ${result.total_events || 0} events from ${result.imported_files || 0} file(s)`
@@ -279,27 +245,6 @@ export const SettingsMenu: React.FC = () => {
 
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
-              Auto-refresh
-            </div>
-            <div className="flex gap-2">
-              {(['off', '30s', '60s', '300s'] as AutoRefreshOption[]).map((option) => (
-                <button
-                  key={option}
-                  onClick={() => setAutoRefresh(option)}
-                  className={`flex-1 px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
-                    autoRefresh === option
-                      ? 'border-brand-500 bg-[var(--color-surface-active)] text-[var(--color-text-primary)]'
-                      : 'border-[var(--color-border-soft)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
-                  }`}
-                >
-                  {AUTO_REFRESH_LABELS[option]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
               Data Management
             </div>
             <div className="space-y-2">
@@ -396,14 +341,12 @@ export const SettingsMenu: React.FC = () => {
 
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                        Start Date & Time
-                      </label>
-                      <input
-                        type="datetime-local"
+                      <TimeInputWithCalendar
                         value={exportForm.from}
-                        onChange={(e) => setExportForm({ ...exportForm, from: e.target.value })}
-                        className="w-full px-3 py-2 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] focus:border-brand-500 focus:outline-none"
+                        onChange={(value) => setExportForm({ ...exportForm, from: value })}
+                        label="Start Date & Time"
+                        placeholder="e.g., 1d ago, 2h ago, 2024-01-01 13:00"
+                        className="w-full"
                       />
                       <div className="text-xs text-[var(--color-text-muted)] mt-1">
                         Data from this time onwards
@@ -411,14 +354,12 @@ export const SettingsMenu: React.FC = () => {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                        End Date & Time
-                      </label>
-                      <input
-                        type="datetime-local"
+                      <TimeInputWithCalendar
                         value={exportForm.to}
-                        onChange={(e) => setExportForm({ ...exportForm, to: e.target.value })}
-                        className="w-full px-3 py-2 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] focus:border-brand-500 focus:outline-none"
+                        onChange={(value) => setExportForm({ ...exportForm, to: value })}
+                        label="End Date & Time"
+                        placeholder="e.g., now, 1h ago, 2024-01-01 15:00"
+                        className="w-full"
                       />
                       <div className="text-xs text-[var(--color-text-muted)] mt-1">
                         Data up to this time

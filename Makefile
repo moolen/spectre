@@ -1,4 +1,4 @@
-.PHONY: help build build-ui build-mcp run test clean docker-build docker-run deploy watch lint fmt vet
+.PHONY: help build build-ui build-mcp run test clean docker-build docker-run deploy watch lint fmt vet favicons
 
 # Default target
 help:
@@ -19,6 +19,7 @@ help:
 	@echo "  docker-run     - Run application in Docker"
 	@echo "  deploy         - Deploy to Kubernetes via Helm"
 	@echo "  watch          - Watch and rebuild on file changes (requires entr)"
+	@echo "  favicons       - Generate all favicon versions from favicon.svg"
 
 # Variables
 BINARY_NAME=k8s-event-monitor
@@ -166,6 +167,12 @@ deps-verify:
 	@echo "Verifying dependencies..."
 	@go mod verify
 	@echo "Dependencies verified"
+
+# Generate favicons from SVG source
+favicons:
+	@echo "Generating favicons..."
+	@./hack/generate-favicons.sh
+	@echo "Favicons generated successfully"
 
 # Default target
 .DEFAULT_GOAL := help

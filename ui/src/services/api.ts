@@ -234,11 +234,145 @@ class ApiClient {
       throw error;
     }
   }
+
+  /**
+   * Export storage data
+   * Returns a Blob that can be downloaded
+   */
+  async exportData(options: {
+    from: string;
+    to: string;
+    includeOpenHour?: boolean;
+    compression?: boolean;
+    clusterId?: string;
+    instanceId?: string;
+  }): Promise<Blob> {
+    const params = new URLSearchParams();
+    params.append('from', options.from);
+    params.append('to', options.to);
+    params.append('include_open_hour', (options.includeOpenHour ?? true).toString());
+    params.append('compression', (options.compression ?? true).toString());
+    if (options.clusterId) params.append('cluster_id', options.clusterId);
+    if (options.instanceId) params.append('instance_id', options.instanceId);
+
+    const url = `${this.baseUrl}/v1/storage/export?${params.toString()}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        // Try to parse structured error response
+        try {
+          const errorData = await response.json();
+          if (errorData.error && errorData.message) {
+            throw new Error(`API error (${errorData.error}): ${errorData.message}`);
+          }
+          throw new Error(`API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+        } catch (jsonError) {
+          // If JSON parsing fails, fall back to text
+          const errorBody = await response.text().catch(() => '');
+          throw new Error(
+            `API Error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`
+          );
+        }
+      }
+
+      return await response.blob();
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error(`Request timeout (${this.timeout}ms) - Backend server may be unavailable`);
+        }
+        if (error.message.includes('Failed to fetch')) {
+          throw new Error('Network error - Unable to connect to backend server. Please check that the server is running.');
+        }
+        throw error;
+      }
+      throw new Error('Unknown error occurred');
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * Import storage data from a file
+   */
+  async importData(
+    file: File,
+    options?: {
+      validate?: boolean;
+      overwrite?: boolean;
+    }
+  ): Promise<{ total_events: number; imported_files: number }> {
+    const params = new URLSearchParams();
+    if (options?.validate !== undefined) {
+      params.append('validate', options.validate.toString());
+    } else {
+      params.append('validate', 'true');
+    }
+    if (options?.overwrite !== undefined) {
+      params.append('overwrite', options.overwrite.toString());
+    } else {
+      params.append('overwrite', 'true');
+    }
+
+    const url = `${this.baseUrl}/v1/storage/import?${params.toString()}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        body: file,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/gzip',
+        },
+      });
+
+      if (!response.ok) {
+        // Try to parse structured error response
+        try {
+          const errorData = await response.json();
+          if (errorData.error && errorData.message) {
+            throw new Error(`API error (${errorData.error}): ${errorData.message}`);
+          }
+          throw new Error(`API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+        } catch (jsonError) {
+          // If JSON parsing fails, fall back to text
+          const errorText = await response.text().catch(() => '');
+          throw new Error(`Import failed: ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+        }
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error(`Request timeout (${this.timeout}ms) - Backend server may be unavailable`);
+        }
+        if (error.message.includes('Failed to fetch')) {
+          throw new Error('Network error - Unable to connect to backend server. Please check that the server is running.');
+        }
+        throw error;
+      }
+      throw new Error('Unknown error occurred');
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 // Create singleton instance with environment-based configuration
 const baseUrl =
-  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080');
+  'http://localhost:8080';
 
 export const apiClient = new ApiClient({
   baseUrl,
