@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
@@ -34,24 +33,24 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	clusterID := r.URL.Query().Get("cluster_id")
 	instanceID := r.URL.Query().Get("instance_id")
 
-	// Parse timestamps
+	// Parse timestamps using the date parser (supports Unix timestamps and human-readable dates)
 	var startTime, endTime int64
 	var err error
 
 	if startTimeStr != "" {
-		startTime, err = strconv.ParseInt(startTimeStr, 10, 64)
+		startTime, err = ParseTimestamp(startTimeStr, "from")
 		if err != nil {
 			h.logger.Warn("Invalid start time parameter: %v", err)
-			writeError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Invalid 'from' parameter: must be Unix timestamp")
+			writeError(w, http.StatusBadRequest, "INVALID_PARAMETER", fmt.Sprintf("Invalid 'from' parameter: %v", err))
 			return
 		}
 	}
 
 	if endTimeStr != "" {
-		endTime, err = strconv.ParseInt(endTimeStr, 10, 64)
+		endTime, err = ParseTimestamp(endTimeStr, "to")
 		if err != nil {
 			h.logger.Warn("Invalid end time parameter: %v", err)
-			writeError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Invalid 'to' parameter: must be Unix timestamp")
+			writeError(w, http.StatusBadRequest, "INVALID_PARAMETER", fmt.Sprintf("Invalid 'to' parameter: %v", err))
 			return
 		}
 	}
@@ -103,4 +102,3 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("Export completed successfully")
 }
-

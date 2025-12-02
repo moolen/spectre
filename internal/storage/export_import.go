@@ -328,7 +328,6 @@ func (s *Storage) filterFilesByTimeRange(files []string, startTime, endTime int6
 	return filtered
 }
 
-
 // Import imports storage files from a tar archive
 func (s *Storage) Import(r io.Reader, opts ImportOptions) (*ImportReport, error) {
 	startTime := time.Now()
@@ -605,4 +604,3 @@ func (s *Storage) readAllEventsFromFile(filePath string) ([]*models.Event, error
 
 	return allEvents, nil
 }
-

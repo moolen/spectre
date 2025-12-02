@@ -11,6 +11,8 @@ interface TimelineProps {
   highlightedEventIds?: string[];
   sidebarWidth?: number;
   timeRange: TimeRange;
+  onVisibleTimeRangeChange?: (timeRange: TimeRange) => void;
+  onZoomDetected?: () => void;
 }
 
 const MARGIN = { top: 40, right: 30, bottom: 20, left: 240 };
@@ -23,7 +25,9 @@ export const Timeline: React.FC<TimelineProps> = ({
     selectedPoint,
     highlightedEventIds = [],
     sidebarWidth = 0,
-    timeRange
+    timeRange,
+    onVisibleTimeRangeChange,
+    onZoomDetected
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const stickyAxisRef = useRef<SVGSVGElement>(null);
@@ -31,6 +35,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null);
   const { compactMode, formatTime, theme } = useSettings();
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const rowHeight = compactMode ? ROW_HEIGHT_COMPACT : ROW_HEIGHT_DEFAULT;
   const bandPadding = compactMode ? 0.15 : 0.4;
@@ -127,6 +132,33 @@ export const Timeline: React.FC<TimelineProps> = ({
       .scaleExtent([1, 1000]) // Min scale 1 = can't zoom out beyond full view
       .translateExtent([[0, 0], [innerWidth, height]]) // Limit panning to content area
       .extent([[0, 0], [innerWidth, height]]), [innerWidth, height]);
+
+  // Notify about visible time range changes with debouncing
+  // This updates the URL without triggering timeline re-renders
+  const notifyVisibleTimeRange = (transform: d3.ZoomTransform) => {
+    if (!onVisibleTimeRangeChange) return;
+
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+
+    debounceTimeoutRef.current = setTimeout(() => {
+      const rescaledXScale = transform.rescaleX(xScale);
+      const visibleStart = rescaledXScale.invert(0);
+      const visibleEnd = rescaledXScale.invert(innerWidth);
+      onVisibleTimeRangeChange({ start: visibleStart, end: visibleEnd });
+      debounceTimeoutRef.current = null;
+    }, 300);
+  };
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Main Draw Effect: Handles structure, data binding, and initial render
   useEffect(() => {
@@ -326,7 +358,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('cy', yScale.bandwidth() / 2)
         .attr('r', 5)
         .attr('fill', '#f8fafc')
-        .attr('stroke', themeColors.appBg)
+        .attr('stroke', '#1e293b') // Dark outline for visibility in both themes
         .attr('stroke-width', 2)
         .style('cursor', 'pointer')
         .style('pointer-events', 'all')
@@ -398,7 +430,11 @@ export const Timeline: React.FC<TimelineProps> = ({
             .attr('cx', d => newXScale(d.timestamp));
     };
 
-    zoom.on('zoom', (event) => updateChart(event.transform));
+    zoom.on('zoom', (event) => {
+        updateChart(event.transform);
+        notifyVisibleTimeRange(event.transform);
+        onZoomDetected?.();
+    });
 
     svg.call(zoom)
        .on("wheel.zoom", null)
@@ -430,8 +466,12 @@ export const Timeline: React.FC<TimelineProps> = ({
             const k = innerWidth / dx;
             const tx = -xScale(x0_orig) * k;
 
+            const newTransform = d3.zoomIdentity.translate(tx, 0).scale(k);
             svg.transition().duration(750)
-               .call(zoom.transform, d3.zoomIdentity.translate(tx, 0).scale(k));
+               .call(zoom.transform, newTransform)
+               .on('end', () => {
+                 notifyVisibleTimeRange(newTransform);
+               });
         });
 
     brushGroup.call(brush);
@@ -599,7 +639,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     svg.selectAll('.event-dot')
         .attr('fill', (d: any) => highlightedEventIds.includes(d.id) ? '#fbbf24' : '#f8fafc') // amber-400 vs slate-50
         .attr('r', (d: any) => highlightedEventIds.includes(d.id) ? 7 : 5)
-        .attr('stroke', (d: any) => highlightedEventIds.includes(d.id) ? '#ffffff' : themeColors.appBg)
+        .attr('stroke', (d: any) => highlightedEventIds.includes(d.id) ? '#ffffff' : '#1e293b') // Dark outline for visibility in both themes
         .attr('stroke-width', (d: any) => highlightedEventIds.includes(d.id) ? 2 : 2)
         // Bring highlighted events to front
         .filter((d: any) => highlightedEventIds.includes(d.id))

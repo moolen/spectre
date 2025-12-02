@@ -12,6 +12,8 @@ interface UseTimelineResult {
 interface UseTimelineOptions {
   startTime?: Date;
   endTime?: Date;
+  rawStart?: string;
+  rawEnd?: string;
   filters?: {
     namespace?: string;
     kind?: string;
@@ -91,9 +93,10 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
 
       // Fetch timeline data from backend API using provided time range
       // This endpoint returns full resource data with statusSegments and events
+      // Prefer raw expressions if available, otherwise use timestamps
       const data = await apiClient.getTimeline(
-        startTimeMs!,
-        endTimeMs!,
+        options?.rawStart || startTimeMs!,
+        options?.rawEnd || endTimeMs!,
         options?.filters
       );
 

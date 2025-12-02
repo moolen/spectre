@@ -456,4 +456,3 @@ func TestExtractHourFromFilename(t *testing.T) {
 		})
 	}
 }
-

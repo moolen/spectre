@@ -19,6 +19,7 @@ import {
   transformStatusSegmentsWithErrorHandling,
 } from './dataTransformer';
 import { buildDemoMetadata, buildDemoTimelineResponse, TimelineFilters } from '../demo/demoDataService';
+import { isHumanFriendlyExpression } from '../utils/timeParsing';
 
 export interface ApiMetadata {
   namespaces: string[];
@@ -93,10 +94,20 @@ class ApiClient {
       });
 
       if (!response.ok) {
-        const errorBody = await response.text().catch(() => '');
-        throw new Error(
-          `API Error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`
-        );
+        // Try to parse structured error response
+        try {
+          const errorData = await response.json();
+          if (errorData.error && errorData.message) {
+            throw new Error(`API error (${errorData.error}): ${errorData.message}`);
+          }
+          throw new Error(`API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+        } catch (jsonError) {
+          // If JSON parsing fails, fall back to text
+          const errorBody = await response.text().catch(() => '');
+          throw new Error(
+            `API Error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`
+          );
+        }
       }
 
       return await response.json();
@@ -125,13 +136,23 @@ class ApiClient {
     endTime: string | number,
     filters?: TimelineFilters
   ): Promise<K8sResource[]> {
-    // Convert milliseconds to Unix seconds if needed
-    const startSeconds = normalizeToSeconds(startTime);
-    const endSeconds = normalizeToSeconds(endTime);
-
     const params = new URLSearchParams();
-    params.append('start', startSeconds.toString());
-    params.append('end', endSeconds.toString());
+
+    // If startTime/endTime are strings that look like human-friendly expressions, pass them through
+    // Otherwise normalize to seconds
+    if (typeof startTime === 'string' && isHumanFriendlyExpression(startTime)) {
+      params.append('start', startTime);
+    } else {
+      const startSeconds = normalizeToSeconds(startTime);
+      params.append('start', startSeconds.toString());
+    }
+
+    if (typeof endTime === 'string' && isHumanFriendlyExpression(endTime)) {
+      params.append('end', endTime);
+    } else {
+      const endSeconds = normalizeToSeconds(endTime);
+      params.append('end', endSeconds.toString());
+    }
 
     if (filters?.namespace) params.append('namespace', filters.namespace);
     if (filters?.kind) params.append('kind', filters.kind);
@@ -143,9 +164,24 @@ class ApiClient {
       const response = await this.request<SearchResponse>(endpoint);
       return transformSearchResponse(response);
     } catch (error) {
-      console.warn('Falling back to embedded demo timeline data:', error);
-      const fallbackResponse = buildDemoTimelineResponse(startSeconds, filters);
-      return transformSearchResponse(fallbackResponse);
+      // Only fall back to demo data for network/timeout errors, not validation errors
+      if (error instanceof Error && (
+        error.message.includes('Network error') ||
+        error.message.includes('timeout') ||
+        error.message.includes('Failed to fetch')
+      )) {
+        console.warn('Falling back to embedded demo timeline data:', error);
+        // For fallback, we need numeric timestamps
+        const startSeconds = typeof startTime === 'string' && !isHumanFriendlyExpression(startTime)
+          ? normalizeToSeconds(startTime)
+          : typeof startTime === 'number'
+          ? Math.floor(startTime / 1000)
+          : Math.floor(Date.now() / 1000) - 7200; // Default 2h ago
+        const fallbackResponse = buildDemoTimelineResponse(startSeconds, filters);
+        return transformSearchResponse(fallbackResponse);
+      }
+      // Re-throw validation and other errors
+      throw error;
     }
   }
 
@@ -158,15 +194,22 @@ class ApiClient {
   ): Promise<MetadataResponse> {
     const params = new URLSearchParams();
 
-    const normalizedStart = startTime !== undefined ? normalizeToSeconds(startTime) : undefined;
-    const normalizedEnd = endTime !== undefined ? normalizeToSeconds(endTime) : undefined;
-
-    if (normalizedStart !== undefined) {
-      params.append('start', normalizedStart.toString());
+    if (startTime !== undefined) {
+      if (typeof startTime === 'string' && isHumanFriendlyExpression(startTime)) {
+        params.append('start', startTime);
+      } else {
+        const normalizedStart = normalizeToSeconds(startTime);
+        params.append('start', normalizedStart.toString());
+      }
     }
 
-    if (normalizedEnd !== undefined) {
-      params.append('end', normalizedEnd.toString());
+    if (endTime !== undefined) {
+      if (typeof endTime === 'string' && isHumanFriendlyExpression(endTime)) {
+        params.append('end', endTime);
+      } else {
+        const normalizedEnd = normalizeToSeconds(endTime);
+        params.append('end', normalizedEnd.toString());
+      }
     }
 
     const endpoint = params.toString()
@@ -176,12 +219,153 @@ class ApiClient {
     try {
       return await this.request<MetadataResponse>(endpoint);
     } catch (error) {
-      console.warn('Falling back to embedded demo metadata:', error);
-      const fallbackStart =
-        normalizedStart ?? Math.floor(Date.now() / 1000) - 2 * 60 * 60;
-      const fallbackEnd =
-        normalizedEnd ?? fallbackStart + 2 * 60 * 60;
-      return buildDemoMetadata(fallbackStart, fallbackEnd);
+      // Only fall back to demo data for network/timeout errors
+      if (error instanceof Error && (
+        error.message.includes('Network error') ||
+        error.message.includes('timeout') ||
+        error.message.includes('Failed to fetch')
+      )) {
+        console.warn('Falling back to embedded demo metadata:', error);
+        const fallbackStart = Math.floor(Date.now() / 1000) - 2 * 60 * 60;
+        const fallbackEnd = fallbackStart + 2 * 60 * 60;
+        return buildDemoMetadata(fallbackStart, fallbackEnd);
+      }
+      // Re-throw validation and other errors
+      throw error;
+    }
+  }
+
+  /**
+   * Export storage data
+   * Returns a Blob that can be downloaded
+   */
+  async exportData(options: {
+    from: string;
+    to: string;
+    includeOpenHour?: boolean;
+    compression?: boolean;
+    clusterId?: string;
+    instanceId?: string;
+  }): Promise<Blob> {
+    const params = new URLSearchParams();
+    params.append('from', options.from);
+    params.append('to', options.to);
+    params.append('include_open_hour', (options.includeOpenHour ?? true).toString());
+    params.append('compression', (options.compression ?? true).toString());
+    if (options.clusterId) params.append('cluster_id', options.clusterId);
+    if (options.instanceId) params.append('instance_id', options.instanceId);
+
+    const url = `${this.baseUrl}/v1/storage/export?${params.toString()}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        // Try to parse structured error response
+        try {
+          const errorData = await response.json();
+          if (errorData.error && errorData.message) {
+            throw new Error(`API error (${errorData.error}): ${errorData.message}`);
+          }
+          throw new Error(`API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+        } catch (jsonError) {
+          // If JSON parsing fails, fall back to text
+          const errorBody = await response.text().catch(() => '');
+          throw new Error(
+            `API Error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`
+          );
+        }
+      }
+
+      return await response.blob();
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error(`Request timeout (${this.timeout}ms) - Backend server may be unavailable`);
+        }
+        if (error.message.includes('Failed to fetch')) {
+          throw new Error('Network error - Unable to connect to backend server. Please check that the server is running.');
+        }
+        throw error;
+      }
+      throw new Error('Unknown error occurred');
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * Import storage data from a file
+   */
+  async importData(
+    file: File,
+    options?: {
+      validate?: boolean;
+      overwrite?: boolean;
+    }
+  ): Promise<{ total_events: number; imported_files: number }> {
+    const params = new URLSearchParams();
+    if (options?.validate !== undefined) {
+      params.append('validate', options.validate.toString());
+    } else {
+      params.append('validate', 'true');
+    }
+    if (options?.overwrite !== undefined) {
+      params.append('overwrite', options.overwrite.toString());
+    } else {
+      params.append('overwrite', 'true');
+    }
+
+    const url = `${this.baseUrl}/v1/storage/import?${params.toString()}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        body: file,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/gzip',
+        },
+      });
+
+      if (!response.ok) {
+        // Try to parse structured error response
+        try {
+          const errorData = await response.json();
+          if (errorData.error && errorData.message) {
+            throw new Error(`API error (${errorData.error}): ${errorData.message}`);
+          }
+          throw new Error(`API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+        } catch (jsonError) {
+          // If JSON parsing fails, fall back to text
+          const errorText = await response.text().catch(() => '');
+          throw new Error(`Import failed: ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+        }
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error(`Request timeout (${this.timeout}ms) - Backend server may be unavailable`);
+        }
+        if (error.message.includes('Failed to fetch')) {
+          throw new Error('Network error - Unable to connect to backend server. Please check that the server is running.');
+        }
+        throw error;
+      }
+      throw new Error('Unknown error occurred');
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 }
