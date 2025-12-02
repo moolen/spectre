@@ -168,7 +168,8 @@ class ApiClient {
       if (error instanceof Error && (
         error.message.includes('Network error') ||
         error.message.includes('timeout') ||
-        error.message.includes('Failed to fetch')
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('<!DOCTYPE')
       )) {
         console.warn('Falling back to embedded demo timeline data:', error);
         // For fallback, we need numeric timestamps
