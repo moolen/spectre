@@ -1,40 +1,29 @@
 # Spectre
 
 <div align="center">
-  <img src="ui/src/spectre-mascot.png" alt="Spectre" width="200">
+  <img src="ui/public/ghost.svg" alt="Spectre" width="200">
 </div>
 
 > **See everything that happens in your Kubernetes cluster.** Spectre captures, stores, and visualizes all resource changes in real-time with an intuitive audit timeline.
 
 ## What is Spectre?
 
-Spectre is a comprehensive Kubernetes event monitoring and auditing system. It captures all resource changes (create, update, delete) across your cluster and provides a powerful visualization dashboard to understand what happened, when it happened, and why.
+Spectre is a Kubernetes event monitoring and auditing system. It captures all resource changes (create, update, delete) across your cluster and provides a powerful visualization dashboard to understand what happened, when it happened, and why.
 
 ### Why Spectre?
 
 In Kubernetes environments, resources are constantly changing. Without proper visibility, it's difficult to:
-- **Track resource changes** - What changed? When? Who made the change?
+- **Track resource changes** - What changed and When?
 - **Debug issues** - Understand the sequence of events that led to a problem
-- **Audit operations** - Maintain compliance with resource change tracking
-- **Troubleshoot failures** - See the timeline of state transitions
+- **Troubleshoot failures** - Helps with Incident Response or post mortem analysis
 
 Spectre solves this by providing:
 
-1. **Real-time Event Capture** - Every resource change is captured instantly
+1. **Real-time Event Capture** - Every resource change is captured instantly using watches
 2. **Efficient Storage** - Events are compressed and indexed for fast retrieval
 3. **Interactive Audit Timeline** - Visualize resource state changes over time
 4. **Flexible Filtering** - Find exactly what you're looking for by namespace, kind, or name
 5. **Historical Analysis** - Query any time period to understand what happened
-
-## Features
-
-- **Real-time Event Capture**: Monitors all Kubernetes resource changes using watches
-- **Efficient Storage**: Events are stored on disk with compression and intelligent indexing
-- **Multi-dimensional Filtering**: Query events by namespace, resource kind, API group/version
-- **Fast Queries**: Low response time for large time windows using sparse indexes and metadata filtering
-- **Interactive Timeline UI**: Beautiful, responsive dashboard for exploring audit events
-- **Resource Status Tracking**: Visualize resource states (Ready, Warning, Error, Terminating) over time
-- **Kubernetes Native**: Helm chart for easy deployment with full RBAC support
 
 ## Quick Start
 

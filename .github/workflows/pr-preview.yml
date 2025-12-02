@@ -41,6 +41,7 @@ jobs:
         run: npm run build
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}/
+          VITE_DEMO_MODE: 'true'
 
       - name: Deploy preview to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
