@@ -358,7 +358,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('cy', yScale.bandwidth() / 2)
         .attr('r', 5)
         .attr('fill', '#f8fafc')
-        .attr('stroke', themeColors.appBg)
+        .attr('stroke', '#1e293b') // Dark outline for visibility in both themes
         .attr('stroke-width', 2)
         .style('cursor', 'pointer')
         .style('pointer-events', 'all')
@@ -639,7 +639,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     svg.selectAll('.event-dot')
         .attr('fill', (d: any) => highlightedEventIds.includes(d.id) ? '#fbbf24' : '#f8fafc') // amber-400 vs slate-50
         .attr('r', (d: any) => highlightedEventIds.includes(d.id) ? 7 : 5)
-        .attr('stroke', (d: any) => highlightedEventIds.includes(d.id) ? '#ffffff' : themeColors.appBg)
+        .attr('stroke', (d: any) => highlightedEventIds.includes(d.id) ? '#ffffff' : '#1e293b') // Dark outline for visibility in both themes
         .attr('stroke-width', (d: any) => highlightedEventIds.includes(d.id) ? 2 : 2)
         // Bring highlighted events to front
         .filter((d: any) => highlightedEventIds.includes(d.id))

@@ -372,7 +372,7 @@ class ApiClient {
 
 // Create singleton instance with environment-based configuration
 const baseUrl =
-  'http://localhost:8080';
+  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080');
 
 export const apiClient = new ApiClient({
   baseUrl,

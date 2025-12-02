@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { TimeRange } from '../types';
-import spectreMascot from '../spectre-mascot.png';
 import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
 import { TimeInputWithCalendar } from './TimeInputWithCalendar';
 import { validateTimeRange, formatDateTimeForInput } from '../utils/timeParsing';
@@ -84,10 +83,9 @@ export const TimeRangePicker: React.FC<TimeRangePickerProps> = ({ onConfirm, ini
         {/* Mascot */}
         <div className="flex justify-center mb-6">
           <img
-            src={spectreMascot}
-            alt="Spectre Mascot"
-            style={{ borderRadius: '20px' }}
-            className="w-32 h-32 object-contain"
+            src="/ghost.svg"
+            alt="Spectre Ghost"
+            className="w-32 h-32"
           />
         </div>
 

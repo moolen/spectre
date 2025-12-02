@@ -81,7 +81,7 @@ func TestUIFilterByNamespace(t *testing.T) {
 			if err == nil && count > 0 {
 				return nil
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(2 * time.Second)
 		}
 		return fmt.Errorf("text %q not found after %v", text, timeout)
 	}
