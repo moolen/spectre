@@ -130,7 +130,7 @@ func TestImportExportRoundTrip(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	// Verify PVC is gone
-	pvcName := testCtx.ReleaseName + "-k8s-event-monitor"
+	pvcName := testCtx.ReleaseName + "-spectre"
 	_, err = k8sClient.Clientset.CoreV1().PersistentVolumeClaims(testCtx.Namespace).Get(ctx, pvcName, metav1.GetOptions{})
 	assert.True(t, apierrors.IsNotFound(err), "PVC should be deleted after uninstall")
 

@@ -1,8 +1,8 @@
-# Default values for k8s-event-monitor Helm chart
+# Default values for spectre Helm chart
 
 # Image configuration
 image:
-  repository: k8s-event-monitor
+  repository: spectre
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -102,7 +102,7 @@ namespace: monitoring
 # Service account configuration
 serviceAccount:
   create: true
-  name: ""  # Will use "k8s-event-monitor" if not specified
+  name: ""  # Will use "spectre" if not specified
 
 # Override names
 nameOverride: ""

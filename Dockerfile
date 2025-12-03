@@ -47,7 +47,7 @@ COPY cmd/ cmd/
 COPY internal/ internal/
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o k8s-event-monitor ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o spectre ./cmd/main.go
 
 # Stage 3: Runtime
 FROM alpine:3.18
@@ -58,7 +58,7 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata
 
 # Copy binary from builder
-COPY --from=builder /build/k8s-event-monitor .
+COPY --from=builder /build/spectre .
 
 # Copy built UI from ui-builder
 COPY --from=ui-builder /ui-build/dist ./ui
@@ -71,7 +71,7 @@ EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/app/k8s-event-monitor", "--health-check"] || exit 1
+  CMD ["/app/spectre", "--health-check"] || exit 1
 
 # Run the application
-ENTRYPOINT ["/app/k8s-event-monitor"]
+ENTRYPOINT ["/app/spectre"]

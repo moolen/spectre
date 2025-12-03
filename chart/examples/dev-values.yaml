@@ -1,5 +1,5 @@
 # Development environment configuration
-# Use: helm install k8s-event-monitor ./chart -f chart/examples/dev-values.yaml
+# Use: helm install spectre ./chart -f chart/examples/dev-values.yaml
 
 replicaCount: 1
 

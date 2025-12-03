@@ -465,7 +465,7 @@ curl "...query..." | jq '.segmentsSkipped / .segmentsScanned'
 lsof -i :8080
 
 # Or check logs
-kubectl logs -n monitoring deployment/k8s-event-monitor
+kubectl logs -n monitoring deployment/spectre
 ```
 
 ### No Matching Events
@@ -480,6 +480,6 @@ curl "http://localhost:8080/v1/search?start=X&end=Y&kind=Pod"  # Correct
 
 ## See Also
 
-- [Quickstart Guide](../specs/001-k8s-event-monitor/quickstart.md)
+- [Quickstart Guide](../specs/001-spectre/quickstart.md)
 - [Architecture Overview](./ARCHITECTURE.md)
 - [Operations Guide](./OPERATIONS.md)

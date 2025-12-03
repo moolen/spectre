@@ -71,7 +71,7 @@ jobs:
       - name: Push Helm chart to OCI
         run: |
           CHART_VERSION=$(grep '^version:' chart/Chart.yaml | awk '{print $2}')
-          helm push ./k8s-event-monitor-${CHART_VERSION}.tgz oci://ghcr.io/moolen/charts
+          helm push ./spectre-${CHART_VERSION}.tgz oci://ghcr.io/moolen/charts
 
       - name: Log out from Container Registry
         if: always()

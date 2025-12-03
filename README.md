@@ -35,12 +35,12 @@ helm repo add spectre oci://ghcr.io/moolen/charts
 helm repo update
 
 # Install Spectre
-helm install spectre spectre/k8s-event-monitor \
+helm install spectre spectre/spectre \
   --namespace monitoring \
   --create-namespace
 
 # Access the UI
-kubectl port-forward -n monitoring svc/k8s-event-monitor 8080:8080
+kubectl port-forward -n monitoring svc/spectre 8080:8080
 
 # Open your browser to http://localhost:8080
 ```
