@@ -604,3 +604,177 @@ func (s *Storage) readAllEventsFromFile(filePath string) ([]*models.Event, error
 
 	return allEvents, nil
 }
+
+// AddEventsBatch ingests a batch of events and merges them into storage blocks
+func (s *Storage) AddEventsBatch(events []*models.Event, opts ImportOptions) (*ImportReport, error) {
+	startTime := time.Now()
+	report := &ImportReport{
+		Errors: make([]string, 0),
+	}
+
+	if len(events) == 0 {
+		report.Duration = time.Since(startTime)
+		return report, nil
+	}
+
+	s.logger.InfoWithFields("Starting batch event ingestion",
+		logging.Field("event_count", len(events)))
+
+	// Validate all events first
+	for i, event := range events {
+		if event == nil {
+			report.Errors = append(report.Errors, fmt.Sprintf("event %d is nil", i))
+			continue
+		}
+		if err := event.Validate(); err != nil {
+			report.Errors = append(report.Errors, fmt.Sprintf("event %d validation failed: %v", i, err))
+			continue
+		}
+	}
+
+	if len(report.Errors) > 0 {
+		s.logger.Warn("Batch event validation encountered %d errors", len(report.Errors))
+	}
+
+	// Group events by hour timestamp
+	hourGroups := make(map[int64][]*models.Event)
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		hourTime := time.Unix(0, event.Timestamp).UTC()
+		// Round down to hour boundary
+		hourTimestamp := hourTime.Unix() - int64(hourTime.Second())-int64(hourTime.Minute())*60
+		hourGroups[hourTimestamp] = append(hourGroups[hourTimestamp], event)
+	}
+
+	// Process each hour group
+	totalEvents := int64(0)
+	for hourTimestamp, hourEvents := range hourGroups {
+		if err := s.ingestHourEvents(hourTimestamp, hourEvents, opts); err != nil {
+			hourTime := time.Unix(hourTimestamp, 0).UTC()
+			report.Errors = append(report.Errors, fmt.Sprintf("failed to ingest hour %s: %v", hourTime.Format("2006-01-02-15"), err))
+		} else {
+			totalEvents += int64(len(hourEvents))
+			report.MergedHours++
+		}
+	}
+
+	report.TotalEvents = totalEvents
+	report.ImportedFiles = len(events) // Track individual events as items imported
+	report.Duration = time.Since(startTime)
+
+	s.logger.InfoWithFields("Batch event ingestion completed",
+		logging.Field("total_events", totalEvents),
+		logging.Field("merged_hours", report.MergedHours),
+		logging.Field("errors", len(report.Errors)),
+		logging.Field("duration", report.Duration))
+
+	return report, nil
+}
+
+// ingestHourEvents ingests events for a specific hour, merging with existing data
+func (s *Storage) ingestHourEvents(hourTimestamp int64, events []*models.Event, opts ImportOptions) error {
+	s.fileMutex.Lock()
+	defer s.fileMutex.Unlock()
+
+	// Determine the canonical filename for this hour
+	hourTime := time.Unix(hourTimestamp, 0).UTC()
+	canonicalFilename := fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		hourTime.Year(), hourTime.Month(), hourTime.Day(), hourTime.Hour())
+	canonicalPath := filepath.Join(s.dataDir, canonicalFilename)
+
+	// Check if this is the currently open hour
+	if s.currentFile != nil && s.currentFile.hourTimestamp == hourTimestamp {
+		// Write events directly to the current file
+		for _, event := range events {
+			if err := s.currentFile.WriteEvent(event); err != nil {
+				return fmt.Errorf("failed to write event to current file: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// Check if the hour file exists
+	_, err := os.Stat(canonicalPath)
+	fileExists := err == nil
+
+	if fileExists && !opts.OverwriteExisting {
+		// Skip merge, just return success
+		s.logger.DebugWithFields("Skipping merge for existing hour",
+			logging.Field("hour", hourTime.Format("2006-01-02-15")))
+		return nil
+	}
+
+	// Collect all events (existing + new)
+	var sourceEvents []*models.Event
+
+	// Add existing file events if it exists
+	if fileExists {
+		existingEvents, err := s.readAllEventsFromFile(canonicalPath)
+		if err != nil {
+			s.logger.Warn("Failed to read existing file %s: %v", canonicalPath, err)
+		} else {
+			sourceEvents = append(sourceEvents, existingEvents...)
+		}
+	}
+
+	// Add new events
+	sourceEvents = append(sourceEvents, events...)
+
+	// Create temporary file for the merged result
+	tempMergedPath := filepath.Join(s.dataDir, fmt.Sprintf("%s.ingesting-%d", canonicalFilename, time.Now().Unix()))
+
+	// Perform the merge
+	eventCount, err := s.mergeEventsIntoNew(sourceEvents, tempMergedPath, hourTimestamp)
+	if err != nil {
+		// Clean up temp file on error
+		os.Remove(tempMergedPath)
+		return fmt.Errorf("failed to merge events: %w", err)
+	}
+
+	// Atomically replace the canonical file with the merged one
+	if err := os.Rename(tempMergedPath, canonicalPath); err != nil {
+		os.Remove(tempMergedPath)
+		return fmt.Errorf("failed to replace canonical file: %w", err)
+	}
+
+	s.logger.DebugWithFields("Ingested hour events",
+		logging.Field("hour", hourTime.Format("2006-01-02-15")),
+		logging.Field("events", eventCount))
+
+	return nil
+}
+
+// mergeEventsIntoNew writes events to a new file with sorting and deduplication
+func (s *Storage) mergeEventsIntoNew(events []*models.Event, targetPath string, hourTimestamp int64) (int64, error) {
+	if len(events) == 0 {
+		return 0, fmt.Errorf("no events to merge")
+	}
+
+	// Sort events by timestamp for better compression and query performance
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].Timestamp < events[j].Timestamp
+	})
+
+	// Create new storage file
+	newFile, err := NewBlockStorageFile(targetPath, hourTimestamp, s.blockSize)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create new storage file: %w", err)
+	}
+
+	// Write all events
+	for _, event := range events {
+		if err := newFile.WriteEvent(event); err != nil {
+			newFile.Close()
+			return 0, fmt.Errorf("failed to write event: %w", err)
+		}
+	}
+
+	// Close to finalize (writes index and footer)
+	if err := newFile.Close(); err != nil {
+		return 0, fmt.Errorf("failed to close new file: %w", err)
+	}
+
+	return int64(len(events)), nil
+}

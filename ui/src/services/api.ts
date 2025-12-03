@@ -393,7 +393,7 @@ class ApiClient {
         body: file,
         signal: controller.signal,
         headers: {
-          'Content-Type': 'application/gzip',
+          'Content-Type': 'application/vnd.spectre.events.v1+bin',
         },
       });
 
