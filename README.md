@@ -4,11 +4,11 @@
   <img src="ui/public/ghost.svg" alt="Spectre" width="200">
 </div>
 
-> **See everything that happens in your Kubernetes cluster.** Spectre captures, stores, and visualizes all resource changes in real-time with an intuitive audit timeline.
-
 ## What is Spectre?
 
 Spectre is a Kubernetes event monitoring and auditing system. It captures all resource changes (create, update, delete) across your cluster and provides a powerful visualization dashboard to understand what happened, when it happened, and why.
+
+![Deployment Rollout](./docs/screenshot-2.png)
 
 ### Why Spectre?
 
