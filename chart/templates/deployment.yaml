@@ -1,25 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "k8s-event-monitor.fullname" . }}
+  name: {{ include "spectre.fullname" . }}
   namespace: {{ .Values.namespace }}
   labels:
-    {{- include "k8s-event-monitor.labels" . | nindent 4 }}
+    {{- include "spectre.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "k8s-event-monitor.selectorLabels" . | nindent 6 }}
+      {{- include "spectre.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "k8s-event-monitor.selectorLabels" . | nindent 8 }}
+        {{- include "spectre.selectorLabels" . | nindent 8 }}
       {{- with .Values.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      serviceAccountName: {{ include "k8s-event-monitor.serviceAccountName" . }}
+      serviceAccountName: {{ include "spectre.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}
       containers:
@@ -69,13 +69,13 @@ spec:
       - name: data
         {{- if .Values.persistence.enabled }}
         persistentVolumeClaim:
-          claimName: {{ include "k8s-event-monitor.fullname" . }}
+          claimName: {{ include "spectre.fullname" . }}
         {{- else }}
         emptyDir: {}
         {{- end }}
       - name: watcher-config
         configMap:
-          name: {{ include "k8s-event-monitor.fullname" . }}
+          name: {{ include "spectre.fullname" . }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

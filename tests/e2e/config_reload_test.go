@@ -59,7 +59,7 @@ func TestScenarioDynamicConfig(t *testing.T) {
 
 	// Update the watcher ConfigMap directly to include StatefulSet
 	// This avoids a Helm upgrade which would trigger a deployment rollout
-	configMapName := fmt.Sprintf("%s-k8s-event-monitor", testCtx.ReleaseName)
+	configMapName := fmt.Sprintf("%s-spectre", testCtx.ReleaseName)
 	newWatcherConfig := `resources:
   - group: "apps"
     version: "v1"

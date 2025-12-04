@@ -15,6 +15,7 @@ type QueryExecutor struct {
 	logger       *logging.Logger
 	storage      *Storage
 	filterEngine *FilterEngine
+	cache        *BlockCache
 }
 
 // NewQueryExecutor creates a new query executor
@@ -23,7 +24,33 @@ func NewQueryExecutor(storage *Storage) *QueryExecutor {
 		logger:       logging.GetLogger("query"),
 		storage:      storage,
 		filterEngine: NewFilterEngine(),
+		cache:        nil, // Cache will be initialized separately
 	}
+}
+
+// NewQueryExecutorWithCache creates a new query executor with block caching
+func NewQueryExecutorWithCache(storage *Storage, cacheMaxMB int64) (*QueryExecutor, error) {
+	cache, err := NewBlockCache(cacheMaxMB)
+	if err != nil {
+		return nil, err
+	}
+
+	return &QueryExecutor{
+		logger:       logging.GetLogger("query"),
+		storage:      storage,
+		filterEngine: NewFilterEngine(),
+		cache:        cache,
+	}, nil
+}
+
+// SetCache sets the block cache for the executor
+func (qe *QueryExecutor) SetCache(cache *BlockCache) {
+	qe.cache = cache
+}
+
+// GetCache returns the block cache if it exists
+func (qe *QueryExecutor) GetCache() *BlockCache {
+	return qe.cache
 }
 
 // Execute executes a query against stored events
@@ -183,12 +210,27 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 			continue
 		}
 
-		// Read and decompress block
-		events, err := reader.ReadBlockEvents(blockMeta)
-		if err != nil {
-			qe.logger.Warn("Failed to read block %d from file %s: %v", blockMeta.ID, filePath, err)
-			segmentsSkipped++
-			continue
+		// Read and decompress block (with cache if available)
+		var events []*models.Event
+		var err error
+
+		if qe.cache != nil {
+			// Use cached block reader (events are already parsed)
+			cachedBlock, err := reader.ReadBlockWithCache(filePath, blockMeta, qe.cache)
+			if err != nil {
+				qe.logger.Warn("Failed to read block %d from file %s: %v", blockMeta.ID, filePath, err)
+				segmentsSkipped++
+				continue
+			}
+			events = cachedBlock.Events
+		} else {
+			// Use original non-cached reader
+			events, err = reader.ReadBlockEvents(blockMeta)
+			if err != nil {
+				qe.logger.Warn("Failed to read block %d from file %s: %v", blockMeta.ID, filePath, err)
+				segmentsSkipped++
+				continue
+			}
 		}
 
 		segmentsScanned++

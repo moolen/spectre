@@ -1,6 +1,6 @@
 apiVersion: v2
-name: k8s-event-monitor
-description: Kubernetes Event Monitoring and Storage System
+name: spectre
+description: Kubernetes Audit Event Monitoring
 type: application
 version: 1.0.0
 appVersion: "1.0.0"
@@ -13,5 +13,5 @@ home: https://github.com/moolen/spectre
 sources:
   - https://github.com/moolen/spectre
 maintainers:
-  - name: rpk-team
-    email: team@rpk.local
+  - name: moolen
+    email: beller.moritz@googlemail.com

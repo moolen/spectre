@@ -1,5 +1,5 @@
 # Production environment configuration
-# Use: helm install k8s-event-monitor ./chart -f chart/examples/prod-values.yaml
+# Use: helm install spectre ./chart -f chart/examples/prod-values.yaml
 
 replicaCount: 2
 
@@ -44,7 +44,7 @@ affinity:
               - key: app.kubernetes.io/name
                 operator: In
                 values:
-                  - k8s-event-monitor
+                  - spectre
           topologyKey: kubernetes.io/hostname
 
 securityContext:

@@ -22,11 +22,11 @@ help:
 	@echo "  favicons       - Generate all favicon versions from favicon.svg"
 
 # Variables
-BINARY_NAME=k8s-event-monitor
+BINARY_NAME=spectre
 BINARY_PATH=bin/$(BINARY_NAME)
 MCP_BINARY_NAME=spectre-mcp
 MCP_BINARY_PATH=bin/$(MCP_BINARY_NAME)
-IMAGE_NAME=k8s-event-monitor
+IMAGE_NAME=spectre
 IMAGE_TAG=latest
 DOCKER_IMAGE=$(IMAGE_NAME):$(IMAGE_TAG)
 CHART_PATH=./chart
@@ -127,7 +127,7 @@ docker-run: docker-build
 deploy:
 	@echo "Deploying to Kubernetes cluster..."
 	@kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
-	@helm upgrade --install k8s-event-monitor $(CHART_PATH) \
+	@helm upgrade --install spectre $(CHART_PATH) \
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(CHART_PATH)/values.yaml

@@ -29,6 +29,8 @@ func main() {
 	watcherConfigPath := flag.String("watcher-config", "watcher.yaml", "Path to the YAML file containing watcher configuration")
 	segmentSize := flag.Int64("segment-size", 10*1024*1024, "Target size for compression segments in bytes (default: 10MB)")
 	maxConcurrentRequests := flag.Int("max-concurrent-requests", 100, "Maximum number of concurrent API requests")
+	cacheMaxMB := flag.Int64("cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
+	cacheEnabled := flag.Bool("cache-enabled", true, "Enable block cache (default: true)")
 
 	flag.Parse()
 
@@ -46,6 +48,8 @@ func main() {
 		*watcherConfigPath,
 		*segmentSize,
 		*maxConcurrentRequests,
+		*cacheMaxMB,
+		*cacheEnabled,
 	)
 
 	// Validate configuration
@@ -79,7 +83,23 @@ func main() {
 	}
 	logger.Info("Watcher component created")
 
-	apiComponent := api.NewWithStorage(cfg.APIPort, storage.NewQueryExecutor(storageComponent), storageComponent, watcherComponent)
+	// Create query executor with or without cache based on CLI flag
+	var queryExecutor *storage.QueryExecutor
+	if *cacheEnabled {
+		var err error
+		queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, *cacheMaxMB)
+		if err != nil {
+			logger.Error("Failed to create cache: %v", err)
+			fmt.Fprintf(os.Stderr, "Cache initialization error: %v\n", err)
+			os.Exit(1)
+		}
+		logger.Info("Block cache enabled with max size: %dMB", *cacheMaxMB)
+	} else {
+		queryExecutor = storage.NewQueryExecutor(storageComponent)
+		logger.Info("Block cache disabled")
+	}
+
+	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent)
 	logger.Info("API server component created")
 
 	if err := manager.Register(storageComponent); err != nil {

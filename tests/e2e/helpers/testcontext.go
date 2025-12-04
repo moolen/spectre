@@ -64,7 +64,7 @@ func (tc *TestContext) ReconnectPortForward() error {
 	}
 
 	// Create a new port-forward
-	serviceName := fmt.Sprintf("%s-k8s-event-monitor", tc.ReleaseName)
+	serviceName := fmt.Sprintf("%s-spectre", tc.ReleaseName)
 	portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetKubeConfig(), tc.Namespace, serviceName, defaultServicePort)
 	if err != nil {
 		return fmt.Errorf("failed to create new port-forward: %w", err)
@@ -149,7 +149,7 @@ func SetupE2ETest(t *testing.T) *TestContext {
 		t.Fatalf("app deployment not ready: %v", err)
 	}
 
-	serviceName := fmt.Sprintf("%s-k8s-event-monitor", ctx.ReleaseName)
+	serviceName := fmt.Sprintf("%s-spectre", ctx.ReleaseName)
 	portForwarder, err := NewPortForwarder(t, testCluster.GetKubeConfig(), ctx.Namespace, serviceName, defaultServicePort)
 	if err != nil {
 		ctx.Cleanup()
@@ -241,7 +241,7 @@ func loadHelmValues() (map[string]interface{}, string, error) {
 }
 
 func extractImageReference(values map[string]interface{}) string {
-	repo := "k8s-event-monitor"
+	repo := "spectre"
 	tag := "latest"
 
 	if imageSection, ok := values["image"].(map[string]interface{}); ok {

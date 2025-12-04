@@ -17,7 +17,7 @@ A Helm chart for deploying the Kubernetes Event Monitoring and Storage System to
 helm repo add rpk https://example.com/helm-charts
 
 # Install with default values
-helm install k8s-event-monitor rpk/k8s-event-monitor \
+helm install spectre rpk/spectre \
   --namespace monitoring \
   --create-namespace
 
@@ -29,7 +29,7 @@ kubectl get pods -n monitoring
 
 ```bash
 # From the chart directory
-helm install k8s-event-monitor ./chart \
+helm install spectre ./chart \
   --namespace monitoring \
   --create-namespace
 ```
@@ -41,7 +41,7 @@ The chart provides comprehensive configuration options. Common configurations ar
 ### Basic Configuration
 
 ```bash
-helm install k8s-event-monitor ./chart \
+helm install spectre ./chart \
   --namespace monitoring \
   --set persistence.size=20Gi \
   --set resources.limits.memory=1Gi
@@ -50,7 +50,7 @@ helm install k8s-event-monitor ./chart \
 ### With Custom Values File
 
 ```bash
-helm install k8s-event-monitor ./chart \
+helm install spectre ./chart \
   --namespace monitoring \
   --values custom-values.yaml
 ```
@@ -68,7 +68,7 @@ helm install k8s-event-monitor ./chart \
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `image.repository` | Image repository | `k8s-event-monitor` |
+| `image.repository` | Image repository | `spectre` |
 | `image.tag` | Image tag | `latest` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 
@@ -161,7 +161,7 @@ config:
 ### Different Storage Classes
 
 ```bash
-helm install k8s-event-monitor ./chart \
+helm install spectre ./chart \
   --namespace monitoring \
   --set persistence.storageClassName=fast-ssd
 ```
@@ -169,7 +169,7 @@ helm install k8s-event-monitor ./chart \
 ### Custom Resource Limits
 
 ```bash
-helm install k8s-event-monitor ./chart \
+helm install spectre ./chart \
   --namespace monitoring \
   --set resources.requests.memory=256Mi \
   --set resources.limits.memory=2Gi
@@ -178,7 +178,7 @@ helm install k8s-event-monitor ./chart \
 ### Node Affinity
 
 ```bash
-helm install k8s-event-monitor ./chart \
+helm install spectre ./chart \
   --namespace monitoring \
   -f - <<EOF
 nodeSelector:
@@ -200,16 +200,16 @@ After installation, verify the deployment:
 kubectl get pods -n monitoring
 
 # View pod logs
-kubectl logs -n monitoring deployment/k8s-event-monitor -f
+kubectl logs -n monitoring deployment/spectre -f
 
 # Port-forward to access API
-kubectl port-forward -n monitoring svc/k8s-event-monitor 8080:8080 &
+kubectl port-forward -n monitoring svc/spectre 8080:8080 &
 
 # Test API
 curl http://localhost:8080/v1/search?start=1&end=2
 
 # Check storage
-kubectl exec -n monitoring -it deployment/k8s-event-monitor -- df -h /data
+kubectl exec -n monitoring -it deployment/spectre -- df -h /data
 ```
 
 ## Troubleshooting
@@ -218,10 +218,10 @@ kubectl exec -n monitoring -it deployment/k8s-event-monitor -- df -h /data
 
 ```bash
 # Check pod events
-kubectl describe pod -n monitoring -l app.kubernetes.io/name=k8s-event-monitor
+kubectl describe pod -n monitoring -l app.kubernetes.io/name=spectre
 
 # View logs
-kubectl logs -n monitoring -l app.kubernetes.io/name=k8s-event-monitor
+kubectl logs -n monitoring -l app.kubernetes.io/name=spectre
 ```
 
 ### RBAC Issues
@@ -229,13 +229,13 @@ kubectl logs -n monitoring -l app.kubernetes.io/name=k8s-event-monitor
 ```bash
 # Verify service account has permissions
 kubectl auth can-i watch pods \
-  --as=system:serviceaccount:monitoring:k8s-event-monitor
+  --as=system:serviceaccount:monitoring:spectre
 
 # Check cluster role
-kubectl describe clusterrole k8s-event-monitor
+kubectl describe clusterrole spectre
 
 # Check cluster role binding
-kubectl describe clusterrolebinding k8s-event-monitor
+kubectl describe clusterrolebinding spectre
 ```
 
 ### Storage Issues
@@ -248,14 +248,14 @@ kubectl get pvc -n monitoring
 kubectl get storageclass
 
 # Check disk usage
-kubectl exec -n monitoring -it deployment/k8s-event-monitor -- du -sh /data
+kubectl exec -n monitoring -it deployment/spectre -- du -sh /data
 ```
 
 ## Upgrade
 
 ```bash
 # Upgrade to new values
-helm upgrade k8s-event-monitor ./chart \
+helm upgrade spectre ./chart \
   --namespace monitoring \
   --values new-values.yaml
 ```
@@ -264,7 +264,7 @@ helm upgrade k8s-event-monitor ./chart \
 
 ```bash
 # Remove the deployment
-helm uninstall k8s-event-monitor --namespace monitoring
+helm uninstall spectre --namespace monitoring
 
 # Remove the namespace (optional)
 kubectl delete namespace monitoring
@@ -274,5 +274,5 @@ kubectl delete namespace monitoring
 
 For issues and questions, refer to:
 - Main repository: https://github.com/moolen/spectre
-- Feature specification: `specs/001-k8s-event-monitor/spec.md`
-- Quickstart guide: `specs/001-k8s-event-monitor/quickstart.md`
+- Feature specification: `specs/001-spectre/spec.md`
+- Quickstart guide: `specs/001-spectre/quickstart.md`

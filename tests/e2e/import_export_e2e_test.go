@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,9 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/moolen/spectre/internal/models"
 	"github.com/moolen/spectre/tests/e2e/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -130,7 +134,7 @@ func TestImportExportRoundTrip(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	// Verify PVC is gone
-	pvcName := testCtx.ReleaseName + "-k8s-event-monitor"
+	pvcName := testCtx.ReleaseName + "-spectre"
 	_, err = k8sClient.Clientset.CoreV1().PersistentVolumeClaims(testCtx.Namespace).Get(ctx, pvcName, metav1.GetOptions{})
 	assert.True(t, apierrors.IsNotFound(err), "PVC should be deleted after uninstall")
 
@@ -217,20 +221,19 @@ func TestImportExportRoundTrip(t *testing.T) {
 	importURL := fmt.Sprintf("%s/v1/storage/import?validate=true&overwrite=true", apiClient.BaseURL)
 	importReq, err := http.NewRequestWithContext(ctx, "POST", importURL, exportFile)
 	require.NoError(t, err, "failed to create import request")
-	importReq.Header.Set("Content-Type", "application/gzip")
+	importReq.Header.Set("Content-Type", "application/vnd.spectre.events.v1+bin")
 
 	importResp, err := http.DefaultClient.Do(importReq)
 	require.NoError(t, err, "failed to execute import request")
 	defer importResp.Body.Close()
 
-	require.Equal(t, http.StatusOK, importResp.StatusCode, "import request failed")
-
 	// Parse import response
 	var importReport map[string]interface{}
 	err = json.NewDecoder(importResp.Body).Decode(&importReport)
 	require.NoError(t, err, "failed to decode import response")
-
 	t.Logf("Import report: %+v", importReport)
+
+	require.Equal(t, http.StatusOK, importResp.StatusCode, "import request failed")
 
 	// Verify import was successful
 	if failedFiles, ok := importReport["failed_files"].(float64); ok {
@@ -311,4 +314,261 @@ func TestImportExportRoundTrip(t *testing.T) {
 	assert.True(t, foundSpecificDeploy, "Should find import-deploy-0 after import")
 
 	t.Log("✓ Import/Export round-trip test completed successfully!")
+}
+
+// TestJSONEventBatchImport validates the JSON event batch import functionality:
+// 1. Deploy Spectre via Helm
+// 2. Generate 30-40 test events of different kinds across multiple namespaces
+// 3. Call the JSON import endpoint
+// 4. Verify imported events are present via search and metadata APIs
+func TestJSONEventBatchImport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping e2e test in short mode")
+	}
+
+	// Step 1: Deploy Spectre via Helm
+	t.Log("Step 1: Deploying Spectre via Helm")
+	testCtx := helpers.SetupE2ETest(t)
+	apiClient := testCtx.APIClient
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Step 2: Generate test events
+	t.Log("Step 2: Generating test events")
+	now := time.Now()
+	testNamespaces := []string{"e2e-import-json-1", "e2e-import-json-2", "e2e-import-json-3", "e2e-import-json-4"}
+
+	events := generateTestEvents(now, testNamespaces)
+	t.Logf("Generated %d test events", len(events))
+
+	// Step 3: Prepare JSON payload and call import endpoint
+	t.Log("Step 3: Calling JSON import endpoint")
+
+	importPayload := map[string]interface{}{
+		"events": events,
+	}
+
+	payloadJSON, err := json.Marshal(importPayload)
+	require.NoError(t, err, "failed to marshal import payload")
+
+	importURL := fmt.Sprintf("%s/v1/storage/import?validate=true&overwrite=true", apiClient.BaseURL)
+	importReq, err := http.NewRequestWithContext(ctx, "POST", importURL, bytes.NewReader(payloadJSON))
+	require.NoError(t, err, "failed to create import request")
+
+	// Set custom content-type for JSON event batch
+	importReq.Header.Set("Content-Type", "application/vnd.spectre.events.v1+json")
+
+	importResp, err := http.DefaultClient.Do(importReq)
+	require.NoError(t, err, "failed to execute import request")
+	defer importResp.Body.Close()
+
+	require.Equal(t, http.StatusOK, importResp.StatusCode, "import request failed with status %d", importResp.StatusCode)
+
+	// Parse import response
+	var importReport map[string]interface{}
+	err = json.NewDecoder(importResp.Body).Decode(&importReport)
+	require.NoError(t, err, "failed to decode import response")
+
+	t.Logf("Import report: %+v", importReport)
+
+	// Verify import was successful
+	totalEventsImported := int64(0)
+	if totalEvents, ok := importReport["total_events"].(float64); ok {
+		assert.Greater(t, totalEvents, float64(0), "Import should have imported events")
+		totalEventsImported = int64(totalEvents)
+		t.Logf("✓ Imported %.0f events", totalEvents)
+	}
+
+	require.Greater(t, totalEventsImported, int64(0), "No events were imported")
+
+	// Step 4: Verify imported data is present
+	t.Log("Step 4: Verifying imported data via search and metadata APIs")
+
+	// Wait for data to be indexed
+	time.Sleep(3 * time.Second)
+
+	// Verify namespaces appear in metadata
+	helpers.EventuallyCondition(t, func() bool {
+		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer metadataCancel()
+
+		metadata, err := apiClient.GetMetadata(metadataCtx, nil, nil)
+		if err != nil {
+			t.Logf("GetMetadata failed: %v", err)
+			return false
+		}
+
+		for _, ns := range testNamespaces {
+			found := false
+			for _, metaNs := range metadata.Namespaces {
+				if metaNs == ns {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Logf("Namespace %s not yet in metadata", ns)
+				return false
+			}
+		}
+
+		return true
+	}, helpers.SlowEventuallyOption)
+
+	t.Log("✓ All test namespaces appear in metadata")
+
+	// Verify all resource kinds are present
+	helpers.EventuallyCondition(t, func() bool {
+		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer metadataCancel()
+
+		metadata, err := apiClient.GetMetadata(metadataCtx, nil, nil)
+		if err != nil {
+			t.Logf("GetMetadata failed: %v", err)
+			return false
+		}
+
+		expectedKinds := map[string]bool{
+			"Deployment": false,
+			"Pod":        false,
+			"Service":    false,
+			"ConfigMap":  false,
+		}
+
+		for _, kind := range metadata.Kinds {
+			if _, exists := expectedKinds[kind]; exists {
+				expectedKinds[kind] = true
+			}
+		}
+
+		allFound := true
+		for kind, found := range expectedKinds {
+			if !found {
+				t.Logf("Kind %s not yet in metadata", kind)
+				allFound = false
+			}
+		}
+
+		return allFound
+	}, helpers.SlowEventuallyOption)
+
+	t.Log("✓ All expected resource kinds appear in metadata")
+
+	// Verify resources can be queried by namespace and kind
+	resourceKinds := []string{"Deployment", "Pod", "Service", "ConfigMap"}
+	startTime := now.Unix() - 300 // 5 minutes before
+	endTime := now.Unix() + 300   // 5 minutes after
+
+	for _, ns := range testNamespaces {
+		for _, kind := range resourceKinds {
+			helpers.EventuallyCondition(t, func() bool {
+				searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer searchCancel()
+
+				resp, err := apiClient.Search(searchCtx, startTime, endTime, ns, kind)
+				if err != nil {
+					t.Logf("Search failed for namespace %s, kind %s: %v", ns, kind, err)
+					return false
+				}
+
+				if resp.Count > 0 {
+					t.Logf("Found %d %s resources in namespace %s", resp.Count, kind, ns)
+					return true
+				}
+
+				return false
+			}, helpers.SlowEventuallyOption)
+		}
+	}
+
+	t.Log("✓ All resource kinds queryable in all test namespaces")
+
+	// Spot-check specific resources by name
+	// Note: kindIdx in generation is 0=Deployment, 1=Pod, 2=Service, 3=ConfigMap
+	expectedResources := []struct {
+		namespace string
+		name      string
+		kind      string
+	}{
+		{"e2e-import-json-1", "test-deployment-0", "Deployment"}, // kindIdx=0
+		{"e2e-import-json-1", "test-pod-1", "Pod"},               // kindIdx=1
+		{"e2e-import-json-2", "test-service-2", "Service"},       // kindIdx=2
+		{"e2e-import-json-2", "test-configmap-3", "ConfigMap"},   // kindIdx=3
+	}
+
+	for _, expected := range expectedResources {
+		helpers.EventuallyCondition(t, func() bool {
+			searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer searchCancel()
+
+			resp, err := apiClient.Search(searchCtx, startTime, endTime, expected.namespace, expected.kind)
+			if err != nil {
+				t.Logf("Search failed for %s/%s: %v", expected.namespace, expected.name, err)
+				return false
+			}
+
+			for _, r := range resp.Resources {
+				if r.Name == expected.name && r.Kind == expected.kind {
+					t.Logf("✓ Found expected resource: %s/%s (%s)", r.Namespace, r.Name, r.Kind)
+					return true
+				}
+			}
+
+			t.Logf("Resource %s/%s not yet found", expected.namespace, expected.name)
+			return false
+		}, helpers.SlowEventuallyOption)
+	}
+
+	t.Log("✓ JSON event batch import test completed successfully!")
+}
+
+// generateTestEvents creates a batch of test events with variety across namespaces and kinds
+func generateTestEvents(baseTime time.Time, namespaces []string) []*models.Event {
+	var events []*models.Event
+
+	kinds := []string{"Deployment", "Pod", "Service", "ConfigMap"}
+	eventTypes := []models.EventType{models.EventTypeCreate, models.EventTypeUpdate, models.EventTypeDelete}
+
+	for nsIdx, ns := range namespaces {
+		for kindIdx, kind := range kinds {
+			// Create 2-3 events per kind per namespace
+			// All events for the same resource should share the same UID
+			resourceUID := fmt.Sprintf("uid-%s-%d-%d", ns, nsIdx, kindIdx)
+			// Use lowercase kind in resource name to match test expectations
+			resourceName := fmt.Sprintf("test-%s-%d", strings.ToLower(kind), kindIdx)
+
+			for eventIdx := 0; eventIdx < 3; eventIdx++ {
+				timestamp := baseTime.Add(time.Duration(eventIdx*10) * time.Second)
+				eventType := eventTypes[eventIdx%len(eventTypes)]
+
+				event := &models.Event{
+					ID:        uuid.New().String(),
+					Timestamp: timestamp.UnixNano(),
+					Type:      eventType,
+					Resource: models.ResourceMetadata{
+						Group:     "apps",
+						Version:   "v1",
+						Kind:      kind,
+						Namespace: ns,
+						Name:      resourceName,
+						UID:       resourceUID,
+					},
+					// Include minimal JSON data for CREATE/UPDATE events
+					Data: []byte(fmt.Sprintf(
+						`{"apiVersion":"apps/v1","kind":"%s","metadata":{"name":"%s","namespace":"%s"}}`,
+						kind, resourceName, ns,
+					)),
+					DataSize: int32(len([]byte(fmt.Sprintf(
+						`{"apiVersion":"apps/v1","kind":"%s","metadata":{"name":"%s","namespace":"%s"}}`,
+						kind, resourceName, ns,
+					)))),
+				}
+
+				events = append(events, event)
+			}
+		}
+	}
+
+	return events
 }

@@ -25,6 +25,7 @@ type BlockStorageFile struct {
 	blockMetadataList []*BlockMetadata
 	index             *InvertedIndex
 	startOffset       int64
+	encodingFormat    string // "json" or "protobuf"
 
 	// Metrics
 	totalUncompressed int64
@@ -101,6 +102,7 @@ func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTi
 		blockMetadataList: blockMetadataList,
 		index:             invertedIndex,
 		startOffset:       int64(FileHeaderSize),
+		encodingFormat:    "json", // Default to JSON for backward compatibility
 		totalEvents:       totalEvents,
 		totalUncompressed: totalUncompressed,
 		totalCompressed:   totalCompressed,
@@ -174,6 +176,7 @@ func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64)
 		blockMetadataList: make([]*BlockMetadata, 0),
 		index:             &InvertedIndex{},
 		startOffset:       0,
+		encodingFormat:    "json", // Default to JSON for backward compatibility
 	}
 
 	// Write file header
@@ -228,7 +231,7 @@ func (bsf *BlockStorageFile) finalizeBlock() error {
 	}
 
 	// Create block from buffer
-	block, err := bsf.currentBuffer.Finalize(bsf.blockID, "gzip")
+	block, err := bsf.currentBuffer.Finalize(bsf.blockID, "gzip", bsf.encodingFormat)
 	if err != nil {
 		return fmt.Errorf("failed to finalize block: %w", err)
 	}

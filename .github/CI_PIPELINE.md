@@ -89,6 +89,6 @@ helm install spectre spectre/spectre --namespace monitoring --create-namespace
 ## Environment Variables
 
 The workflows inherit the following from your Makefile:
-- `BINARY_NAME=k8s-event-monitor`
-- `IMAGE_NAME=k8s-event-monitor` (overridden to use ghcr.io in workflows)
+- `BINARY_NAME=spectre`
+- `IMAGE_NAME=spectre` (overridden to use ghcr.io in workflows)
 - `CHART_PATH=./chart`
