@@ -72,8 +72,11 @@ func (s *Storage) getOrCreateCurrentFile() (*BlockStorageFile, error) {
 
 	// Check if we need to create a new file
 	if s.currentFile == nil || s.currentFile.hourTimestamp != currentHour.Unix() {
-		// Close the previous file if it exists
+		// Close the previous file if it exists and capture its final states
+		var carryoverStates map[string]*ResourceLastState
 		if s.currentFile != nil {
+			// Extract final states before closing
+			carryoverStates = s.currentFile.finalResourceStates
 			if err := s.currentFile.Close(); err != nil {
 				s.logger.Error("Failed to close previous file: %v", err)
 			}
@@ -86,6 +89,12 @@ func (s *Storage) getOrCreateCurrentFile() (*BlockStorageFile, error) {
 		newFile, err := NewBlockStorageFile(filePath, currentHour.Unix(), s.blockSize)
 		if err != nil {
 			return nil, err
+		}
+
+		// Carry over state snapshots from previous hour
+		if len(carryoverStates) > 0 {
+			newFile.finalResourceStates = carryoverStates
+			s.logger.Info("Carried over %d resource states from previous hour to new file", len(carryoverStates))
 		}
 
 		s.currentFile = newFile
@@ -230,6 +239,122 @@ func (s *Storage) DeleteOldFiles(maxAgeHours int) error {
 				s.logger.Info("Deleted old storage file: %s (hour: %s)", filePath, fileTime.Format("2006-01-02 15:04"))
 			}
 		}
+	}
+
+	return nil
+}
+
+// CleanupOldStateSnapshots removes state snapshots older than maxAgeDays from all storage files
+// This keeps the state snapshots current and prevents them from growing indefinitely
+func (s *Storage) CleanupOldStateSnapshots(maxAgeDays int) error {
+	s.fileMutex.Lock()
+	defer s.fileMutex.Unlock()
+
+	files, err := s.getStorageFiles()
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	maxAge := time.Duration(maxAgeDays) * 24 * time.Hour
+	cutoffTime := now.Add(-maxAge)
+	cutoffTimestampNs := cutoffTime.UnixNano()
+
+	for _, filePath := range files {
+		// Read the file to get its index section
+		reader, err := NewBlockReader(filePath)
+		if err != nil {
+			s.logger.Warn("Failed to read file %s for state cleanup: %v", filePath, err)
+			continue
+		}
+
+		fileData, err := reader.ReadFile()
+		reader.Close()
+
+		if err != nil {
+			s.logger.Warn("Failed to read index section from file %s: %v", filePath, err)
+			continue
+		}
+
+		// Check if there are any state snapshots to clean
+		if len(fileData.IndexSection.FinalResourceStates) == 0 {
+			continue
+		}
+
+		// Filter out states older than cutoff
+		cleanedStates := make(map[string]*ResourceLastState)
+		statesRemoved := 0
+
+		for key, state := range fileData.IndexSection.FinalResourceStates {
+			// Keep states that are:
+			// 1. Newer than the cutoff time, OR
+			// 2. Represent non-deleted resources (they're still relevant for consistent view)
+			if state.Timestamp > cutoffTimestampNs {
+				cleanedStates[key] = state
+			} else if state.EventType != "DELETE" {
+				// Keep non-deleted resources even if old - they might still be relevant
+				cleanedStates[key] = state
+			} else {
+				// Remove deleted resources that are older than cutoff
+				statesRemoved++
+			}
+		}
+
+		// If nothing was removed, skip rewriting
+		if statesRemoved == 0 {
+			continue
+		}
+
+		// Rewrite the index section with cleaned states
+		if err := s.rewriteFileIndexSection(filePath, fileData, cleanedStates); err != nil {
+			s.logger.Error("Failed to rewrite index section for file %s: %v", filePath, err)
+			continue
+		}
+
+		s.logger.Info("Cleaned %d old state snapshots from file %s", statesRemoved, filePath)
+	}
+
+	return nil
+}
+
+// rewriteFileIndexSection rewrites the index section of a file with updated state snapshots
+func (s *Storage) rewriteFileIndexSection(filePath string, fileData *StorageFileData, cleanedStates map[string]*ResourceLastState) error {
+	// Update the cleaned states in the index section
+	fileData.IndexSection.FinalResourceStates = cleanedStates
+
+	// Open file for writing
+	file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open file for rewriting: %w", err)
+	}
+	defer file.Close()
+
+	// Seek to where the old index section started
+	indexOffset := fileData.Footer.IndexSectionOffset
+	if _, err := file.Seek(indexOffset, 0); err != nil {
+		return fmt.Errorf("failed to seek to index section: %w", err)
+	}
+
+	// Truncate file at the start of index section
+	if err := file.Truncate(indexOffset); err != nil {
+		return fmt.Errorf("failed to truncate file: %w", err)
+	}
+
+	// Write new index section
+	bytesWritten, err := WriteIndexSection(file, fileData.IndexSection)
+	if err != nil {
+		return fmt.Errorf("failed to write index section: %w", err)
+	}
+
+	// Write new footer
+	footer := &FileFooter{
+		IndexSectionOffset: indexOffset,
+		IndexSectionLength: int32(bytesWritten),
+		MagicBytes:         FileFooterMagic,
+	}
+
+	if err := WriteFileFooter(file, footer); err != nil {
+		return fmt.Errorf("failed to write file footer: %w", err)
 	}
 
 	return nil

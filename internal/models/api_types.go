@@ -19,6 +19,7 @@ type Resource struct {
 	Name           string          `json:"name"`
 	StatusSegments []StatusSegment `json:"statusSegments,omitempty"`
 	Events         []K8sEvent      `json:"events,omitempty"`
+	PreExisting    bool            `json:"preExisting"` // true if resource existed before query start time
 }
 
 // StatusSegment represents a period during which a resource maintained a specific status
