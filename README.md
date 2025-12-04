@@ -32,15 +32,10 @@ Spectre solves this by providing:
 
 ```bash
 # Add the Spectre Helm repository
-helm repo add spectre oci://ghcr.io/moolen/charts
-helm repo update
-
-# Install Spectre
-helm install spectre spectre/spectre \
+helm install spectre oci://ghcr.io/moolen/charts/spectre \
   --namespace monitoring \
   --create-namespace
 
-# Access the UI
 kubectl port-forward -n monitoring svc/spectre 8080:8080
 
 # Open your browser to http://localhost:8080
@@ -64,6 +59,15 @@ resources:
     namespace: ""
 ```
 
+### Demo mode
+
+Spectre comes with a demo mode which allows you to navigate the UI with demo data.
+
+```sh
+
+docker run -it -p 8080:8080 docker pull ghcr.io/moolen/spectre:master --demo
+
+```
 
 ## MCP
 
