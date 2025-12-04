@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
@@ -209,16 +211,27 @@ func (eb *EventBuffer) GetEvents() ([]*models.Event, error) {
 }
 
 // Finalize creates a Block from the buffered events and compresses it
-func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string) (*Block, error) {
+// encodingFormat should be "json" or "protobuf"
+func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string, encodingFormat string) (*Block, error) {
 	if len(eb.events) == 0 {
 		return nil, fmt.Errorf("cannot finalize empty event buffer")
 	}
 
-	// Combine all events into a single byte stream (newline-delimited JSON)
+	// Encode events based on format
 	var uncompressedData []byte
-	for _, eventJSON := range eb.events {
-		uncompressedData = append(uncompressedData, eventJSON...)
-		uncompressedData = append(uncompressedData, '\n')
+	var err error
+
+	switch encodingFormat {
+	case "protobuf":
+		uncompressedData, err = eb.encodeProtobuf()
+	case "json":
+		uncompressedData, err = eb.encodeJSON()
+	default:
+		return nil, fmt.Errorf("unknown encoding format: %s", encodingFormat)
+	}
+
+	if err != nil {
+		return nil, err
 	}
 
 	// Create metadata
@@ -248,6 +261,49 @@ func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string) (*Bl
 	}
 
 	return block, nil
+}
+
+// encodeProtobuf encodes events as length-prefixed protobuf messages
+func (eb *EventBuffer) encodeProtobuf() ([]byte, error) {
+	var buf bytes.Buffer
+
+	for _, eventJSON := range eb.events {
+		// Unmarshal JSON to Event
+		event := &models.Event{}
+		if err := json.Unmarshal(eventJSON, event); err != nil {
+			return nil, fmt.Errorf("failed to parse event JSON: %w", err)
+		}
+
+		// Marshal to protobuf
+		pbData, err := event.MarshalProtobuf()
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal protobuf: %w", err)
+		}
+
+		// Write length-prefixed message using varint encoding
+		varint := make([]byte, binary.MaxVarintLen64)
+		n := binary.PutUvarint(varint, uint64(len(pbData)))
+		if _, err := buf.Write(varint[:n]); err != nil {
+			return nil, err
+		}
+		if _, err := buf.Write(pbData); err != nil {
+			return nil, err
+		}
+	}
+
+	return buf.Bytes(), nil
+}
+
+// encodeJSON encodes events as newline-delimited JSON (current format)
+func (eb *EventBuffer) encodeJSON() ([]byte, error) {
+	var buf bytes.Buffer
+
+	for _, eventJSON := range eb.events {
+		buf.Write(eventJSON)
+		buf.WriteByte('\n')
+	}
+
+	return buf.Bytes(), nil
 }
 
 // CompressBlock compresses the block's data using gzip compression

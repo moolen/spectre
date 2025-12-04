@@ -249,8 +249,8 @@ func (s *Storage) extractHourFromFilename(filePath string) (int64, error) {
 		return 0, fmt.Errorf("invalid filename format: %w", err)
 	}
 
-	// Create time and convert to Unix timestamp
-	t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC)
+	// Create time and convert to Unix timestamp using local timezone (matches getOrCreateCurrentFile)
+	t := time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.Local)
 	return t.Unix(), nil
 }
 

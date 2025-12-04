@@ -19,10 +19,16 @@ type Config struct {
 
 	// MaxConcurrentRequests is the maximum number of concurrent API requests
 	MaxConcurrentRequests int
+
+	// BlockCacheMaxMB is the maximum memory for block cache in MB
+	BlockCacheMaxMB int64
+
+	// BlockCacheEnabled indicates whether block caching is enabled
+	BlockCacheEnabled bool
 }
 
 // LoadConfig creates a Config with the provided values
-func LoadConfig(dataDir string, apiPort int, logLevel string, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int) *Config {
+func LoadConfig(dataDir string, apiPort int, logLevel string, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool) *Config {
 	cfg := &Config{
 		DataDir:               dataDir,
 		APIPort:               apiPort,
@@ -30,6 +36,8 @@ func LoadConfig(dataDir string, apiPort int, logLevel string, watcherConfigPath 
 		WatcherConfigPath:     watcherConfigPath,
 		SegmentSize:           segmentSize,
 		MaxConcurrentRequests: maxConcurrentRequests,
+		BlockCacheMaxMB:       blockCacheMaxMB,
+		BlockCacheEnabled:     blockCacheEnabled,
 	}
 
 	return cfg
@@ -55,6 +63,10 @@ func (c *Config) Validate() error {
 
 	if c.MaxConcurrentRequests < 1 {
 		return NewConfigError("MaxConcurrentRequests must be at least 1")
+	}
+
+	if c.BlockCacheEnabled && c.BlockCacheMaxMB < 1 {
+		return NewConfigError("BlockCacheMaxMB must be at least 1 when cache is enabled")
 	}
 
 	return nil

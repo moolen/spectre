@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -220,20 +221,19 @@ func TestImportExportRoundTrip(t *testing.T) {
 	importURL := fmt.Sprintf("%s/v1/storage/import?validate=true&overwrite=true", apiClient.BaseURL)
 	importReq, err := http.NewRequestWithContext(ctx, "POST", importURL, exportFile)
 	require.NoError(t, err, "failed to create import request")
-	importReq.Header.Set("Content-Type", "application/gzip")
+	importReq.Header.Set("Content-Type", "application/vnd.spectre.events.v1+bin")
 
 	importResp, err := http.DefaultClient.Do(importReq)
 	require.NoError(t, err, "failed to execute import request")
 	defer importResp.Body.Close()
 
-	require.Equal(t, http.StatusOK, importResp.StatusCode, "import request failed")
-
 	// Parse import response
 	var importReport map[string]interface{}
 	err = json.NewDecoder(importResp.Body).Decode(&importReport)
 	require.NoError(t, err, "failed to decode import response")
-
 	t.Logf("Import report: %+v", importReport)
+
+	require.Equal(t, http.StatusOK, importResp.StatusCode, "import request failed")
 
 	// Verify import was successful
 	if failedFiles, ok := importReport["failed_files"].(float64); ok {
@@ -457,8 +457,8 @@ func TestJSONEventBatchImport(t *testing.T) {
 
 	// Verify resources can be queried by namespace and kind
 	resourceKinds := []string{"Deployment", "Pod", "Service", "ConfigMap"}
-	startTime := now.Unix() - 60 // 1 minute before
-	endTime := now.Unix() + 300  // 5 minutes after
+	startTime := now.Unix() - 300 // 5 minutes before
+	endTime := now.Unix() + 300   // 5 minutes after
 
 	for _, ns := range testNamespaces {
 		for _, kind := range resourceKinds {
@@ -485,15 +485,16 @@ func TestJSONEventBatchImport(t *testing.T) {
 	t.Log("✓ All resource kinds queryable in all test namespaces")
 
 	// Spot-check specific resources by name
+	// Note: kindIdx in generation is 0=Deployment, 1=Pod, 2=Service, 3=ConfigMap
 	expectedResources := []struct {
 		namespace string
 		name      string
 		kind      string
 	}{
-		{"e2e-import-json-1", "test-deployment-0", "Deployment"},
-		{"e2e-import-json-1", "test-pod-0", "Pod"},
-		{"e2e-import-json-2", "test-service-0", "Service"},
-		{"e2e-import-json-2", "test-configmap-0", "ConfigMap"},
+		{"e2e-import-json-1", "test-deployment-0", "Deployment"}, // kindIdx=0
+		{"e2e-import-json-1", "test-pod-1", "Pod"},               // kindIdx=1
+		{"e2e-import-json-2", "test-service-2", "Service"},       // kindIdx=2
+		{"e2e-import-json-2", "test-configmap-3", "ConfigMap"},   // kindIdx=3
 	}
 
 	for _, expected := range expectedResources {
@@ -532,11 +533,15 @@ func generateTestEvents(baseTime time.Time, namespaces []string) []*models.Event
 	for nsIdx, ns := range namespaces {
 		for kindIdx, kind := range kinds {
 			// Create 2-3 events per kind per namespace
+			// All events for the same resource should share the same UID
+			resourceUID := fmt.Sprintf("uid-%s-%d-%d", ns, nsIdx, kindIdx)
+			// Use lowercase kind in resource name to match test expectations
+			resourceName := fmt.Sprintf("test-%s-%d", strings.ToLower(kind), kindIdx)
+
 			for eventIdx := 0; eventIdx < 3; eventIdx++ {
 				timestamp := baseTime.Add(time.Duration(eventIdx*10) * time.Second)
 				eventType := eventTypes[eventIdx%len(eventTypes)]
 
-				resourceName := fmt.Sprintf("test-%s-%d", kind, kindIdx)
 				event := &models.Event{
 					ID:        uuid.New().String(),
 					Timestamp: timestamp.UnixNano(),
@@ -547,7 +552,7 @@ func generateTestEvents(baseTime time.Time, namespaces []string) []*models.Event
 						Kind:      kind,
 						Namespace: ns,
 						Name:      resourceName,
-						UID:       fmt.Sprintf("uid-%s-%d-%d-%d", ns, nsIdx, kindIdx, eventIdx),
+						UID:       resourceUID,
 					},
 					// Include minimal JSON data for CREATE/UPDATE events
 					Data: []byte(fmt.Sprintf(

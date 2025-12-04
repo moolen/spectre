@@ -144,6 +144,19 @@ func (s *Storage) Export(w io.Writer, opts ExportOptions) error {
 		s.currentFile = nil
 		s.fileMutex.Unlock()
 		s.fileMutex.RLock()
+
+		// CRITICAL FIX: Extend endTime to include the hour we just closed
+		// The current file represents the current hour, so we need to extend
+		// the endTime to encompass the entire hour that was just closed
+		now := time.Now()
+		currentHourStart := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location()).Unix()
+		currentHourEnd := currentHourStart + 3600
+		if opts.EndTime < currentHourEnd {
+			opts.EndTime = currentHourEnd
+			s.logger.DebugWithFields("Extended export time range to include open hour",
+				logging.Field("new_end_time", opts.EndTime),
+				logging.Field("current_hour_end", currentHourEnd))
+		}
 	}
 
 	// Get all storage files
@@ -318,7 +331,7 @@ func (s *Storage) filterFilesByTimeRange(files []string, startTime, endTime int6
 		if startTime > 0 && hourEnd < startTime {
 			continue
 		}
-		if endTime > 0 && hourTimestamp > endTime {
+		if endTime > 0 && hourTimestamp >= endTime {
 			continue
 		}
 
@@ -644,7 +657,7 @@ func (s *Storage) AddEventsBatch(events []*models.Event, opts ImportOptions) (*I
 		}
 		hourTime := time.Unix(0, event.Timestamp).UTC()
 		// Round down to hour boundary
-		hourTimestamp := hourTime.Unix() - int64(hourTime.Second())-int64(hourTime.Minute())*60
+		hourTimestamp := hourTime.Unix() - int64(hourTime.Second()) - int64(hourTime.Minute())*60
 		hourGroups[hourTimestamp] = append(hourGroups[hourTimestamp], event)
 	}
 

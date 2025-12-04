@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/md5"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -112,14 +114,123 @@ func (br *BlockReader) ReadBlock(metadata *BlockMetadata) ([]byte, error) {
 	return decompressed, nil
 }
 
+// ReadBlockWithCache reads a block, checking the cache first
+func (br *BlockReader) ReadBlockWithCache(filename string, metadata *BlockMetadata, cache *BlockCache) (*CachedBlock, error) {
+	// Check cache first
+	if cached := cache.Get(filename, metadata.ID); cached != nil {
+		return cached, nil
+	}
+
+	// Cache miss: read and decompress
+	decompressed, err := br.ReadBlock(metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse events from decompressed NDJSON data
+	events := parseNDJSONToEvents(decompressed)
+
+	cachedBlock := &CachedBlock{
+		BlockID:  makeKey(filename, metadata.ID),
+		Events:   events,
+		Metadata: metadata,
+		Size:     int64(len(decompressed)),
+		Filename: filename,
+		ID:       metadata.ID,
+	}
+
+	// Store in cache
+	if err := cache.Put(filename, metadata.ID, cachedBlock); err != nil {
+		// If cache full, log but continue (don't fail query)
+		// In production, this would use a logger
+		fmt.Printf("Warning: Failed to cache block: %v\n", err)
+	}
+
+	return cachedBlock, nil
+}
+
+// parseNDJSONToEvents parses newline-delimited JSON into []*models.Event
+func parseNDJSONToEvents(data []byte) []*models.Event {
+	var events []*models.Event
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var event *models.Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			// Skip malformed events (logging would happen at query level)
+			continue
+		}
+
+		events = append(events, event)
+	}
+
+	return events
+}
+
 // ReadBlockEvents reads and decompresses a block, then parses events
+// Automatically detects JSON vs Protobuf encoding
 func (br *BlockReader) ReadBlockEvents(metadata *BlockMetadata) ([]*models.Event, error) {
 	decompressedData, err := br.ReadBlock(metadata)
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse events from newline-delimited JSON (NDJSON)
+	if len(decompressedData) == 0 {
+		return nil, fmt.Errorf("decompressed data is empty")
+	}
+
+	// Auto-detect format based on first byte
+	// Protobuf: starts with field tags (0x0A = field 1 length-delimited)
+	// JSON: starts with {, [, or whitespace/other characters
+	isProtobuf := decompressedData[0] == 0x0A
+
+	if isProtobuf {
+		return br.readBlockEventsProtobuf(decompressedData)
+	}
+	return br.readBlockEventsJSON(decompressedData)
+}
+
+// readBlockEventsProtobuf reads events encoded as length-prefixed protobuf messages
+func (br *BlockReader) readBlockEventsProtobuf(decompressedData []byte) ([]*models.Event, error) {
+	var events []*models.Event
+	offset := 0
+
+	// Read length-prefixed protobuf messages
+	for offset < len(decompressedData) {
+		// Parse varint length
+		length, n := binary.Uvarint(decompressedData[offset:])
+		if n <= 0 {
+			break // End of data
+		}
+		offset += n
+
+		// Extract message bytes
+		if offset+int(length) > len(decompressedData) {
+			return nil, fmt.Errorf("invalid message length: %d at offset %d", length, offset)
+		}
+
+		messageData := decompressedData[offset : offset+int(length)]
+		offset += int(length)
+
+		// Unmarshal event
+		event := &models.Event{}
+		if err := event.UnmarshalProtobuf(messageData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal event at offset %d: %w", offset, err)
+		}
+
+		events = append(events, event)
+	}
+
+	return events, nil
+}
+
+// readBlockEventsJSON reads events encoded as newline-delimited JSON
+func (br *BlockReader) readBlockEventsJSON(decompressedData []byte) ([]*models.Event, error) {
 	var events []*models.Event
 	lines := bytes.Split(decompressedData, []byte("\n"))
 
@@ -130,7 +241,7 @@ func (br *BlockReader) ReadBlockEvents(metadata *BlockMetadata) ([]*models.Event
 
 		var event *models.Event
 		if err := json.Unmarshal(line, &event); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal event: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal JSON event: %w", err)
 		}
 
 		events = append(events, event)

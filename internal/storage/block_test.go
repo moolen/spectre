@@ -133,7 +133,7 @@ func TestEventBufferFinalize(t *testing.T) {
 	buffer.AddEvent(event1JSON)
 	buffer.AddEvent(event2JSON)
 
-	block, err := buffer.Finalize(0, "gzip")
+	block, err := buffer.Finalize(0, "gzip", "json")
 	if err != nil {
 		t.Fatalf("failed to finalize buffer: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestEventBufferFinalize(t *testing.T) {
 func TestEventBufferFinalizeEmpty(t *testing.T) {
 	buffer := NewEventBuffer(1024)
 
-	_, err := buffer.Finalize(0, "gzip")
+	_, err := buffer.Finalize(0, "gzip", "json")
 	if err == nil {
 		t.Error("expected error when finalizing empty buffer")
 	}
@@ -179,7 +179,7 @@ func TestCompressBlock(t *testing.T) {
 	eventJSON, _ := json.Marshal(event)
 	buffer.AddEvent(eventJSON)
 
-	block, err := buffer.Finalize(0, "gzip")
+	block, err := buffer.Finalize(0, "gzip", "json")
 	if err != nil {
 		t.Fatalf("failed to finalize: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestDecompressBlock(t *testing.T) {
 	eventJSON, _ := json.Marshal(event)
 	buffer.AddEvent(eventJSON)
 
-	block, err := buffer.Finalize(0, "gzip")
+	block, err := buffer.Finalize(0, "gzip", "json")
 	if err != nil {
 		t.Fatalf("failed to finalize: %v", err)
 	}

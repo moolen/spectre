@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package models_pb;
+
+option go_package = "github.com/moolen/spectre/internal/models/pb";
+
+// ResourceMetadata contains metadata about a Kubernetes resource
+message ResourceMetadata {
+  string group = 1;              // API group (e.g., "apps", "" for core)
+  string version = 2;            // API version (e.g., "v1")
+  string kind = 3;               // Resource kind (e.g., "Deployment")
+  string namespace = 4;          // Kubernetes namespace ("" for cluster-scoped)
+  string name = 5;               // Resource name
+  string uid = 6;                // Unique identifier within cluster
+  string involvedObjectUid = 7;  // For Kubernetes Event objects (optional)
+}
+
+// EventType represents the type of resource change
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  CREATE = 1;
+  UPDATE = 2;
+  DELETE = 3;
+}
+
+// Event represents a single Kubernetes resource change
+message Event {
+  string id = 1;                 // Unique identifier (UUID)
+  int64 timestamp = 2;           // Unix nanoseconds
+  EventType type = 3;            // Operation type
+  ResourceMetadata resource = 4; // Resource metadata
+  bytes data = 5;                // Full Kubernetes resource (JSON bytes)
+  int32 dataSize = 6;            // Original uncompressed size
+  int32 compressedSize = 7;      // Compressed size
+}
