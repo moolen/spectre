@@ -26,15 +26,16 @@ type Server struct {
 	storage          *storage.Storage
 	router           *http.ServeMux
 	readinessChecker ReadinessChecker
+	demoMode         bool
 }
 
 // New creates a new API server
 func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecker) *Server {
-	return NewWithStorage(port, queryExecutor, nil, readinessChecker)
+	return NewWithStorage(port, queryExecutor, nil, readinessChecker, false)
 }
 
 // NewWithStorage creates a new API server with storage export/import capabilities
-func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker) *Server {
+func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker, demoMode bool) *Server {
 	s := &Server{
 		port:             port,
 		logger:           logging.GetLogger("api"),
@@ -42,6 +43,7 @@ func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Stor
 		storage:          storage,
 		router:           http.NewServeMux(),
 		readinessChecker: readinessChecker,
+		demoMode:         demoMode,
 	}
 
 	// Register handlers
@@ -234,8 +236,9 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // handleHealth handles health check requests
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	response := map[string]string{
+	response := map[string]interface{}{
 		"status": "healthy",
+		"demo":   s.demoMode,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

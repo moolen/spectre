@@ -23,6 +23,7 @@ const Version = "0.1.0"
 func main() {
 	// Parse command line flags
 	version := flag.Bool("version", false, "Show version and exit")
+	demo := flag.Bool("demo", false, "Run in demo mode with embedded demo data")
 	dataDir := flag.String("data-dir", "/data", "Directory where events are stored")
 	apiPort := flag.Int("api-port", 8080, "Port the API server listens on")
 	logLevel := flag.String("log-level", "info", "Logging level (debug, info, warn, error)")
@@ -36,7 +37,7 @@ func main() {
 
 	// Handle version flag
 	if *version {
-		fmt.Printf("Kubernetes Event Monitor v%s\n", Version)
+		fmt.Printf("Spectre v%s\n", Version)
 		os.Exit(0)
 	}
 
@@ -61,63 +62,88 @@ func main() {
 	logging.Initialize(cfg.LogLevel)
 	logger := logging.GetLogger("main")
 
-	logger.Info("Starting Kubernetes Event Monitor v%s", Version)
+	if *demo {
+		logger.Info("Starting Spectre v%s [DEMO MODE]", Version)
+	} else {
+		logger.Info("Starting Spectre v%s", Version)
+	}
 	logger.Debug("Configuration loaded: DataDir=%s, APIPort=%d, LogLevel=%s", cfg.DataDir, cfg.APIPort, cfg.LogLevel)
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
 
-	storageComponent, err := storage.New(cfg.DataDir, cfg.SegmentSize)
-	if err != nil {
-		logger.Error("Failed to create storage component: %v", err)
-		fmt.Fprintf(os.Stderr, "Storage initialization error: %v\n", err)
-		os.Exit(1)
-	}
-	logger.Info("Storage component created")
+	// In demo mode, skip storage and watcher initialization
+	var storageComponent *storage.Storage
+	var watcherComponent *watcher.Watcher
+	var queryExecutor api.QueryExecutor
 
-	watcherComponent, err := watcher.New(watcher.NewEventCaptureHandler(storageComponent), cfg.WatcherConfigPath)
-	if err != nil {
-		logger.Error("Failed to create watcher component: %v", err)
-		fmt.Fprintf(os.Stderr, "Watcher initialization error: %v\n", err)
-		os.Exit(1)
-	}
-	logger.Info("Watcher component created")
-
-	// Create query executor with or without cache based on CLI flag
-	var queryExecutor *storage.QueryExecutor
-	if *cacheEnabled {
+	if *demo {
+		logger.Info("Demo mode enabled - using embedded demo data")
+		demoExecutor := api.NewDemoQueryExecutor()
+		queryExecutor = demoExecutor
+		logger.Info("Demo query executor created")
+	} else {
 		var err error
-		queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, *cacheMaxMB)
+		storageComponent, err = storage.New(cfg.DataDir, cfg.SegmentSize)
 		if err != nil {
-			logger.Error("Failed to create cache: %v", err)
-			fmt.Fprintf(os.Stderr, "Cache initialization error: %v\n", err)
+			logger.Error("Failed to create storage component: %v", err)
+			fmt.Fprintf(os.Stderr, "Storage initialization error: %v\n", err)
 			os.Exit(1)
 		}
-		logger.Info("Block cache enabled with max size: %dMB", *cacheMaxMB)
-	} else {
-		queryExecutor = storage.NewQueryExecutor(storageComponent)
-		logger.Info("Block cache disabled")
+		logger.Info("Storage component created")
+
+		watcherComponent, err = watcher.New(watcher.NewEventCaptureHandler(storageComponent), cfg.WatcherConfigPath)
+		if err != nil {
+			logger.Error("Failed to create watcher component: %v", err)
+			fmt.Fprintf(os.Stderr, "Watcher initialization error: %v\n", err)
+			os.Exit(1)
+		}
+		logger.Info("Watcher component created")
+
+		// Create query executor with or without cache based on CLI flag
+		if *cacheEnabled {
+			var err error
+			queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, *cacheMaxMB)
+			if err != nil {
+				logger.Error("Failed to create cache: %v", err)
+				fmt.Fprintf(os.Stderr, "Cache initialization error: %v\n", err)
+				os.Exit(1)
+			}
+			logger.Info("Block cache enabled with max size: %dMB", *cacheMaxMB)
+		} else {
+			queryExecutor = storage.NewQueryExecutor(storageComponent)
+			logger.Info("Block cache disabled")
+		}
 	}
 
-	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent)
+	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent, *demo)
 	logger.Info("API server component created")
 
-	if err := manager.Register(storageComponent); err != nil {
-		logger.Error("Failed to register storage component: %v", err)
-		fmt.Fprintf(os.Stderr, "Storage registration error: %v\n", err)
-		os.Exit(1)
-	}
+	// Register components based on demo mode
+	if !*demo {
+		if err := manager.Register(storageComponent); err != nil {
+			logger.Error("Failed to register storage component: %v", err)
+			fmt.Fprintf(os.Stderr, "Storage registration error: %v\n", err)
+			os.Exit(1)
+		}
 
-	if err := manager.Register(watcherComponent, storageComponent); err != nil {
-		logger.Error("Failed to register watcher component: %v", err)
-		fmt.Fprintf(os.Stderr, "Watcher registration error: %v\n", err)
-		os.Exit(1)
-	}
+		if err := manager.Register(watcherComponent, storageComponent); err != nil {
+			logger.Error("Failed to register watcher component: %v", err)
+			fmt.Fprintf(os.Stderr, "Watcher registration error: %v\n", err)
+			os.Exit(1)
+		}
 
-	if err := manager.Register(apiComponent, storageComponent); err != nil {
-		logger.Error("Failed to register API server component: %v", err)
-		fmt.Fprintf(os.Stderr, "API server registration error: %v\n", err)
-		os.Exit(1)
+		if err := manager.Register(apiComponent, storageComponent); err != nil {
+			logger.Error("Failed to register API server component: %v", err)
+			fmt.Fprintf(os.Stderr, "API server registration error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := manager.Register(apiComponent); err != nil {
+			logger.Error("Failed to register API server component: %v", err)
+			fmt.Fprintf(os.Stderr, "API server registration error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	logger.Info("All components registered with dependencies")
