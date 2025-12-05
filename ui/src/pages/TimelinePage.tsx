@@ -8,7 +8,7 @@ import { useTimeline } from '../hooks/useTimeline';
 import { useMetadata } from '../hooks/useMetadata';
 import { usePersistedFilters } from '../hooks/usePersistedFilters';
 import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
-import { K8sResource, FilterState, SelectedPoint, TimeRange } from '../types';
+import { K8sResource, FilterState, SelectedPoint, TimeRange, ResourceStatus } from '../types';
 import { useSettings } from '../hooks/useSettings';
 import { parseTimeExpression } from '../utils/timeParsing';
 
@@ -125,15 +125,17 @@ function TimelinePage() {
   // Selection State
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
 
-  // Filters - search is component state only (resets on reload)
+  // Filters - search and hasProblematicStatus are component state only (reset on reload)
   // kinds and namespaces come from persisted filters
   const [search, setSearch] = useState<string>('');
+  const [hasProblematicStatus, setHasProblematicStatus] = useState<boolean>(false);
 
   const filters: FilterState = useMemo(() => ({
     kinds: persistedKinds,
     namespaces: persistedNamespaces,
-    search
-  }), [persistedKinds, persistedNamespaces, search]);
+    search,
+    hasProblematicStatus
+  }), [persistedKinds, persistedNamespaces, search, hasProblematicStatus]);
 
   const setFilters = useCallback((updater: React.SetStateAction<FilterState>) => {
     if (typeof updater === 'function') {
@@ -141,18 +143,25 @@ function TimelinePage() {
       const currentFilters: FilterState = {
         kinds: persistedKinds,
         namespaces: persistedNamespaces,
-        search
+        search,
+        hasProblematicStatus
       };
       const newFilters = updater(currentFilters);
       setSearch(newFilters.search);
       setKinds(newFilters.kinds);
       setNamespaces(newFilters.namespaces);
+      if (newFilters.hasProblematicStatus !== undefined) {
+        setHasProblematicStatus(newFilters.hasProblematicStatus);
+      }
     } else {
       setSearch(updater.search);
       setKinds(updater.kinds);
       setNamespaces(updater.namespaces);
+      if (updater.hasProblematicStatus !== undefined) {
+        setHasProblematicStatus(updater.hasProblematicStatus);
+      }
     }
-  }, [persistedKinds, persistedNamespaces, search, setKinds, setNamespaces]);
+  }, [persistedKinds, persistedNamespaces, search, hasProblematicStatus, setKinds, setNamespaces]);
 
   // Don't filter at the API level - filter client-side instead
   // This allows selecting multiple kinds/namespaces
@@ -189,7 +198,9 @@ function TimelinePage() {
       const matchesSearch = r.name.toLowerCase().includes(filters.search.toLowerCase());
       const matchesNs = filters.namespaces.length === 0 || filters.namespaces.includes(r.namespace);
       const matchesKind = filters.kinds.length === 0 || filters.kinds.includes(r.kind);
-      return matchesSearch && matchesNs && matchesKind;
+      const matchesStatus = !filters.hasProblematicStatus ||
+        r.statusSegments.some(s => s.status !== ResourceStatus.Ready);
+      return matchesSearch && matchesNs && matchesKind && matchesStatus;
     });
   }, [resources, filters]);
 

@@ -188,7 +188,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedInde
 
   return (
     <div
-      className="fixed right-0 bg-[var(--color-surface-elevated)] border-l border-[var(--color-border-soft)] shadow-2xl transform transition-transform duration-300 ease-in-out z-50 overflow-y-auto flex flex-col text-[var(--color-text-primary)] DetailPanel"
+      className="fixed right-0 bg-[var(--color-surface-elevated)] border-l border-[var(--color-border-soft)] shadow-2xl transform transition-transform duration-300 ease-in-out z-20 overflow-y-auto flex flex-col text-[var(--color-text-primary)] DetailPanel"
       style={{ width: `${width}px`, top: '73px', bottom: 0 }}
     >
       {/* Resize Handle */}
@@ -219,8 +219,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedInde
                 <div className="text-sm text-[var(--color-text-muted)] uppercase tracking-wider font-semibold">
                     Version {selectedIndex + 1} of {resource.statusSegments.length}
                 </div>
-                <div className="flex gap-1">
-                     <span className={`w-2 h-2 rounded-full ${
+                <div className="flex items-center gap-1">
+                     <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
                         currentSegment.status === 'Ready' ? 'bg-emerald-500' :
                         currentSegment.status === 'Error' ? 'bg-red-500' : 'bg-amber-500'
                      }`}></span>

@@ -150,7 +150,7 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-2 w-96 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl z-50 p-4 animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10">
+        <div className="absolute top-full right-0 mt-2 w-96 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl z-[60] p-4 animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10">
           {/* Presets */}
           <div className="mb-4">
             <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-2">

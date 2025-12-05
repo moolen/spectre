@@ -1,6 +1,9 @@
 package storage
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestInferStatusFromResource_DeploymentReady(t *testing.T) {
 	data := []byte(`
@@ -122,4 +125,133 @@ func TestInferStatusFromResource_DeleteEventFallback(t *testing.T) {
 	if status := InferStatusFromResource("Deployment", nil, "DELETE"); status != resourceStatusTerminating {
 		t.Fatalf("expected Terminating for delete event, got %s", status)
 	}
+}
+
+func TestInferStatusFromResource_DaemonSet(t *testing.T) {
+	tests := []struct {
+		name                   string
+		metadataName           string
+		desiredNumberScheduled int
+		numberReady            int
+		numberUnavailable      int
+		numberMisscheduled     int
+		currentNumberScheduled *int
+		numberAvailable        *int
+		updatedNumberScheduled *int
+		hasStatus              bool
+		expected               string
+	}{
+		{
+			name:                   "Ready - healthy DaemonSet",
+			metadataName:           "kube-prometheus-stack-prometheus-node-exporter",
+			desiredNumberScheduled: 3,
+			numberReady:            3,
+			numberUnavailable:      0,
+			numberMisscheduled:     0,
+			currentNumberScheduled: intPtr(3),
+			numberAvailable:        intPtr(3),
+			updatedNumberScheduled: intPtr(3),
+			hasStatus:              true,
+			expected:               resourceStatusReady,
+		},
+		{
+			name:                   "Warning - unavailable pods",
+			metadataName:           "test-daemonset",
+			desiredNumberScheduled: 3,
+			numberReady:            2,
+			numberUnavailable:      1,
+			numberMisscheduled:     0,
+			hasStatus:              true,
+			expected:               resourceStatusWarning,
+		},
+		{
+			name:                   "Warning - misscheduled pods",
+			metadataName:           "test-daemonset",
+			desiredNumberScheduled: 3,
+			numberReady:            3,
+			numberUnavailable:      0,
+			numberMisscheduled:     1,
+			hasStatus:              true,
+			expected:               resourceStatusWarning,
+		},
+		{
+			name:         "Ready (fallback) - no status",
+			metadataName: "test-daemonset",
+			hasStatus:    false,
+			expected:     resourceStatusReady,
+		},
+		{
+			name:                   "Ready (fallback) - ready less than desired but no unavailable/misscheduled",
+			metadataName:           "test-daemonset",
+			desiredNumberScheduled: 3,
+			numberReady:            2,
+			numberUnavailable:      0,
+			numberMisscheduled:     0,
+			hasStatus:              true,
+			expected:               resourceStatusReady,
+		},
+		{
+			name:                   "Warning - both unavailable and misscheduled",
+			metadataName:           "test-daemonset",
+			desiredNumberScheduled: 3,
+			numberReady:            2,
+			numberUnavailable:      1,
+			numberMisscheduled:     1,
+			hasStatus:              true,
+			expected:               resourceStatusWarning,
+		},
+		{
+			name:                   "Ready (fallback) - zero desired pods",
+			metadataName:           "test-daemonset",
+			desiredNumberScheduled: 0,
+			numberReady:            0,
+			numberUnavailable:      0,
+			numberMisscheduled:     0,
+			hasStatus:              true,
+			expected:               resourceStatusReady,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resource := map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name": tt.metadataName,
+				},
+			}
+
+			if tt.hasStatus {
+				status := map[string]interface{}{
+					"desiredNumberScheduled": tt.desiredNumberScheduled,
+					"numberReady":            tt.numberReady,
+					"numberUnavailable":      tt.numberUnavailable,
+					"numberMisscheduled":     tt.numberMisscheduled,
+				}
+				if tt.currentNumberScheduled != nil {
+					status["currentNumberScheduled"] = *tt.currentNumberScheduled
+				}
+				if tt.numberAvailable != nil {
+					status["numberAvailable"] = *tt.numberAvailable
+				}
+				if tt.updatedNumberScheduled != nil {
+					status["updatedNumberScheduled"] = *tt.updatedNumberScheduled
+				}
+				resource["status"] = status
+			}
+
+			data, err := json.Marshal(resource)
+			if err != nil {
+				t.Fatalf("failed to marshal test data: %v", err)
+			}
+
+			status := InferStatusFromResource("DaemonSet", data, "UPDATE")
+			if status != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, status)
+			}
+		})
+	}
+}
+
+func intPtr(i int) *int {
+	return &i
 }

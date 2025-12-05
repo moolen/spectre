@@ -134,6 +134,7 @@ func inferDaemonSetStatus(obj *resourceData) string {
 		return ""
 	}
 
+	// TODO: does not work as expected. see demo data.
 	desired := obj.statusInt("desiredNumberScheduled")
 	ready := obj.statusInt("numberReady")
 	unavailable := obj.statusInt("numberUnavailable")
@@ -156,9 +157,13 @@ func inferReplicaSetStatus(obj *resourceData) string {
 		return ""
 	}
 
-	desired := firstNonZero(obj.specInt("replicas"), obj.statusInt("replicas"))
+	desired := obj.specInt("replicas")
 	ready := obj.statusInt("readyReplicas")
 	available := obj.statusInt("availableReplicas")
+
+	if obj.specInt("replicas") == obj.statusInt("replicas") {
+		return resourceStatusReady
+	}
 
 	if desired > 0 && ready >= desired && available >= desired {
 		return resourceStatusReady
