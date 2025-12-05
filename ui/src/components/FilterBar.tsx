@@ -216,7 +216,7 @@ const MultiSelectDropdown = ({
             </button>
 
             {isOpen && (
-                <div className="absolute top-full left-0 mt-2 w-56 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10">
+                <div className="absolute top-full left-0 mt-2 w-56 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl z-[60] overflow-hidden animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10">
                     {/* Search Input and Clear Button */}
                     <div className="p-2 border-b border-[var(--color-border-soft)] space-y-2">
                         <div className="relative">
@@ -399,7 +399,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeR
         <div className="h-8 w-px bg-gray-800 hidden md:block"></div>
 
         {/* Search */}
-        <div className="relative group min-w-[300px] flex-grow max-w-2xl">
+        <div className="relative group min-w-[150px] flex-grow max-w-xl">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <svg className="h-4 w-4 text-gray-500 group-focus-within:text-brand-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
             </div>
@@ -429,6 +429,31 @@ export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeR
                 onToggle={toggleKind}
                 onClear={clearKinds}
             />
+
+            <button
+                onClick={() => setFilters(prev => ({ ...prev, hasProblematicStatus: !prev.hasProblematicStatus }))}
+                className={`flex items-center justify-between gap-2 px-4 py-2 text-sm font-medium rounded-md border transition-all outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
+                    filters.hasProblematicStatus
+                        ? 'bg-[var(--color-surface-active)] border-brand-500 text-brand-300 ring-1 ring-brand-500/20'
+                        : 'bg-[var(--color-surface-muted)] border-[var(--color-border-soft)] text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)]'
+                }`}
+                title="Show only resources with problematic status (Warning, Error, Terminating, or Unknown)"
+            >
+                <div className="flex items-center gap-2">
+                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                        filters.hasProblematicStatus
+                            ? 'bg-brand-600 border-brand-600'
+                            : 'border-[var(--color-border-soft)]'
+                    }`}>
+                        {filters.hasProblematicStatus && (
+                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                        )}
+                    </div>
+                    <span className="truncate">Problematic Only</span>
+                </div>
+            </button>
         </div>
 
         {/* Time Range Picker */}

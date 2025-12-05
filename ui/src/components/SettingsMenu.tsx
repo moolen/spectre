@@ -201,7 +201,7 @@ export const SettingsMenu: React.FC = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-3 w-72 rounded-xl border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)] shadow-2xl z-50 p-4 space-y-4">
+        <div className="absolute right-0 mt-3 w-72 rounded-xl border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)] shadow-2xl z-[60] p-4 space-y-4">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-2">
               Theme & Layout

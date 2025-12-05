@@ -43,6 +43,7 @@ export interface FilterState {
   kinds: string[];
   namespaces: string[];
   search: string;
+  hasProblematicStatus?: boolean;
 }
 
 export interface SelectedPoint {

@@ -784,10 +784,67 @@ export const Timeline: React.FC<TimelineProps> = ({
           transform={`translate(${MARGIN.left},${MARGIN.top})`}
         />
       </svg>
-      <div className="fixed right-0 z-20 pointer-events-none flex justify-end p-2" style={{ top: `112px` }}>
-        <div className="text-xs text-[var(--color-text-muted)] bg-[var(--color-surface-elevated)]/90 backdrop-blur px-2 py-1 rounded border border-[var(--color-border-soft)] shadow-sm mr-4">
-          Drag to Zoom • Shift+Scroll to Pan Time • Double-click Reset • Arrow Keys to Navigate
-        </div>
+
+      {/* Zoom Controls */}
+      <div className="absolute flex gap-2 z-[10]" style={{ top: `${MARGIN.top + 10}px`, right: '10px' }}>
+        <button
+          onClick={() => {
+            if (!svgRef.current) return;
+            const svg = d3.select(svgRef.current);
+            const currentTransform = d3.zoomTransform(svg.node()!);
+            const newScale = Math.max(1, currentTransform.k * 0.8); // Zoom out by 20%
+            const centerX = innerWidth / 2;
+            const newTx = currentTransform.x + (centerX * (currentTransform.k - newScale)) / currentTransform.k;
+            svg.transition()
+              .duration(300)
+              .ease(d3.easeCubicOut)
+              .call(zoom.transform, d3.zoomIdentity.translate(newTx, 0).scale(newScale));
+          }}
+          title="Zoom Out"
+          className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => {
+            if (!svgRef.current) return;
+            const svg = d3.select(svgRef.current);
+            const currentTransform = d3.zoomTransform(svg.node()!);
+            const newScale = Math.min(1000, currentTransform.k * 1.25); // Zoom in by 25%
+            const centerX = innerWidth / 2;
+            const newTx = currentTransform.x + (centerX * (currentTransform.k - newScale)) / currentTransform.k;
+            svg.transition()
+              .duration(300)
+              .ease(d3.easeCubicOut)
+              .call(zoom.transform, d3.zoomIdentity.translate(newTx, 0).scale(newScale));
+          }}
+          title="Zoom In"
+          className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => {
+            if (!svgRef.current) return;
+            const svg = d3.select(svgRef.current);
+            svg.transition()
+              .duration(300)
+              .ease(d3.easeCubicOut)
+              .call(zoom.transform, d3.zoomIdentity);
+          }}
+          title="Reset Zoom"
+          className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
       </div>
       <svg
         ref={svgRef}
