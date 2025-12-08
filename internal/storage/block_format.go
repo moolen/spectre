@@ -75,7 +75,7 @@ func NewFileHeader() *FileHeader {
 		CreatedAt:            time.Now().UnixNano(),
 		CompressionAlgorithm: DefaultCompressionAlgorithm,
 		BlockSize:            int32(DefaultBlockSize),
-		EncodingFormat:       "json",
+		EncodingFormat:       "protobuf",
 		ChecksumEnabled:      false,
 	}
 }

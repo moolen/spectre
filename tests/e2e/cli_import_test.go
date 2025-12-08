@@ -85,7 +85,7 @@ func TestCLIImportOnStartup(t *testing.T) {
 	require.NoError(t, err, "failed to create ConfigMap")
 	t.Logf("✓ ConfigMap created: %s/%s", namespace, configMapName)
 
-	// Step 4: Load and customize Helm values
+	// Step 4: Load and customize Helm values with import configuration
 	t.Log("Step 4: Preparing Helm deployment with import configuration")
 
 	values, imageRef, err := helpers.LoadHelmValues()
@@ -95,8 +95,33 @@ func TestCLIImportOnStartup(t *testing.T) {
 	err = helpers.BuildAndLoadTestImage(t, testCluster.Name, imageRef)
 	require.NoError(t, err, "failed to build/load image")
 
-	// Step 5: Deploy Spectre with Helm
-	t.Log("Step 5: Deploying Spectre via Helm")
+	// Configure import via Helm values
+	importMountPath := "/import-data"
+
+	// Add extra volumes, volume mounts, and args for import functionality
+	values["extraVolumes"] = []map[string]interface{}{
+		{
+			"name": "import-data",
+			"configMap": map[string]string{
+				"name": configMapName,
+			},
+		},
+	}
+
+	values["extraVolumeMounts"] = []map[string]interface{}{
+		{
+			"name":      "import-data",
+			"mountPath": importMountPath,
+			"readOnly":  true,
+		},
+	}
+
+	values["extraArgs"] = []string{
+		fmt.Sprintf("--import=%s", importMountPath),
+	}
+
+	// Step 5: Deploy Spectre with Helm including import configuration
+	t.Log("Step 5: Deploying Spectre via Helm with import configuration")
 
 	releaseName := clusterName
 	helmDeployer, err := helpers.NewHelmDeployer(t, testCluster.GetKubeConfig(), namespace)
@@ -108,60 +133,13 @@ func TestCLIImportOnStartup(t *testing.T) {
 	err = helmDeployer.InstallOrUpgrade(releaseName, chartPath, values)
 	require.NoError(t, err, "failed to install Helm release")
 
-	// Wait briefly for initial deployment
-	time.Sleep(5 * time.Second)
-
-	// Step 6: Patch the deployment to add import volume and arg
-	t.Log("Step 6: Patching deployment to add import functionality")
-
-	deploymentName := releaseName + "-spectre"
-	importMountPath := "/import-data"
-
-	// Create JSON patch to add the volume, volumeMount, and --import arg
-	patchData := fmt.Sprintf(`[
-		{
-			"op": "add",
-			"path": "/spec/template/spec/volumes/-",
-			"value": {
-				"name": "import-data",
-				"configMap": {
-					"name": "%s"
-				}
-			}
-		},
-		{
-			"op": "add",
-			"path": "/spec/template/spec/containers/0/volumeMounts/-",
-			"value": {
-				"name": "import-data",
-				"mountPath": "%s",
-				"readOnly": true
-			}
-		},
-		{
-			"op": "add",
-			"path": "/spec/template/spec/containers/0/args/-",
-			"value": "--import=%s"
-		}
-	]`, configMapName, importMountPath, importMountPath)
-
-	deployment, err := k8sClient.Clientset.AppsV1().Deployments(namespace).Patch(
-		ctx,
-		deploymentName,
-		"application/json-patch+json",
-		[]byte(patchData),
-		metav1.PatchOptions{},
-	)
-	require.NoError(t, err, "failed to patch deployment")
-	t.Logf("✓ Deployment patched: %s", deployment.Name)
-
-	// Step 7: Wait for deployment to be ready after patch
-	t.Log("Step 7: Waiting for Spectre to restart and become ready")
+	// Step 6: Wait for deployment to be ready
+	t.Log("Step 6: Waiting for Spectre to become ready")
 	err = helpers.WaitForAppReady(ctx, k8sClient, namespace, releaseName)
-	require.NoError(t, err, "Spectre not ready after restart")
+	require.NoError(t, err, "Spectre not ready")
 
-	// Step 8: Set up port forwarding to access the API
-	t.Log("Step 8: Setting up port forwarding")
+	// Step 7: Set up port forwarding to access the API
+	t.Log("Step 7: Setting up port forwarding")
 
 	serviceName := fmt.Sprintf("%s-spectre", releaseName)
 	portForwarder, err := helpers.NewPortForwarder(t, testCluster.GetKubeConfig(), namespace, serviceName, 8080)
@@ -175,16 +153,16 @@ func TestCLIImportOnStartup(t *testing.T) {
 
 	t.Log("✓ Spectre deployed and ready with import configuration")
 
-	// Step 9: Wait a bit for import to complete (it runs on startup)
-	t.Log("Step 9: Waiting for import to complete")
+	// Step 8: Wait a bit for import to complete (it runs on startup)
+	t.Log("Step 8: Waiting for import to complete")
 	time.Sleep(10 * time.Second)
 
 	// Define time range for queries (matches the event generation time)
 	startTime := now.Unix() - 300 // 5 minutes before
 	endTime := now.Unix() + 300   // 5 minutes after
 
-	// Step 10: Verify imported data is present via metadata API
-	t.Log("Step 10: Verifying imported data via metadata API")
+	// Step 9: Verify imported data is present via metadata API
+	t.Log("Step 9: Verifying imported data via metadata API")
 
 	helpers.EventuallyCondition(t, func() bool {
 		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -212,12 +190,12 @@ func TestCLIImportOnStartup(t *testing.T) {
 		}
 
 		return true
-	}, helpers.SlowEventuallyOption)
+	}, helpers.DefaultEventuallyOption)
 
 	t.Log("✓ All test namespaces appear in metadata")
 
-	// Step 11: Verify resources can be queried via search API
-	t.Log("Step 11: Verifying resources via search API")
+	// Step 10: Verify resources can be queried via search API
+	t.Log("Step 10: Verifying resources via search API")
 
 	resourceKinds := []string{"Deployment", "Pod", "Service", "ConfigMap"}
 
@@ -246,8 +224,8 @@ func TestCLIImportOnStartup(t *testing.T) {
 
 	t.Log("✓ All resource kinds queryable in all test namespaces")
 
-	// Step 12: Verify specific resources by name
-	t.Log("Step 12: Verifying specific resources by name")
+	// Step 11: Verify specific resources by name
+	t.Log("Step 11: Verifying specific resources by name")
 
 	expectedResources := []struct {
 		namespace string
@@ -283,8 +261,8 @@ func TestCLIImportOnStartup(t *testing.T) {
 		}, helpers.SlowEventuallyOption)
 	}
 
-	// Step 13: Verify import report in logs
-	t.Log("Step 13: Checking pod logs for import confirmation")
+	// Step 12: Verify import report in logs
+	t.Log("Step 12: Checking pod logs for import confirmation")
 
 	pods, err := k8sClient.ListPods(ctx, namespace, fmt.Sprintf("app.kubernetes.io/instance=%s", releaseName))
 	require.NoError(t, err, "failed to list pods")

@@ -1,9 +1,8 @@
 package storage
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -478,15 +477,26 @@ func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event,
 				continue
 			}
 
-			// Parse events from newline-delimited JSON (NDJSON)
-			lines := bytes.Split(decompressedData, []byte("\n"))
-			for _, line := range lines {
-				if len(line) == 0 {
-					continue // Skip empty lines
+			// Parse events from length-prefixed protobuf format
+			offset := 0
+			for offset < len(decompressedData) {
+				// Parse varint length
+				length, n := binary.Uvarint(decompressedData[offset:])
+				if n <= 0 {
+					break // End of data
+				}
+				offset += n
+
+				if offset+int(length) > len(decompressedData) {
+					s.logger.Warn("Invalid message length in finalized block: %d at offset %d", length, offset)
+					break
 				}
 
-				var event *models.Event
-				if err := json.Unmarshal(line, &event); err != nil {
+				messageData := decompressedData[offset : offset+int(length)]
+				offset += int(length)
+
+				event := &models.Event{}
+				if err := event.UnmarshalProtobuf(messageData); err != nil {
 					s.logger.Warn("Failed to unmarshal event from finalized block: %v", err)
 					continue
 				}

@@ -56,14 +56,15 @@ func (h *ImportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// empty content-type for backwards compat
 	if contentType == "" || strings.HasPrefix(contentType, ContentTypeEventsBinary) {
 		h.handleArchiveImport(w, r, opts)
+		return
 	}
 	if strings.HasPrefix(contentType, ContentTypeEventsJSON) {
 		h.handleJSONEventImport(w, r, opts)
-	} else {
-		h.logger.Error("Unsupported Content-Type: %s", contentType)
-		writeError(w, http.StatusBadRequest, "UNSUPPORTED_CONTENT_TYPE", fmt.Sprintf("Content-Type %s not supported", contentType))
 		return
 	}
+
+	h.logger.Error("Unsupported Content-Type: %s", contentType)
+	writeError(w, http.StatusBadRequest, "UNSUPPORTED_CONTENT_TYPE", fmt.Sprintf("Content-Type %s not supported", contentType))
 }
 
 // handleJSONEventImport processes a JSON batch event import request

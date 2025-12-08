@@ -134,7 +134,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       .extent([[0, 0], [innerWidth, height]]), [innerWidth, height]);
 
   // Notify about visible time range changes with debouncing
-  // This updates the URL without triggering timeline re-renders
+  // This updates the URL with the current visible range (including padding)
   const notifyVisibleTimeRange = (transform: d3.ZoomTransform) => {
     if (!onVisibleTimeRangeChange) return;
 
@@ -144,6 +144,8 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     debounceTimeoutRef.current = setTimeout(() => {
       const rescaledXScale = transform.rescaleX(xScale);
+      // Get the visible range including the timeline's 2% padding
+      // This matches the actual domain being displayed
       const visibleStart = rescaledXScale.invert(0);
       const visibleEnd = rescaledXScale.invert(innerWidth);
       onVisibleTimeRangeChange({ start: visibleStart, end: visibleEnd });
@@ -795,10 +797,15 @@ export const Timeline: React.FC<TimelineProps> = ({
             const newScale = Math.max(1, currentTransform.k * 0.8); // Zoom out by 20%
             const centerX = innerWidth / 2;
             const newTx = currentTransform.x + (centerX * (currentTransform.k - newScale)) / currentTransform.k;
+            const newTransform = d3.zoomIdentity.translate(newTx, 0).scale(newScale);
             svg.transition()
               .duration(300)
               .ease(d3.easeCubicOut)
-              .call(zoom.transform, d3.zoomIdentity.translate(newTx, 0).scale(newScale));
+              .call(zoom.transform, newTransform)
+              .on('end', () => {
+                notifyVisibleTimeRange(newTransform);
+                onZoomDetected?.();
+              });
           }}
           title="Zoom Out"
           className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
@@ -816,10 +823,15 @@ export const Timeline: React.FC<TimelineProps> = ({
             const newScale = Math.min(1000, currentTransform.k * 1.25); // Zoom in by 25%
             const centerX = innerWidth / 2;
             const newTx = currentTransform.x + (centerX * (currentTransform.k - newScale)) / currentTransform.k;
+            const newTransform = d3.zoomIdentity.translate(newTx, 0).scale(newScale);
             svg.transition()
               .duration(300)
               .ease(d3.easeCubicOut)
-              .call(zoom.transform, d3.zoomIdentity.translate(newTx, 0).scale(newScale));
+              .call(zoom.transform, newTransform)
+              .on('end', () => {
+                notifyVisibleTimeRange(newTransform);
+                onZoomDetected?.();
+              });
           }}
           title="Zoom In"
           className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
@@ -836,7 +848,11 @@ export const Timeline: React.FC<TimelineProps> = ({
             svg.transition()
               .duration(300)
               .ease(d3.easeCubicOut)
-              .call(zoom.transform, d3.zoomIdentity);
+              .call(zoom.transform, d3.zoomIdentity)
+              .on('end', () => {
+                notifyVisibleTimeRange(d3.zoomIdentity);
+                onZoomDetected?.();
+              });
           }}
           title="Reset Zoom"
           className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"

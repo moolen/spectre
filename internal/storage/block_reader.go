@@ -173,7 +173,7 @@ func parseNDJSONToEvents(data []byte) []*models.Event {
 }
 
 // ReadBlockEvents reads and decompresses a block, then parses events
-// Automatically detects JSON vs Protobuf encoding
+// Events are decoded using protobuf format
 func (br *BlockReader) ReadBlockEvents(metadata *BlockMetadata) ([]*models.Event, error) {
 	decompressedData, err := br.ReadBlock(metadata)
 	if err != nil {
@@ -184,15 +184,7 @@ func (br *BlockReader) ReadBlockEvents(metadata *BlockMetadata) ([]*models.Event
 		return nil, fmt.Errorf("decompressed data is empty")
 	}
 
-	// Auto-detect format based on first byte
-	// Protobuf: starts with field tags (0x0A = field 1 length-delimited)
-	// JSON: starts with {, [, or whitespace/other characters
-	isProtobuf := decompressedData[0] == 0x0A
-
-	if isProtobuf {
-		return br.readBlockEventsProtobuf(decompressedData)
-	}
-	return br.readBlockEventsJSON(decompressedData)
+	return br.readBlockEventsProtobuf(decompressedData)
 }
 
 // readBlockEventsProtobuf reads events encoded as length-prefixed protobuf messages
@@ -221,27 +213,6 @@ func (br *BlockReader) readBlockEventsProtobuf(decompressedData []byte) ([]*mode
 		event := &models.Event{}
 		if err := event.UnmarshalProtobuf(messageData); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal event at offset %d: %w", offset, err)
-		}
-
-		events = append(events, event)
-	}
-
-	return events, nil
-}
-
-// readBlockEventsJSON reads events encoded as newline-delimited JSON
-func (br *BlockReader) readBlockEventsJSON(decompressedData []byte) ([]*models.Event, error) {
-	var events []*models.Event
-	lines := bytes.Split(decompressedData, []byte("\n"))
-
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue // Skip empty lines
-		}
-
-		var event *models.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal JSON event: %w", err)
 		}
 
 		events = append(events, event)

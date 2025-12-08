@@ -182,11 +182,9 @@ func (s *Storage) Export(w io.Writer, opts ExportOptions) error {
 	if opts.Compression {
 		gzipWriter = gzip.NewWriter(w)
 		archiveWriter = gzipWriter
-		defer gzipWriter.Close()
 	}
 
 	tarWriter := tar.NewWriter(archiveWriter)
-	defer tarWriter.Close()
 
 	// Build manifest
 	manifest := ExportManifest{
@@ -202,7 +200,7 @@ func (s *Storage) Export(w io.Writer, opts ExportOptions) error {
 		entry, err := s.exportFile(tarWriter, filePath)
 		if err != nil {
 			s.logger.Error("Failed to export file %s: %v", filePath, err)
-			continue
+			return fmt.Errorf("failed to export file %s: %w", filePath, err)
 		}
 		manifest.Files = append(manifest.Files, entry)
 	}
@@ -226,6 +224,16 @@ func (s *Storage) Export(w io.Writer, opts ExportOptions) error {
 
 	if _, err := tarWriter.Write(manifestJSON); err != nil {
 		return fmt.Errorf("failed to write manifest: %w", err)
+	}
+
+	if err := tarWriter.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	if gzipWriter != nil {
+		if err := gzipWriter.Close(); err != nil {
+			return fmt.Errorf("failed to close gzip writer: %w", err)
+		}
 	}
 
 	s.logger.InfoWithFields("Storage export completed",
@@ -288,8 +296,14 @@ func (s *Storage) exportFile(tw *tar.Writer, filePath string) (ExportedFileEntry
 	}
 	defer file.Close()
 
-	if _, err := io.Copy(tw, file); err != nil {
+	written, err := io.Copy(tw, file)
+	if err != nil {
 		return ExportedFileEntry{}, fmt.Errorf("failed to copy file contents: %w", err)
+	}
+
+	// Verify we wrote the expected number of bytes
+	if written != fileInfo.Size() {
+		return ExportedFileEntry{}, fmt.Errorf("size mismatch: wrote %d bytes but file size is %d", written, fileInfo.Size())
 	}
 
 	entry := ExportedFileEntry{

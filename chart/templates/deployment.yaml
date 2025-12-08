@@ -37,12 +37,18 @@ spec:
         - --watcher-config=/etc/watcher/watcher.yaml
         - --segment-size={{ .Values.config.segmentSize | int64 }}
         - --max-concurrent-requests={{ .Values.config.maxConcurrentRequests }}
+        {{- range .Values.extraArgs }}
+        - {{ . }}
+        {{- end }}
         volumeMounts:
         - name: data
           mountPath: {{ .Values.persistence.mountPath }}
         - name: watcher-config
           mountPath: /etc/watcher
           readOnly: true
+        {{- with .Values.extraVolumeMounts }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         {{- if .Values.livenessProbe.enabled }}
         livenessProbe:
           httpGet:
@@ -76,6 +82,9 @@ spec:
       - name: watcher-config
         configMap:
           name: {{ include "spectre.fullname" . }}
+      {{- with .Values.extraVolumes }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
