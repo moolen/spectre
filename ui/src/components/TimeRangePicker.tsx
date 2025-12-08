@@ -83,7 +83,7 @@ export const TimeRangePicker: React.FC<TimeRangePickerProps> = ({ onConfirm, ini
         {/* Mascot */}
         <div className="flex justify-center mb-6">
           <img
-            src="/ghost.svg"
+            src="ghost.svg"
             alt="Spectre Ghost"
             className="w-32 h-32"
           />

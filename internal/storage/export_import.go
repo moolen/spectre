@@ -493,7 +493,8 @@ func (s *Storage) importHourGroup(hourTimestamp int64, importedFilePaths []strin
 	defer s.fileMutex.Unlock()
 
 	// Determine the canonical filename for this hour
-	hourTime := time.Unix(hourTimestamp, 0).UTC()
+	// Use Local timezone to match extractHourFromFilename and getOrCreateCurrentFile
+	hourTime := time.Unix(hourTimestamp, 0).Local()
 	canonicalFilename := fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
 		hourTime.Year(), hourTime.Month(), hourTime.Day(), hourTime.Hour())
 	canonicalPath := filepath.Join(s.dataDir, canonicalFilename)
@@ -665,7 +666,7 @@ func (s *Storage) AddEventsBatch(events []*models.Event, opts ImportOptions) (*I
 	totalEvents := int64(0)
 	for hourTimestamp, hourEvents := range hourGroups {
 		if err := s.ingestHourEvents(hourTimestamp, hourEvents, opts); err != nil {
-			hourTime := time.Unix(hourTimestamp, 0).UTC()
+			hourTime := time.Unix(hourTimestamp, 0).Local()
 			report.Errors = append(report.Errors, fmt.Sprintf("failed to ingest hour %s: %v", hourTime.Format("2006-01-02-15"), err))
 		} else {
 			totalEvents += int64(len(hourEvents))
@@ -692,7 +693,8 @@ func (s *Storage) ingestHourEvents(hourTimestamp int64, events []*models.Event, 
 	defer s.fileMutex.Unlock()
 
 	// Determine the canonical filename for this hour
-	hourTime := time.Unix(hourTimestamp, 0).UTC()
+	// Use Local timezone to match extractHourFromFilename and getOrCreateCurrentFile
+	hourTime := time.Unix(hourTimestamp, 0).Local()
 	canonicalFilename := fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
 		hourTime.Year(), hourTime.Month(), hourTime.Day(), hourTime.Hour())
 	canonicalPath := filepath.Join(s.dataDir, canonicalFilename)

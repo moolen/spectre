@@ -52,6 +52,11 @@ func (rb *ResourceBuilder) BuildResourcesFromEvents(events []models.Event) map[s
 	// Build status segments for each resource
 	for uid, resource := range resources {
 		resource.StatusSegments = rb.BuildStatusSegments(uid, baseEvents)
+
+		// Mark as pre-existing if the first event is a state snapshot
+		if len(resource.StatusSegments) > 0 {
+			resource.PreExisting = rb.IsPreExisting(uid, baseEvents)
+		}
 	}
 
 	return resources
@@ -107,6 +112,32 @@ func (rb *ResourceBuilder) BuildStatusSegments(resourceUID string, allEvents []m
 	}
 
 	return segments
+}
+
+// IsPreExisting checks if a resource existed before the query start time
+// by checking if the first event is a state snapshot (indicated by "state-" ID prefix)
+func (rb *ResourceBuilder) IsPreExisting(resourceUID string, allEvents []models.Event) bool {
+	// Find all events for this resource and sort by timestamp
+	var resourceEvents []models.Event
+	for _, event := range allEvents {
+		if event.Resource.UID == resourceUID {
+			resourceEvents = append(resourceEvents, event)
+		}
+	}
+
+	if len(resourceEvents) == 0 {
+		return false
+	}
+
+	// Sort by timestamp ascending
+	sort.Slice(resourceEvents, func(i, j int) bool {
+		return resourceEvents[i].Timestamp < resourceEvents[j].Timestamp
+	})
+
+	// Check if the first event is a state snapshot
+	// State snapshot events have IDs starting with "state-"
+	firstEvent := resourceEvents[0]
+	return strings.HasPrefix(firstEvent.ID, "state-")
 }
 
 // generateMessage creates a human-readable message for the segment

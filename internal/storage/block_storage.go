@@ -13,19 +13,20 @@ import (
 
 // BlockStorageFile represents a block-based storage file for one hour
 type BlockStorageFile struct {
-	path              string
-	hourTimestamp     int64
-	file              *os.File
-	blocks            []*Block
-	currentBuffer     *EventBuffer
-	blockID           int32
-	logger            *logging.Logger
-	blockSize         int64
-	mutex             sync.Mutex
-	blockMetadataList []*BlockMetadata
-	index             *InvertedIndex
-	startOffset       int64
-	encodingFormat    string // "json" or "protobuf"
+	path                string
+	hourTimestamp       int64
+	file                *os.File
+	blocks              []*Block
+	currentBuffer       *EventBuffer
+	blockID             int32
+	logger              *logging.Logger
+	blockSize           int64
+	mutex               sync.Mutex
+	blockMetadataList   []*BlockMetadata
+	index               *InvertedIndex
+	startOffset         int64
+	encodingFormat      string                        // "json" or "protobuf"
+	finalResourceStates map[string]*ResourceLastState // Final state snapshots for resources in this file
 
 	// Metrics
 	totalUncompressed int64
@@ -90,22 +91,29 @@ func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTi
 		actualBlockSize = int64(header.BlockSize)
 	}
 
+	// Restore final resource states from index section
+	finalResourceStates := indexSection.FinalResourceStates
+	if finalResourceStates == nil {
+		finalResourceStates = make(map[string]*ResourceLastState)
+	}
+
 	bsf := &BlockStorageFile{
-		path:              path,
-		hourTimestamp:     hourTimestamp,
-		file:              file,
-		blocks:            make([]*Block, 0), // We don't need actual block data in memory
-		currentBuffer:     NewEventBuffer(actualBlockSize),
-		blockID:           nextBlockID,
-		logger:            logger,
-		blockSize:         actualBlockSize,
-		blockMetadataList: blockMetadataList,
-		index:             invertedIndex,
-		startOffset:       int64(FileHeaderSize),
-		encodingFormat:    "json", // Default to JSON for backward compatibility
-		totalEvents:       totalEvents,
-		totalUncompressed: totalUncompressed,
-		totalCompressed:   totalCompressed,
+		path:                path,
+		hourTimestamp:       hourTimestamp,
+		file:                file,
+		blocks:              make([]*Block, 0), // We don't need actual block data in memory
+		currentBuffer:       NewEventBuffer(actualBlockSize),
+		blockID:             nextBlockID,
+		logger:              logger,
+		blockSize:           actualBlockSize,
+		blockMetadataList:   blockMetadataList,
+		index:               invertedIndex,
+		startOffset:         int64(FileHeaderSize),
+		encodingFormat:      "json",
+		finalResourceStates: finalResourceStates,
+		totalEvents:         totalEvents,
+		totalUncompressed:   totalUncompressed,
+		totalCompressed:     totalCompressed,
 	}
 
 	logger.InfoWithFields("Restored existing complete file for appending",
@@ -165,18 +173,19 @@ func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64)
 	}
 
 	bsf := &BlockStorageFile{
-		path:              path,
-		hourTimestamp:     hourTimestamp,
-		file:              file,
-		blocks:            make([]*Block, 0),
-		currentBuffer:     NewEventBuffer(blockSizeBytes),
-		blockID:           0,
-		logger:            logger,
-		blockSize:         blockSizeBytes,
-		blockMetadataList: make([]*BlockMetadata, 0),
-		index:             &InvertedIndex{},
-		startOffset:       0,
-		encodingFormat:    "json", // Default to JSON for backward compatibility
+		path:                path,
+		hourTimestamp:       hourTimestamp,
+		file:                file,
+		blocks:              make([]*Block, 0),
+		currentBuffer:       NewEventBuffer(blockSizeBytes),
+		blockID:             0,
+		logger:              logger,
+		blockSize:           blockSizeBytes,
+		blockMetadataList:   make([]*BlockMetadata, 0),
+		index:               &InvertedIndex{},
+		startOffset:         0,
+		encodingFormat:      "json",
+		finalResourceStates: make(map[string]*ResourceLastState),
 	}
 
 	// Write file header
@@ -357,6 +366,55 @@ func (bsf *BlockStorageFile) buildIndexes() error {
 	return nil
 }
 
+// extractFinalResourceStates extracts the final state of each resource from all blocks
+// Returns a map where key is "group/version/kind/namespace/name" and value is the ResourceLastState
+func (bsf *BlockStorageFile) extractFinalResourceStates() (map[string]*ResourceLastState, error) {
+	finalStates := make(map[string]*ResourceLastState)
+
+	// If no blocks exist, return empty map
+	if len(bsf.blockMetadataList) == 0 {
+		return finalStates, nil
+	}
+
+	// For each block, read its events and track the latest state per resource
+	reader, err := NewBlockReader(bsf.path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create block reader: %w", err)
+	}
+	defer reader.Close()
+
+	for _, metadata := range bsf.blockMetadataList {
+		events, err := reader.ReadBlockEvents(metadata)
+		if err != nil {
+			bsf.logger.Warn("Failed to read block %d for state extraction: %v", metadata.ID, err)
+			continue
+		}
+
+		// For each event, update the final state for that resource
+		for _, event := range events {
+			// Create resource key: group/version/kind/namespace/name
+			resourceKey := fmt.Sprintf("%s/%s/%s/%s/%s",
+				event.Resource.Group,
+				event.Resource.Version,
+				event.Resource.Kind,
+				event.Resource.Namespace,
+				event.Resource.Name,
+			)
+
+			// Store or update the final state
+			// Events are processed in order within a block, so later events overwrite earlier ones
+			finalStates[resourceKey] = &ResourceLastState{
+				UID:          event.Resource.UID,
+				EventType:    string(event.Type),
+				Timestamp:    event.Timestamp,
+				ResourceData: event.Data,
+			}
+		}
+	}
+
+	return finalStates, nil
+}
+
 // writeIndexSection writes the index section to the end of the file
 func (bsf *BlockStorageFile) writeIndexSection() error {
 	// Get current file offset (start of index section)
@@ -406,12 +464,21 @@ func (bsf *BlockStorageFile) writeIndexSection() error {
 	stats.UniqueNamespaces = int32(len(uniqueNamespaces))
 	stats.UniqueGroups = int32(len(uniqueGroups))
 
+	// Extract final resource states for consistent view across hour boundaries
+	finalResourceStates, err := bsf.extractFinalResourceStates()
+	if err != nil {
+		bsf.logger.Warn("Failed to extract final resource states: %v", err)
+		// Continue without state snapshots - not fatal
+		finalResourceStates = make(map[string]*ResourceLastState)
+	}
+
 	// Create index section
 	indexSection := &IndexSection{
-		FormatVersion:   DefaultFormatVersion,
-		BlockMetadata:   bsf.blockMetadataList,
-		InvertedIndexes: bsf.index,
-		Statistics:      stats,
+		FormatVersion:       DefaultFormatVersion,
+		BlockMetadata:       bsf.blockMetadataList,
+		InvertedIndexes:     bsf.index,
+		Statistics:          stats,
+		FinalResourceStates: finalResourceStates,
 	}
 
 	// Write index section

@@ -423,12 +423,12 @@ func TestExtractHourFromFilename(t *testing.T) {
 	}{
 		{
 			filename: filepath.Join(tempDir, "2024-12-01-10.bin"),
-			expected: time.Date(2024, 12, 1, 10, 0, 0, 0, time.UTC).Unix(),
+			expected: time.Date(2024, 12, 1, 10, 0, 0, 0, time.Local).Unix(),
 			wantErr:  false,
 		},
 		{
 			filename: filepath.Join(tempDir, "2024-01-15-23.bin"),
-			expected: time.Date(2024, 1, 15, 23, 0, 0, 0, time.UTC).Unix(),
+			expected: time.Date(2024, 1, 15, 23, 0, 0, 0, time.Local).Unix(),
 			wantErr:  false,
 		},
 		{

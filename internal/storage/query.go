@@ -68,13 +68,71 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 		logging.Field("filters", fmt.Sprintf("%v", query.Filters)))
 
 	// Find all storage files that overlap with the time range
-	files, err := qe.storage.getStorageFiles()
+	allFiles, err := qe.storage.getStorageFiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get storage files: %w", err)
 	}
 
-	qe.logger.Debug("Found %d storage files to search", len(files))
-	for _, f := range files {
+	// Filter files: include those that overlap with query range, plus one file before for state snapshots
+	var filesToQuery []string
+	var mostRecentFileBeforeQuery string
+	var mostRecentFileBeforeHour int64
+	startTimeNs := query.StartTimestamp * 1e9
+	endTimeNs := query.EndTimestamp * 1e9
+
+	for _, filePath := range allFiles {
+		fileHour, err := qe.storage.extractHourFromFilename(filePath)
+		if err != nil {
+			qe.logger.Debug("Could not extract hour from file %s: %v", filePath, err)
+			continue
+		}
+
+		fileHourNs := fileHour * 1e9
+		fileEndNs := fileHourNs + (3600 * 1e9) // Files are 1 hour long
+
+		// Check if file hour overlaps with query time range
+		fileHourOverlaps := fileEndNs > startTimeNs && fileHourNs < endTimeNs
+
+		if fileHourOverlaps {
+			// File hour overlaps, include it
+			filesToQuery = append(filesToQuery, filePath)
+		} else {
+			// File hour doesn't overlap, but check file metadata to see if events overlap
+			// This handles cases where events with old timestamps are stored in current hour's file
+			reader, err := NewBlockReader(filePath)
+			if err == nil {
+				fileData, err := reader.ReadFile()
+				reader.Close()
+				if err == nil && fileData.IndexSection != nil && fileData.IndexSection.Statistics != nil {
+					stats := fileData.IndexSection.Statistics
+					// Check if file's event timestamps overlap with query range
+					if stats.TimestampMax >= startTimeNs && stats.TimestampMin <= endTimeNs {
+						qe.logger.Debug("File %s hour doesn't overlap but events do (min=%d, max=%d), including it",
+							filePath, stats.TimestampMin, stats.TimestampMax)
+						filesToQuery = append(filesToQuery, filePath)
+						continue
+					}
+				}
+			}
+
+			// Track the most recent file before query start (for state snapshots)
+			if fileEndNs <= startTimeNs {
+				if fileHour > mostRecentFileBeforeHour {
+					mostRecentFileBeforeQuery = filePath
+					mostRecentFileBeforeHour = fileHour
+				}
+			}
+		}
+	}
+
+	// Add the most recent file before query start to get state snapshots (only one file)
+	if mostRecentFileBeforeQuery != "" {
+		qe.logger.Debug("Including one file before query for state snapshots: %s", mostRecentFileBeforeQuery)
+		filesToQuery = append(filesToQuery, mostRecentFileBeforeQuery)
+	}
+
+	qe.logger.Debug("Will query %d files (found %d total files)", len(filesToQuery), len(allFiles))
+	for _, f := range filesToQuery {
 		qe.logger.Debug("  - %s", f)
 	}
 
@@ -83,8 +141,8 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 	totalSegmentsScanned := int32(0)
 	totalSegmentsSkipped := int32(0)
 
-	// Query each file
-	for _, filePath := range files {
+	// Query each filtered file
+	for _, filePath := range filesToQuery {
 		qe.logger.Debug("Querying file: %s", filePath)
 		events, segmentsScanned, segmentsSkipped, err := qe.queryFile(filePath, query)
 		if err != nil {
@@ -114,10 +172,33 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 	}
 
 	// Filter events by time range (in case of boundary issues)
-	// Events use nanoseconds, but FilterByTimeRange expects nanoseconds, so convert query to nanoseconds
-	startTimeNs := query.StartTimestamp * 1e9
-	endTimeNs := query.EndTimestamp * 1e9
-	allEvents = qe.filterEngine.FilterByTimeRange(allEvents, startTimeNs, endTimeNs)
+	// Note: startTimeNs and endTimeNs were already defined above for file filtering
+
+	// Separate state snapshot events from regular events for special filtering
+	var stateSnapshots []models.Event
+	var regularEvents []models.Event
+	for _, event := range allEvents {
+		if strings.HasPrefix(event.ID, "state-") {
+			stateSnapshots = append(stateSnapshots, event)
+		} else {
+			regularEvents = append(regularEvents, event)
+		}
+	}
+
+	// Regular events must be within query time range
+	regularEvents = qe.filterEngine.FilterByTimeRange(regularEvents, startTimeNs, endTimeNs)
+
+	// State snapshots are included as long as they're at or before query end time
+	// They represent resources that may have pre-existed before the query window
+	var filteredSnapshots []models.Event
+	for _, event := range stateSnapshots {
+		if event.Timestamp <= endTimeNs {
+			filteredSnapshots = append(filteredSnapshots, event)
+		}
+	}
+
+	// Combine both sets
+	allEvents = append(regularEvents, filteredSnapshots...)
 
 	// Sort events by timestamp
 	sort.Slice(allEvents, func(i, j int) bool {
@@ -139,11 +220,11 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 		logging.Field("events_found", result.Count),
 		logging.Field("execution_time_ms", result.ExecutionTimeMs),
 		logging.Field("files_searched", filesSearched),
-		logging.Field("total_files", len(files)),
+		logging.Field("total_files", len(allFiles)),
 		logging.Field("segments_scanned", totalSegmentsScanned),
 		logging.Field("segments_skipped", totalSegmentsSkipped))
 
-	if result.Count == 0 && len(files) > 0 {
+	if result.Count == 0 && len(allFiles) > 0 {
 		qe.logger.Info("No events found. Check debug logs for details on why segments/events were filtered out.")
 	}
 
@@ -193,6 +274,9 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 	startTimeNs := query.StartTimestamp * 1e9
 	endTimeNs := query.EndTimestamp * 1e9
 
+	// Track which resources have events in the query results
+	resourcesWithEvents := make(map[string]bool)
+
 	// Iterate through blocks
 	for _, blockMeta := range fileData.IndexSection.BlockMetadata {
 		// Check if block overlaps with query time range
@@ -238,6 +322,11 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 		// Filter events by time range and resource filters
 		var blockEvents []models.Event
 		for _, event := range events {
+			// Track all resources seen in this block (even those outside time range)
+			// This prevents creating state snapshots for resources we already have events from
+			resourceKey := qe.getResourceKey(event.Resource)
+			resourcesWithEvents[resourceKey] = true
+
 			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
 				continue
 			}
@@ -251,6 +340,16 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 
 		qe.logger.Debug("File %s: block %d loaded %d events (after filtering)", filePath, blockMeta.ID, len(blockEvents))
 		results = append(results, blockEvents...)
+	}
+
+	// Add state snapshots for resources that don't have events in the query range
+	// but exist in the final resource states
+	qe.logger.Debug("File %s: checking state snapshots - has %d final resource states", filePath, len(fileData.IndexSection.FinalResourceStates))
+	if len(fileData.IndexSection.FinalResourceStates) > 0 {
+		qe.logger.Debug("File %s: creating state snapshot events from %d final states", filePath, len(fileData.IndexSection.FinalResourceStates))
+		stateEvents := qe.getStateSnapshotEvents(fileData.IndexSection.FinalResourceStates, query, resourcesWithEvents)
+		qe.logger.Debug("File %s: added %d state snapshot events", filePath, len(stateEvents))
+		results = append(results, stateEvents...)
 	}
 
 	return results, segmentsScanned, segmentsSkipped, nil
@@ -408,4 +507,81 @@ func isIncompleteFileError(err error) bool {
 		strings.Contains(errStr, "incomplete") ||
 		strings.Contains(errStr, "footer not found") ||
 		(strings.Contains(errStr, "invalid argument") && strings.Contains(errStr, "seek"))
+}
+
+// getResourceKey creates a unique key for a resource: group/version/kind/namespace/name
+func (qe *QueryExecutor) getResourceKey(resource models.ResourceMetadata) string {
+	return fmt.Sprintf("%s/%s/%s/%s/%s",
+		resource.Group,
+		resource.Version,
+		resource.Kind,
+		resource.Namespace,
+		resource.Name,
+	)
+}
+
+// getStateSnapshotEvents converts final resource states to synthetic events
+// for resources that don't have actual events in the query range
+func (qe *QueryExecutor) getStateSnapshotEvents(finalStates map[string]*ResourceLastState,
+	query *models.QueryRequest, resourcesWithEvents map[string]bool) []models.Event {
+
+	var stateEvents []models.Event
+
+	for resourceKey, state := range finalStates {
+		// Skip if this resource already has events in the query results
+		if resourcesWithEvents[resourceKey] {
+			continue
+		}
+
+		// Skip deleted resources - they shouldn't appear in the consistent view
+		if state.EventType == "DELETE" {
+			continue
+		}
+
+		// Create synthetic event from state snapshot
+		// Use a special marker timestamp (the state timestamp, but ensure it's within query range)
+		eventTimestamp := state.Timestamp
+
+		// Only include if timestamp is at or before query end time
+		// This ensures we show consistent view of resources that existed at query time
+		queryEndNs := query.EndTimestamp * 1e9
+		if eventTimestamp > queryEndNs {
+			// State happened after query range - skip it
+			continue
+		}
+
+		// Parse the resource key back to metadata
+		parts := strings.Split(resourceKey, "/")
+		if len(parts) != 5 {
+			qe.logger.Warn("Invalid resource key format: %s", resourceKey)
+			continue
+		}
+
+		resource := models.ResourceMetadata{
+			Group:     parts[0],
+			Version:   parts[1],
+			Kind:      parts[2],
+			Namespace: parts[3],
+			Name:      parts[4],
+			UID:       state.UID,
+		}
+
+		// Check if resource matches filters
+		if !resource.Matches(query.Filters) {
+			continue
+		}
+
+		// Create synthetic event from state
+		event := models.Event{
+			ID:        fmt.Sprintf("state-%s-%d", resourceKey, state.Timestamp),
+			Timestamp: eventTimestamp,
+			Type:      models.EventType(state.EventType),
+			Resource:  resource,
+			Data:      state.ResourceData,
+		}
+
+		stateEvents = append(stateEvents, event)
+	}
+
+	return stateEvents
 }

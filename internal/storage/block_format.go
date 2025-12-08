@@ -308,6 +308,23 @@ type IndexStatistics struct {
 	TimestampMax           int64   `json:"timestamp_max"`
 }
 
+// ResourceLastState represents the final state of a resource at file close time
+// Used for consistent view of resources that haven't changed recently
+type ResourceLastState struct {
+	// UID is the unique identifier of the resource
+	UID string `json:"uid"`
+
+	// EventType indicates if resource exists (CREATE/UPDATE) or was deleted (DELETE)
+	EventType string `json:"event_type"`
+
+	// Timestamp is when this state was last observed
+	Timestamp int64 `json:"timestamp"`
+
+	// ResourceData is the full Kubernetes resource object at this state
+	// Null for DELETE events
+	ResourceData json.RawMessage `json:"resource_data,omitempty"`
+}
+
 // IndexSection is a collection of metadata and indexes written to end of file for fast access
 type IndexSection struct {
 	// FormatVersion matches FileHeader.FormatVersion
@@ -321,6 +338,11 @@ type IndexSection struct {
 
 	// Statistics contains file-level stats
 	Statistics *IndexStatistics `json:"statistics"`
+
+	// FinalResourceStates maps resource identifiers to their final state
+	// Key format: group/version/kind/namespace/name
+	// This enables consistent view of resources across hour boundaries
+	FinalResourceStates map[string]*ResourceLastState `json:"final_resource_states,omitempty"`
 }
 
 // WriteIndexSection serializes IndexSection to a writer using JSON encoding
