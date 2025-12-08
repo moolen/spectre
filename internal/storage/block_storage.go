@@ -109,7 +109,7 @@ func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTi
 		blockMetadataList:   blockMetadataList,
 		index:               invertedIndex,
 		startOffset:         int64(FileHeaderSize),
-		encodingFormat:      "json",
+		encodingFormat:      "protobuf",
 		finalResourceStates: finalResourceStates,
 		totalEvents:         totalEvents,
 		totalUncompressed:   totalUncompressed,
@@ -184,7 +184,7 @@ func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64)
 		blockMetadataList:   make([]*BlockMetadata, 0),
 		index:               &InvertedIndex{},
 		startOffset:         0,
-		encodingFormat:      "json",
+		encodingFormat:      "protobuf",
 		finalResourceStates: make(map[string]*ResourceLastState),
 	}
 
@@ -240,7 +240,7 @@ func (bsf *BlockStorageFile) finalizeBlock() error {
 	}
 
 	// Create block from buffer
-	block, err := bsf.currentBuffer.Finalize(bsf.blockID, "gzip", bsf.encodingFormat)
+	block, err := bsf.currentBuffer.Finalize(bsf.blockID, "gzip")
 	if err != nil {
 		return fmt.Errorf("failed to finalize block: %w", err)
 	}

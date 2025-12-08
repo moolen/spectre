@@ -29,8 +29,8 @@ func TestNewFileHeader(t *testing.T) {
 		t.Errorf("expected block size %d, got %d", DefaultBlockSize, header.BlockSize)
 	}
 
-	if header.EncodingFormat != "json" {
-		t.Errorf("expected encoding format json, got %s", header.EncodingFormat)
+	if header.EncodingFormat != "protobuf" {
+		t.Errorf("expected encoding format protobuf, got %s", header.EncodingFormat)
 	}
 
 	if header.ChecksumEnabled {
@@ -45,7 +45,7 @@ func TestWriteReadFileHeader(t *testing.T) {
 		CreatedAt:            time.Now().UnixNano(),
 		CompressionAlgorithm: "gzip",
 		BlockSize:            256 * 1024,
-		EncodingFormat:       "json",
+		EncodingFormat:       "protobuf",
 		ChecksumEnabled:      true,
 		Reserved:             [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 	}

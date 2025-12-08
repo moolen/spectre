@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef, startTransition } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Timeline } from '../components/Timeline';
@@ -25,9 +25,30 @@ function TimelinePage() {
   const [timeRange, setTimeRange] = useState<TimeRange | null>(null);
   const [rawTimeExpressions, setRawTimeExpressions] = useState<{ start?: string; end?: string }>({});
   const originalUrlParamsRef = useRef<{ start?: string; end?: string } | null>(null);
+  const isUpdatingFromZoom = useRef(false);
 
-  // Parse time range from URL only once on mount
+  // Create a display time range that reads from URL for FilterBar
+  // This allows FilterBar to update without triggering Timeline re-renders
+  const displayTimeRange = useMemo(() => {
+    const startParam = searchParams.get('start');
+    const endParam = searchParams.get('end');
+    if (!startParam || !endParam) return timeRange;
+
+    const start = new Date(startParam);
+    const end = new Date(endParam);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return timeRange;
+
+    return { start, end };
+  }, [searchParams, timeRange]);
+
+  // Parse time range from URL
   useEffect(() => {
+    // Skip processing if this update came from a zoom action (to prevent render loops)
+    if (isUpdatingFromZoom.current) {
+      isUpdatingFromZoom.current = false;
+      return;
+    }
+
     const startParam = searchParams.get('start');
     const endParam = searchParams.get('end');
 
@@ -80,7 +101,7 @@ function TimelinePage() {
       start: parsedStart !== null ? startParam : undefined,
       end: parsedEnd !== null ? endParam : undefined,
     });
-  }, []); // Only run once on mount, ignore searchParams changes
+  }, [searchParams]); // Re-run when URL params change
 
   // Update URL when time range changes (from time picker)
   const handleTimeRangeChange = (range: TimeRange, rawStart?: string, rawEnd?: string) => {
@@ -101,12 +122,53 @@ function TimelinePage() {
   };
 
   // Handle visible range changes from zoom/pan
-  // Don't update URL - preserve the original format (human-friendly or ISO)
-  // The URL should only change when user explicitly uses the date picker
+  // Update URL with the new visible range (as ISO timestamps)
   const handleVisibleTimeRangeChange = (range: TimeRange) => {
-    // Do nothing - preserve the original URL parameters
-    // This prevents the URL from being overwritten with ISO dates when the timeline
-    // adjusts its visible range or initializes
+    // Check if this is a real zoom change or just a precision noise update
+    // If current timeRange exists, compare the received range with what we'd expect
+    // (current range + 2% padding on each side)
+    if (timeRange) {
+      const currentDuration = timeRange.end.getTime() - timeRange.start.getTime();
+      const expectedPadding = currentDuration * 0.02;
+      const expectedDomain = {
+        start: new Date(timeRange.start.getTime() - expectedPadding),
+        end: new Date(timeRange.end.getTime() + expectedPadding)
+      };
+
+      // Allow 2 second tolerance for floating-point precision
+      const startDiff = Math.abs(range.start.getTime() - expectedDomain.start.getTime());
+      const endDiff = Math.abs(range.end.getTime() - expectedDomain.end.getTime());
+      const tolerance = 2000; // 2 seconds
+
+      if (startDiff < tolerance && endDiff < tolerance) {
+        return; // Don't update - this is just precision noise
+      }
+    }
+
+    // The range received from Timeline INCLUDES the 2% padding that Timeline adds to timeDomain.
+    // We need to remove this padding before updating the state/URL, otherwise when Timeline
+    // recalculates timeDomain it will add another 2% padding on top, causing the zoom-out loop.
+    const duration = range.end.getTime() - range.start.getTime();
+    const paddingMs = duration * 0.02; // Timeline adds 2% padding
+    const unpaddedRange = {
+      start: new Date(range.start.getTime() + paddingMs),
+      end: new Date(range.end.getTime() - paddingMs)
+    };
+
+    // Set flag to prevent the URL effect from processing this change
+    isUpdatingFromZoom.current = true;
+
+    // Update URL immediately (for browser history and sharing)
+    setSearchParams({
+      start: unpaddedRange.start.toISOString(),
+      end: unpaddedRange.end.toISOString()
+    });
+
+    // DON'T update timeRange state - this would trigger Timeline re-render and cause flash
+    // The URL is the source of truth, and FilterBar will display it via displayTimeRange
+
+    // Clear raw expressions so FilterBar displays the ISO timestamps from URL
+    setRawTimeExpressions({});
   };
 
   // Handle zoom detection - clear the persisted preset when user zooms/pans
@@ -263,7 +325,7 @@ function TimelinePage() {
       <FilterBar
         filters={filters}
         setFilters={setFilters}
-        timeRange={timeRange}
+        timeRange={displayTimeRange}
         onTimeRangeChange={handleTimeRangeChange}
         availableNamespaces={availableNamespaces}
         availableKinds={availableKinds}

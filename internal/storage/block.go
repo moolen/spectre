@@ -211,25 +211,14 @@ func (eb *EventBuffer) GetEvents() ([]*models.Event, error) {
 }
 
 // Finalize creates a Block from the buffered events and compresses it
-// encodingFormat should be "json" or "protobuf"
-func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string, encodingFormat string) (*Block, error) {
+// Events are encoded using protobuf format
+func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string) (*Block, error) {
 	if len(eb.events) == 0 {
 		return nil, fmt.Errorf("cannot finalize empty event buffer")
 	}
 
-	// Encode events based on format
-	var uncompressedData []byte
-	var err error
-
-	switch encodingFormat {
-	case "protobuf":
-		uncompressedData, err = eb.encodeProtobuf()
-	case "json":
-		uncompressedData, err = eb.encodeJSON()
-	default:
-		return nil, fmt.Errorf("unknown encoding format: %s", encodingFormat)
-	}
-
+	// Encode events using protobuf format
+	uncompressedData, err := eb.encodeProtobuf()
 	if err != nil {
 		return nil, err
 	}
@@ -289,18 +278,6 @@ func (eb *EventBuffer) encodeProtobuf() ([]byte, error) {
 		if _, err := buf.Write(pbData); err != nil {
 			return nil, err
 		}
-	}
-
-	return buf.Bytes(), nil
-}
-
-// encodeJSON encodes events as newline-delimited JSON (current format)
-func (eb *EventBuffer) encodeJSON() ([]byte, error) {
-	var buf bytes.Buffer
-
-	for _, eventJSON := range eb.events {
-		buf.Write(eventJSON)
-		buf.WriteByte('\n')
 	}
 
 	return buf.Bytes(), nil

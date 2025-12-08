@@ -5,11 +5,38 @@ on:
     branches: [ master ]
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
+  generate-version:
+    runs-on: ubuntu-latest
+    name: Generate Semantic Version
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      new_version: ${{ steps.tag_version.outputs.new_version }}
+      changelog: ${{ steps.tag_version.outputs.changelog }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          default_prerelease_bump: prerelease
+          release_branches: master
+          pre_release_branches: develop
+          initial_version: 0.1.0
+          tag_prefix: v
+
   build-and-push-image:
+    needs: generate-version
     runs-on: ubuntu-latest
     name: Build & Push Container Image
 
@@ -33,10 +60,11 @@ jobs:
         with:
           images: ghcr.io/moolen/spectre
           tags: |
+            type=raw,value=${{ needs.generate-version.outputs.new_tag }}
+            type=raw,value=${{ needs.generate-version.outputs.new_version }}
+            type=raw,value=latest
             type=ref,event=branch
             type=sha,prefix={{branch}}-
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -45,11 +73,15 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.generate-version.outputs.new_version }}
 
   build-and-push-helm-chart:
     runs-on: ubuntu-latest
     name: Build & Push Helm Chart
-    needs: build-and-push-image
+    needs: [generate-version, build-and-push-image]
+    outputs:
+      chart_package: ${{ steps.package.outputs.chart_package }}
 
     steps:
       - name: Checkout code
@@ -60,19 +92,80 @@ jobs:
         with:
           version: 'v3.13.0'
 
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Update Chart version and appVersion
+        run: |
+          VERSION=${{ needs.generate-version.outputs.new_version }}
+          yq eval ".version = \"${VERSION}\"" -i chart/Chart.yaml
+          yq eval ".appVersion = \"${VERSION}\"" -i chart/Chart.yaml
+          yq eval ".image.repository = \"ghcr.io/moolen/spectre\"" -i chart/values.yaml
+          yq eval ".image.tag = \"${VERSION}\"" -i chart/values.yaml
+
       - name: Log in to Container Registry
         run: |
           echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Package Helm chart
+        id: package
         run: |
           helm package ./chart
+          VERSION=${{ needs.generate-version.outputs.new_version }}
+          echo "chart_package=spectre-${VERSION}.tgz" >> $GITHUB_OUTPUT
 
       - name: Push Helm chart to OCI
         run: |
-          CHART_VERSION=$(grep '^version:' chart/Chart.yaml | awk '{print $2}')
-          helm push ./spectre-${CHART_VERSION}.tgz oci://ghcr.io/moolen/charts
+          helm push ${{ steps.package.outputs.chart_package }} oci://ghcr.io/moolen/charts
+
+      - name: Upload chart as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: ${{ steps.package.outputs.chart_package }}
+          retention-days: 5
 
       - name: Log out from Container Registry
         if: always()
         run: helm registry logout ghcr.io
+
+  create-github-release:
+    runs-on: ubuntu-latest
+    name: Create GitHub Release
+    needs: [generate-version, build-and-push-helm-chart]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Helm chart artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: helm-chart
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.generate-version.outputs.new_tag }}
+          name: Release ${{ needs.generate-version.outputs.new_tag }}
+          body: |
+            ## What's Changed
+
+            ${{ needs.generate-version.outputs.changelog }}
+
+            ## Container Images
+
+            ```bash
+            docker pull ghcr.io/moolen/spectre:${{ needs.generate-version.outputs.new_version }}
+            ```
+
+            ## Helm Chart
+
+            ```bash
+            helm install spectre oci://ghcr.io/moolen/charts/spectre --version ${{ needs.generate-version.outputs.new_version }}
+            ```
+          artifacts: ${{ needs.build-and-push-helm-chart.outputs.chart_package }}
+          generateReleaseNotes: true
+          makeLatest: true

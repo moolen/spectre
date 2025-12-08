@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
-	"github.com/moolen/spectre/internal/models"
 	"github.com/moolen/spectre/internal/storage"
 )
 
@@ -21,11 +21,6 @@ const (
 	// MaxPayloadSize is the maximum allowed request body size (30 MB)
 	MaxPayloadSize = 30 * 1024 * 1024
 )
-
-// BatchEventImportRequest represents a JSON request to import a batch of events
-type BatchEventImportRequest struct {
-	Events []*models.Event `json:"events"`
-}
 
 // ImportHandler handles storage import requests
 type ImportHandler struct {
@@ -61,14 +56,15 @@ func (h *ImportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// empty content-type for backwards compat
 	if contentType == "" || strings.HasPrefix(contentType, ContentTypeEventsBinary) {
 		h.handleArchiveImport(w, r, opts)
+		return
 	}
 	if strings.HasPrefix(contentType, ContentTypeEventsJSON) {
 		h.handleJSONEventImport(w, r, opts)
-	} else {
-		h.logger.Error("Unsupported Content-Type: %s", contentType)
-		writeError(w, http.StatusBadRequest, "UNSUPPORTED_CONTENT_TYPE", fmt.Sprintf("Content-Type %s not supported", contentType))
 		return
 	}
+
+	h.logger.Error("Unsupported Content-Type: %s", contentType)
+	writeError(w, http.StatusBadRequest, "UNSUPPORTED_CONTENT_TYPE", fmt.Sprintf("Content-Type %s not supported", contentType))
 }
 
 // handleJSONEventImport processes a JSON batch event import request
@@ -111,30 +107,19 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Parse JSON request
-	var req BatchEventImportRequest
-	decoder := json.NewDecoder(decompressedBody)
-	if err := decoder.Decode(&req); err != nil {
+	// Parse JSON request using shared utility
+	events, err := importexport.ParseJSONEvents(decompressedBody)
+	if err != nil {
 		h.logger.Error("Failed to parse JSON: %v", err)
-		if err == io.EOF {
-			writeError(w, http.StatusBadRequest, "INVALID_JSON", "Empty request body")
-		} else {
-			writeError(w, http.StatusBadRequest, "INVALID_JSON", fmt.Sprintf("Failed to parse JSON: %v", err))
-		}
-		return
-	}
-
-	if len(req.Events) == 0 {
-		h.logger.Warn("Empty events array in import request")
-		writeError(w, http.StatusBadRequest, "NO_EVENTS", "Events array is empty")
+		writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
 		return
 	}
 
 	h.logger.InfoWithFields("Parsed JSON import request",
-		logging.Field("event_count", len(req.Events)))
+		logging.Field("event_count", len(events)))
 
 	// Call storage engine to ingest events
-	report, err := h.storage.AddEventsBatch(req.Events, opts)
+	report, err := h.storage.AddEventsBatch(events, opts)
 	if err != nil {
 		h.logger.Error("Event batch ingestion failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "INGEST_FAILED", err.Error())

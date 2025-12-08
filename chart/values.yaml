@@ -107,3 +107,24 @@ serviceAccount:
 # Override names
 nameOverride: ""
 fullnameOverride: ""
+
+# Extra configuration for advanced use cases
+# extraArgs can be used to add additional command-line arguments
+# Example: ["--import=/import-data"]
+extraArgs: []
+
+# extraVolumes can be used to mount additional volumes (e.g., ConfigMaps, Secrets)
+# Example:
+# extraVolumes:
+#   - name: import-data
+#     configMap:
+#       name: import-events
+extraVolumes: []
+
+# extraVolumeMounts can be used to mount the extra volumes defined above
+# Example:
+# extraVolumeMounts:
+#   - name: import-data
+#     mountPath: /import-data
+#     readOnly: true
+extraVolumeMounts: []

@@ -11,6 +11,7 @@ import (
 
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/config"
+	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
@@ -32,6 +33,7 @@ func main() {
 	maxConcurrentRequests := flag.Int("max-concurrent-requests", 100, "Maximum number of concurrent API requests")
 	cacheMaxMB := flag.Int64("cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
 	cacheEnabled := flag.Bool("cache-enabled", true, "Enable block cache (default: true)")
+	importDir := flag.String("import", "", "Import JSON event files from directory before starting server")
 
 	flag.Parse()
 
@@ -91,6 +93,33 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Info("Storage component created")
+
+		// Handle import if --import flag is provided
+		if *importDir != "" {
+			logger.Info("Starting import from directory: %s", *importDir)
+			fmt.Printf("Importing events from: %s\n", *importDir)
+
+			importOpts := storage.ImportOptions{
+				ValidateFiles:     true,
+				OverwriteExisting: true,
+			}
+
+			filesProcessed := 0
+			progressCallback := func(filename string, eventCount int) {
+				filesProcessed++
+				fmt.Printf("  [%d] Loaded %d events from %s\n", filesProcessed, eventCount, filename)
+			}
+
+			report, err := importexport.WalkAndImportJSON(*importDir, storageComponent, importOpts, progressCallback)
+			if err != nil {
+				logger.Error("Import failed: %v", err)
+				fmt.Fprintf(os.Stderr, "Import error: %v\n", err)
+				os.Exit(1)
+			}
+
+			fmt.Println("\n" + importexport.FormatImportReport(report))
+			logger.Info("Import completed successfully")
+		}
 
 		watcherComponent, err = watcher.New(watcher.NewEventCaptureHandler(storageComponent), cfg.WatcherConfigPath)
 		if err != nil {
