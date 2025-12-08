@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 // DeploymentBuilder helps construct Kubernetes Deployment objects.
@@ -72,6 +73,7 @@ func (b *DeploymentBuilder) Build() *appsv1.Deployment {
 					Labels: b.labels,
 				},
 				Spec: corev1.PodSpec{
+					TerminationGracePeriodSeconds: ptr.To(int64(0)),
 					Containers: []corev1.Container{
 						{
 							Name:  b.name,

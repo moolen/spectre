@@ -131,49 +131,59 @@ func (s *Storage) Export(w io.Writer, opts ExportOptions) error {
 	startTime := time.Now()
 	s.logger.Info("Starting storage export")
 
-	// Acquire read lock to enumerate files
-	s.fileMutex.RLock()
-
-	// If IncludeOpenHour is true, we need to close the current file
-	if opts.IncludeOpenHour && s.currentFile != nil {
-		s.fileMutex.RUnlock()
+	// Acquire write lock if we need to close the current file
+	// This prevents concurrent writes from reopening files during export
+	var closedCurrentFile bool
+	if opts.IncludeOpenHour {
 		s.fileMutex.Lock()
-		if err := s.currentFile.Close(); err != nil {
-			s.logger.Warn("Failed to close current file for export: %v", err)
+		if s.currentFile != nil {
+			if err := s.currentFile.Close(); err != nil {
+				s.logger.Warn("Failed to close current file for export: %v", err)
+			}
+			s.currentFile = nil
+			closedCurrentFile = true
+
+			// CRITICAL FIX: Extend endTime to include the hour we just closed
+			// The current file represents the current hour, so we need to extend
+			// the endTime to encompass the entire hour that was just closed
+			now := time.Now()
+			currentHourStart := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location()).Unix()
+			currentHourEnd := currentHourStart + 3600
+			if opts.EndTime < currentHourEnd {
+				opts.EndTime = currentHourEnd
+				s.logger.DebugWithFields("Extended export time range to include open hour",
+					logging.Field("new_end_time", opts.EndTime),
+					logging.Field("current_hour_end", currentHourEnd))
+			}
 		}
-		s.currentFile = nil
+		// Downgrade to read lock for file enumeration
+		// Keep read lock held to prevent file reopening during export
 		s.fileMutex.Unlock()
 		s.fileMutex.RLock()
-
-		// CRITICAL FIX: Extend endTime to include the hour we just closed
-		// The current file represents the current hour, so we need to extend
-		// the endTime to encompass the entire hour that was just closed
-		now := time.Now()
-		currentHourStart := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location()).Unix()
-		currentHourEnd := currentHourStart + 3600
-		if opts.EndTime < currentHourEnd {
-			opts.EndTime = currentHourEnd
-			s.logger.DebugWithFields("Extended export time range to include open hour",
-				logging.Field("new_end_time", opts.EndTime),
-				logging.Field("current_hour_end", currentHourEnd))
-		}
+		defer s.fileMutex.RUnlock()
+	} else {
+		// Just acquire read lock for file enumeration
+		s.fileMutex.RLock()
+		defer s.fileMutex.RUnlock()
 	}
 
 	// Get all storage files
 	allFiles, err := s.getStorageFiles()
 	if err != nil {
-		s.fileMutex.RUnlock()
 		return fmt.Errorf("failed to list storage files: %w", err)
 	}
 
 	// Filter files by time range
 	selectedFiles := s.filterFilesByTimeRange(allFiles, opts.StartTime, opts.EndTime)
-	s.fileMutex.RUnlock()
 
 	if len(selectedFiles) == 0 {
 		s.logger.Warn("No files match the export criteria")
 		return fmt.Errorf("no files to export")
 	}
+
+	s.logger.DebugWithFields("Exporting files",
+		logging.Field("count", len(selectedFiles)),
+		logging.Field("closed_current", closedCurrentFile))
 
 	// Create the archive writer
 	var archiveWriter io.Writer = w
