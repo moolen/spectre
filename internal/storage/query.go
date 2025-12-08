@@ -90,14 +90,37 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 		fileHourNs := fileHour * 1e9
 		fileEndNs := fileHourNs + (3600 * 1e9) // Files are 1 hour long
 
-		// Include files that overlap with query time range
-		if fileEndNs > startTimeNs && fileHourNs < endTimeNs {
+		// Check if file hour overlaps with query time range
+		fileHourOverlaps := fileEndNs > startTimeNs && fileHourNs < endTimeNs
+
+		if fileHourOverlaps {
+			// File hour overlaps, include it
 			filesToQuery = append(filesToQuery, filePath)
-		} else if fileEndNs <= startTimeNs {
+		} else {
+			// File hour doesn't overlap, but check file metadata to see if events overlap
+			// This handles cases where events with old timestamps are stored in current hour's file
+			reader, err := NewBlockReader(filePath)
+			if err == nil {
+				fileData, err := reader.ReadFile()
+				reader.Close()
+				if err == nil && fileData.IndexSection != nil && fileData.IndexSection.Statistics != nil {
+					stats := fileData.IndexSection.Statistics
+					// Check if file's event timestamps overlap with query range
+					if stats.TimestampMax >= startTimeNs && stats.TimestampMin <= endTimeNs {
+						qe.logger.Debug("File %s hour doesn't overlap but events do (min=%d, max=%d), including it",
+							filePath, stats.TimestampMin, stats.TimestampMax)
+						filesToQuery = append(filesToQuery, filePath)
+						continue
+					}
+				}
+			}
+
 			// Track the most recent file before query start (for state snapshots)
-			if fileHour > mostRecentFileBeforeHour {
-				mostRecentFileBeforeQuery = filePath
-				mostRecentFileBeforeHour = fileHour
+			if fileEndNs <= startTimeNs {
+				if fileHour > mostRecentFileBeforeHour {
+					mostRecentFileBeforeQuery = filePath
+					mostRecentFileBeforeHour = fileHour
+				}
 			}
 		}
 	}

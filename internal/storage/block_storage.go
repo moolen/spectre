@@ -109,7 +109,7 @@ func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTi
 		blockMetadataList:   blockMetadataList,
 		index:               invertedIndex,
 		startOffset:         int64(FileHeaderSize),
-		encodingFormat:      "protobuf",
+		encodingFormat:      "json",
 		finalResourceStates: finalResourceStates,
 		totalEvents:         totalEvents,
 		totalUncompressed:   totalUncompressed,
@@ -184,7 +184,7 @@ func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64)
 		blockMetadataList:   make([]*BlockMetadata, 0),
 		index:               &InvertedIndex{},
 		startOffset:         0,
-		encodingFormat:      "protobuf",
+		encodingFormat:      "json",
 		finalResourceStates: make(map[string]*ResourceLastState),
 	}
 
