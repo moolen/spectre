@@ -1,0 +1,149 @@
+suite: test ingress
+templates:
+  - ingress.yaml
+tests:
+  - it: should not create Ingress when disabled
+    set:
+      ingress:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should create Ingress when enabled
+    set:
+      ingress:
+        enabled: true
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spectre
+      - equal:
+          path: metadata.namespace
+          value: monitoring
+
+  - it: should have correct labels
+    set:
+      ingress:
+        enabled: true
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should add annotations
+    set:
+      ingress:
+        enabled: true
+        annotations:
+          kubernetes.io/ingress.class: nginx
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+    asserts:
+      - equal:
+          path: metadata.annotations["kubernetes.io/ingress.class"]
+          value: nginx
+      - equal:
+          path: metadata.annotations["cert-manager.io/cluster-issuer"]
+          value: letsencrypt-prod
+
+  - it: should configure ingress class name
+    set:
+      ingress:
+        enabled: true
+        className: nginx
+    asserts:
+      - equal:
+          path: spec.ingressClassName
+          value: nginx
+
+  - it: should not set ingress class name when empty
+    set:
+      ingress:
+        enabled: true
+        className: ""
+    asserts:
+      - isNull:
+          path: spec.ingressClassName
+
+  - it: should configure single host with path
+    set:
+      ingress:
+        enabled: true
+        hosts:
+          - host: spectre.example.com
+            paths:
+              - path: /
+                pathType: Prefix
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: spectre.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /
+      - equal:
+          path: spec.rules[0].http.paths[0].pathType
+          value: Prefix
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: RELEASE-NAME-spectre
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8080
+
+  - it: should configure multiple hosts
+    set:
+      ingress:
+        enabled: true
+        hosts:
+          - host: spectre1.example.com
+            paths:
+              - path: /
+                pathType: Prefix
+          - host: spectre2.example.com
+            paths:
+              - path: /api
+                pathType: Prefix
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: spectre1.example.com
+      - equal:
+          path: spec.rules[1].host
+          value: spectre2.example.com
+      - equal:
+          path: spec.rules[1].http.paths[0].path
+          value: /api
+
+  - it: should configure TLS
+    set:
+      ingress:
+        enabled: true
+        tls:
+          - secretName: spectre-tls
+            hosts:
+              - spectre.example.com
+              - www.spectre.example.com
+    asserts:
+      - equal:
+          path: spec.tls[0].secretName
+          value: spectre-tls
+      - contains:
+          path: spec.tls[0].hosts
+          content: spectre.example.com
+      - contains:
+          path: spec.tls[0].hosts
+          content: www.spectre.example.com
+
+  - it: should not configure TLS when not specified
+    set:
+      ingress:
+        enabled: true
+        tls: []
+    asserts:
+      - isNull:
+          path: spec.tls

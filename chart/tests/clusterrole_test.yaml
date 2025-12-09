@@ -1,0 +1,84 @@
+suite: test clusterrole
+templates:
+  - clusterrole.yaml
+tests:
+  - it: should create ClusterRole
+    asserts:
+      - isKind:
+          of: ClusterRole
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spectre
+
+  - it: should have correct labels
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should have WATCH permissions for core resources
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources:
+              - pods
+              - services
+              - configmaps
+              - secrets
+              - nodes
+              - namespaces
+              - persistentvolumes
+              - persistentvolumeclaims
+            verbs: ["watch", "list", "get"]
+
+  - it: should have WATCH permissions for apps resources
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: ["apps"]
+            resources:
+              - deployments
+              - statefulsets
+              - daemonsets
+              - replicasets
+            verbs: ["watch", "list", "get"]
+
+  - it: should have permissions for batch resources
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: ["batch"]
+            resources:
+              - jobs
+              - cronjobs
+            verbs: ["watch", "list", "get"]
+
+  - it: should have permissions for networking resources
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: ["networking.k8s.io"]
+            resources:
+              - networkpolicies
+              - ingresses
+            verbs: ["watch", "list", "get"]
+
+  - it: should have permissions for RBAC resources
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: ["rbac.authorization.k8s.io"]
+            resources:
+              - roles
+              - rolebindings
+              - clusterroles
+              - clusterrolebindings
+            verbs: ["watch", "list", "get"]

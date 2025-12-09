@@ -1,0 +1,139 @@
+suite: test servicemonitor
+templates:
+  - servicemonitor.yaml
+tests:
+  - it: should not create ServiceMonitor when disabled
+    set:
+      serviceMonitor:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should create ServiceMonitor when enabled
+    set:
+      serviceMonitor:
+        enabled: true
+    asserts:
+      - isKind:
+          of: ServiceMonitor
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spectre
+
+  - it: should use default namespace
+    set:
+      serviceMonitor:
+        enabled: true
+        namespace: ""
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: monitoring
+
+  - it: should use custom namespace
+    set:
+      serviceMonitor:
+        enabled: true
+        namespace: prometheus
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: prometheus
+
+  - it: should have correct labels
+    set:
+      serviceMonitor:
+        enabled: true
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should add custom labels
+    set:
+      serviceMonitor:
+        enabled: true
+        labels:
+          prometheus: kube-prometheus
+          custom: label
+    asserts:
+      - equal:
+          path: metadata.labels.prometheus
+          value: kube-prometheus
+      - equal:
+          path: metadata.labels.custom
+          value: label
+
+  - it: should configure selector
+    set:
+      serviceMonitor:
+        enabled: true
+    asserts:
+      - isSubset:
+          path: spec.selector.matchLabels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should configure namespace selector
+    set:
+      serviceMonitor:
+        enabled: true
+    asserts:
+      - contains:
+          path: spec.namespaceSelector.matchNames
+          content: monitoring
+
+  - it: should configure endpoint
+    set:
+      serviceMonitor:
+        enabled: true
+        path: /metrics
+        interval: 30s
+        scrapeTimeout: 10s
+    asserts:
+      - equal:
+          path: spec.endpoints[0].port
+          value: http
+      - equal:
+          path: spec.endpoints[0].path
+          value: /metrics
+      - equal:
+          path: spec.endpoints[0].interval
+          value: 30s
+      - equal:
+          path: spec.endpoints[0].scrapeTimeout
+          value: 10s
+
+  - it: should configure relabelings
+    set:
+      serviceMonitor:
+        enabled: true
+        relabelings:
+          - sourceLabels: [__meta_kubernetes_pod_name]
+            targetLabel: pod
+    asserts:
+      - contains:
+          path: spec.endpoints[0].relabelings
+          content:
+            sourceLabels: [__meta_kubernetes_pod_name]
+            targetLabel: pod
+
+  - it: should configure metric relabelings
+    set:
+      serviceMonitor:
+        enabled: true
+        metricRelabelings:
+          - sourceLabels: [__name__]
+            regex: 'go_.*'
+            action: drop
+    asserts:
+      - contains:
+          path: spec.endpoints[0].metricRelabelings
+          content:
+            sourceLabels: [__name__]
+            regex: 'go_.*'
+            action: drop

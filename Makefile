@@ -1,4 +1,4 @@
-.PHONY: help build build-ui build-mcp run test clean docker-build docker-run deploy watch lint fmt vet favicons
+.PHONY: help build build-ui build-mcp run test clean docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install
 
 # Default target
 help:
@@ -18,6 +18,11 @@ help:
 	@echo "  docker-build   - Build Docker image"
 	@echo "  docker-run     - Run application in Docker"
 	@echo "  deploy         - Deploy to Kubernetes via Helm"
+	@echo "  helm-lint      - Lint Helm chart"
+	@echo "  helm-unittest  - Run Helm unit tests"
+	@echo "  helm-unittest-install - Install helm-unittest plugin"
+	@echo "  helm-test      - Run Helm tests (requires active k8s cluster)"
+	@echo "  helm-test-local - Create Kind cluster and run Helm tests locally"
 	@echo "  watch          - Watch and rebuild on file changes (requires entr)"
 	@echo "  favicons       - Generate all favicon versions from favicon.svg"
 
@@ -173,6 +178,85 @@ favicons:
 	@echo "Generating favicons..."
 	@./hack/generate-favicons.sh
 	@echo "Favicons generated successfully"
+
+# Helm chart testing
+helm-lint:
+	@echo "Linting Helm chart..."
+	@helm lint $(CHART_PATH)
+	@echo "Helm lint complete"
+
+helm-template:
+	@echo "Templating Helm chart..."
+	@helm template test-release $(CHART_PATH) --debug
+
+# Install helm-unittest plugin
+helm-unittest-install:
+	@echo "Installing helm-unittest plugin..."
+	@helm plugin list | grep -q unittest || helm plugin install https://github.com/helm-unittest/helm-unittest.git
+	@echo "helm-unittest plugin installed"
+
+# Run helm unit tests
+helm-unittest: helm-unittest-install
+	@echo "Running Helm unit tests..."
+	@helm unittest $(CHART_PATH) --color --output-type JUnit --output-file test-results.xml
+	@echo "Helm unit tests complete!"
+
+helm-test: docker-build
+	@echo "Running Helm tests (requires active Kubernetes cluster)..."
+	@echo "Loading Docker image to cluster..."
+	@kind load docker-image $(DOCKER_IMAGE) --name $(shell kubectl config current-context | sed 's/kind-//') 2>/dev/null || \
+		echo "Note: kind load failed, assuming image is already available in cluster"
+	@echo "Installing chart..."
+	@helm upgrade --install spectre-test $(CHART_PATH) \
+		--namespace $(NAMESPACE) \
+		--create-namespace \
+		--set image.repository=$(IMAGE_NAME) \
+		--set image.tag=$(IMAGE_TAG) \
+		--set image.pullPolicy=IfNotPresent \
+		--wait \
+		--timeout=5m
+	@echo "Waiting for deployment..."
+	@kubectl wait --for=condition=available --timeout=300s \
+		deployment/spectre-test-spectre -n $(NAMESPACE) || \
+		(kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/name=spectre --tail=100 && exit 1)
+	@echo "Running Helm tests..."
+	@helm test spectre-test --namespace $(NAMESPACE) --logs
+	@echo "Helm tests complete!"
+
+helm-test-local: docker-build
+	@echo "Creating local Kind cluster for Helm testing..."
+	@kind create cluster --name helm-test --wait 300s || \
+		(echo "Cluster 'helm-test' already exists, using existing cluster" && exit 0)
+	@echo "Loading Docker image to Kind cluster..."
+	@kind load docker-image $(DOCKER_IMAGE) --name helm-test
+	@echo "Installing chart to Kind cluster..."
+	@helm upgrade --install spectre-test $(CHART_PATH) \
+		--namespace $(NAMESPACE) \
+		--create-namespace \
+		--set image.repository=$(IMAGE_NAME) \
+		--set image.tag=$(IMAGE_TAG) \
+		--set image.pullPolicy=IfNotPresent \
+		--set persistence.size=1Gi \
+		--wait \
+		--timeout=5m
+	@echo "Waiting for deployment to be ready..."
+	@kubectl wait --for=condition=available --timeout=300s \
+		deployment/spectre-test-spectre -n $(NAMESPACE) || \
+		(kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/name=spectre --tail=100 && exit 1)
+	@echo "Running Helm tests..."
+	@helm test spectre-test --namespace $(NAMESPACE) --logs
+	@echo ""
+	@echo "Helm tests complete!"
+	@echo ""
+	@echo "To cleanup, run: kind delete cluster --name helm-test"
+	@echo "To keep cluster and cleanup helm release: helm uninstall spectre-test -n $(NAMESPACE)"
+
+helm-clean:
+	@echo "Cleaning up Helm test resources..."
+	@helm uninstall spectre-test --namespace $(NAMESPACE) 2>/dev/null || true
+	@kubectl delete namespace $(NAMESPACE) 2>/dev/null || true
+	@kind delete cluster --name helm-test 2>/dev/null || true
+	@echo "Cleanup complete"
 
 # Default target
 .DEFAULT_GOAL := help

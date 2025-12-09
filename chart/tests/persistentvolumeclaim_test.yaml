@@ -1,0 +1,127 @@
+suite: test persistentvolumeclaim
+templates:
+  - persistentvolumeclaim.yaml
+tests:
+  - it: should create PVC when persistence is enabled
+    set:
+      persistence:
+        enabled: true
+    asserts:
+      - isKind:
+          of: PersistentVolumeClaim
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spectre
+      - equal:
+          path: metadata.namespace
+          value: monitoring
+
+  - it: should not create PVC when persistence is disabled
+    set:
+      persistence:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create PVC when existingClaim is specified
+    set:
+      persistence:
+        enabled: true
+        existingClaim: my-existing-pvc
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should have correct labels
+    set:
+      persistence:
+        enabled: true
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should add annotations
+    set:
+      persistence:
+        enabled: true
+        annotations:
+          custom-annotation: value
+          another: annotation
+    asserts:
+      - equal:
+          path: metadata.annotations["custom-annotation"]
+          value: value
+      - equal:
+          path: metadata.annotations["another"]
+          value: annotation
+
+  - it: should configure access modes
+    set:
+      persistence:
+        enabled: true
+        accessModes:
+          - ReadWriteOnce
+    asserts:
+      - contains:
+          path: spec.accessModes
+          content: ReadWriteOnce
+
+  - it: should configure multiple access modes
+    set:
+      persistence:
+        enabled: true
+        accessModes:
+          - ReadWriteOnce
+          - ReadWriteMany
+    asserts:
+      - contains:
+          path: spec.accessModes
+          content: ReadWriteOnce
+      - contains:
+          path: spec.accessModes
+          content: ReadWriteMany
+
+  - it: should configure storage size
+    set:
+      persistence:
+        enabled: true
+        size: 20Gi
+    asserts:
+      - equal:
+          path: spec.resources.requests.storage
+          value: 20Gi
+
+  - it: should configure storage class
+    set:
+      persistence:
+        enabled: true
+        storageClassName: fast-ssd
+    asserts:
+      - equal:
+          path: spec.storageClassName
+          value: fast-ssd
+
+  - it: should not set storage class when not specified
+    set:
+      persistence:
+        enabled: true
+        storageClassName: ""
+    asserts:
+      - isNull:
+          path: spec.storageClassName
+
+  - it: should configure selector
+    set:
+      persistence:
+        enabled: true
+        selector:
+          matchLabels:
+            app: spectre
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels.app
+          value: spectre
