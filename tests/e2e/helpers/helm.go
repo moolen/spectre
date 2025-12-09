@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"helm.sh/helm/v3/pkg/action"
@@ -61,6 +62,8 @@ func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values m
 	if releaseExists {
 		hd.t.Logf("Upgrading existing Helm release %s from %s", releaseName, chartPath)
 		upgrade := action.NewUpgrade(hd.Config)
+		upgrade.Wait = true
+		upgrade.Timeout = 90 * time.Second
 		_, err = upgrade.Run(releaseName, chart, values)
 		if err != nil {
 			return fmt.Errorf("failed to upgrade chart: %w", err)
@@ -71,6 +74,8 @@ func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values m
 		install := action.NewInstall(hd.Config)
 		install.ReleaseName = releaseName
 		install.Namespace = hd.Namespace
+		install.Wait = true
+		install.Timeout = 90 * time.Second
 		_, err = install.Run(chart, values)
 		if err != nil {
 			return fmt.Errorf("failed to install chart: %w", err)
@@ -92,7 +97,8 @@ func (hd *HelmDeployer) UpgradeChart(releaseName, chartPath string, values map[s
 
 	// Create upgrade action
 	upgrade := action.NewUpgrade(hd.Config)
-
+	upgrade.Wait = true
+	upgrade.Timeout = 90 * time.Second
 	// Upgrade release
 	release, err := upgrade.Run(releaseName, chart, values)
 	if err != nil {
