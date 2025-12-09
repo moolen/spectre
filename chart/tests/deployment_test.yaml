@@ -1,0 +1,507 @@
+suite: test deployment
+templates:
+  - deployment.yaml
+tests:
+  - it: should create a Deployment with default values
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spectre
+      - equal:
+          path: metadata.namespace
+          value: monitoring
+      - equal:
+          path: spec.replicas
+          value: 1
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "spectre:latest"
+
+  - it: should set correct labels
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/managed-by: Helm
+      - isSubset:
+          path: spec.selector.matchLabels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should configure replicas from values
+    set:
+      replicaCount: 3
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  - it: should configure update strategy
+    set:
+      updateStrategy:
+        type: Recreate
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+
+  - it: should configure minReadySeconds
+    set:
+      minReadySeconds: 30
+    asserts:
+      - equal:
+          path: spec.minReadySeconds
+          value: 30
+
+  - it: should configure revisionHistoryLimit
+    set:
+      revisionHistoryLimit: 3
+    asserts:
+      - equal:
+          path: spec.revisionHistoryLimit
+          value: 3
+
+  - it: should add pod labels
+    set:
+      podLabels:
+        custom: label
+        env: production
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels.custom
+          value: label
+      - equal:
+          path: spec.template.metadata.labels.env
+          value: production
+
+  - it: should add pod annotations
+    set:
+      podAnnotations:
+        prometheus.io/scrape: "true"
+        custom-annotation: value
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - equal:
+          path: spec.template.metadata.annotations["custom-annotation"]
+          value: value
+
+  - it: should configure image pull secrets
+    set:
+      image:
+        pullSecrets:
+          - name: regcred
+          - name: dockerhub
+    asserts:
+      - equal:
+          path: spec.template.spec.imagePullSecrets[0].name
+          value: regcred
+      - equal:
+          path: spec.template.spec.imagePullSecrets[1].name
+          value: dockerhub
+
+  - it: should configure pod security context
+    set:
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 2000
+
+  - it: should configure container security context
+    set:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        readOnlyRootFilesystem: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - contains:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          content: ALL
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+
+  - it: should configure priority class
+    set:
+      priorityClassName: high-priority
+    asserts:
+      - equal:
+          path: spec.template.spec.priorityClassName
+          value: high-priority
+
+  - it: should configure termination grace period
+    set:
+      terminationGracePeriodSeconds: 60
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 60
+
+  - it: should configure DNS policy and config
+    set:
+      dnsPolicy: ClusterFirstWithHostNet
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+    asserts:
+      - equal:
+          path: spec.template.spec.dnsPolicy
+          value: ClusterFirstWithHostNet
+      - equal:
+          path: spec.template.spec.dnsConfig.options[0].name
+          value: ndots
+      - equal:
+          path: spec.template.spec.dnsConfig.options[0].value
+          value: "2"
+
+  - it: should configure host aliases
+    set:
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames:
+            - foo.local
+            - bar.local
+    asserts:
+      - equal:
+          path: spec.template.spec.hostAliases[0].ip
+          value: "127.0.0.1"
+      - contains:
+          path: spec.template.spec.hostAliases[0].hostnames
+          content: foo.local
+
+  - it: should enable host network
+    set:
+      hostNetwork: true
+    asserts:
+      - equal:
+          path: spec.template.spec.hostNetwork
+          value: true
+
+  - it: should configure container args with all parameters
+    set:
+      config:
+        logLevel: debug
+        segmentSize: 20971520
+        maxConcurrentRequests: 200
+      persistence:
+        mountPath: /custom-data
+      service:
+        targetPort: 9090
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--data-dir=/custom-data"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--api-port=9090"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--log-level=debug"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--segment-size=20971520"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--max-concurrent-requests=200"
+
+  - it: should add extra args
+    set:
+      extraArgs:
+        - "--import=/import-data"
+        - "--debug"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--import=/import-data"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--debug"
+
+  - it: should configure environment variables
+    set:
+      env:
+        - name: CUSTOM_VAR
+          value: custom-value
+        - name: ANOTHER_VAR
+          value: another-value
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUSTOM_VAR
+            value: custom-value
+
+  - it: should configure envFrom
+    set:
+      envFrom:
+        - configMapRef:
+            name: special-config
+        - secretRef:
+            name: special-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            configMapRef:
+              name: special-config
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: special-secret
+
+  - it: should configure liveness probe when enabled
+    set:
+      livenessProbe:
+        enabled: true
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 30
+        periodSeconds: 20
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /health
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.initialDelaySeconds
+          value: 30
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.periodSeconds
+          value: 20
+      - isNull:
+          path: spec.template.spec.containers[0].livenessProbe.enabled
+
+  - it: should not configure liveness probe when disabled
+    set:
+      livenessProbe:
+        enabled: false
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].livenessProbe
+
+  - it: should configure readiness probe when enabled
+    set:
+      readinessProbe:
+        enabled: true
+        httpGet:
+          path: /ready
+          port: http
+        initialDelaySeconds: 5
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /ready
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.initialDelaySeconds
+          value: 5
+
+  - it: should configure startup probe when enabled
+    set:
+      startupProbe:
+        enabled: true
+        httpGet:
+          path: /health
+          port: http
+        failureThreshold: 30
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.path
+          value: /health
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.failureThreshold
+          value: 30
+
+  - it: should not configure startup probe when disabled
+    set:
+      startupProbe:
+        enabled: false
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].startupProbe
+
+  - it: should configure lifecycle hooks
+    set:
+      lifecycle:
+        preStop:
+          exec:
+            command: ["/bin/sh", "-c", "sleep 15"]
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.exec.command
+          value: ["/bin/sh", "-c", "sleep 15"]
+
+  - it: should configure resources
+    set:
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "200m"
+        limits:
+          memory: "1Gi"
+          cpu: "1000m"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: "256Mi"
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: "1000m"
+
+  - it: should use PVC for data volume when persistence enabled
+    set:
+      persistence:
+        enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[0].name
+          value: data
+      - equal:
+          path: spec.template.spec.volumes[0].persistentVolumeClaim.claimName
+          value: RELEASE-NAME-spectre
+
+  - it: should use existing PVC when specified
+    set:
+      persistence:
+        enabled: true
+        existingClaim: my-existing-pvc
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[0].persistentVolumeClaim.claimName
+          value: my-existing-pvc
+
+  - it: should use emptyDir when persistence disabled
+    set:
+      persistence:
+        enabled: false
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[0].name
+          value: data
+      - isNotNull:
+          path: spec.template.spec.volumes[0].emptyDir
+
+  - it: should add extra volumes and volume mounts
+    set:
+      extraVolumes:
+        - name: import-data
+          configMap:
+            name: import-events
+      extraVolumeMounts:
+        - name: import-data
+          mountPath: /import-data
+          readOnly: true
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: import-data
+            configMap:
+              name: import-events
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: import-data
+            mountPath: /import-data
+            readOnly: true
+
+  - it: should configure node selector
+    set:
+      nodeSelector:
+        disktype: ssd
+        zone: us-west-1a
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
+      - equal:
+          path: spec.template.spec.nodeSelector.zone
+          value: us-west-1a
+
+  - it: should configure tolerations
+    set:
+      tolerations:
+        - key: "key1"
+          operator: "Equal"
+          value: "value1"
+          effect: "NoSchedule"
+    asserts:
+      - contains:
+          path: spec.template.spec.tolerations
+          content:
+            key: "key1"
+            operator: "Equal"
+            value: "value1"
+            effect: "NoSchedule"
+
+  - it: should configure affinity
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/e2e-az-name
+                    operator: In
+                    values:
+                      - e2e-az1
+                      - e2e-az2
+    asserts:
+      - isNotNull:
+          path: spec.template.spec.affinity.nodeAffinity
+
+  - it: should configure topology spread constraints
+    set:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+    asserts:
+      - contains:
+          path: spec.template.spec.topologySpreadConstraints
+          content:
+            maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: DoNotSchedule
+
+  - it: should use correct service account name when created
+    set:
+      serviceAccount:
+        create: true
+        name: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: RELEASE-NAME-spectre
+
+  - it: should use custom service account name
+    set:
+      serviceAccount:
+        create: true
+        name: custom-sa
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: custom-sa

@@ -1,0 +1,165 @@
+suite: test service
+templates:
+  - service.yaml
+tests:
+  - it: should create a Service with default values
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spectre
+      - equal:
+          path: metadata.namespace
+          value: monitoring
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.ports[0].port
+          value: 8080
+      - equal:
+          path: spec.ports[0].targetPort
+          value: http
+      - equal:
+          path: spec.ports[0].name
+          value: http
+
+  - it: should have correct labels
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+      - isSubset:
+          path: spec.selector
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should add custom service labels
+    set:
+      service:
+        labels:
+          custom: label
+          environment: production
+    asserts:
+      - equal:
+          path: metadata.labels.custom
+          value: label
+      - equal:
+          path: metadata.labels.environment
+          value: production
+
+  - it: should add service annotations
+    set:
+      service:
+        annotations:
+          prometheus.io/scrape: "true"
+          custom-annotation: value
+    asserts:
+      - equal:
+          path: metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - equal:
+          path: metadata.annotations["custom-annotation"]
+          value: value
+
+  - it: should configure NodePort service type
+    set:
+      service:
+        type: NodePort
+        port: 9090
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+      - equal:
+          path: spec.ports[0].port
+          value: 9090
+
+  - it: should configure LoadBalancer service type
+    set:
+      service:
+        type: LoadBalancer
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+
+  - it: should set loadBalancerIP when service type is LoadBalancer
+    set:
+      service:
+        type: LoadBalancer
+        loadBalancerIP: "10.0.0.100"
+    asserts:
+      - equal:
+          path: spec.loadBalancerIP
+          value: "10.0.0.100"
+
+  - it: should not set loadBalancerIP when service type is not LoadBalancer
+    set:
+      service:
+        type: ClusterIP
+        loadBalancerIP: "10.0.0.100"
+    asserts:
+      - isNull:
+          path: spec.loadBalancerIP
+
+  - it: should configure loadBalancerSourceRanges
+    set:
+      service:
+        loadBalancerSourceRanges:
+          - "10.0.0.0/8"
+          - "192.168.0.0/16"
+    asserts:
+      - contains:
+          path: spec.loadBalancerSourceRanges
+          content: "10.0.0.0/8"
+      - contains:
+          path: spec.loadBalancerSourceRanges
+          content: "192.168.0.0/16"
+
+  - it: should configure externalTrafficPolicy
+    set:
+      service:
+        externalTrafficPolicy: Local
+    asserts:
+      - equal:
+          path: spec.externalTrafficPolicy
+          value: Local
+
+  - it: should configure session affinity to ClientIP
+    set:
+      service:
+        sessionAffinity: ClientIP
+    asserts:
+      - equal:
+          path: spec.sessionAffinity
+          value: ClientIP
+
+  - it: should configure session affinity config
+    set:
+      service:
+        sessionAffinity: ClientIP
+        sessionAffinityConfig:
+          clientIP:
+            timeoutSeconds: 10800
+    asserts:
+      - equal:
+          path: spec.sessionAffinityConfig.clientIP.timeoutSeconds
+          value: 10800
+
+  - it: should use custom port configuration
+    set:
+      service:
+        port: 9090
+        targetPort: 9091
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 9090
+      - equal:
+          path: spec.ports[0].targetPort
+          value: http

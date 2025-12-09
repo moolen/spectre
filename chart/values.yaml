@@ -151,8 +151,6 @@ serviceAccount:
   annotations: {}
   automountServiceAccountToken: true
 
-
-
 extraArgs: []
 
 extraVolumes: []

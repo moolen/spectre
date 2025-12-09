@@ -1,0 +1,28 @@
+# Chart Testing Configuration
+# https://github.com/helm/chart-testing
+
+# Path to the chart to test
+chart-dirs:
+  - .
+
+# Charts to test (relative to chart-dirs)
+charts:
+  - chart
+
+# Validate maintainers in Chart.yaml
+validate-maintainers: true
+
+# Check for version bumps
+check-version-increment: false
+
+# Validate chart values against schema
+validate-chart-schema: true
+
+# Additional Helm lint options
+helm-extra-args: --timeout 600s
+
+# Target Kubernetes versions for validation
+target-branch: master
+
+# Additional values files for testing
+# helm-extra-set-args: --set=image.tag=ci-test

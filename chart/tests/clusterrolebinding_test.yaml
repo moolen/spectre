@@ -1,0 +1,68 @@
+suite: test clusterrolebinding
+templates:
+  - clusterrolebinding.yaml
+  - serviceaccount.yaml
+tests:
+  - it: should create ClusterRoleBinding
+    asserts:
+      - isKind:
+          of: ClusterRoleBinding
+        template: clusterrolebinding.yaml
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spectre
+        template: clusterrolebinding.yaml
+
+  - it: should have correct labels
+    asserts:
+      - isSubset:
+          path: metadata.labels
+          content:
+            app.kubernetes.io/name: spectre
+            app.kubernetes.io/instance: RELEASE-NAME
+        template: clusterrolebinding.yaml
+
+  - it: should bind to correct ClusterRole
+    asserts:
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+        template: clusterrolebinding.yaml
+      - equal:
+          path: roleRef.name
+          value: RELEASE-NAME-spectre
+        template: clusterrolebinding.yaml
+      - equal:
+          path: roleRef.apiGroup
+          value: rbac.authorization.k8s.io
+        template: clusterrolebinding.yaml
+
+  - it: should bind to correct ServiceAccount
+    set:
+      serviceAccount:
+        create: true
+        name: ""
+    asserts:
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+        template: clusterrolebinding.yaml
+      - equal:
+          path: subjects[0].name
+          value: RELEASE-NAME-spectre
+        template: clusterrolebinding.yaml
+      - equal:
+          path: subjects[0].namespace
+          value: monitoring
+        template: clusterrolebinding.yaml
+
+  - it: should bind to custom ServiceAccount name
+    set:
+      serviceAccount:
+        create: true
+        name: custom-sa
+    asserts:
+      - equal:
+          path: subjects[0].name
+          value: custom-sa
+        template: clusterrolebinding.yaml
