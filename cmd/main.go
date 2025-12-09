@@ -29,6 +29,7 @@ func main() {
 	apiPort := flag.Int("api-port", 8080, "Port the API server listens on")
 	logLevel := flag.String("log-level", "info", "Logging level (debug, info, warn, error)")
 	watcherConfigPath := flag.String("watcher-config", "watcher.yaml", "Path to the YAML file containing watcher configuration")
+	watcherEnabled := flag.Bool("watcher-enabled", true, "Enable Kubernetes watcher (default: true)")
 	segmentSize := flag.Int64("segment-size", 10*1024*1024, "Target size for compression segments in bytes (default: 10MB)")
 	maxConcurrentRequests := flag.Int("max-concurrent-requests", 100, "Maximum number of concurrent API requests")
 	cacheMaxMB := flag.Int64("cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
@@ -121,13 +122,18 @@ func main() {
 			logger.Info("Import completed successfully")
 		}
 
-		watcherComponent, err = watcher.New(watcher.NewEventCaptureHandler(storageComponent), cfg.WatcherConfigPath)
-		if err != nil {
-			logger.Error("Failed to create watcher component: %v", err)
-			fmt.Fprintf(os.Stderr, "Watcher initialization error: %v\n", err)
-			os.Exit(1)
+		// Only initialize watcher if enabled
+		if *watcherEnabled {
+			watcherComponent, err = watcher.New(watcher.NewEventCaptureHandler(storageComponent), cfg.WatcherConfigPath)
+			if err != nil {
+				logger.Error("Failed to create watcher component: %v", err)
+				fmt.Fprintf(os.Stderr, "Watcher initialization error: %v\n", err)
+				os.Exit(1)
+			}
+			logger.Info("Watcher component created")
+		} else {
+			logger.Info("Watcher disabled - running in read-only mode")
 		}
-		logger.Info("Watcher component created")
 
 		// Create query executor with or without cache based on CLI flag
 		if *cacheEnabled {
@@ -156,10 +162,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		if err := manager.Register(watcherComponent, storageComponent); err != nil {
-			logger.Error("Failed to register watcher component: %v", err)
-			fmt.Fprintf(os.Stderr, "Watcher registration error: %v\n", err)
-			os.Exit(1)
+		// Only register watcher if it was initialized
+		if watcherComponent != nil {
+			if err := manager.Register(watcherComponent, storageComponent); err != nil {
+				logger.Error("Failed to register watcher component: %v", err)
+				fmt.Fprintf(os.Stderr, "Watcher registration error: %v\n", err)
+				os.Exit(1)
+			}
 		}
 
 		if err := manager.Register(apiComponent, storageComponent); err != nil {
