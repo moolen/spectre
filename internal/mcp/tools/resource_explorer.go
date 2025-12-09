@@ -24,10 +24,11 @@ func NewResourceExplorerTool(client *client.SpectreClient) *ResourceExplorerTool
 
 // ResourceExplorerInput represents the input for resource_explorer tool
 type ResourceExplorerInput struct {
-	Kind      string `json:"kind,omitempty"`
-	Namespace string `json:"namespace,omitempty"`
-	Status    string `json:"status,omitempty"` // Ready, Warning, Error, Terminating
-	Time      int64  `json:"time,omitempty"`   // Snapshot at specific time, 0 = latest
+	Kind         string `json:"kind,omitempty"`
+	Namespace    string `json:"namespace,omitempty"`
+	Status       string `json:"status,omitempty"`    // Ready, Warning, Error, Terminating
+	Time         int64  `json:"time,omitempty"`      // Snapshot at specific time, 0 = latest
+	MaxResources int    `json:"max_resources,omitempty"` // Max resources to return, default 200, max 1000
 }
 
 // ResourceInfo represents a resource in the explorer output
@@ -108,13 +109,16 @@ func (t *ResourceExplorerTool) Execute(ctx context.Context, input json.RawMessag
 		return nil, fmt.Errorf("failed to query timeline: %w", err)
 	}
 
-	output := t.buildExplorerOutput(response, metadata, params)
+	// Apply default limit: 200 (default), max 1000
+	maxResources := ApplyDefaultLimit(params.MaxResources, 200, 1000)
+
+	output := t.buildExplorerOutput(response, metadata, params, maxResources)
 	output.ExplorationTimeMs = time.Since(start).Milliseconds()
 
 	return output, nil
 }
 
-func (t *ResourceExplorerTool) buildExplorerOutput(response *client.TimelineResponse, metadata *client.MetadataResponse, params ResourceExplorerInput) *ResourceExplorerOutput {
+func (t *ResourceExplorerTool) buildExplorerOutput(response *client.TimelineResponse, metadata *client.MetadataResponse, params ResourceExplorerInput, maxResources int) *ResourceExplorerOutput {
 	output := &ResourceExplorerOutput{
 		Resources:        make([]ResourceInfo, 0),
 		AvailableOptions: AvailableOptions{},
@@ -173,6 +177,11 @@ func (t *ResourceExplorerTool) buildExplorerOutput(response *client.TimelineResp
 		}
 
 		output.Resources = append(output.Resources, info)
+
+		// Apply limit
+		if len(output.Resources) >= maxResources {
+			break
+		}
 	}
 
 	// Sort by kind, namespace, name for consistent output

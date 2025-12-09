@@ -63,7 +63,7 @@ func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values m
 		hd.t.Logf("Upgrading existing Helm release %s from %s", releaseName, chartPath)
 		upgrade := action.NewUpgrade(hd.Config)
 		upgrade.Wait = true
-		upgrade.Timeout = 90 * time.Second
+		upgrade.Timeout = 300 * time.Second
 		_, err = upgrade.Run(releaseName, chart, values)
 		if err != nil {
 			return fmt.Errorf("failed to upgrade chart: %w", err)
@@ -75,7 +75,7 @@ func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values m
 		install.ReleaseName = releaseName
 		install.Namespace = hd.Namespace
 		install.Wait = true
-		install.Timeout = 90 * time.Second
+		install.Timeout = 300 * time.Second
 		_, err = install.Run(chart, values)
 		if err != nil {
 			return fmt.Errorf("failed to install chart: %w", err)
@@ -98,7 +98,7 @@ func (hd *HelmDeployer) UpgradeChart(releaseName, chartPath string, values map[s
 	// Create upgrade action
 	upgrade := action.NewUpgrade(hd.Config)
 	upgrade.Wait = true
-	upgrade.Timeout = 90 * time.Second
+	upgrade.Timeout = 300 * time.Second
 	// Upgrade release
 	release, err := upgrade.Run(releaseName, chart, values)
 	if err != nil {

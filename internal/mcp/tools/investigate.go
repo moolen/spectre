@@ -24,12 +24,13 @@ func NewInvestigateTool(client *client.SpectreClient) *InvestigateTool {
 
 // InvestigateInput represents the input for investigate tool
 type InvestigateInput struct {
-	ResourceKind      string `json:"resource_kind"`
-	ResourceName      string `json:"resource_name,omitempty"` // "*" for all
-	Namespace         string `json:"namespace,omitempty"`
-	StartTime         int64  `json:"start_time"`
-	EndTime           int64  `json:"end_time"`
-	InvestigationType string `json:"investigation_type,omitempty"` // incident, post-mortem, auto
+	ResourceKind       string `json:"resource_kind"`
+	ResourceName       string `json:"resource_name,omitempty"`  // "*" for all
+	Namespace          string `json:"namespace,omitempty"`
+	StartTime          int64  `json:"start_time"`
+	EndTime            int64  `json:"end_time"`
+	InvestigationType  string `json:"investigation_type,omitempty"` // incident, post-mortem, auto
+	MaxInvestigations  int    `json:"max_investigations,omitempty"` // Max resources to investigate when using "*", default 20, max 100
 }
 
 // InvestigationEvidence represents evidence for investigation
@@ -78,11 +79,11 @@ type EventSummary struct {
 
 // ResourceSnapshot represents a snapshot of a resource at a point in time
 type ResourceSnapshot struct {
-	Timestamp     int64           `json:"timestamp"`
-	Status        string          `json:"status"`
-	Message       string          `json:"message"`
-	Data          json.RawMessage `json:"data"`
-	TimestampText string          `json:"timestamp_text,omitempty"` // Human-readable timestamp
+	Timestamp     int64    `json:"timestamp"`
+	Status        string   `json:"status"`
+	Message       string   `json:"message"`
+	KeyChanges    []string `json:"key_changes,omitempty"`    // Summary of important changes, e.g., ["replicas: 3->1", "image: v1.2->v1.3"]
+	TimestampText string   `json:"timestamp_text,omitempty"` // Human-readable timestamp
 }
 
 // InvestigateOutput represents the output of investigate tool
@@ -130,10 +131,22 @@ func (t *InvestigateTool) Execute(ctx context.Context, input json.RawMessage) (i
 
 	investigations := make([]InvestigationEvidence, 0)
 
+	// Apply default limit: 20 (default), max 100
+	maxInvestigations := ApplyDefaultLimit(params.MaxInvestigations, 20, 100)
+	processedCount := 0
+
 	for _, resource := range response.Resources {
 		// Filter by name if specified and not "*"
 		if params.ResourceName != "" && params.ResourceName != "*" && resource.Name != params.ResourceName {
 			continue
+		}
+
+		// Apply limit when using wildcard
+		if params.ResourceName == "*" || params.ResourceName == "" {
+			if processedCount >= maxInvestigations {
+				break
+			}
+			processedCount++
 		}
 
 		evidence := t.buildInvestigationEvidence(&resource, params.InvestigationType)
@@ -186,13 +199,14 @@ func (t *InvestigateTool) buildInvestigationEvidence(resource *client.TimelineRe
 		}
 		evidence.StatusSegments = append(evidence.StatusSegments, summary)
 
-		// Include raw data for key transitions
+		// Include snapshot summary for key transitions (Error/Warning only)
+		// Skip raw resource data to save tokens - message contains key information
 		if segment.Status == "Error" || segment.Status == "Warning" {
 			evidence.RawResourceSnapshots = append(evidence.RawResourceSnapshots, ResourceSnapshot{
 				Timestamp:     segment.StartTime,
 				Status:        segment.Status,
 				Message:       segment.Message,
-				Data:          segment.ResourceData,
+				KeyChanges:    []string{}, // Could be enhanced with diff analysis in the future
 				TimestampText: FormatTimestamp(segment.StartTime),
 			})
 		}
@@ -294,12 +308,6 @@ func (t *InvestigateTool) generatePrompts(evidence *InvestigationEvidence, resou
 	}
 
 	// Additional context prompts
-	if len(evidence.RawResourceSnapshots) > 0 {
-		prompts = append(prompts,
-			fmt.Sprintf("Examine the resource snapshots at error transitions. What configuration or state changes preceded the error?"),
-		)
-	}
-
 	if evidence.CurrentMessage != "" {
 		prompts = append(prompts,
 			fmt.Sprintf("Interpret the current message: '%s'. What does it mean?", evidence.CurrentMessage),
