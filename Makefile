@@ -29,8 +29,6 @@ help:
 # Variables
 BINARY_NAME=spectre
 BINARY_PATH=bin/$(BINARY_NAME)
-MCP_BINARY_NAME=spectre-mcp
-MCP_BINARY_PATH=bin/$(MCP_BINARY_NAME)
 IMAGE_NAME=spectre
 IMAGE_TAG=latest
 DOCKER_IMAGE=$(IMAGE_NAME):$(IMAGE_TAG)
@@ -42,7 +40,7 @@ DATA_DIR=./data
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p bin
-	@go build -o $(BINARY_PATH) ./cmd/main.go
+	@go build -o $(BINARY_PATH) ./cmd/spectre
 	@echo "Build complete: $(BINARY_PATH)"
 
 # Build the React UI
@@ -51,20 +49,13 @@ build-ui:
 	@cd ui && npm ci && npm run build
 	@echo "UI build complete: ui/dist"
 
-# Build the MCP server
-build-mcp:
-	@echo "Building $(MCP_BINARY_NAME)..."
-	@mkdir -p bin
-	@go build -o $(MCP_BINARY_PATH) ./cmd/mcp-server
-	@echo "Build complete: $(MCP_BINARY_PATH)"
-	@echo "Start with: ./$(MCP_BINARY_PATH) --spectre-url http://localhost:8080"
 
 # Run the application locally
 run: build build-ui
-	@echo "Running $(BINARY_NAME)..."
+	@echo "Running $(BINARY_NAME) server..."
 	@mkdir -p $(DATA_DIR)
 	@export KUBECONFIG=$(KUBECONFIG); \
-	$(BINARY_PATH)
+	$(BINARY_PATH) server
 
 # Run all tests
 test:
@@ -139,22 +130,6 @@ deploy:
 	@echo "Deployment complete. Check status:"
 	@kubectl get pods -n $(NAMESPACE)
 
-.PHONY: benchmark
-benchmark:
-	@echo "Generating data..."
-	rm -rf ./benchmark-data
-	go run ./cmd/gendata --output-dir ./benchmark-data \
-	--event-count 1000000 --duration-hours 24 \
-	--segment-size 1048576 --distribution skewed
-
-	go run ./cmd/main.go \
-		--data-dir ./benchmark-data \
-		--api-port 8080 \
-		--log-level debug \
-		--watcher-config ./hack/watcher.yaml \
-		--segment-size 1048576 \
-		--max-concurrent-requests 100
-
 # Watch and rebuild on file changes (requires entr)
 watch:
 	@echo "Watching for changes (requires 'entr')..."
@@ -179,16 +154,6 @@ favicons:
 	@./hack/generate-favicons.sh
 	@echo "Favicons generated successfully"
 
-# Helm chart testing
-helm-lint:
-	@echo "Linting Helm chart..."
-	@helm lint $(CHART_PATH)
-	@echo "Helm lint complete"
-
-helm-template:
-	@echo "Templating Helm chart..."
-	@helm template test-release $(CHART_PATH) --debug
-
 # Install helm-unittest plugin
 helm-unittest-install:
 	@echo "Installing helm-unittest plugin..."
@@ -200,63 +165,6 @@ helm-unittest: helm-unittest-install
 	@echo "Running Helm unit tests..."
 	@helm unittest $(CHART_PATH) --color --output-type JUnit --output-file test-results.xml
 	@echo "Helm unit tests complete!"
-
-helm-test: docker-build
-	@echo "Running Helm tests (requires active Kubernetes cluster)..."
-	@echo "Loading Docker image to cluster..."
-	@kind load docker-image $(DOCKER_IMAGE) --name $(shell kubectl config current-context | sed 's/kind-//') 2>/dev/null || \
-		echo "Note: kind load failed, assuming image is already available in cluster"
-	@echo "Installing chart..."
-	@helm upgrade --install spectre-test $(CHART_PATH) \
-		--namespace $(NAMESPACE) \
-		--create-namespace \
-		--set image.repository=$(IMAGE_NAME) \
-		--set image.tag=$(IMAGE_TAG) \
-		--set image.pullPolicy=IfNotPresent \
-		--wait \
-		--timeout=5m
-	@echo "Waiting for deployment..."
-	@kubectl wait --for=condition=available --timeout=300s \
-		deployment/spectre-test-spectre -n $(NAMESPACE) || \
-		(kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/name=spectre --tail=100 && exit 1)
-	@echo "Running Helm tests..."
-	@helm test spectre-test --namespace $(NAMESPACE) --logs
-	@echo "Helm tests complete!"
-
-helm-test-local: docker-build
-	@echo "Creating local Kind cluster for Helm testing..."
-	@kind create cluster --name helm-test --wait 300s || \
-		(echo "Cluster 'helm-test' already exists, using existing cluster" && exit 0)
-	@echo "Loading Docker image to Kind cluster..."
-	@kind load docker-image $(DOCKER_IMAGE) --name helm-test
-	@echo "Installing chart to Kind cluster..."
-	@helm upgrade --install spectre-test $(CHART_PATH) \
-		--namespace $(NAMESPACE) \
-		--create-namespace \
-		--set image.repository=$(IMAGE_NAME) \
-		--set image.tag=$(IMAGE_TAG) \
-		--set image.pullPolicy=IfNotPresent \
-		--set persistence.size=1Gi \
-		--wait \
-		--timeout=5m
-	@echo "Waiting for deployment to be ready..."
-	@kubectl wait --for=condition=available --timeout=300s \
-		deployment/spectre-test-spectre -n $(NAMESPACE) || \
-		(kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/name=spectre --tail=100 && exit 1)
-	@echo "Running Helm tests..."
-	@helm test spectre-test --namespace $(NAMESPACE) --logs
-	@echo ""
-	@echo "Helm tests complete!"
-	@echo ""
-	@echo "To cleanup, run: kind delete cluster --name helm-test"
-	@echo "To keep cluster and cleanup helm release: helm uninstall spectre-test -n $(NAMESPACE)"
-
-helm-clean:
-	@echo "Cleaning up Helm test resources..."
-	@helm uninstall spectre-test --namespace $(NAMESPACE) 2>/dev/null || true
-	@kubectl delete namespace $(NAMESPACE) 2>/dev/null || true
-	@kind delete cluster --name helm-test 2>/dev/null || true
-	@echo "Cleanup complete"
 
 # Default target
 .DEFAULT_GOAL := help

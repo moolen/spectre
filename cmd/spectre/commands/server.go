@@ -1,8 +1,7 @@
-package main
+package commands
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -16,56 +15,65 @@ import (
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
 	"github.com/moolen/spectre/internal/watcher"
+	"github.com/spf13/cobra"
 )
 
-// Version is the application version
-const Version = "0.1.0"
+var (
+	demo                  bool
+	dataDir               string
+	apiPort               int
+	watcherConfigPath     string
+	watcherEnabled        bool
+	segmentSize           int64
+	maxConcurrentRequests int
+	cacheMaxMB            int64
+	cacheEnabled          bool
+	importDir             string
+)
 
-func main() {
-	// Parse command line flags
-	version := flag.Bool("version", false, "Show version and exit")
-	demo := flag.Bool("demo", false, "Run in demo mode with embedded demo data")
-	dataDir := flag.String("data-dir", "/data", "Directory where events are stored")
-	apiPort := flag.Int("api-port", 8080, "Port the API server listens on")
-	logLevel := flag.String("log-level", "info", "Logging level (debug, info, warn, error)")
-	watcherConfigPath := flag.String("watcher-config", "watcher.yaml", "Path to the YAML file containing watcher configuration")
-	watcherEnabled := flag.Bool("watcher-enabled", true, "Enable Kubernetes watcher (default: true)")
-	segmentSize := flag.Int64("segment-size", 10*1024*1024, "Target size for compression segments in bytes (default: 10MB)")
-	maxConcurrentRequests := flag.Int("max-concurrent-requests", 100, "Maximum number of concurrent API requests")
-	cacheMaxMB := flag.Int64("cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
-	cacheEnabled := flag.Bool("cache-enabled", true, "Enable block cache (default: true)")
-	importDir := flag.String("import", "", "Import JSON event files from directory before starting server")
+var serverCmd = &cobra.Command{
+	Use:   "server",
+	Short: "Start the Spectre server",
+	Long: `Start the Spectre server which watches Kubernetes events,
+stores them, and provides an API for querying and analysis.`,
+	Run: runServer,
+}
 
-	flag.Parse()
+func init() {
+	serverCmd.Flags().BoolVar(&demo, "demo", false, "Run in demo mode with embedded demo data")
+	serverCmd.Flags().StringVar(&dataDir, "data-dir", "/data", "Directory where events are stored")
+	serverCmd.Flags().IntVar(&apiPort, "api-port", 8080, "Port the API server listens on")
+	serverCmd.Flags().StringVar(&watcherConfigPath, "watcher-config", "watcher.yaml", "Path to the YAML file containing watcher configuration")
+	serverCmd.Flags().BoolVar(&watcherEnabled, "watcher-enabled", true, "Enable Kubernetes watcher (default: true)")
+	serverCmd.Flags().Int64Var(&segmentSize, "segment-size", 10*1024*1024, "Target size for compression segments in bytes (default: 10MB)")
+	serverCmd.Flags().IntVar(&maxConcurrentRequests, "max-concurrent-requests", 100, "Maximum number of concurrent API requests")
+	serverCmd.Flags().Int64Var(&cacheMaxMB, "cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
+	serverCmd.Flags().BoolVar(&cacheEnabled, "cache-enabled", true, "Enable block cache (default: true)")
+	serverCmd.Flags().StringVar(&importDir, "import", "", "Import JSON event files from directory before starting server")
+}
 
-	// Handle version flag
-	if *version {
-		fmt.Printf("Spectre v%s\n", Version)
-		os.Exit(0)
-	}
-
+func runServer(cmd *cobra.Command, args []string) {
 	// Load configuration
 	cfg := config.LoadConfig(
-		*dataDir,
-		*apiPort,
-		*logLevel,
-		*watcherConfigPath,
-		*segmentSize,
-		*maxConcurrentRequests,
-		*cacheMaxMB,
-		*cacheEnabled,
+		dataDir,
+		apiPort,
+		logLevel,
+		watcherConfigPath,
+		segmentSize,
+		maxConcurrentRequests,
+		cacheMaxMB,
+		cacheEnabled,
 	)
 
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
-		os.Exit(1)
+		HandleError(err, "Configuration error")
 	}
 
 	logging.Initialize(cfg.LogLevel)
-	logger := logging.GetLogger("main")
+	logger := logging.GetLogger("server")
 
-	if *demo {
+	if demo {
 		logger.Info("Starting Spectre v%s [DEMO MODE]", Version)
 	} else {
 		logger.Info("Starting Spectre v%s", Version)
@@ -80,7 +88,7 @@ func main() {
 	var watcherComponent *watcher.Watcher
 	var queryExecutor api.QueryExecutor
 
-	if *demo {
+	if demo {
 		logger.Info("Demo mode enabled - using embedded demo data")
 		demoExecutor := api.NewDemoQueryExecutor()
 		queryExecutor = demoExecutor
@@ -90,15 +98,14 @@ func main() {
 		storageComponent, err = storage.New(cfg.DataDir, cfg.SegmentSize)
 		if err != nil {
 			logger.Error("Failed to create storage component: %v", err)
-			fmt.Fprintf(os.Stderr, "Storage initialization error: %v\n", err)
-			os.Exit(1)
+			HandleError(err, "Storage initialization error")
 		}
 		logger.Info("Storage component created")
 
 		// Handle import if --import flag is provided
-		if *importDir != "" {
-			logger.Info("Starting import from directory: %s", *importDir)
-			fmt.Printf("Importing events from: %s\n", *importDir)
+		if importDir != "" {
+			logger.Info("Starting import from directory: %s", importDir)
+			fmt.Printf("Importing events from: %s\n", importDir)
 
 			importOpts := storage.ImportOptions{
 				ValidateFiles:     true,
@@ -111,11 +118,10 @@ func main() {
 				fmt.Printf("  [%d] Loaded %d events from %s\n", filesProcessed, eventCount, filename)
 			}
 
-			report, err := importexport.WalkAndImportJSON(*importDir, storageComponent, importOpts, progressCallback)
+			report, err := importexport.WalkAndImportJSON(importDir, storageComponent, importOpts, progressCallback)
 			if err != nil {
 				logger.Error("Import failed: %v", err)
-				fmt.Fprintf(os.Stderr, "Import error: %v\n", err)
-				os.Exit(1)
+				HandleError(err, "Import error")
 			}
 
 			fmt.Println("\n" + importexport.FormatImportReport(report))
@@ -123,12 +129,11 @@ func main() {
 		}
 
 		// Only initialize watcher if enabled
-		if *watcherEnabled {
+		if watcherEnabled {
 			watcherComponent, err = watcher.New(watcher.NewEventCaptureHandler(storageComponent), cfg.WatcherConfigPath)
 			if err != nil {
 				logger.Error("Failed to create watcher component: %v", err)
-				fmt.Fprintf(os.Stderr, "Watcher initialization error: %v\n", err)
-				os.Exit(1)
+				HandleError(err, "Watcher initialization error")
 			}
 			logger.Info("Watcher component created")
 		} else {
@@ -136,51 +141,46 @@ func main() {
 		}
 
 		// Create query executor with or without cache based on CLI flag
-		if *cacheEnabled {
+		if cacheEnabled {
 			var err error
-			queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, *cacheMaxMB)
+			queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, cacheMaxMB)
 			if err != nil {
 				logger.Error("Failed to create cache: %v", err)
-				fmt.Fprintf(os.Stderr, "Cache initialization error: %v\n", err)
-				os.Exit(1)
+				HandleError(err, "Cache initialization error")
 			}
-			logger.Info("Block cache enabled with max size: %dMB", *cacheMaxMB)
+			logger.Info("Block cache enabled with max size: %dMB", cacheMaxMB)
 		} else {
 			queryExecutor = storage.NewQueryExecutor(storageComponent)
 			logger.Info("Block cache disabled")
 		}
 	}
 
-	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent, *demo)
+	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent, demo)
 	logger.Info("API server component created")
 
 	// Register components based on demo mode
-	if !*demo {
+	if !demo {
 		if err := manager.Register(storageComponent); err != nil {
 			logger.Error("Failed to register storage component: %v", err)
-			fmt.Fprintf(os.Stderr, "Storage registration error: %v\n", err)
-			os.Exit(1)
+			HandleError(err, "Storage registration error")
 		}
 
 		// Only register watcher if it was initialized
 		if watcherComponent != nil {
 			if err := manager.Register(watcherComponent, storageComponent); err != nil {
 				logger.Error("Failed to register watcher component: %v", err)
-				fmt.Fprintf(os.Stderr, "Watcher registration error: %v\n", err)
-				os.Exit(1)
+				HandleError(err, "Watcher registration error")
 			}
 		}
 
 		if err := manager.Register(apiComponent, storageComponent); err != nil {
 			logger.Error("Failed to register API server component: %v", err)
-			fmt.Fprintf(os.Stderr, "API server registration error: %v\n", err)
-			os.Exit(1)
+			HandleError(err, "API server registration error")
 		}
 	} else {
 		if err := manager.Register(apiComponent); err != nil {
 			logger.Error("Failed to register API server component: %v", err)
-			fmt.Fprintf(os.Stderr, "API server registration error: %v\n", err)
-			os.Exit(1)
+			HandleError(err, "API server registration error")
 		}
 	}
 
@@ -188,8 +188,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := manager.Start(ctx); err != nil {
 		logger.Error("Failed to start components: %v", err)
-		fmt.Fprintf(os.Stderr, "Startup error: %v\n", err)
-		os.Exit(1)
+		HandleError(err, "Startup error")
 	}
 
 	logger.Info("Application started successfully")
@@ -209,5 +208,4 @@ func main() {
 
 	manager.Stop(shutdownCtx)
 	logger.Info("Shutdown complete")
-	os.Exit(0)
 }

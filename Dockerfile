@@ -14,18 +14,16 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o spectre ./cmd/main.go
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o spectre-mcp ./cmd/mcp-server/
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o spectre ./cmd/spectre
 
 FROM alpine:3.18
 WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /build/spectre .
-COPY --from=builder /build/spectre-mcp .
 COPY --from=ui-builder /ui-build/dist ./ui
 RUN mkdir -p /data
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD ["/app/spectre", "--health-check"] || exit 1
 
-ENTRYPOINT ["/app/spectre"]
+ENTRYPOINT ["/app/spectre", "server"]
