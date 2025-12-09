@@ -15,11 +15,13 @@ RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o spectre ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o spectre-mcp ./cmd/mcp-server/
 
 FROM alpine:3.18
 WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /build/spectre .
+COPY --from=builder /build/spectre-mcp .
 COPY --from=ui-builder /ui-build/dist ./ui
 RUN mkdir -p /data
 EXPOSE 8080
