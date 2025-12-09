@@ -523,6 +523,270 @@ func TestJSONEventBatchImport(t *testing.T) {
 	t.Log("✓ JSON event batch import test completed successfully!")
 }
 
+// TestBatchImportWithResourceTimeline validates batch import with multiple update events for a single resource:
+// 1. Deploy Spectre via Helm
+// 2. Generate a single Service resource with 10 update events in short succession (5-30 seconds apart)
+// 3. Push the JSON data to the batch import endpoint
+// 4. Verify the data is available through the timeline API
+func TestBatchImportWithResourceTimeline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping e2e test in short mode")
+	}
+
+	// Step 1: Deploy Spectre via Helm
+	t.Log("Step 1: Deploying Spectre via Helm")
+	testCtx := helpers.SetupE2ETest(t)
+	apiClient := testCtx.APIClient
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Step 2: Generate test events for a single resource with multiple updates
+	t.Log("Step 2: Generating Service resource with 10 update events")
+
+	now := time.Now()
+	namespace := "e2e-timeline-test"
+	serviceName := "test-service-timeline"
+	serviceUID := uuid.New().String()
+
+	var events []*models.Event
+
+	// Create initial CREATE event
+	createEvent := &models.Event{
+		ID:        uuid.New().String(),
+		Timestamp: now.UnixNano(),
+		Type:      models.EventTypeCreate,
+		Resource: models.ResourceMetadata{
+			Group:     "",
+			Version:   "v1",
+			Kind:      "Service",
+			Namespace: namespace,
+			Name:      serviceName,
+			UID:       serviceUID,
+		},
+		Data: []byte(fmt.Sprintf(
+			`{"apiVersion":"v1","kind":"Service","metadata":{"name":"%s","namespace":"%s","uid":"%s"},"spec":{"ports":[{"port":80,"targetPort":8080}],"selector":{"app":"test"}}}`,
+			serviceName, namespace, serviceUID,
+		)),
+	}
+	createEvent.DataSize = int32(len(createEvent.Data))
+	events = append(events, createEvent)
+
+	// Create 10 UPDATE events with 5-30 seconds between them
+	baseInterval := 5 * time.Second
+	for i := 0; i < 10; i++ {
+		// Vary the interval between 5-30 seconds
+		interval := baseInterval + time.Duration(i*2)*time.Second
+		timestamp := now.Add(interval)
+
+		updateEvent := &models.Event{
+			ID:        uuid.New().String(),
+			Timestamp: timestamp.UnixNano(),
+			Type:      models.EventTypeUpdate,
+			Resource: models.ResourceMetadata{
+				Group:     "",
+				Version:   "v1",
+				Kind:      "Service",
+				Namespace: namespace,
+				Name:      serviceName,
+				UID:       serviceUID,
+			},
+			Data: []byte(fmt.Sprintf(
+				`{"apiVersion":"v1","kind":"Service","metadata":{"name":"%s","namespace":"%s","uid":"%s","resourceVersion":"%d"},"spec":{"ports":[{"port":80,"targetPort":%d}],"selector":{"app":"test","version":"v%d"}}}`,
+				serviceName, namespace, serviceUID, i+2, 8080+i, i+1,
+			)),
+		}
+		updateEvent.DataSize = int32(len(updateEvent.Data))
+		events = append(events, updateEvent)
+	}
+
+	t.Logf("Generated %d events (1 CREATE + 10 UPDATE) for Service %s/%s", len(events), namespace, serviceName)
+
+	// Step 3: Push JSON data to batch import endpoint
+	t.Log("Step 3: Importing events via JSON batch import endpoint")
+
+	importPayload := map[string]interface{}{
+		"events": events,
+	}
+
+	payloadJSON, err := json.Marshal(importPayload)
+	require.NoError(t, err, "failed to marshal import payload")
+
+	importURL := fmt.Sprintf("%s/v1/storage/import?validate=true&overwrite=true", apiClient.BaseURL)
+	importReq, err := http.NewRequestWithContext(ctx, "POST", importURL, bytes.NewReader(payloadJSON))
+	require.NoError(t, err, "failed to create import request")
+	importReq.Header.Set("Content-Type", "application/vnd.spectre.events.v1+json")
+
+	importResp, err := http.DefaultClient.Do(importReq)
+	require.NoError(t, err, "failed to execute import request")
+	defer importResp.Body.Close()
+
+	require.Equal(t, http.StatusOK, importResp.StatusCode, "import request failed with status %d", importResp.StatusCode)
+
+	// Parse import response
+	var importReport map[string]interface{}
+	err = json.NewDecoder(importResp.Body).Decode(&importReport)
+	require.NoError(t, err, "failed to decode import response")
+	t.Logf("Import report: %+v", importReport)
+
+	// Verify all events were imported
+	if totalEvents, ok := importReport["total_events"].(float64); ok {
+		assert.Equal(t, float64(11), totalEvents, "Expected 11 events to be imported (1 CREATE + 10 UPDATE)")
+		t.Logf("✓ Imported %.0f events", totalEvents)
+	} else {
+		t.Fatal("total_events not found in import report")
+	}
+
+	// Step 4: Verify data is available through the timeline API
+	t.Log("Step 4: Verifying data via timeline API")
+
+	// Wait for data to be indexed
+	time.Sleep(3 * time.Second)
+
+	// Verify namespace appears in metadata
+	helpers.EventuallyCondition(t, func() bool {
+		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer metadataCancel()
+
+		metadata, err := apiClient.GetMetadata(metadataCtx, nil, nil)
+		if err != nil {
+			t.Logf("GetMetadata failed: %v", err)
+			return false
+		}
+
+		for _, ns := range metadata.Namespaces {
+			if ns == namespace {
+				t.Logf("✓ Namespace %s found in metadata", namespace)
+				return true
+			}
+		}
+
+		t.Logf("Namespace %s not yet in metadata", namespace)
+		return false
+	}, helpers.SlowEventuallyOption)
+
+	// Verify Service kind appears in metadata
+	helpers.EventuallyCondition(t, func() bool {
+		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer metadataCancel()
+
+		metadata, err := apiClient.GetMetadata(metadataCtx, nil, nil)
+		if err != nil {
+			t.Logf("GetMetadata failed: %v", err)
+			return false
+		}
+
+		for _, kind := range metadata.Kinds {
+			if kind == "Service" {
+				t.Logf("✓ Service kind found in metadata")
+				return true
+			}
+		}
+
+		t.Logf("Service kind not yet in metadata")
+		return false
+	}, helpers.SlowEventuallyOption)
+
+	// Verify resource can be found via search
+	startTime := now.Unix() - 300
+	endTime := now.Unix() + 300
+
+	var resourceID string
+	helpers.EventuallyCondition(t, func() bool {
+		searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer searchCancel()
+
+		resp, err := apiClient.Search(searchCtx, startTime, endTime, namespace, "Service")
+		if err != nil {
+			t.Logf("Search failed: %v", err)
+			return false
+		}
+
+		for _, r := range resp.Resources {
+			if r.Name == serviceName {
+				resourceID = r.ID
+				t.Logf("✓ Found Service %s/%s with ID %s", namespace, serviceName, resourceID)
+				return true
+			}
+		}
+
+		t.Logf("Service %s/%s not yet found in search results", namespace, serviceName)
+		return false
+	}, helpers.SlowEventuallyOption)
+
+	require.NotEmpty(t, resourceID, "Resource ID should be set after search")
+	require.Equal(t, serviceUID, resourceID, "Resource ID should match the UID we created")
+
+	// Verify timeline shows all status segments for this resource
+	// The timeline endpoint returns resources with their full status history
+	var timelineResource *helpers.Resource
+	helpers.EventuallyCondition(t, func() bool {
+		timelineCtx, timelineCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer timelineCancel()
+
+		timelineURL := fmt.Sprintf("%s/v1/timeline?start=%d&end=%d&namespace=%s&kind=Service",
+			apiClient.BaseURL, startTime, endTime, namespace)
+
+		req, err := http.NewRequestWithContext(timelineCtx, "GET", timelineURL, nil)
+		if err != nil {
+			t.Logf("Failed to create timeline request: %v", err)
+			return false
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Logf("Timeline request failed: %v", err)
+			return false
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Logf("Timeline request returned status %d", resp.StatusCode)
+			return false
+		}
+
+		var timelineResp helpers.SearchResponse
+		if err := json.NewDecoder(resp.Body).Decode(&timelineResp); err != nil {
+			t.Logf("Failed to decode timeline response: %v", err)
+			return false
+		}
+
+		// Find our specific resource
+		for i := range timelineResp.Resources {
+			if timelineResp.Resources[i].ID == resourceID {
+				timelineResource = &timelineResp.Resources[i]
+				break
+			}
+		}
+
+		if timelineResource == nil {
+			t.Logf("Resource %s not found in timeline response", resourceID)
+			return false
+		}
+
+		// The timeline should show status segments for all the updates
+		// With 11 events (1 CREATE + 10 UPDATE), we should have at least some status segments
+		if len(timelineResource.StatusSegments) < 1 {
+			t.Logf("Expected status segments in timeline, got %d", len(timelineResource.StatusSegments))
+			return false
+		}
+
+		t.Logf("✓ Timeline contains %d status segments for resource", len(timelineResource.StatusSegments))
+		return true
+	}, helpers.SlowEventuallyOption)
+
+	require.NotNil(t, timelineResource, "Timeline resource should be found")
+
+	// Verify status segments exist and are ordered
+	assert.Greater(t, len(timelineResource.StatusSegments), 0, "Should have status segments")
+	for i := 1; i < len(timelineResource.StatusSegments); i++ {
+		assert.LessOrEqual(t, timelineResource.StatusSegments[i-1].StartTime, timelineResource.StatusSegments[i].StartTime,
+			"Status segments should be ordered by start time")
+	}
+
+	t.Log("✓ Batch import with resource timeline test completed successfully!")
+}
+
 // generateTestEvents creates a batch of test events with variety across namespaces and kinds
 func generateTestEvents(baseTime time.Time, namespaces []string) []*models.Event {
 	var events []*models.Event
