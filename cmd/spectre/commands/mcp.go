@@ -36,7 +36,9 @@ func init() {
 
 func runMCP(cmd *cobra.Command, args []string) {
 	// Set up logging
-	logging.Initialize(logLevel)
+	if err := setupLog(GetLogLevel()); err != nil {
+		HandleError(err, "Failed to setup logging")
+	}
 	logger := logging.GetLogger("mcp")
 	logger.Info("Starting Spectre MCP Server")
 	logger.Info("Connecting to Spectre API at %s", spectreURL)

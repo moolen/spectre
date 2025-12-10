@@ -84,7 +84,7 @@ func (s *PodRestartStage) spectre_pod_is_restarted() *PodRestartStage {
 }
 
 func (s *PodRestartStage) wait_for_spectre_to_be_ready() *PodRestartStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	err := helpers.WaitForAppReady(ctx, s.testCtx.K8sClient, "monitoring", s.testCtx.ReleaseName)

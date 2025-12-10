@@ -70,7 +70,10 @@ func runServer(cmd *cobra.Command, args []string) {
 		HandleError(err, "Configuration error")
 	}
 
-	logging.Initialize(cfg.LogLevel)
+	// Setup logging
+	if err := setupLog(cfg.LogLevel); err != nil {
+		HandleError(err, "Failed to setup logging")
+	}
 	logger := logging.GetLogger("server")
 
 	if demo {
