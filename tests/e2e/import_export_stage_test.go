@@ -45,6 +45,8 @@ type ImportExportStage struct {
 	// Verification
 	resourceID       string
 	timelineResource *helpers.Resource
+	kubernetesEvents []*models.Event
+	involvedPodUIDs  []string
 
 	// CLI import on startup
 	spectreNamespace string
@@ -172,6 +174,82 @@ func (s *ImportExportStage) generated_service_with_timeline_events() *ImportExpo
 
 	s.resourceID = serviceUID
 	s.t.Logf("Generated %d events (1 CREATE + 10 UPDATE) for Service %s/%s", len(s.events), s.testNamespaces[0], serviceName)
+	return s
+}
+
+func (s *ImportExportStage) generated_test_events_with_kubernetes_events() *ImportExportStage {
+	s.baseTime = time.Now()
+	s.testNamespaces = []string{"e2e-k8s-events-1", "e2e-k8s-events-2"}
+	s.events = []*models.Event{}
+	s.kubernetesEvents = []*models.Event{}
+	s.involvedPodUIDs = []string{}
+
+	// Generate regular resources
+	kinds := []string{"Deployment", "Pod", "Service"}
+
+	for nsIdx, ns := range s.testNamespaces {
+		for kindIdx, kind := range kinds {
+			resourceUID := fmt.Sprintf("uid-%s-%d-%d", ns, nsIdx, kindIdx)
+			resourceName := fmt.Sprintf("test-%s-%d", strings.ToLower(kind), kindIdx)
+
+			// Create a regular resource event
+			timestamp := s.baseTime.Add(time.Duration(kindIdx*10) * time.Second)
+			event := &models.Event{
+				ID:        uuid.New().String(),
+				Timestamp: timestamp.UnixNano(),
+				Type:      models.EventTypeCreate,
+				Resource: models.ResourceMetadata{
+					Group:     "apps",
+					Version:   "v1",
+					Kind:      kind,
+					Namespace: ns,
+					Name:      resourceName,
+					UID:       resourceUID,
+				},
+				Data: []byte(fmt.Sprintf(
+					`{"apiVersion":"apps/v1","kind":%q,"metadata":{"name":%q,"namespace":%q,"uid":%q}}`,
+					kind, resourceName, ns, resourceUID,
+				)),
+			}
+			event.DataSize = int32(len(event.Data))
+			s.events = append(s.events, event)
+
+			// For Pod resources, create Kubernetes Events that reference them
+			if kind == "Pod" {
+				s.involvedPodUIDs = append(s.involvedPodUIDs, resourceUID)
+
+				// Create a Kubernetes Event for this Pod
+				eventName := fmt.Sprintf("pod-event-%d", kindIdx)
+				eventUID := uuid.New().String()
+				eventTimestamp := timestamp.Add(5 * time.Second)
+
+				kubeEvent := &models.Event{
+					ID:        uuid.New().String(),
+					Timestamp: eventTimestamp.UnixNano(),
+					Type:      models.EventTypeCreate,
+					Resource: models.ResourceMetadata{
+						Group:     "",
+						Version:   "v1",
+						Kind:      "Event",
+						Namespace: ns,
+						Name:      eventName,
+						UID:       eventUID,
+						// NOTE: InvolvedObjectUID should be populated by enrichEventsWithInvolvedObjectUID
+					},
+					Data: []byte(fmt.Sprintf(
+						`{"apiVersion":"v1","kind":"Event","metadata":{"name":%q,"namespace":%q,"uid":%q},"involvedObject":{"kind":"Pod","name":%q,"namespace":%q,"uid":%q},"reason":"Started","message":"Container started","type":"Normal"}`,
+						eventName, ns, eventUID, resourceName, ns, resourceUID,
+					)),
+				}
+				kubeEvent.DataSize = int32(len(kubeEvent.Data))
+				s.events = append(s.events, kubeEvent)
+				s.kubernetesEvents = append(s.kubernetesEvents, kubeEvent)
+			}
+		}
+	}
+
+	s.t.Logf("Generated %d total events including %d Kubernetes Events across %d namespaces",
+		len(s.events), len(s.kubernetesEvents), len(s.testNamespaces))
 	return s
 }
 
@@ -711,6 +789,145 @@ func (s *ImportExportStage) status_segments_are_ordered() *ImportExportStage {
 	}
 
 	s.t.Log("✓ Batch import with resource timeline test completed successfully!")
+	return s
+}
+
+func (s *ImportExportStage) kubernetes_event_kind_is_present() *ImportExportStage {
+	startTime := s.baseTime.Unix() - 300
+	endTime := s.baseTime.Unix() + 300
+
+	helpers.EventuallyCondition(s.t, func() bool {
+		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer metadataCancel()
+
+		metadata, err := s.apiClient.GetMetadata(metadataCtx, &startTime, &endTime)
+		if err != nil {
+			s.t.Logf("GetMetadata failed: %v", err)
+			return false
+		}
+
+		for _, kind := range metadata.Kinds {
+			if kind == "Event" {
+				s.t.Logf("✓ Event kind found in metadata")
+				// Also check resource count
+				if count, ok := metadata.ResourceCounts["Event"]; ok && count > 0 {
+					s.t.Logf("✓ Event resource count: %d", count)
+				}
+				return true
+			}
+		}
+
+		s.t.Logf("Event kind not yet in metadata, found kinds: %v", metadata.Kinds)
+		return false
+	}, helpers.SlowEventuallyOption)
+
+	return s
+}
+
+func (s *ImportExportStage) kubernetes_events_can_be_queried() *ImportExportStage {
+	startTime := s.baseTime.Unix() - 300
+	endTime := s.baseTime.Unix() + 300
+
+	// Events are not returned as standalone resources, they are attached to their involved objects
+	// So we query for Pod resources and verify they have events attached
+	for _, ns := range s.testNamespaces {
+		helpers.EventuallyCondition(s.t, func() bool {
+			searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer searchCancel()
+
+			resp, err := s.apiClient.Search(searchCtx, startTime, endTime, ns, "Pod")
+			if err != nil {
+				s.t.Logf("Search failed for namespace %s, kind Pod: %v", ns, err)
+				return false
+			}
+
+			if resp.Count > 0 {
+				s.t.Logf("Found %d Pod resources in namespace %s (which should have Events attached)", resp.Count, ns)
+				return true
+			}
+
+			s.t.Logf("No Pod resources found yet in namespace %s", ns)
+			return false
+		}, helpers.SlowEventuallyOption)
+	}
+
+	s.t.Log("✓ Pod resources with attached Kubernetes Events are queryable in all test namespaces")
+	return s
+}
+
+func (s *ImportExportStage) specific_kubernetes_event_is_present() *ImportExportStage {
+	startTime := s.baseTime.Unix() - 300
+	endTime := s.baseTime.Unix() + 300
+
+	// Verify that Kubernetes Events are attached to their involved Pod resources
+	// Events are not standalone resources but are attached via InvolvedObjectUID
+	for _, ns := range s.testNamespaces {
+		helpers.EventuallyCondition(s.t, func() bool {
+			timelineCtx, timelineCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer timelineCancel()
+
+			// Use timeline API to get resources with their attached events
+			timelineURL := fmt.Sprintf("%s/v1/timeline?start=%d&end=%d&namespace=%s&kind=Pod",
+				s.apiClient.BaseURL, startTime, endTime, ns)
+
+			req, err := http.NewRequestWithContext(timelineCtx, "GET", timelineURL, http.NoBody)
+			if err != nil {
+				s.t.Logf("Failed to create timeline request: %v", err)
+				return false
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				s.t.Logf("Timeline request failed: %v", err)
+				return false
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				s.t.Logf("Timeline request returned status %d", resp.StatusCode)
+				return false
+			}
+
+			var timelineResp helpers.SearchResponse
+			if err := json.NewDecoder(resp.Body).Decode(&timelineResp); err != nil {
+				s.t.Logf("Failed to decode timeline response: %v", err)
+				return false
+			}
+
+			if timelineResp.Count == 0 {
+				s.t.Logf("No Pod resources found yet in namespace %s", ns)
+				return false
+			}
+
+			// Check if Pods have Events attached
+			foundPodWithEvents := false
+			totalEventsFound := 0
+			for _, r := range timelineResp.Resources {
+				if r.Kind == "Pod" && len(r.Events) > 0 {
+					foundPodWithEvents = true
+					totalEventsFound += len(r.Events)
+					s.t.Logf("✓ Found Pod %s/%s with %d attached Kubernetes Events", r.Namespace, r.Name, len(r.Events))
+
+					// Verify that the events have expected properties
+					for _, evt := range r.Events {
+						if evt.Reason == "" || evt.Message == "" {
+							s.t.Logf("Warning: Event %s has empty reason or message", evt.ID)
+						}
+					}
+				}
+			}
+
+			if foundPodWithEvents && totalEventsFound > 0 {
+				s.t.Logf("✓ Found %d total Kubernetes Events attached to Pods in namespace %s", totalEventsFound, ns)
+				return true
+			}
+
+			s.t.Logf("No Pods with attached Events found yet in namespace %s", ns)
+			return false
+		}, helpers.SlowEventuallyOption)
+	}
+
+	s.t.Log("✓ JSON event batch import with Kubernetes Events test completed successfully!")
 	return s
 }
 

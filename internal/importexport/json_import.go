@@ -184,5 +184,50 @@ func ParseJSONEvents(r io.Reader) ([]*models.Event, error) {
 		return nil, fmt.Errorf("events array is empty")
 	}
 
+	// Enrich Kubernetes Event resources with involvedObject UID
+	enrichEventsWithInvolvedObjectUID(req.Events)
+
 	return req.Events, nil
+}
+
+// enrichEventsWithInvolvedObjectUID extracts the involvedObject.uid from Kubernetes Event resources
+// and populates the InvolvedObjectUID field in resource metadata.
+// This matches the behavior of the live watcher for file imports.
+func enrichEventsWithInvolvedObjectUID(events []*models.Event) {
+	for _, event := range events {
+		// Only process Kubernetes Event resources
+		if !strings.EqualFold(event.Resource.Kind, "Event") {
+			continue
+		}
+
+		// Skip if data is empty
+		if len(event.Data) == 0 {
+			continue
+		}
+
+		if event.Resource.InvolvedObjectUID != "" {
+			continue
+		}
+
+		// Extract involvedObject.uid from the JSON data
+		var eventData map[string]interface{}
+		if err := json.Unmarshal(event.Data, &eventData); err != nil {
+			// Skip events that can't be parsed - this shouldn't happen but handle gracefully
+			continue
+		}
+
+		// Navigate to involvedObject.uid
+		involvedObject, ok := eventData["involvedObject"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		uid, ok := involvedObject["uid"].(string)
+		if !ok || uid == "" {
+			continue
+		}
+
+		// Populate the InvolvedObjectUID field
+		event.Resource.InvolvedObjectUID = uid
+	}
 }
