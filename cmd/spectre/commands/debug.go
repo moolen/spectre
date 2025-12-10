@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/models"
 	"github.com/moolen/spectre/internal/storage"
 	"github.com/spf13/cobra"
@@ -20,14 +21,15 @@ var debugCmd = &cobra.Command{
 }
 
 var (
-	debugStorageFile      string
-	debugStorageGroup     string
-	debugStorageVersion   string
-	debugStorageKind      string
-	debugStorageNamespace string
-	debugStorageName      string
-	debugStorageExtended  bool
-	debugStorageJSON      bool
+	debugStorageFile          string
+	debugStorageGroup         string
+	debugStorageVersion       string
+	debugStorageKind          string
+	debugStorageNamespace     string
+	debugStorageName          string
+	debugStorageExtended      bool
+	debugStorageJSON          bool
+	debugStorageDumpResources bool
 )
 
 var debugStorageCmd = &cobra.Command{
@@ -47,8 +49,11 @@ func init() {
 	debugStorageCmd.Flags().StringVar(&debugStorageName, "name", "", "Filter by resource name")
 	debugStorageCmd.Flags().BoolVarP(&debugStorageExtended, "extended", "x", false, "Show extended details")
 	debugStorageCmd.Flags().BoolVar(&debugStorageJSON, "json", false, "Output as JSON")
+	debugStorageCmd.Flags().BoolVarP(&debugStorageDumpResources, "dump-resources", "d", false, "Output matched resources in JSON format for import")
 
-	debugStorageCmd.MarkFlagRequired("file")
+	if err := debugStorageCmd.MarkFlagRequired("file"); err != nil {
+		panic(fmt.Sprintf("failed to mark file flag as required: %v", err))
+	}
 
 	debugCmd.AddCommand(debugStorageCmd)
 }
@@ -72,7 +77,9 @@ func runDebugStorage(cmd *cobra.Command, args []string) {
 	filteredEvents := applyDebugFilter(data.Events, filter)
 
 	// Format and print output
-	if debugStorageJSON {
+	if debugStorageDumpResources {
+		printDumpResources(filteredEvents)
+	} else if debugStorageJSON {
 		printDebugJSON(data, filteredEvents)
 	} else if debugStorageExtended {
 		printDebugExtended(data, filteredEvents, filter)
@@ -112,7 +119,11 @@ func readDebugStorageFile(filePath string) (*debugFileData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create reader: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	header, err := reader.ReadFileHeader()
 	if err != nil {
@@ -160,9 +171,8 @@ func readDebugStorageFile(filePath string) (*debugFileData, error) {
 }
 
 // buildDebugStatistics calculates file statistics
-func buildDebugStatistics(header *storage.FileHeader, footer *storage.FileFooter,
-	index *storage.IndexSection, blocks []*debugBlockData, events []*models.Event) map[string]interface{} {
-
+func buildDebugStatistics(header *storage.FileHeader, _ *storage.FileFooter,
+	_ *storage.IndexSection, blocks []*debugBlockData, events []*models.Event) map[string]interface{} {
 	stats := make(map[string]interface{})
 
 	stats["format_version"] = header.FormatVersion
@@ -176,8 +186,8 @@ func buildDebugStatistics(header *storage.FileHeader, footer *storage.FileFooter
 
 	var compressedSize, uncompressedSize uint64
 	for _, block := range blocks {
-		compressedSize += uint64(block.Metadata.CompressedLength)
-		uncompressedSize += uint64(block.Metadata.UncompressedLength)
+		compressedSize += uint64(block.Metadata.CompressedLength)     //nolint:gosec // safe conversion: metadata lengths are positive
+		uncompressedSize += uint64(block.Metadata.UncompressedLength) //nolint:gosec // safe conversion: metadata lengths are positive
 	}
 	stats["compressed_size"] = compressedSize
 	stats["uncompressed_size"] = uncompressedSize
@@ -260,7 +270,7 @@ func printDebugSummary(data *debugFileData, events []*models.Event, filter *debu
 	fmt.Printf("Format Version:    %s\n", data.Header.FormatVersion)
 	fmt.Printf("Compression:       %s\n", data.Header.CompressionAlgorithm)
 	fmt.Printf("Encoding:          %s\n", data.Header.EncodingFormat)
-	fmt.Printf("Target Block Size: %s\n", formatDebugBytes(uint64(data.Header.BlockSize)))
+	fmt.Printf("Target Block Size: %s\n", formatDebugBytes(uint64(data.Header.BlockSize))) //nolint:gosec // safe conversion: block size is positive
 	fmt.Printf("Checksum Enabled:  %v\n", data.Header.ChecksumEnabled)
 	fmt.Printf("Created:           %s\n\n", time.Unix(0, data.Header.CreatedAt).Format(time.RFC3339))
 
@@ -286,16 +296,16 @@ func printDebugSummary(data *debugFileData, events []*models.Event, filter *debu
 
 	fmt.Println("=== Blocks ===")
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Block ID\tOffset\tCompressed\tUncompressed\tEvents")
+	_, _ = fmt.Fprintln(w, "Block ID\tOffset\tCompressed\tUncompressed\tEvents")
 	for i, block := range data.Blocks {
-		fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%d\n",
+		_, _ = fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%d\n",
 			i,
 			block.Metadata.Offset,
-			formatDebugBytes(uint64(block.Metadata.CompressedLength)),
-			formatDebugBytes(uint64(block.Metadata.UncompressedLength)),
+			formatDebugBytes(uint64(block.Metadata.CompressedLength)),   //nolint:gosec // safe conversion: metadata lengths are positive
+			formatDebugBytes(uint64(block.Metadata.UncompressedLength)), //nolint:gosec // safe conversion: metadata lengths are positive
 			block.Metadata.EventCount)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	if !isDebugFilterEmpty(filter) {
 		fmt.Println("\n=== Filter Results ===")
@@ -314,8 +324,8 @@ func printDebugExtended(data *debugFileData, events []*models.Event, filter *deb
 	for i, block := range data.Blocks {
 		fmt.Printf("\n--- Block %d ---\n", i)
 		fmt.Printf("Offset:         %d\n", block.Metadata.Offset)
-		fmt.Printf("Compressed:     %s\n", formatDebugBytes(uint64(block.Metadata.CompressedLength)))
-		fmt.Printf("Uncompressed:   %s\n", formatDebugBytes(uint64(block.Metadata.UncompressedLength)))
+		fmt.Printf("Compressed:     %s\n", formatDebugBytes(uint64(block.Metadata.CompressedLength)))   //nolint:gosec // safe conversion: metadata lengths are positive
+		fmt.Printf("Uncompressed:   %s\n", formatDebugBytes(uint64(block.Metadata.UncompressedLength))) //nolint:gosec // safe conversion: metadata lengths are positive
 		fmt.Printf("Event Count:    %d\n", block.Metadata.EventCount)
 		fmt.Printf("Checksum:       %s\n", block.Metadata.Checksum)
 		fmt.Printf("Min Timestamp:  %s\n", time.Unix(0, block.Metadata.TimestampMin).Format(time.RFC3339))
@@ -324,9 +334,9 @@ func printDebugExtended(data *debugFileData, events []*models.Event, filter *deb
 
 	fmt.Println("\n=== Events ===")
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Timestamp\tType\tKind\tNamespace\tName\tSize")
+	_, _ = fmt.Fprintln(w, "Timestamp\tType\tKind\tNamespace\tName\tSize")
 	for _, event := range events {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			time.Unix(0, event.Timestamp).Format("15:04:05"),
 			debugEventTypeString(event.Type),
 			event.Resource.Kind,
@@ -334,7 +344,7 @@ func printDebugExtended(data *debugFileData, events []*models.Event, filter *deb
 			event.Resource.Name,
 			formatDebugBytes(uint64(len(event.Data))))
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	if len(data.FinalResourceStates) > 0 {
 		fmt.Println("\n=== Final Resource States ===")
@@ -354,6 +364,19 @@ func printDebugJSON(data *debugFileData, events []*models.Event) {
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(output); err != nil {
 		HandleError(err, "Failed to encode JSON")
+	}
+}
+
+func printDumpResources(events []*models.Event) {
+	request := &importexport.BatchEventImportRequest{
+		Events: events,
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(request); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to encode JSON: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -378,7 +401,7 @@ func printDebugFilterInfo(filter *debugEventFilter) {
 
 func printDebugFinalResourceStates(states map[string]*storage.ResourceLastState) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Resource\tType\tTimestamp\tSize")
+	_, _ = fmt.Fprintln(w, "Resource\tType\tTimestamp\tSize")
 
 	keys := make([]string, 0, len(states))
 	for k := range states {
@@ -398,13 +421,13 @@ func printDebugFinalResourceStates(states map[string]*storage.ResourceLastState)
 		case "DELETE":
 			eventType = models.EventTypeDelete
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			key,
 			debugEventTypeString(eventType),
 			time.Unix(0, state.Timestamp).Format("15:04:05"),
 			formatDebugBytes(uint64(len(state.ResourceData))))
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 func getDebugUniqueResources(events []*models.Event) map[string]*models.Event {

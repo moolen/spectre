@@ -206,6 +206,8 @@ func runServer(cmd *cobra.Command, args []string) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	manager.Stop(shutdownCtx)
+	if err := manager.Stop(shutdownCtx); err != nil {
+		logger.Error("Error during shutdown: %v", err)
+	}
 	logger.Info("Shutdown complete")
 }
