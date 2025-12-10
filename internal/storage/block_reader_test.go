@@ -367,3 +367,201 @@ func TestComputeChecksum(t *testing.T) {
 		t.Error("expected different checksum for different data")
 	}
 }
+
+func TestBlockReaderReadBlockWithCache_CacheHit(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "test.bin")
+	filename := "test.bin"
+
+	// Create a file with events
+	bsf, err := NewBlockStorageFile(filePath, time.Now().Unix(), DefaultBlockSize)
+	if err != nil {
+		t.Fatalf("failed to create block storage file: %v", err)
+	}
+
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
+	bsf.WriteEvent(event)
+	bsf.Close()
+
+	reader, err := NewBlockReader(filePath)
+	if err != nil {
+		t.Fatalf("failed to create block reader: %v", err)
+	}
+	defer reader.Close()
+
+	// Get block metadata
+	footer, err := reader.ReadFileFooter()
+	if err != nil {
+		t.Fatalf("failed to read footer: %v", err)
+	}
+
+	indexSection, err := reader.ReadIndexSection(footer.IndexSectionOffset, footer.IndexSectionLength)
+	if err != nil {
+		t.Fatalf("failed to read index section: %v", err)
+	}
+
+	if len(indexSection.BlockMetadata) == 0 {
+		t.Fatal("expected at least one block metadata")
+	}
+
+	metadata := indexSection.BlockMetadata[0]
+
+	// Create cache and pre-populate it with a cached block
+	cache, err := NewBlockCache(100) // 100MB cache
+	if err != nil {
+		t.Fatalf("failed to create cache: %v", err)
+	}
+
+	// Read the block first to populate cache
+	firstRead, err := reader.ReadBlockWithCache(filename, metadata, cache)
+	if err != nil {
+		t.Fatalf("failed to read block with cache (first read): %v", err)
+	}
+
+	// Verify cache stats show a miss for first read
+	stats := cache.Stats()
+	if stats.Misses == 0 {
+		t.Error("expected at least one cache miss for first read")
+	}
+
+	// Now read again - this should be a cache hit
+	secondRead, err := reader.ReadBlockWithCache(filename, metadata, cache)
+	if err != nil {
+		t.Fatalf("failed to read block with cache (second read): %v", err)
+	}
+
+	// Verify it's the same block (same pointer or same content)
+	if secondRead.BlockID != firstRead.BlockID {
+		t.Errorf("expected same block ID, got %s vs %s", secondRead.BlockID, firstRead.BlockID)
+	}
+
+	if len(secondRead.Events) != len(firstRead.Events) {
+		t.Errorf("expected same number of events, got %d vs %d", len(secondRead.Events), len(firstRead.Events))
+	}
+
+	// Verify cache stats show a hit for second read
+	stats = cache.Stats()
+	if stats.Hits == 0 {
+		t.Error("expected at least one cache hit for second read")
+	}
+
+	// Verify the events are the same
+	if len(secondRead.Events) > 0 && len(firstRead.Events) > 0 {
+		if secondRead.Events[0].Resource.Kind != firstRead.Events[0].Resource.Kind {
+			t.Errorf("expected same event kind, got %s vs %s",
+				secondRead.Events[0].Resource.Kind, firstRead.Events[0].Resource.Kind)
+		}
+	}
+}
+
+func TestBlockReaderReadBlockWithCache_CacheMiss(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "test.bin")
+	filename := "test.bin"
+
+	// Create a file with events
+	bsf, err := NewBlockStorageFile(filePath, time.Now().Unix(), DefaultBlockSize)
+	if err != nil {
+		t.Fatalf("failed to create block storage file: %v", err)
+	}
+
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
+	bsf.WriteEvent(event)
+	bsf.Close()
+
+	reader, err := NewBlockReader(filePath)
+	if err != nil {
+		t.Fatalf("failed to create block reader: %v", err)
+	}
+	defer reader.Close()
+
+	// Get block metadata
+	footer, err := reader.ReadFileFooter()
+	if err != nil {
+		t.Fatalf("failed to read footer: %v", err)
+	}
+
+	indexSection, err := reader.ReadIndexSection(footer.IndexSectionOffset, footer.IndexSectionLength)
+	if err != nil {
+		t.Fatalf("failed to read index section: %v", err)
+	}
+
+	if len(indexSection.BlockMetadata) == 0 {
+		t.Fatal("expected at least one block metadata")
+	}
+
+	metadata := indexSection.BlockMetadata[0]
+
+	// Create empty cache
+	cache, err := NewBlockCache(100) // 100MB cache
+	if err != nil {
+		t.Fatalf("failed to create cache: %v", err)
+	}
+
+	// Verify cache is empty
+	stats := cache.Stats()
+	if stats.Items != 0 {
+		t.Errorf("expected empty cache, got %d items", stats.Items)
+	}
+
+	// Read block with cache - should be a cache miss
+	cachedBlock, err := reader.ReadBlockWithCache(filename, metadata, cache)
+	if err != nil {
+		t.Fatalf("failed to read block with cache: %v", err)
+	}
+
+	// Verify the block was returned
+	if cachedBlock == nil {
+		t.Fatal("expected non-nil cached block")
+	}
+
+	// Verify block properties
+	if cachedBlock.BlockID != makeKey(filename, metadata.ID) {
+		t.Errorf("expected block ID %s, got %s", makeKey(filename, metadata.ID), cachedBlock.BlockID)
+	}
+
+	if cachedBlock.Filename != filename {
+		t.Errorf("expected filename %s, got %s", filename, cachedBlock.Filename)
+	}
+
+	if cachedBlock.ID != metadata.ID {
+		t.Errorf("expected block ID %d, got %d", metadata.ID, cachedBlock.ID)
+	}
+
+	if cachedBlock.Metadata != metadata {
+		t.Error("expected metadata to match")
+	}
+
+	// Verify events were parsed
+	if len(cachedBlock.Events) == 0 {
+		t.Error("expected at least one event")
+	}
+
+	if cachedBlock.Events[0].Resource.Kind != kindPod {
+		t.Errorf("expected Pod, got %s", cachedBlock.Events[0].Resource.Kind)
+	}
+
+	// Verify block was stored in cache
+	stats = cache.Stats()
+	if stats.Items != 1 {
+		t.Errorf("expected 1 item in cache, got %d", stats.Items)
+	}
+
+	if stats.Misses == 0 {
+		t.Error("expected at least one cache miss")
+	}
+
+	// Verify we can retrieve it from cache directly
+	retrieved := cache.Get(filename, metadata.ID)
+	if retrieved == nil {
+		t.Fatal("expected to retrieve block from cache")
+	}
+
+	if retrieved.BlockID != cachedBlock.BlockID {
+		t.Errorf("expected same block ID, got %s vs %s", retrieved.BlockID, cachedBlock.BlockID)
+	}
+
+	if len(retrieved.Events) != len(cachedBlock.Events) {
+		t.Errorf("expected same number of events, got %d vs %d", len(retrieved.Events), len(cachedBlock.Events))
+	}
+}
