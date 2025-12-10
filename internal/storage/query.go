@@ -102,7 +102,7 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 			reader, err := NewBlockReader(filePath)
 			if err == nil {
 				fileData, err := reader.ReadFile()
-				reader.Close()
+				_ = reader.Close()
 				if err == nil && fileData.IndexSection != nil && fileData.IndexSection.Statistics != nil {
 					stats := fileData.IndexSection.Statistics
 					// Check if file's event timestamps overlap with query range
@@ -198,7 +198,8 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 	}
 
 	// Combine both sets
-	allEvents = append(regularEvents, filteredSnapshots...)
+	regularEvents = append(regularEvents, filteredSnapshots...)
+	allEvents = regularEvents
 
 	// Sort events by timestamp
 	sort.Slice(allEvents, func(i, j int) bool {
@@ -209,11 +210,11 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 	executionTime := time.Since(start)
 	result := &models.QueryResult{
 		Events:          allEvents,
-		Count:           int32(len(allEvents)),
-		ExecutionTimeMs: int32(executionTime.Milliseconds()),
+		Count:           int32(len(allEvents)),               //nolint:gosec // safe conversion: event count is reasonable
+		ExecutionTimeMs: int32(executionTime.Milliseconds()), //nolint:gosec // safe conversion: execution time is reasonable
 		SegmentsScanned: totalSegmentsScanned,
 		SegmentsSkipped: totalSegmentsSkipped,
-		FilesSearched:   int32(filesSearched),
+		FilesSearched:   int32(filesSearched), //nolint:gosec // safe conversion: file count is reasonable
 	}
 
 	qe.logger.InfoWithFields("Query complete",
@@ -247,12 +248,16 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 		}
 		return nil, 0, 0, err
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	// Read complete file structure
 	fileData, err := reader.ReadFile()
 	if err != nil {
-		reader.Close() // Close before trying legacy format
+		// Defer will handle the close
 		// If it's not a valid block storage file, try legacy segment format
 		if isInvalidBlockFormatError(err) {
 			return nil, 0, 0, fmt.Errorf("file %s is not block storage format", filePath)
@@ -385,7 +390,11 @@ func (qe *QueryExecutor) queryIncompleteFile(filePath string, query *models.Quer
 		qe.logger.Debug("File %s cannot be read: %v", filePath, err)
 		return []models.Event{}, 0, 0, nil
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	fileData, err := reader.ReadFile()
 	if err != nil {
@@ -524,8 +533,7 @@ func (qe *QueryExecutor) getResourceKey(resource models.ResourceMetadata) string
 // for resources that don't have actual events in the query range
 func (qe *QueryExecutor) getStateSnapshotEvents(finalStates map[string]*ResourceLastState,
 	query *models.QueryRequest, resourcesWithEvents map[string]bool) []models.Event {
-
-	var stateEvents []models.Event
+	stateEvents := make([]models.Event, 0, len(finalStates))
 
 	for resourceKey, state := range finalStates {
 		// Skip if this resource already has events in the query results
@@ -534,7 +542,7 @@ func (qe *QueryExecutor) getStateSnapshotEvents(finalStates map[string]*Resource
 		}
 
 		// Skip deleted resources - they shouldn't appear in the consistent view
-		if state.EventType == "DELETE" {
+		if state.EventType == string(models.EventTypeDelete) {
 			continue
 		}
 

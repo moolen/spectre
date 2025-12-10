@@ -77,7 +77,7 @@ func (v *Validator) ValidateQuery(query *models.QueryRequest) error {
 
 // isValidNamespace checks if a namespace name is valid per Kubernetes naming rules
 func isValidNamespace(namespace string) bool {
-	if len(namespace) == 0 || len(namespace) > 63 {
+	if namespace == "" || len(namespace) > 63 {
 		return false
 	}
 

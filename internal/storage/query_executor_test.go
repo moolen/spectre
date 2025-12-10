@@ -9,6 +9,10 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
+const (
+	namespaceDefault = "default"
+)
+
 func TestQueryExecutorExecute_EmptyStorage(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, err := New(tmpDir, 1024*1024)
@@ -53,8 +57,8 @@ func TestQueryExecutorExecute_WithEvents(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod2", "default", "Pod", now.Add(-20*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod2", "default", kindPod, now.Add(-20*time.Minute).UnixNano()),
 		createTestEvent("svc1", "default", "Service", now.Add(-10*time.Minute).UnixNano()),
 	}
 
@@ -108,8 +112,8 @@ func TestQueryExecutorExecute_WithFilters(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod2", "default", "Pod", now.Add(-20*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod2", "default", kindPod, now.Add(-20*time.Minute).UnixNano()),
 		createTestEvent("svc1", "default", "Service", now.Add(-10*time.Minute).UnixNano()),
 	}
 
@@ -137,7 +141,7 @@ func TestQueryExecutorExecute_WithFilters(t *testing.T) {
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 3600,
 		EndTimestamp:   baseTime,
-		Filters:        models.QueryFilters{Kind: "Pod"},
+		Filters:        models.QueryFilters{Kind: kindPod},
 	}
 
 	result, err := executor.Execute(query)
@@ -147,7 +151,7 @@ func TestQueryExecutorExecute_WithFilters(t *testing.T) {
 
 	// Should only get Pod events
 	for _, event := range result.Events {
-		if event.Resource.Kind != "Pod" {
+		if event.Resource.Kind != kindPod {
 			t.Errorf("expected Pod, got %s", event.Resource.Kind)
 		}
 	}
@@ -187,7 +191,7 @@ func TestQueryExecutorExecute_WithInMemoryEvents(t *testing.T) {
 	// Write events (they'll be in memory until segment is finalized)
 	now := time.Now()
 	baseTime := now.Unix()
-	event := createTestEvent("pod1", "default", "Pod", now.UnixNano())
+	event := createTestEvent("pod1", "default", kindPod, now.UnixNano())
 
 	if err := storage.WriteEvent(event); err != nil {
 		t.Fatalf("failed to write event: %v", err)
@@ -223,8 +227,8 @@ func TestQueryExecutorQueryCount(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod2", "default", "Pod", now.Add(-20*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod2", "default", kindPod, now.Add(-20*time.Minute).UnixNano()),
 	}
 
 	for _, event := range events {
@@ -273,7 +277,7 @@ func TestQueryExecutorQueryIncompleteFile(t *testing.T) {
 	// Write an event but don't close (file will be incomplete)
 	now := time.Now()
 	baseTime := now.Unix()
-	event := createTestEvent("pod1", "default", "Pod", now.UnixNano())
+	event := createTestEvent("pod1", "default", kindPod, now.UnixNano())
 
 	if err := storage.WriteEvent(event); err != nil {
 		t.Fatalf("failed to write event: %v", err)
@@ -312,9 +316,9 @@ func TestQueryExecutorExecute_TimeRangeFiltering(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-2*time.Hour).UnixNano()),
-		createTestEvent("pod2", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod3", "default", "Pod", now.Add(-10*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-2*time.Hour).UnixNano()),
+		createTestEvent("pod2", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod3", "default", kindPod, now.Add(-10*time.Minute).UnixNano()),
 	}
 
 	for _, event := range events {
@@ -377,7 +381,7 @@ func TestQueryExecutorExecute_MultipleFiles(t *testing.T) {
 
 	// Write events to first file
 	for i := 0; i < 5; i++ {
-		event := createTestEvent("pod1", "default", "Pod", hour1.Add(time.Duration(i)*time.Minute).UnixNano())
+		event := createTestEvent("pod1", "default", kindPod, hour1.Add(time.Duration(i)*time.Minute).UnixNano())
 		if err := file1.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event to file1: %v", err)
 		}
@@ -401,7 +405,7 @@ func TestQueryExecutorExecute_MultipleFiles(t *testing.T) {
 
 	// Write events to second file
 	for i := 0; i < 5; i++ {
-		event := createTestEvent("pod2", "default", "Pod", hour2.Add(time.Duration(i)*time.Minute).UnixNano())
+		event := createTestEvent("pod2", "default", kindPod, hour2.Add(time.Duration(i)*time.Minute).UnixNano())
 		if err := file2.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event to file2: %v", err)
 		}
@@ -452,9 +456,9 @@ func TestQueryExecutorExecute_NamespaceFilter(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod2", "kube-system", "Pod", now.Add(-20*time.Minute).UnixNano()),
-		createTestEvent("pod3", "default", "Pod", now.Add(-10*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod2", "kube-system", kindPod, now.Add(-20*time.Minute).UnixNano()),
+		createTestEvent("pod3", "default", kindPod, now.Add(-10*time.Minute).UnixNano()),
 	}
 
 	for _, event := range events {
@@ -491,7 +495,7 @@ func TestQueryExecutorExecute_NamespaceFilter(t *testing.T) {
 
 	// Should only get events from default namespace
 	for _, event := range result.Events {
-		if event.Resource.Namespace != "default" {
+		if event.Resource.Namespace != namespaceDefault {
 			t.Errorf("expected default namespace, got %s", event.Resource.Namespace)
 		}
 	}
@@ -509,9 +513,9 @@ func TestQueryExecutorExecute_CombinedFilters(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
 		createTestEvent("svc1", "default", "Service", now.Add(-20*time.Minute).UnixNano()),
-		createTestEvent("pod2", "kube-system", "Pod", now.Add(-10*time.Minute).UnixNano()),
+		createTestEvent("pod2", "kube-system", kindPod, now.Add(-10*time.Minute).UnixNano()),
 	}
 
 	for _, event := range events {
@@ -538,7 +542,7 @@ func TestQueryExecutorExecute_CombinedFilters(t *testing.T) {
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 3600,
 		EndTimestamp:   baseTime,
-		Filters:        models.QueryFilters{Kind: "Pod", Namespace: "default"},
+		Filters:        models.QueryFilters{Kind: kindPod, Namespace: "default"},
 	}
 
 	result, err := executor.Execute(query)
@@ -548,10 +552,10 @@ func TestQueryExecutorExecute_CombinedFilters(t *testing.T) {
 
 	// Should only get Pods from default namespace
 	for _, event := range result.Events {
-		if event.Resource.Kind != "Pod" {
+		if event.Resource.Kind != kindPod {
 			t.Errorf("expected Pod, got %s", event.Resource.Kind)
 		}
-		if event.Resource.Namespace != "default" {
+		if event.Resource.Namespace != namespaceDefault {
 			t.Errorf("expected default namespace, got %s", event.Resource.Namespace)
 		}
 	}
@@ -569,7 +573,7 @@ func TestQueryExecutorExecute_ResultStatistics(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	for i := 0; i < 10; i++ {
-		event := createTestEvent("pod1", "default", "Pod", now.Add(time.Duration(-i)*time.Minute).UnixNano())
+		event := createTestEvent("pod1", "default", kindPod, now.Add(time.Duration(-i)*time.Minute).UnixNano())
 		if err := storage.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event: %v", err)
 		}
@@ -695,8 +699,8 @@ func TestQueryExecutorExecute_OpenFileWithoutIndexAndClosedFile(t *testing.T) {
 
 	// Write events to closed file
 	closedFileEvents := []*models.Event{
-		createTestEvent("closed-pod1", "default", "Pod", hour1.Add(0*time.Minute).UnixNano()),
-		createTestEvent("closed-pod2", "default", "Pod", hour1.Add(1*time.Minute).UnixNano()),
+		createTestEvent("closed-pod1", "default", kindPod, hour1.Add(0*time.Minute).UnixNano()),
+		createTestEvent("closed-pod2", "default", kindPod, hour1.Add(1*time.Minute).UnixNano()),
 		createTestEvent("closed-svc1", "default", "Service", hour1.Add(2*time.Minute).UnixNano()),
 	}
 	for _, event := range closedFileEvents {
@@ -718,8 +722,8 @@ func TestQueryExecutorExecute_OpenFileWithoutIndexAndClosedFile(t *testing.T) {
 
 	// Write events that stay in the open file's buffer (not closed = no footer/index)
 	openFileEvents := []*models.Event{
-		createTestEvent("open-pod1", "default", "Pod", now.Add(0*time.Minute).UnixNano()),
-		createTestEvent("open-pod2", "default", "Pod", now.Add(1*time.Minute).UnixNano()),
+		createTestEvent("open-pod1", "default", kindPod, now.Add(0*time.Minute).UnixNano()),
+		createTestEvent("open-pod2", "default", kindPod, now.Add(1*time.Minute).UnixNano()),
 		createTestEvent("open-svc1", "kube-system", "Service", now.Add(2*time.Minute).UnixNano()),
 	}
 	for _, event := range openFileEvents {
@@ -734,7 +738,7 @@ func TestQueryExecutorExecute_OpenFileWithoutIndexAndClosedFile(t *testing.T) {
 	executor := NewQueryExecutor(storage)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 10800, // 3 hours ago
-		EndTimestamp:   baseTime + 3600,   // 1 hour in future
+		EndTimestamp:   baseTime + 3600,  // 1 hour in future
 		Filters:        models.QueryFilters{},
 	}
 
@@ -801,8 +805,8 @@ func TestQueryExecutorExecute_OpenFileRestoredBlocksAndNewEvents(t *testing.T) {
 	}
 
 	initialEvents := []*models.Event{
-		createTestEvent("initial-pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("initial-pod2", "default", "Pod", now.Add(-25*time.Minute).UnixNano()),
+		createTestEvent("initial-pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("initial-pod2", "default", kindPod, now.Add(-25*time.Minute).UnixNano()),
 	}
 	for _, event := range initialEvents {
 		if err := storage1.WriteEvent(event); err != nil {
@@ -823,7 +827,7 @@ func TestQueryExecutorExecute_OpenFileRestoredBlocksAndNewEvents(t *testing.T) {
 
 	// Add new events to the reopened file (has restored blocks but new events in buffer)
 	newEvents := []*models.Event{
-		createTestEvent("new-pod1", "default", "Pod", now.Add(-10*time.Minute).UnixNano()),
+		createTestEvent("new-pod1", "default", kindPod, now.Add(-10*time.Minute).UnixNano()),
 		createTestEvent("new-svc1", "kube-system", "Service", now.Add(-5*time.Minute).UnixNano()),
 	}
 	for _, event := range newEvents {
@@ -838,7 +842,7 @@ func TestQueryExecutorExecute_OpenFileRestoredBlocksAndNewEvents(t *testing.T) {
 	executor := NewQueryExecutor(storage2)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 7200, // 2 hours ago
-		EndTimestamp:   baseTime + 3600,  // 1 hour in future
+		EndTimestamp:   baseTime + 3600, // 1 hour in future
 		Filters:        models.QueryFilters{},
 	}
 
@@ -890,8 +894,8 @@ func TestQueryExecutorExecute_OnlyRestoredBlocksNoNewEvents(t *testing.T) {
 	}
 
 	initialEvents := []*models.Event{
-		createTestEvent("initial-pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("initial-pod2", "default", "Pod", now.Add(-25*time.Minute).UnixNano()),
+		createTestEvent("initial-pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("initial-pod2", "default", kindPod, now.Add(-25*time.Minute).UnixNano()),
 		createTestEvent("initial-svc1", "default", "Service", now.Add(-20*time.Minute).UnixNano()),
 	}
 	for _, event := range initialEvents {
@@ -918,7 +922,7 @@ func TestQueryExecutorExecute_OnlyRestoredBlocksNoNewEvents(t *testing.T) {
 	executor := NewQueryExecutor(storage2)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 7200, // 2 hours ago
-		EndTimestamp:   baseTime + 3600,  // 1 hour in future
+		EndTimestamp:   baseTime + 3600, // 1 hour in future
 		Filters:        models.QueryFilters{},
 	}
 
@@ -969,8 +973,8 @@ func TestQueryExecutorExecute_WithNamespaceFilterOnOpenFile(t *testing.T) {
 	}
 
 	closedFileEvents := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod2", "kube-system", "Pod", now.Add(-25*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod2", "kube-system", kindPod, now.Add(-25*time.Minute).UnixNano()),
 	}
 	for _, event := range closedFileEvents {
 		if err := storage1.WriteEvent(event); err != nil {
@@ -988,8 +992,8 @@ func TestQueryExecutorExecute_WithNamespaceFilterOnOpenFile(t *testing.T) {
 	}
 
 	openFileEvents := []*models.Event{
-		createTestEvent("pod3", "default", "Pod", now.Add(-10*time.Minute).UnixNano()),
-		createTestEvent("pod4", "kube-system", "Pod", now.Add(-5*time.Minute).UnixNano()),
+		createTestEvent("pod3", "default", kindPod, now.Add(-10*time.Minute).UnixNano()),
+		createTestEvent("pod4", "kube-system", kindPod, now.Add(-5*time.Minute).UnixNano()),
 	}
 	for _, event := range openFileEvents {
 		if err := storage2.WriteEvent(event); err != nil {
@@ -1020,7 +1024,7 @@ func TestQueryExecutorExecute_WithNamespaceFilterOnOpenFile(t *testing.T) {
 
 	// Verify all events are from the correct namespace
 	for _, event := range result.Events {
-		if event.Resource.Namespace != "default" {
+		if event.Resource.Namespace != namespaceDefault {
 			t.Errorf("got event from '%s' namespace, expected 'default'", event.Resource.Namespace)
 		}
 	}
@@ -1062,11 +1066,11 @@ func TestQueryExecutorExecute_CurrentFileStillBeingWritten(t *testing.T) {
 	// Write multiple events that will be flushed to disk in blocks
 	// but the file will NOT have a footer (because storage is still open)
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-5*time.Minute).UnixNano()),
-		createTestEvent("pod2", "default", "Pod", now.Add(-4*time.Minute).UnixNano()),
-		createTestEvent("pod3", "default", "Pod", now.Add(-3*time.Minute).UnixNano()),
-		createTestEvent("pod4", "default", "Pod", now.Add(-2*time.Minute).UnixNano()),
-		createTestEvent("pod5", "default", "Pod", now.Add(-1*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-5*time.Minute).UnixNano()),
+		createTestEvent("pod2", "default", kindPod, now.Add(-4*time.Minute).UnixNano()),
+		createTestEvent("pod3", "default", kindPod, now.Add(-3*time.Minute).UnixNano()),
+		createTestEvent("pod4", "default", kindPod, now.Add(-2*time.Minute).UnixNano()),
+		createTestEvent("pod5", "default", kindPod, now.Add(-1*time.Minute).UnixNano()),
 	}
 	for _, event := range events {
 		if err := storage.WriteEvent(event); err != nil {
@@ -1079,7 +1083,7 @@ func TestQueryExecutorExecute_CurrentFileStillBeingWritten(t *testing.T) {
 	executor := NewQueryExecutor(storage)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 600, // 10 minutes ago
-		EndTimestamp:   baseTime,        // now
+		EndTimestamp:   baseTime,       // now
 		Filters:        models.QueryFilters{},
 	}
 
@@ -1134,7 +1138,7 @@ func TestQueryExecutorExecute_CurrentFileFinalizedBlocksNotInMemory(t *testing.T
 		largeEvents[i] = createTestEvent(
 			fmt.Sprintf("pod%d-with-long-name-to-make-event-bigger", i),
 			"default",
-			"Pod",
+			kindPod,
 			now.Add(time.Duration(-20+i)*time.Minute).UnixNano(),
 		)
 	}
@@ -1154,8 +1158,8 @@ func TestQueryExecutorExecute_CurrentFileFinalizedBlocksNotInMemory(t *testing.T
 	// === PART 2: Query the current file while it's still being written ===
 	executor := NewQueryExecutor(storage)
 	query := &models.QueryRequest{
-		StartTimestamp: baseTime - 2400,  // 40 minutes ago
-		EndTimestamp:   baseTime + 3600,   // 1 hour in future
+		StartTimestamp: baseTime - 2400, // 40 minutes ago
+		EndTimestamp:   baseTime + 3600, // 1 hour in future
 		Filters:        models.QueryFilters{},
 	}
 

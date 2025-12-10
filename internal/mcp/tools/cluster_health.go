@@ -10,6 +10,12 @@ import (
 	"github.com/moolen/spectre/internal/mcp/client"
 )
 
+const (
+	statusUnknown = "Unknown"
+	statusError   = "Error"
+	statusWarning = "Warning"
+)
+
 // ClusterHealthTool implements the cluster_health MCP tool
 type ClusterHealthTool struct {
 	client *client.SpectreClient
@@ -24,9 +30,10 @@ func NewClusterHealthTool(client *client.SpectreClient) *ClusterHealthTool {
 
 // Input represents the input for cluster_health tool
 type ClusterHealthInput struct {
-	StartTime int64  `json:"start_time"`
-	EndTime   int64  `json:"end_time"`
-	Namespace string `json:"namespace,omitempty"`
+	StartTime    int64  `json:"start_time"`
+	EndTime      int64  `json:"end_time"`
+	Namespace    string `json:"namespace,omitempty"`
+	MaxResources int    `json:"max_resources,omitempty"` // Max resources to list per status, default 100, max 500
 }
 
 // ResourceStatusCount represents count of resources in each status
@@ -83,10 +90,10 @@ func (t *ClusterHealthTool) Execute(ctx context.Context, input json.RawMessage) 
 
 	// If timestamps look like milliseconds, convert to seconds
 	if startTime > 10000000000 {
-		startTime = startTime / 1000
+		startTime /= 1000
 	}
 	if endTime > 10000000000 {
-		endTime = endTime / 1000
+		endTime /= 1000
 	}
 
 	// Validate time range
@@ -105,13 +112,16 @@ func (t *ClusterHealthTool) Execute(ctx context.Context, input json.RawMessage) 
 		return nil, fmt.Errorf("failed to query timeline: %w", err)
 	}
 
-	output := t.analyzeHealth(response)
+	// Apply default limit: 100 (default), max 500
+	maxResources := ApplyDefaultLimit(params.MaxResources, 100, 500)
+
+	output := t.analyzeHealth(response, maxResources)
 	output.AggregationTimeMs = time.Since(start).Milliseconds()
 
 	return output, nil
 }
 
-func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse) *ClusterHealthOutput {
+func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse, maxResources int) *ClusterHealthOutput {
 	output := &ClusterHealthOutput{
 		ResourcesByKind: make([]ResourceStatusCount, 0),
 	}
@@ -130,7 +140,7 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse) *Cl
 		}
 
 		// Get current status from last segment
-		currentStatus := "Unknown"
+		currentStatus := statusUnknown
 		errorDuration := int64(0)
 		errorMessage := ""
 
@@ -140,7 +150,7 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse) *Cl
 			errorMessage = lastSegment.Message
 
 			// Calculate error duration if in error state
-			if lastSegment.Status == "Error" || lastSegment.Status == "Warning" {
+			if lastSegment.Status == statusError || lastSegment.Status == statusWarning {
 				errorDuration = lastSegment.EndTime - lastSegment.StartTime
 			}
 		}
@@ -154,7 +164,7 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse) *Cl
 		output.TotalResources++
 
 		// Track issues
-		if currentStatus == "Error" || currentStatus == "Warning" {
+		if currentStatus == statusError || currentStatus == statusWarning {
 			issues = append(issues, Issue{
 				ResourceID:        resource.ID,
 				Kind:              resource.Kind,
@@ -171,9 +181,9 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse) *Cl
 		// Count by status for overall calculation
 		if currentStatus == "Ready" {
 			output.HealthyResourceCount++
-		} else if currentStatus == "Error" {
+		} else if currentStatus == statusError {
 			output.ErrorResourceCount++
-		} else if currentStatus == "Warning" {
+		} else if currentStatus == statusWarning {
 			output.WarningResourceCount++
 		}
 	}
@@ -181,16 +191,16 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse) *Cl
 	// Build resource status counts
 	for kind, statuses := range kindStatusMap {
 		count := ResourceStatusCount{
-			Kind:                kind,
-			Ready:               statuses["Ready"],
-			Warning:             statuses["Warning"],
-			Error:               statuses["Error"],
-			Terminating:         statuses["Terminating"],
-			Unknown:             statuses["Unknown"],
-			WarningResources:    kindResourceNamesMap[kind]["Warning"],
-			ErrorResources:      kindResourceNamesMap[kind]["Error"],
-			TerminatingResources: kindResourceNamesMap[kind]["Terminating"],
-			UnknownResources:    kindResourceNamesMap[kind]["Unknown"],
+			Kind:                 kind,
+			Ready:                statuses["Ready"],
+			Warning:              statuses["Warning"],
+			Error:                statuses["Error"],
+			Terminating:          statuses["Terminating"],
+			Unknown:              statuses["Unknown"],
+			WarningResources:     TruncateList(kindResourceNamesMap[kind]["Warning"], maxResources),
+			ErrorResources:       TruncateList(kindResourceNamesMap[kind]["Error"], maxResources),
+			TerminatingResources: TruncateList(kindResourceNamesMap[kind]["Terminating"], maxResources),
+			UnknownResources:     TruncateList(kindResourceNamesMap[kind]["Unknown"], maxResources),
 		}
 		count.TotalCount = count.Ready + count.Warning + count.Error + count.Terminating + count.Unknown
 

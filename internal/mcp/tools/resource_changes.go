@@ -27,8 +27,9 @@ func NewResourceChangesTool(client *client.SpectreClient) *ResourceChangesTool {
 type ResourceChangesInput struct {
 	StartTime        int64   `json:"start_time"`
 	EndTime          int64   `json:"end_time"`
-	Kinds            string  `json:"kinds,omitempty"` // comma-separated list
+	Kinds            string  `json:"kinds,omitempty"`         // comma-separated list
 	ImpactThreshold  float64 `json:"impact_threshold,omitempty"`
+	MaxResources     int     `json:"max_resources,omitempty"` // Max resources to return, default 50, max 500
 }
 
 // ChangeDetail represents a single change
@@ -85,10 +86,10 @@ func (t *ResourceChangesTool) Execute(ctx context.Context, input json.RawMessage
 
 	// Convert milliseconds to seconds if needed
 	if startTime > 10000000000 {
-		startTime = startTime / 1000
+		startTime /= 1000
 	}
 	if endTime > 10000000000 {
-		endTime = endTime / 1000
+		endTime /= 1000
 	}
 
 	if startTime >= endTime {
@@ -110,13 +111,16 @@ func (t *ResourceChangesTool) Execute(ctx context.Context, input json.RawMessage
 		return nil, fmt.Errorf("failed to query timeline: %w", err)
 	}
 
-	output := t.analyzeChanges(response, params.ImpactThreshold)
+	// Apply default limit: 50 (default), max 500
+	maxResources := ApplyDefaultLimit(params.MaxResources, 50, 500)
+
+	output := t.analyzeChanges(response, params.ImpactThreshold, maxResources)
 	output.AggregationTimeMs = time.Since(start).Milliseconds()
 
 	return output, nil
 }
 
-func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, impactThreshold float64) *ResourceChangesOutput {
+func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, impactThreshold float64, maxResources int) *ResourceChangesOutput {
 	output := &ResourceChangesOutput{
 		Changes: make([]ResourceChangeSummary, 0),
 	}
@@ -174,6 +178,11 @@ func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, 
 	sort.Slice(output.Changes, func(i, j int) bool {
 		return output.Changes[i].ImpactScore > output.Changes[j].ImpactScore
 	})
+
+	// Apply limit to top results
+	if len(output.Changes) > maxResources {
+		output.Changes = output.Changes[:maxResources]
+	}
 
 	output.ResourcesAffected = len(output.Changes)
 	output.TotalChanges = output.ResourcesAffected // Simplified for now

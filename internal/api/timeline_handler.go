@@ -45,7 +45,7 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, timelineResponse)
+	_ = writeJSON(w, timelineResponse)
 
 	th.logger.Debug("Timeline completed: resources=%d, executionTime=%dms", timelineResponse.Count, timelineResponse.ExecutionTimeMs)
 }
@@ -150,5 +150,5 @@ func (th *TimelineHandler) respondWithError(w http.ResponseWriter, statusCode in
 		"message": message,
 	}
 
-	writeJSON(w, response)
+	_ = writeJSON(w, response)
 }

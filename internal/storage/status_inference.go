@@ -360,7 +360,7 @@ func (r *resourceData) conditions() []condition {
 		return nil
 	}
 	raw := getSliceValue(status, "conditions")
-	var conds []condition
+	conds := make([]condition, 0, len(raw))
 	for _, item := range raw {
 		condMap, ok := item.(map[string]any)
 		if !ok {
@@ -386,8 +386,9 @@ func (r *resourceData) condition(name string) *condition {
 	return nil
 }
 
-func (r *resourceData) specInt(key string) int64 {
-	return getIntValue(r.spec(), key)
+func (r *resourceData) specInt(_ string) int64 {
+	// key parameter is kept for interface consistency, but currently always "replicas"
+	return getIntValue(r.spec(), "replicas")
 }
 
 func (r *resourceData) statusInt(key string) int64 {

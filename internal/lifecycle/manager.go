@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -263,7 +264,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 		duration := time.Since(startTime)
 
 		if err != nil {
-			if err == context.DeadlineExceeded {
+			if errors.Is(err, context.DeadlineExceeded) {
 				m.logger.Warn("Component %s exceeded grace period (%dms timeout), forcing termination",
 					component.Name(), m.shutdownTimeout.Milliseconds())
 			} else {

@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+const (
+	kindPod = "Pod"
+)
+
 func TestNewBlockReader(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.bin")
@@ -74,7 +78,7 @@ func TestBlockReaderReadFileFooter(t *testing.T) {
 		t.Fatalf("failed to create block storage file: %v", err)
 	}
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	bsf.WriteEvent(event)
 	bsf.Close()
 
@@ -108,7 +112,7 @@ func TestBlockReaderReadIndexSection(t *testing.T) {
 		t.Fatalf("failed to create block storage file: %v", err)
 	}
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	bsf.WriteEvent(event)
 	bsf.Close()
 
@@ -147,7 +151,7 @@ func TestBlockReaderReadBlock(t *testing.T) {
 		t.Fatalf("failed to create block storage file: %v", err)
 	}
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	bsf.WriteEvent(event)
 	bsf.Close()
 
@@ -186,7 +190,7 @@ func TestBlockReaderReadBlockEvents(t *testing.T) {
 		t.Fatalf("failed to create block storage file: %v", err)
 	}
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	bsf.WriteEvent(event)
 	bsf.Close()
 
@@ -214,7 +218,7 @@ func TestBlockReaderReadBlockEvents(t *testing.T) {
 		t.Error("expected at least one event")
 	}
 
-	if events[0].Resource.Kind != "Pod" {
+	if events[0].Resource.Kind != kindPod {
 		t.Errorf("expected Pod, got %s", events[0].Resource.Kind)
 	}
 }
@@ -229,7 +233,7 @@ func TestBlockReaderReadFile(t *testing.T) {
 		t.Fatalf("failed to create block storage file: %v", err)
 	}
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	bsf.WriteEvent(event)
 	bsf.Close()
 
@@ -267,7 +271,7 @@ func TestStorageFileDataGetEvents(t *testing.T) {
 		t.Fatalf("failed to create block storage file: %v", err)
 	}
 
-	event1 := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event1 := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	event2 := createTestEvent("svc-1", "default", "Service", time.Now().UnixNano())
 	bsf.WriteEvent(event1)
 	bsf.WriteEvent(event2)
@@ -295,7 +299,7 @@ func TestStorageFileDataGetEvents(t *testing.T) {
 	}
 
 	// Get events with filter
-	events, err = fileData.GetEvents(map[string]string{"kind": "Pod"})
+	events, err = fileData.GetEvents(map[string]string{"kind": kindPod})
 	if err != nil {
 		t.Fatalf("failed to get filtered events: %v", err)
 	}
@@ -306,7 +310,7 @@ func TestStorageFileDataGetEvents(t *testing.T) {
 
 	// Verify all returned events match filter
 	for _, event := range events {
-		if event.Resource.Kind != "Pod" {
+		if event.Resource.Kind != kindPod {
 			t.Errorf("expected Pod, got %s", event.Resource.Kind)
 		}
 	}
@@ -322,7 +326,7 @@ func TestVerifyBlockChecksum(t *testing.T) {
 		t.Fatalf("failed to create block storage file: %v", err)
 	}
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	bsf.WriteEvent(event)
 	bsf.Close()
 
@@ -352,7 +356,7 @@ func TestComputeChecksum(t *testing.T) {
 		t.Error("expected same checksum for same data")
 	}
 
-	if len(checksum1) == 0 {
+	if checksum1 == "" {
 		t.Error("expected non-empty checksum")
 	}
 

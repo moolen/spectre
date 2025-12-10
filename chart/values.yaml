@@ -41,6 +41,48 @@ service:
   sessionAffinity: None
   sessionAffinityConfig: {}
 
+# MCP (Model Context Protocol) sidecar configuration
+mcp:
+  enabled: true
+  spectreURL: "http://localhost:8080"  # Connect to main container via localhost
+  httpAddr: ":8081"
+  port: 8081
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /health
+      port: mcp
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+    successThreshold: 1
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /health
+      port: mcp
+    initialDelaySeconds: 3
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+    successThreshold: 1
+
 # Persistent storage configuration
 persistence:
   enabled: true

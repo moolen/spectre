@@ -23,7 +23,7 @@ func writeError(w http.ResponseWriter, statusCode int, errorCode, message string
 		"message": message,
 	}
 
-	writeJSON(w, response)
+	_ = writeJSON(w, response)
 }
 
 // ResponseFormatter formats API responses

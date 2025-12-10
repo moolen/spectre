@@ -157,8 +157,8 @@ func (d *DemoQueryExecutor) Execute(query *models.QueryRequest) (*models.QueryRe
 
 	return &models.QueryResult{
 		Events:          events,
-		Count:           int32(len(events)),
-		ExecutionTimeMs: int32(executionTime.Milliseconds()),
+		Count:           int32(len(events)),                          //nolint:gosec // safe conversion: event count is reasonable
+		ExecutionTimeMs: int32(executionTime.Milliseconds()),         //nolint:gosec // safe conversion: execution time is reasonable
 		SegmentsScanned: 1,
 		SegmentsSkipped: 0,
 		FilesSearched:   1,

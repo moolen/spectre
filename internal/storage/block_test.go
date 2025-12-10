@@ -40,7 +40,7 @@ func TestNewEventBuffer(t *testing.T) {
 func TestEventBufferAddEvent(t *testing.T) {
 	buffer := NewEventBuffer(1024)
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	eventJSON, _ := json.Marshal(event)
 
 	if !buffer.AddEvent(eventJSON) {
@@ -60,7 +60,7 @@ func TestEventBufferIsFull(t *testing.T) {
 	buffer := NewEventBuffer(100)
 
 	// First event should always fit
-	event1 := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event1 := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	event1JSON, _ := json.Marshal(event1)
 
 	if buffer.IsFull(int64(len(event1JSON))) {
@@ -80,7 +80,7 @@ func TestEventBufferMetadataTracking(t *testing.T) {
 	buffer := NewEventBuffer(10240)
 
 	now := time.Now()
-	event1 := createTestEvent("pod-1", "default", "Pod", now.UnixNano())
+	event1 := createTestEvent("pod-1", "default", kindPod, now.UnixNano())
 	event2 := createTestEvent("svc-1", "kube-system", "Service", now.Add(time.Second).UnixNano())
 	event3 := createTestEvent("deploy-1", "default", "Deployment", now.Add(2*time.Second).UnixNano())
 
@@ -107,7 +107,7 @@ func TestEventBufferMetadataTracking(t *testing.T) {
 	if len(buffer.kindSet) != 3 {
 		t.Errorf("expected 3 unique kinds, got %d", len(buffer.kindSet))
 	}
-	if !buffer.kindSet["Pod"] || !buffer.kindSet["Service"] || !buffer.kindSet["Deployment"] {
+	if !buffer.kindSet[kindPod] || !buffer.kindSet["Service"] || !buffer.kindSet["Deployment"] {
 		t.Error("expected all kinds to be tracked")
 	}
 
@@ -124,7 +124,7 @@ func TestEventBufferFinalize(t *testing.T) {
 	buffer := NewEventBuffer(10240)
 
 	now := time.Now()
-	event1 := createTestEvent("pod-1", "default", "Pod", now.UnixNano())
+	event1 := createTestEvent("pod-1", "default", kindPod, now.UnixNano())
 	event2 := createTestEvent("svc-1", "default", "Service", now.Add(time.Second).UnixNano())
 
 	event1JSON, _ := json.Marshal(event1)
@@ -175,7 +175,7 @@ func TestEventBufferFinalizeEmpty(t *testing.T) {
 func TestCompressBlock(t *testing.T) {
 	buffer := NewEventBuffer(10240)
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	eventJSON, _ := json.Marshal(event)
 	buffer.AddEvent(eventJSON)
 
@@ -207,7 +207,7 @@ func TestCompressBlock(t *testing.T) {
 func TestDecompressBlock(t *testing.T) {
 	buffer := NewEventBuffer(10240)
 
-	event := createTestEvent("pod-1", "default", "Pod", time.Now().UnixNano())
+	event := createTestEvent("pod-1", "default", kindPod, time.Now().UnixNano())
 	eventJSON, _ := json.Marshal(event)
 	buffer.AddEvent(eventJSON)
 
@@ -253,7 +253,7 @@ func TestDecompressBlock(t *testing.T) {
 			t.Fatalf("failed to unmarshal event: %v", err)
 		}
 
-		if event.Resource.Kind != "Pod" {
+		if event.Resource.Kind != kindPod {
 			t.Errorf("expected Pod, got %s", event.Resource.Kind)
 		}
 

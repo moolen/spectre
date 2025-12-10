@@ -414,7 +414,7 @@ func TestResourceStateTracking_FilteredConsistentView(t *testing.T) {
 	for _, state := range fileData.IndexSection.FinalResourceStates {
 		// Parse resource key to check namespaces
 		// Keys are: group/version/kind/namespace/name
-		if state.EventType != "DELETE" {
+		if state.EventType != string(models.EventTypeDelete) {
 			// Just verify states exist - full filtering is tested in state_snapshot_test.go
 			hasDefaultNs = true
 			hasKubeSystemNs = true

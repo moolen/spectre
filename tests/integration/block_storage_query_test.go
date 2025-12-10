@@ -25,7 +25,7 @@ func TestQueryBlockFiltering(t *testing.T) {
 	}
 
 	// Define kinds and namespaces for test data
-	kinds := []string{"Pod", "Service", "Deployment", "StatefulSet", "ConfigMap"}
+	kinds := []string{kindPod, "Service", kindDeployment, "StatefulSet", "ConfigMap"}
 	namespaces := []string{"default", "kube-system", "kube-public", "production", "staging"}
 
 	// Write events with selective distribution:
@@ -40,7 +40,7 @@ func TestQueryBlockFiltering(t *testing.T) {
 		if i%5 == 0 {
 			namespace = "production" // Some in production
 		}
-		event := createTestEventWithKindNamespaceQuery(eventCount, hourTimestamp+int64(eventCount), "Pod", namespace)
+		event := createTestEventWithKindNamespaceQuery(eventCount, hourTimestamp+int64(eventCount), kindPod, namespace)
 		if err := bsf.WriteEvent(event); err != nil {
 			t.Fatalf("Failed to write event: %v", err)
 		}
@@ -91,7 +91,7 @@ func TestQueryBlockFiltering(t *testing.T) {
 
 	// Test Query 1: Find all Pods in default namespace
 	filters := map[string]string{
-		"kind":      "Pod",
+		"kind":      kindPod,
 		"namespace": "default",
 	}
 
@@ -129,7 +129,7 @@ func TestQueryBlockFiltering(t *testing.T) {
 
 	// Test Query 3: Find all Service events (should skip blocks without Service)
 	filters3 := map[string]string{
-		"kind": "Deployment",
+		"kind": kindDeployment,
 	}
 
 	candidateBlocks3 := storage.GetCandidateBlocks(fileData.IndexSection.InvertedIndexes, filters3)
@@ -153,7 +153,7 @@ func TestQueryBlockFiltering(t *testing.T) {
 	// Verify the returned events match the filters
 	podDefaultCount := 0
 	for _, event := range events {
-		if event.Resource.Kind == "Pod" && event.Resource.Namespace == "default" {
+		if event.Resource.Kind == kindPod && event.Resource.Namespace == "default" {
 			podDefaultCount++
 		}
 	}
@@ -182,7 +182,7 @@ func TestQueryNoResults(t *testing.T) {
 
 	// Write only Pod/default events
 	for i := 0; i < 50; i++ {
-		event := createTestEventWithKindNamespaceQuery(i, hourTimestamp+int64(i), "Pod", "default")
+		event := createTestEventWithKindNamespaceQuery(i, hourTimestamp+int64(i), kindPod, "default")
 		if err := bsf.WriteEvent(event); err != nil {
 			t.Fatalf("Failed to write event: %v", err)
 		}
@@ -244,7 +244,7 @@ func TestQueryAllEvents(t *testing.T) {
 
 	eventCount := 75
 	for i := 0; i < eventCount; i++ {
-		event := createTestEventWithKindNamespaceQuery(i, hourTimestamp+int64(i), "Pod", "default")
+		event := createTestEventWithKindNamespaceQuery(i, hourTimestamp+int64(i), kindPod, "default")
 		if err := bsf.WriteEvent(event); err != nil {
 			t.Fatalf("Failed to write event: %v", err)
 		}
@@ -303,9 +303,9 @@ func createTestEventWithKindNamespaceQuery(id int, timestamp int64, kind, namesp
 
 func getGroupForKindQuery(kind string) string {
 	switch kind {
-	case "Deployment", "StatefulSet", "DaemonSet":
+	case kindDeployment, "StatefulSet", "DaemonSet":
 		return "apps"
-	case "Pod", "Service":
+	case kindPod, "Service":
 		return ""
 	default:
 		return ""

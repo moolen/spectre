@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/mcp"
 	"github.com/spf13/cobra"
 )
@@ -37,17 +36,20 @@ func init() {
 
 func runMCP(cmd *cobra.Command, args []string) {
 	// Set up logging
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("Starting Spectre MCP Server")
-	log.Printf("Connecting to Spectre API at %s", spectreURL)
+	if err := setupLog(GetLogLevel()); err != nil {
+		HandleError(err, "Failed to setup logging")
+	}
+	logger := logging.GetLogger("mcp")
+	logger.Info("Starting Spectre MCP Server")
+	logger.Info("Connecting to Spectre API at %s", spectreURL)
 
 	// Create MCP server
 	server, err := mcp.NewMCPServer(spectreURL)
 	if err != nil {
-		log.Fatalf("Failed to create MCP server: %v", err)
+		logger.Fatal("Failed to create MCP server: %v", err)
 	}
 
-	log.Println("Successfully connected to Spectre API")
+	logger.Info("Successfully connected to Spectre API")
 
 	// Create HTTP server
 	httpServer := &http.Server{
@@ -64,15 +66,15 @@ func runMCP(cmd *cobra.Command, args []string) {
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Starting HTTP server on %s", httpAddr)
+		logger.Info("Starting HTTP server on %s", httpAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start HTTP server: %v", err)
+			logger.Fatal("Failed to start HTTP server: %v", err)
 		}
 	}()
 
 	// Wait for shutdown signal
 	sig := <-sigCh
-	log.Printf("Received signal: %v, shutting down gracefully...", sig)
+	logger.Info("Received signal: %v, shutting down gracefully...", sig)
 
 	// Create a context with timeout for graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -80,10 +82,10 @@ func runMCP(cmd *cobra.Command, args []string) {
 
 	// Shutdown the HTTP server
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Error during shutdown: %v", err)
+		logger.Error("Error during shutdown: %v", err)
 	}
 
-	log.Println("Server stopped")
+	logger.Info("Server stopped")
 }
 
 // getEnv returns environment variable value or default
@@ -177,13 +179,13 @@ func newMCPHTTPHandler(mcpServer *mcp.MCPServer) http.Handler {
 	// Health check endpoint
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
 	// Root endpoint
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"name":    "Spectre MCP Server",
 			"version": Version,
 		})
@@ -287,7 +289,8 @@ func handleInitialize(params map[string]interface{}, sessionState *SessionState)
 
 	if clientInfo, ok := params["clientInfo"].(map[string]interface{}); ok {
 		sessionState.clientInfo = clientInfo
-		log.Printf("Client connected: %v", clientInfo)
+		logger := logging.GetLogger("mcp")
+		logger.Info("Client connected: %v", clientInfo)
 	}
 
 	if protocolVersion, ok := params["protocolVersion"].(string); ok {
@@ -310,7 +313,7 @@ func handleInitialize(params map[string]interface{}, sessionState *SessionState)
 	}, nil
 }
 
-func handleToolsList(mcpServer *mcp.MCPServer, params map[string]interface{}) interface{} {
+func handleToolsList(mcpServer *mcp.MCPServer, _ map[string]interface{}) interface{} {
 	return map[string]interface{}{
 		"tools": mcpServer.GetTools(),
 	}
@@ -352,7 +355,7 @@ func handleToolCall(ctx context.Context, mcpServer *mcp.MCPServer, params map[st
 	}, nil
 }
 
-func handlePromptsList(params map[string]interface{}) interface{} {
+func handlePromptsList(_ map[string]interface{}) interface{} {
 	return map[string]interface{}{
 		"prompts": getPrompts(),
 	}
@@ -378,11 +381,7 @@ func handlePromptsGet(params map[string]interface{}) (interface{}, *MCPError) {
 		args = arguments
 	}
 
-	result, err := buildPromptMessages(promptName, args)
-	if err != nil {
-		return nil, &MCPError{Code: -32603, Message: fmt.Sprintf("failed to build prompt: %v", err)}
-	}
-
+	result := buildPromptMessages(promptName, args)
 	return result, nil
 }
 
@@ -407,7 +406,6 @@ func handleLoggingSetLevel(params map[string]interface{}) (interface{}, *MCPErro
 		return nil, &MCPError{Code: -32600, Message: fmt.Sprintf("invalid logging level: %s (must be debug, info, warn, or error)", level)}
 	}
 
-	log.Printf("Logging level set to: %s", level)
 	return map[string]interface{}{}, nil
 }
 
@@ -417,13 +415,13 @@ func isInitialized(sessionState *SessionState) bool {
 	return sessionState.initialized
 }
 
-func sendMCPResponse(w http.ResponseWriter, id interface{}, result interface{}) {
+func sendMCPResponse(w http.ResponseWriter, id, result interface{}) {
 	response := MCPResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Result:  result,
 	}
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func sendMCPError(w http.ResponseWriter, id interface{}, code int, message string) {
@@ -435,7 +433,7 @@ func sendMCPError(w http.ResponseWriter, id interface{}, code int, message strin
 			Message: message,
 		},
 	}
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func formatMCPResult(result interface{}) string {
@@ -487,7 +485,7 @@ func getPromptByName(name string) *PromptDefinition {
 	return nil
 }
 
-func buildPromptMessages(promptName string, args map[string]interface{}) (*GetPromptResult, error) {
+func buildPromptMessages(promptName string, args map[string]interface{}) *GetPromptResult {
 	// Simplified version - full implementation should be in internal/mcp
 	return &GetPromptResult{
 		Description: fmt.Sprintf("Prompt: %s", promptName),
@@ -500,32 +498,5 @@ func buildPromptMessages(promptName string, args map[string]interface{}) (*GetPr
 				},
 			},
 		},
-	}, nil
-}
-
-func replaceTemplate(template, key, value string) string {
-	return strings.ReplaceAll(template, "{{"+key+"}}", value)
-}
-
-func removeConditional(template, key string) string {
-	startTag := "{{#if " + key + "}}"
-	endTag := "{{/if}}"
-
-	startIdx := strings.Index(template, startTag)
-	if startIdx == -1 {
-		return template
 	}
-
-	endIdx := strings.Index(template[startIdx:], endTag)
-	if endIdx == -1 {
-		return template
-	}
-
-	endIdx += startIdx + len(endTag)
-
-	if startIdx > 0 && template[startIdx-1] == '\n' {
-		startIdx--
-	}
-
-	return template[:startIdx] + template[endIdx:]
 }

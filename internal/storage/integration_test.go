@@ -24,10 +24,10 @@ func TestIntegration_WriteAndQuery(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod2", "default", "Pod", now.Add(-20*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod2", "default", kindPod, now.Add(-20*time.Minute).UnixNano()),
 		createTestEvent("svc1", "default", "Service", now.Add(-10*time.Minute).UnixNano()),
-		createTestEvent("pod3", "kube-system", "Pod", now.Add(-5*time.Minute).UnixNano()),
+		createTestEvent("pod3", "kube-system", kindPod, now.Add(-5*time.Minute).UnixNano()),
 	}
 
 	for _, event := range events {
@@ -94,8 +94,8 @@ func TestIntegration_FilteredQuery(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	events := []*models.Event{
-		createTestEvent("pod1", "default", "Pod", now.Add(-30*time.Minute).UnixNano()),
-		createTestEvent("pod2", "default", "Pod", now.Add(-20*time.Minute).UnixNano()),
+		createTestEvent("pod1", "default", kindPod, now.Add(-30*time.Minute).UnixNano()),
+		createTestEvent("pod2", "default", kindPod, now.Add(-20*time.Minute).UnixNano()),
 		createTestEvent("svc1", "default", "Service", now.Add(-10*time.Minute).UnixNano()),
 	}
 
@@ -123,7 +123,7 @@ func TestIntegration_FilteredQuery(t *testing.T) {
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 3600,
 		EndTimestamp:   baseTime,
-		Filters:        models.QueryFilters{Kind: "Pod"},
+		Filters:        models.QueryFilters{Kind: kindPod},
 	}
 
 	result, err := executor.Execute(query)
@@ -133,7 +133,7 @@ func TestIntegration_FilteredQuery(t *testing.T) {
 
 	// Should only get Pod events
 	for _, event := range result.Events {
-		if event.Resource.Kind != "Pod" {
+		if event.Resource.Kind != kindPod {
 			t.Errorf("expected Pod, got %s", event.Resource.Kind)
 		}
 	}
@@ -157,7 +157,7 @@ func TestIntegration_InMemoryAndFileEvents(t *testing.T) {
 
 	// Write events and close to create file
 	for i := 0; i < 5; i++ {
-		event := createTestEvent("file-pod", "default", "Pod", now.Add(-2*time.Hour).Add(time.Duration(i)*time.Minute).UnixNano())
+		event := createTestEvent("file-pod", "default", kindPod, now.Add(-2*time.Hour).Add(time.Duration(i)*time.Minute).UnixNano())
 		if err := storage.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event: %v", err)
 		}
@@ -177,7 +177,7 @@ func TestIntegration_InMemoryAndFileEvents(t *testing.T) {
 
 	// Write in-memory events
 	for i := 0; i < 3; i++ {
-		event := createTestEvent("memory-pod", "default", "Pod", now.Add(time.Duration(i)*time.Second).UnixNano())
+		event := createTestEvent("memory-pod", "default", kindPod, now.Add(time.Duration(i)*time.Second).UnixNano())
 		if err := storage.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event: %v", err)
 		}
@@ -223,7 +223,7 @@ func TestIntegration_MultipleFiles(t *testing.T) {
 
 	// Write events to first file
 	for i := 0; i < 10; i++ {
-		event := createTestEvent("file1-pod", "default", "Pod", hour1.Add(time.Duration(i)*time.Minute).UnixNano())
+		event := createTestEvent("file1-pod", "default", kindPod, hour1.Add(time.Duration(i)*time.Minute).UnixNano())
 		if err := file1.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event to file1: %v", err)
 		}
@@ -247,7 +247,7 @@ func TestIntegration_MultipleFiles(t *testing.T) {
 
 	// Write events to second file
 	for i := 0; i < 10; i++ {
-		event := createTestEvent("file2-pod", "default", "Pod", hour2.Add(time.Duration(i)*time.Minute).UnixNano())
+		event := createTestEvent("file2-pod", "default", kindPod, hour2.Add(time.Duration(i)*time.Minute).UnixNano())
 		if err := file2.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event to file2: %v", err)
 		}
@@ -304,7 +304,7 @@ func TestIntegration_ConcurrentWrites(t *testing.T) {
 	done := make(chan error, 10)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			event := createTestEvent("concurrent-pod", "default", "Pod", now.Add(time.Duration(id)*time.Second).UnixNano())
+			event := createTestEvent("concurrent-pod", "default", kindPod, now.Add(time.Duration(id)*time.Second).UnixNano())
 			done <- storage.WriteEvent(event)
 		}(i)
 	}
@@ -348,7 +348,7 @@ func TestIntegration_QueryStatistics(t *testing.T) {
 	now := time.Now()
 	baseTime := now.Unix()
 	for i := 0; i < 20; i++ {
-		event := createTestEvent("stat-pod", "default", "Pod", now.Add(time.Duration(-i)*time.Minute).UnixNano())
+		event := createTestEvent("stat-pod", "default", kindPod, now.Add(time.Duration(-i)*time.Minute).UnixNano())
 		if err := storage.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event: %v", err)
 		}
@@ -410,7 +410,7 @@ func TestIntegration_StorageLifecycle(t *testing.T) {
 	// Write events
 	now := time.Now()
 	for i := 0; i < 5; i++ {
-		event := createTestEvent("lifecycle-pod", "default", "Pod", now.Add(time.Duration(i)*time.Second).UnixNano())
+		event := createTestEvent("lifecycle-pod", "default", kindPod, now.Add(time.Duration(i)*time.Second).UnixNano())
 		if err := storage.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event: %v", err)
 		}
@@ -443,7 +443,7 @@ func TestIntegration_FileManagement(t *testing.T) {
 	// Write events
 	now := time.Now()
 	for i := 0; i < 5; i++ {
-		event := createTestEvent("file-mgmt-pod", "default", "Pod", now.Add(time.Duration(i)*time.Second).UnixNano())
+		event := createTestEvent("file-mgmt-pod", "default", kindPod, now.Add(time.Duration(i)*time.Second).UnixNano())
 		if err := storage.WriteEvent(event); err != nil {
 			t.Fatalf("failed to write event: %v", err)
 		}

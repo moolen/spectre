@@ -67,7 +67,7 @@ func TestStateSnapshot_BasicPersistence(t *testing.T) {
 		t.Errorf("expected UID test-uid-pod1, got %s", state.UID)
 	}
 
-	if state.EventType != "CREATE" {
+	if state.EventType != string(models.EventTypeCreate) {
 		t.Errorf("expected event type CREATE, got %s", state.EventType)
 	}
 }
@@ -464,8 +464,8 @@ func TestStateSnapshot_Cleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open block reader: %v", err)
 	}
-	fileData, err := reader.ReadFile()
-	reader.Close()
+	fileData, _ := reader.ReadFile()
+	_ = reader.Close()
 
 	if len(fileData.IndexSection.FinalResourceStates) == 0 {
 		t.Fatal("expected state snapshots before cleanup")
@@ -546,7 +546,7 @@ func TestStateSnapshot_NonDeletedResourcesPreserved(t *testing.T) {
 		t.Fatalf("failed to open block reader: %v", err)
 	}
 	fileData, err := reader.ReadFile()
-	reader.Close()
+	_ = reader.Close()
 
 	if err != nil {
 		t.Fatalf("failed to read file after cleanup: %v", err)
@@ -558,7 +558,7 @@ func TestStateSnapshot_NonDeletedResourcesPreserved(t *testing.T) {
 		t.Error("expected non-deleted old resource to be preserved")
 	}
 
-	if state.EventType != "CREATE" {
+	if state.EventType != string(models.EventTypeCreate) {
 		t.Errorf("expected CREATE event type, got %s", state.EventType)
 	}
 }

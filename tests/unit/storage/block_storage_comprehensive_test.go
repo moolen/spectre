@@ -517,10 +517,14 @@ func createTestEventWithTimestamp(id int, timestampNs int64) *models.Event {
 	}
 }
 
+const (
+	groupApps = "apps"
+)
+
 func getGroupForKind(kind string) string {
 	switch kind {
 	case "Deployment", "StatefulSet", "DaemonSet":
-		return "apps"
+		return groupApps
 	case "Pod", "Service", "ConfigMap":
 		return ""
 	default:

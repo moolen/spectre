@@ -70,7 +70,10 @@ func runServer(cmd *cobra.Command, args []string) {
 		HandleError(err, "Configuration error")
 	}
 
-	logging.Initialize(cfg.LogLevel)
+	// Setup logging
+	if err := setupLog(cfg.LogLevel); err != nil {
+		HandleError(err, "Failed to setup logging")
+	}
 	logger := logging.GetLogger("server")
 
 	if demo {
@@ -206,6 +209,8 @@ func runServer(cmd *cobra.Command, args []string) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	manager.Stop(shutdownCtx)
+	if err := manager.Stop(shutdownCtx); err != nil {
+		logger.Error("Error during shutdown: %v", err)
+	}
 	logger.Info("Shutdown complete")
 }

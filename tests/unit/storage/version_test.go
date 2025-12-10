@@ -40,7 +40,7 @@ func TestGetVersionInfoV1_0(t *testing.T) {
 		t.Error("GetVersionInfo should return info for version 1.0")
 	}
 
-	if info.Version != "1.0" {
+	if info.Version != version1_0 {
 		t.Errorf("Expected version 1.0, got %s", info.Version)
 	}
 

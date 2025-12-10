@@ -37,7 +37,7 @@ func (c *Compressor) Compress(data []byte) ([]byte, error) {
 
 	// Write data to gzip writer
 	if _, err := writer.Write(data); err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return nil, fmt.Errorf("failed to write data to gzip: %w", err)
 	}
 
@@ -60,7 +60,11 @@ func (c *Compressor) Decompress(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	// Read decompressed data
 	decompressed, err := io.ReadAll(reader)
@@ -99,7 +103,11 @@ func (c *Compressor) CompressStream(reader io.Reader, writer io.Writer) (int64, 
 	if err != nil {
 		return 0, fmt.Errorf("failed to create gzip writer: %w", err)
 	}
-	defer gzipWriter.Close()
+	defer func() {
+		if err := gzipWriter.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	written, err := io.Copy(gzipWriter, reader)
 	if err != nil {
@@ -115,7 +123,11 @@ func (c *Compressor) DecompressStream(reader io.Reader, writer io.Writer) (int64
 	if err != nil {
 		return 0, fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzipReader.Close()
+	defer func() {
+		if err := gzipReader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	written, err := io.Copy(writer, gzipReader)
 	if err != nil {

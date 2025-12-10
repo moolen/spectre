@@ -189,7 +189,7 @@ func (eb *EventBuffer) IsFull(nextEventSize int64) bool {
 
 // GetEventCount returns the number of events in the buffer
 func (eb *EventBuffer) GetEventCount() int32 {
-	return int32(len(eb.events))
+	return int32(len(eb.events)) //nolint:gosec // safe conversion: event count is reasonable
 }
 
 // GetCurrentSize returns the current uncompressed size
@@ -199,7 +199,7 @@ func (eb *EventBuffer) GetCurrentSize() int64 {
 
 // GetEvents parses and returns all buffered events as Event objects
 func (eb *EventBuffer) GetEvents() ([]*models.Event, error) {
-	var events []*models.Event
+	events := make([]*models.Event, 0, len(eb.events))
 	for _, eventJSON := range eb.events {
 		var event models.Event
 		if err := json.Unmarshal(eventJSON, &event); err != nil {
@@ -234,14 +234,14 @@ func (eb *EventBuffer) Finalize(blockID int32, compressionAlgorithm string) (*Bl
 		GroupSet:              mapToSlice(eb.groupSet),
 		TimestampMin:          eb.timestampMin,
 		TimestampMax:          eb.timestampMax,
-		EventCount:            int32(len(eb.events)),
+		EventCount:            int32(len(eb.events)), //nolint:gosec // safe conversion: event count is reasonable
 		UncompressedLength:    int64(len(uncompressedData)),
 	}
 
 	// Create block with uncompressed data
 	block := &Block{
 		ID:                 blockID,
-		EventCount:         int32(len(eb.events)),
+		EventCount:         int32(len(eb.events)), //nolint:gosec // safe conversion: event count is reasonable
 		TimestampMin:       eb.timestampMin,
 		TimestampMax:       eb.timestampMax,
 		UncompressedLength: int64(len(uncompressedData)),

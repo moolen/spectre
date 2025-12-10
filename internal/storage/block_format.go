@@ -86,7 +86,7 @@ func WriteFileHeader(w io.Writer, header *FileHeader) error {
 	pos := 0
 
 	// Write magic bytes (8 bytes)
-	copy(buf[pos:pos+8], []byte(FileHeaderMagic))
+	copy(buf[pos:pos+8], FileHeaderMagic)
 	pos += 8
 
 	// Write format version (8 bytes, null-padded)
@@ -96,7 +96,7 @@ func WriteFileHeader(w io.Writer, header *FileHeader) error {
 	pos += 8
 
 	// Write created at timestamp (8 bytes)
-	binary.LittleEndian.PutUint64(buf[pos:pos+8], uint64(header.CreatedAt))
+	binary.LittleEndian.PutUint64(buf[pos:pos+8], uint64(header.CreatedAt)) //nolint:gosec // safe conversion: timestamp is valid
 	pos += 8
 
 	// Write compression algorithm (16 bytes, null-padded)
@@ -106,7 +106,7 @@ func WriteFileHeader(w io.Writer, header *FileHeader) error {
 	pos += 16
 
 	// Write block size (4 bytes)
-	binary.LittleEndian.PutUint32(buf[pos:pos+4], uint32(header.BlockSize))
+	binary.LittleEndian.PutUint32(buf[pos:pos+4], uint32(header.BlockSize)) //nolint:gosec // safe conversion: block size is positive
 	pos += 4
 
 	// Write encoding format (16 bytes, null-padded)
@@ -158,7 +158,7 @@ func ReadFileHeader(r io.Reader) (*FileHeader, error) {
 	pos += 8
 
 	// Read created at
-	header.CreatedAt = int64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
+	header.CreatedAt = int64(binary.LittleEndian.Uint64(buf[pos : pos+8])) //nolint:gosec // safe conversion: timestamp is valid
 	pos += 8
 
 	// Read compression algorithm
@@ -166,7 +166,7 @@ func ReadFileHeader(r io.Reader) (*FileHeader, error) {
 	pos += 16
 
 	// Read block size
-	header.BlockSize = int32(binary.LittleEndian.Uint32(buf[pos : pos+4]))
+	header.BlockSize = int32(binary.LittleEndian.Uint32(buf[pos : pos+4])) //nolint:gosec // safe conversion: block size is positive
 	pos += 4
 
 	// Read encoding format
@@ -212,11 +212,11 @@ func WriteFileFooter(w io.Writer, footer *FileFooter) error {
 	pos := 0
 
 	// Write index section offset (8 bytes)
-	binary.LittleEndian.PutUint64(buf[pos:pos+8], uint64(footer.IndexSectionOffset))
+	binary.LittleEndian.PutUint64(buf[pos:pos+8], uint64(footer.IndexSectionOffset)) //nolint:gosec // safe conversion: offset is valid
 	pos += 8
 
 	// Write index section length (4 bytes)
-	binary.LittleEndian.PutUint32(buf[pos:pos+4], uint32(footer.IndexSectionLength))
+	binary.LittleEndian.PutUint32(buf[pos:pos+4], uint32(footer.IndexSectionLength)) //nolint:gosec // safe conversion: length is positive
 	pos += 4
 
 	// Write checksum (256 bytes, null-padded)
@@ -230,7 +230,7 @@ func WriteFileFooter(w io.Writer, footer *FileFooter) error {
 	pos += 48
 
 	// Write magic bytes (8 bytes)
-	copy(buf[pos:pos+8], []byte(FileFooterMagic))
+	copy(buf[pos:pos+8], FileFooterMagic)
 	pos += 8
 
 	// Verify buffer is exactly FileFooterSize
@@ -253,11 +253,11 @@ func ReadFileFooter(r io.Reader) (*FileFooter, error) {
 	footer := &FileFooter{}
 
 	// Read index section offset
-	footer.IndexSectionOffset = int64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
+	footer.IndexSectionOffset = int64(binary.LittleEndian.Uint64(buf[pos : pos+8])) //nolint:gosec // safe conversion: offset is valid
 	pos += 8
 
 	// Read index section length
-	footer.IndexSectionLength = int32(binary.LittleEndian.Uint32(buf[pos : pos+4]))
+	footer.IndexSectionLength = int32(binary.LittleEndian.Uint32(buf[pos : pos+4])) //nolint:gosec // safe conversion: length is positive
 	pos += 4
 
 	// Read checksum
@@ -409,7 +409,6 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 	}
 
 	var candidates map[int32]bool
-	filterCount := 0
 
 	// For each filter, intersect the candidate blocks
 	// Empty strings are valid filter values
@@ -423,7 +422,6 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 		} else {
 			return nil // Kind not found, no candidates
 		}
-		filterCount++
 	}
 
 	if ns, ok := filters["namespace"]; ok {
@@ -447,7 +445,6 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 		} else {
 			return nil // Namespace not found, no candidates
 		}
-		filterCount++
 	}
 
 	if group, ok := filters["group"]; ok {
@@ -469,7 +466,6 @@ func GetCandidateBlocks(index *InvertedIndex, filters map[string]string) []int32
 		} else {
 			return nil // Group not found, no candidates
 		}
-		filterCount++
 	}
 
 	if candidates == nil {
@@ -566,7 +562,7 @@ func ValidateVersion(version string) error {
 	}
 
 	majorVersion := version[0:dotIndex]
-	if len(majorVersion) == 0 {
+	if majorVersion == "" {
 		return fmt.Errorf("invalid version format: %s (major version cannot be empty)", version)
 	}
 

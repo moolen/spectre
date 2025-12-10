@@ -243,7 +243,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, response)
+	_ = writeJSON(w, response)
 }
 
 // handleReady handles readiness check requests
@@ -263,21 +263,22 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	writeJSON(w, response)
+	_ = writeJSON(w, response)
 }
 
 // handleNotFound handles 404 responses
-func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-
-	response := map[string]string{
-		"error":   "NOT_FOUND",
-		"message": fmt.Sprintf("Endpoint not found: %s", r.URL.Path),
-	}
-
-	writeJSON(w, response)
-}
+// This function is currently unused but kept for potential future use
+// func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
+// 	w.Header().Set("Content-Type", "application/json")
+// 	w.WriteHeader(http.StatusNotFound)
+//
+// 	response := map[string]string{
+// 		"error":   "NOT_FOUND",
+// 		"message": fmt.Sprintf("Endpoint not found: %s", r.URL.Path),
+// 	}
+//
+// 	_ = writeJSON(w, response)
+// }
 
 // handleMethodNotAllowed handles 405 responses
 func (s *Server) handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +290,7 @@ func (s *Server) handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) 
 		"message": fmt.Sprintf("Method %s not allowed for %s", r.Method, r.URL.Path),
 	}
 
-	writeJSON(w, response)
+	_ = writeJSON(w, response)
 }
 
 // GetPort returns the port the server is listening on

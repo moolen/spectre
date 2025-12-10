@@ -26,7 +26,7 @@ type QueryResult struct {
 // Validate checks that the query result is well-formed
 func (r *QueryResult) Validate() error {
 	// Count must match the length of events
-	if r.Count != int32(len(r.Events)) {
+	if r.Count != int32(len(r.Events)) { //nolint:gosec // safe conversion: event count is reasonable
 		return NewValidationError("count does not match the number of events")
 	}
 

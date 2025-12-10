@@ -73,6 +73,10 @@ func (s *MCPServer) GetTools() []ToolDefinition {
 						"type":        "string",
 						"description": "Optional: filter by Kubernetes namespace",
 					},
+					"max_resources": map[string]interface{}{
+						"type":        "integer",
+						"description": "Optional: max resources to list per status (default 100, max 500)",
+					},
 				},
 				"required": []string{"start_time", "end_time"},
 			},
@@ -98,6 +102,10 @@ func (s *MCPServer) GetTools() []ToolDefinition {
 					"impact_threshold": map[string]interface{}{
 						"type":        "number",
 						"description": "Optional: minimum impact score 0-1.0 to include in results",
+					},
+					"max_resources": map[string]interface{}{
+						"type":        "integer",
+						"description": "Optional: max resources to return (default 50, max 500)",
 					},
 				},
 				"required": []string{"start_time", "end_time"},
@@ -133,6 +141,10 @@ func (s *MCPServer) GetTools() []ToolDefinition {
 						"type":        "string",
 						"description": "Optional: 'incident' for live response, 'post-mortem' for historical analysis, or 'auto' to detect",
 					},
+					"max_investigations": map[string]interface{}{
+						"type":        "integer",
+						"description": "Optional: max resources to investigate when using '*' (default 20, max 100)",
+					},
 				},
 				"required": []string{"resource_kind", "start_time", "end_time"},
 			},
@@ -158,6 +170,10 @@ func (s *MCPServer) GetTools() []ToolDefinition {
 					"time": map[string]interface{}{
 						"type":        "integer",
 						"description": "Optional: snapshot at specific time (Unix seconds), 0 or omit for latest",
+					},
+					"max_resources": map[string]interface{}{
+						"type":        "integer",
+						"description": "Optional: max resources to return (default 200, max 1000)",
 					},
 				},
 				"required": []string{},

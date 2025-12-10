@@ -383,7 +383,7 @@ func buildReleaseName(clusterName string) string {
 func sanitizeName(input string) string {
 	name := sanitizeRegexp.ReplaceAllString(strings.ToLower(input), "-")
 	name = strings.Trim(name, "-")
-	if len(name) == 0 {
+	if name == "" {
 		return "scenario"
 	}
 	if len(name) > 40 {

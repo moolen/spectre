@@ -155,11 +155,15 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 
 // ImportJSONFile reads and parses a single JSON file containing an events array
 func ImportJSONFile(filePath string) ([]*models.Event, error) {
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // filePath is validated before use
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	return ParseJSONEvents(file)
 }

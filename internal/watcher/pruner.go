@@ -77,6 +77,6 @@ func (p *ManagedFieldsPruner) PruneWithFields(data []byte, fieldsToRemove []stri
 }
 
 // GetPrunedSize calculates the size reduction from pruning
-func (p *ManagedFieldsPruner) GetPrunedSize(original []byte, pruned []byte) int64 {
+func (p *ManagedFieldsPruner) GetPrunedSize(original, pruned []byte) int64 {
 	return int64(len(original) - len(pruned))
 }

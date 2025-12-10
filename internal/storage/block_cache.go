@@ -58,9 +58,9 @@ func NewBlockCache(maxMemoryMB int64) (*BlockCache, error) {
 }
 
 // onEvict is called when an item is evicted from the LRU cache
-func (bc *BlockCache) onEvict(key string, block *CachedBlock) {
+func (bc *BlockCache) onEvict(_ string, block *CachedBlock) {
 	atomic.AddUint64(&bc.evictions, 1)
-	atomic.AddInt64((*int64)(&bc.usedMemory), -block.Size)
+	atomic.AddInt64(&bc.usedMemory, -block.Size)
 }
 
 // Get retrieves a cached block or returns nil
@@ -102,7 +102,7 @@ func (bc *BlockCache) Put(filename string, blockID int32, block *CachedBlock) er
 
 	bc.lru.Add(key, block)
 	bc.usedMemory += blockSize
-	atomic.AddUint64(&bc.bytesRead, uint64(blockSize))
+	atomic.AddUint64(&bc.bytesRead, uint64(blockSize)) //nolint:gosec // safe conversion: block size is positive
 
 	return nil
 }
