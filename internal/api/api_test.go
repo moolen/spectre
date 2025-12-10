@@ -14,6 +14,10 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
+const (
+	kindEvent = "Event"
+)
+
 // mockQueryExecutor is a mock implementation of QueryExecutor for testing
 type mockQueryExecutor struct {
 	executeFunc func(*models.QueryRequest) (*models.QueryResult, error)
@@ -275,7 +279,7 @@ func TestSearchHandler_Handle(t *testing.T) {
 			logger := logging.GetLogger("test")
 			handler := NewSearchHandler(mockExecutor, logger)
 
-			req := httptest.NewRequest(tt.method, "/v1/search?"+tt.queryParams.Encode(), nil)
+			req := httptest.NewRequest(tt.method, "/v1/search?"+tt.queryParams.Encode(), http.NoBody)
 			rr := httptest.NewRecorder()
 
 			handler.Handle(rr, req)
@@ -358,7 +362,7 @@ func TestTimelineHandler_Handle(t *testing.T) {
 				"namespace": {"default"},
 			},
 			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
-				if q.Filters.Kind == "Event" {
+				if q.Filters.Kind == kindEvent {
 					// K8s Events query
 					return &models.QueryResult{
 						Events: []models.Event{
@@ -387,7 +391,7 @@ func TestTimelineHandler_Handle(t *testing.T) {
 				"end":   {"2000"},
 			},
 			mockExecute: func(q *models.QueryRequest) (*models.QueryResult, error) {
-				if q.Filters.Kind == "Event" {
+				if q.Filters.Kind == kindEvent {
 					// Return error for K8s events query
 					return nil, &ValidationError{message: "events query failed"}
 				}
@@ -469,7 +473,7 @@ func TestTimelineHandler_Handle(t *testing.T) {
 			logger := logging.GetLogger("test")
 			handler := NewTimelineHandler(mockExecutor, logger)
 
-			req := httptest.NewRequest(tt.method, "/v1/timeline?"+tt.queryParams.Encode(), nil)
+			req := httptest.NewRequest(tt.method, "/v1/timeline?"+tt.queryParams.Encode(), http.NoBody)
 			rr := httptest.NewRecorder()
 
 			handler.Handle(rr, req)
@@ -712,7 +716,7 @@ func TestMetadataHandler_Handle(t *testing.T) {
 			logger := logging.GetLogger("test")
 			handler := NewMetadataHandler(mockExecutor, logger)
 
-			req := httptest.NewRequest(tt.method, "/v1/metadata?"+tt.queryParams.Encode(), nil)
+			req := httptest.NewRequest(tt.method, "/v1/metadata?"+tt.queryParams.Encode(), http.NoBody)
 			rr := httptest.NewRecorder()
 
 			handler.Handle(rr, req)
@@ -1062,7 +1066,7 @@ func TestServer_Routes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req := httptest.NewRequest(tt.method, tt.path, http.NoBody)
 			rr := httptest.NewRecorder()
 
 			server.server.Handler.ServeHTTP(rr, req)
@@ -1097,7 +1101,7 @@ func TestServer_MethodEnforcement(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req := httptest.NewRequest(tt.method, tt.path, http.NoBody)
 			rr := httptest.NewRecorder()
 
 			server.server.Handler.ServeHTTP(rr, req)
@@ -1128,7 +1132,7 @@ func TestServer_ReadinessCheck(t *testing.T) {
 			mockChecker := &mockReadinessChecker{ready: tt.ready}
 			server := New(8080, mockExecutor, mockChecker)
 
-			req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+			req := httptest.NewRequest(http.MethodGet, "/ready", http.NoBody)
 			rr := httptest.NewRecorder()
 
 			server.server.Handler.ServeHTTP(rr, req)
@@ -1193,7 +1197,7 @@ func TestCORS_Middleware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/health", nil)
+			req := httptest.NewRequest(tt.method, "/health", http.NoBody)
 			rr := httptest.NewRecorder()
 
 			server.server.Handler.ServeHTTP(rr, req)

@@ -65,7 +65,7 @@ func EventuallyResourceCreated(t *testing.T, client *APIClient, namespace, kind,
 }
 
 // EventuallyEventCreated waits for an event to appear in the API.
-func EventuallyEventCreated(t *testing.T, client *APIClient, resourceID string, reason string, opts EventuallyOption) *K8sEvent {
+func EventuallyEventCreated(t *testing.T, client *APIClient, resourceID, reason string, opts EventuallyOption) *K8sEvent {
 	if opts.Timeout == 0 {
 		opts = DefaultEventuallyOption
 	}

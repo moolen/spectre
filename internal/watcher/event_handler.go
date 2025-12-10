@@ -147,7 +147,7 @@ func (h *EventCaptureHandler) objectToJSON(obj runtime.Object) (json.RawMessage,
 		return nil, 0, fmt.Errorf("failed to marshal object to JSON: %w", err)
 	}
 
-	dataSize := int32(len(jsonData))
+	dataSize := int32(len(jsonData)) //nolint:gosec // safe conversion: data size is reasonable
 
 	// Prune managedFields to reduce size
 	jsonData, err = h.pruner.Prune(jsonData)

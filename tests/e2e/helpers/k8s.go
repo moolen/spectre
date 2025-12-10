@@ -114,7 +114,7 @@ func (k *K8sClient) DeleteDeployment(ctx context.Context, namespace, name string
 }
 
 // ListPods lists all pods in a namespace.
-func (k *K8sClient) ListPods(ctx context.Context, namespace string, selector string) (*corev1.PodList, error) {
+func (k *K8sClient) ListPods(ctx context.Context, namespace, selector string) (*corev1.PodList, error) {
 	opts := metav1.ListOptions{}
 	if selector != "" {
 		opts.LabelSelector = selector

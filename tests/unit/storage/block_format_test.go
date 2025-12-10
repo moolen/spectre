@@ -8,6 +8,13 @@ import (
 	"github.com/moolen/spectre/internal/storage"
 )
 
+const (
+	magicRPKBLOCK   = "RPKBLOCK"
+	magicRPKEND     = "RPKEND"
+	compressionGzip = "gzip"
+	version1_0      = "1.0"
+)
+
 func TestFileHeaderSerialization(t *testing.T) {
 	header := storage.NewFileHeader()
 	header.CompressionAlgorithm = "zstd"
@@ -33,10 +40,10 @@ func TestFileHeaderSerialization(t *testing.T) {
 	}
 
 	// Verify fields
-	if header2.MagicBytes != "RPKBLOCK" {
+	if header2.MagicBytes != magicRPKBLOCK {
 		t.Errorf("Expected magic RPKBLOCK, got %s", header2.MagicBytes)
 	}
-	if header2.FormatVersion != "1.0" {
+	if header2.FormatVersion != version1_0 {
 		t.Errorf("Expected version 1.0, got %s", header2.FormatVersion)
 	}
 	if header2.CompressionAlgorithm != "zstd" {
@@ -97,7 +104,7 @@ func TestFileFooterSerialization(t *testing.T) {
 	if footer2.Checksum != "abc123def456" {
 		t.Errorf("Expected checksum abc123def456, got %s", footer2.Checksum)
 	}
-	if footer2.MagicBytes != "RPKEND" {
+	if footer2.MagicBytes != magicRPKEND {
 		t.Errorf("Expected magic RPKEND, got %s", footer2.MagicBytes)
 	}
 }
@@ -347,13 +354,13 @@ func TestGetCandidateBlocksNoMatch(t *testing.T) {
 
 func TestFileHeaderAllFields(t *testing.T) {
 	header := storage.NewFileHeader()
-	header.FormatVersion = "1.0"
+	header.FormatVersion = version1_0
 	header.CreatedAt = 1234567890000000000
-	header.CompressionAlgorithm = "gzip"
+	header.CompressionAlgorithm = compressionGzip
 	header.BlockSize = 128 * 1024
 	header.EncodingFormat = "json"
 	header.ChecksumEnabled = true
-	copy(header.Reserved[:], []byte("reserved123456"))
+	copy(header.Reserved[:], "reserved123456")
 
 	buf := &bytes.Buffer{}
 	if err := storage.WriteFileHeader(buf, header); err != nil {
@@ -405,7 +412,7 @@ func TestFileFooterAllFields(t *testing.T) {
 		Checksum:           "a" + string(make([]byte, 255)), // 256 bytes
 		MagicBytes:         "RPKEND",
 	}
-	copy(footer.Reserved[:], []byte("reserved data for future use"))
+	copy(footer.Reserved[:], "reserved data for future use")
 
 	buf := &bytes.Buffer{}
 	if err := storage.WriteFileFooter(buf, footer); err != nil {
@@ -428,7 +435,7 @@ func TestFileFooterAllFields(t *testing.T) {
 
 func TestIndexSectionSerialization(t *testing.T) {
 	section := &storage.IndexSection{
-		FormatVersion: "1.0",
+		FormatVersion: version1_0,
 		BlockMetadata: []*storage.BlockMetadata{
 			{
 				ID:                 0,
@@ -583,11 +590,11 @@ func TestValidateVersion(t *testing.T) {
 
 func TestGetVersionInfo(t *testing.T) {
 	// Test v1.0
-	info := storage.GetVersionInfo("1.0")
+	info := storage.GetVersionInfo(version1_0)
 	if info == nil {
 		t.Fatal("Expected version info for 1.0")
 	}
-	if info.Version != "1.0" {
+	if info.Version != version1_0 {
 		t.Errorf("Expected version 1.0, got %s", info.Version)
 	}
 	if info.Deprecated {

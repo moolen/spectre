@@ -22,7 +22,7 @@ func NewIndexManager() *IndexManager {
 }
 
 // AddEntry adds an index entry for a segment
-func (im *IndexManager) AddEntry(segmentID int32, timestamp int64, offset int64) {
+func (im *IndexManager) AddEntry(segmentID int32, timestamp, offset int64) {
 	entry := &models.IndexEntry{
 		Timestamp: timestamp,
 		SegmentID: segmentID,
@@ -74,7 +74,7 @@ func (im *IndexManager) BuildSparseIndex() models.SparseTimestampIndex {
 
 	return models.SparseTimestampIndex{
 		Entries:       entries,
-		TotalSegments: int32(len(im.entries)),
+		TotalSegments: int32(len(im.entries)), //nolint:gosec // safe conversion: entry count is reasonable
 	}
 }
 

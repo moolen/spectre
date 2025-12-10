@@ -48,7 +48,7 @@ func TestEndToEndBlockStorage(t *testing.T) {
 				Group:     getGroupForKindE2E(kind),
 				Version:   "v1",
 			},
-			Data: json.RawMessage([]byte(fmt.Sprintf(`{"index":%d,"kind":"%s","namespace":"%s"}`, i, kind, namespace))),
+			Data: json.RawMessage([]byte(fmt.Sprintf(`{"index":%d,"kind":%q,"namespace":%q}`, i, kind, namespace))),
 		}
 
 		if err := bsf.WriteEvent(event); err != nil {
@@ -267,9 +267,9 @@ func TestEndToEndBlockStorage(t *testing.T) {
 // Helper function
 func getGroupForKindE2E(kind string) string {
 	switch kind {
-	case "Deployment", "StatefulSet", "DaemonSet":
+	case kindDeployment, kindStatefulSet, kindDaemonSet:
 		return "apps"
-	case "Pod", "Service":
+	case kindPod, kindService:
 		return ""
 	default:
 		return ""

@@ -34,7 +34,7 @@ func NewHelmDeployer(t *testing.T, kubeConfig, namespace string) (*HelmDeployer,
 
 	// Create action configuration
 	cfg := new(action.Configuration)
-	if err := cfg.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), debugLog); err != nil {
+	if err := cfg.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), debugLogf); err != nil {
 		return nil, fmt.Errorf("failed to initialize Helm config: %w", err)
 	}
 
@@ -154,8 +154,8 @@ func (hd *HelmDeployer) ListReleases() ([]string, error) {
 	return names, nil
 }
 
-// debugLog is a Helm-compatible logger.
-func debugLog(format string, v ...interface{}) {
+// debugLogf is a Helm-compatible logger.
+func debugLogf(format string, v ...interface{}) {
 	fmt.Fprintf(os.Stderr, format+"\n", v...)
 }
 

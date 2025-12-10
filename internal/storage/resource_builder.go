@@ -90,7 +90,7 @@ func (rb *ResourceBuilder) BuildStatusSegments(resourceUID string, allEvents []m
 		return resourceEvents[i].Timestamp < resourceEvents[j].Timestamp
 	})
 
-	var segments []models.StatusSegment
+	segments := make([]models.StatusSegment, 0, len(resourceEvents))
 
 	for i, event := range resourceEvents {
 		var endTime int64

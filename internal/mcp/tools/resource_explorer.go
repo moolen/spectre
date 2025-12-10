@@ -26,23 +26,23 @@ func NewResourceExplorerTool(client *client.SpectreClient) *ResourceExplorerTool
 type ResourceExplorerInput struct {
 	Kind         string `json:"kind,omitempty"`
 	Namespace    string `json:"namespace,omitempty"`
-	Status       string `json:"status,omitempty"`    // Ready, Warning, Error, Terminating
-	Time         int64  `json:"time,omitempty"`      // Snapshot at specific time, 0 = latest
+	Status       string `json:"status,omitempty"`        // Ready, Warning, Error, Terminating
+	Time         int64  `json:"time,omitempty"`          // Snapshot at specific time, 0 = latest
 	MaxResources int    `json:"max_resources,omitempty"` // Max resources to return, default 200, max 1000
 }
 
 // ResourceInfo represents a resource in the explorer output
 type ResourceInfo struct {
-	Kind                  string `json:"kind"`
-	Namespace             string `json:"namespace"`
-	Name                  string `json:"name"`
-	CurrentStatus         string `json:"current_status"`
-	IssueCount            int    `json:"issue_count"`
-	ErrorCount            int    `json:"error_count"`
-	WarningCount          int    `json:"warning_count"`
-	EventCount            int    `json:"event_count"`
-	LastStatusChange      int64  `json:"last_status_change"`
-	LastStatusChangeText  string `json:"last_status_change_text,omitempty"` // Human-readable timestamp
+	Kind                 string `json:"kind"`
+	Namespace            string `json:"namespace"`
+	Name                 string `json:"name"`
+	CurrentStatus        string `json:"current_status"`
+	IssueCount           int    `json:"issue_count"`
+	ErrorCount           int    `json:"error_count"`
+	WarningCount         int    `json:"warning_count"`
+	EventCount           int    `json:"event_count"`
+	LastStatusChange     int64  `json:"last_status_change"`
+	LastStatusChangeText string `json:"last_status_change_text,omitempty"` // Human-readable timestamp
 }
 
 // AvailableOptions represents available options for filtering
@@ -60,10 +60,10 @@ type AvailableOptions struct {
 
 // ResourceExplorerOutput represents the output of resource_explorer tool
 type ResourceExplorerOutput struct {
-	Resources        []ResourceInfo      `json:"resources"`
-	AvailableOptions AvailableOptions    `json:"available_options"`
-	ResourceCount    int                 `json:"resource_count"`
-	ExplorationTimeMs int64              `json:"exploration_time_ms"`
+	Resources         []ResourceInfo   `json:"resources"`
+	AvailableOptions  AvailableOptions `json:"available_options"`
+	ResourceCount     int              `json:"resource_count"`
+	ExplorationTimeMs int64            `json:"exploration_time_ms"`
 }
 
 // Execute runs the resource_explorer tool
@@ -82,8 +82,7 @@ func (t *ResourceExplorerTool) Execute(ctx context.Context, input json.RawMessag
 	}
 
 	// Set time range for query - use metadata if time not specified
-	queryStart := params.Time
-	queryEnd := params.Time
+	var queryStart, queryEnd int64
 
 	if params.Time == 0 {
 		// Use full range from metadata
@@ -135,9 +134,9 @@ func (t *ResourceExplorerTool) buildExplorerOutput(response *client.TimelineResp
 	// Process resources
 	for _, resource := range response.Resources {
 		info := ResourceInfo{
-			Kind:      resource.Kind,
-			Namespace: resource.Namespace,
-			Name:      resource.Name,
+			Kind:       resource.Kind,
+			Namespace:  resource.Namespace,
+			Name:       resource.Name,
 			EventCount: len(resource.Events),
 		}
 
@@ -155,7 +154,7 @@ func (t *ResourceExplorerTool) buildExplorerOutput(response *client.TimelineResp
 
 		// Count issues
 		for _, event := range resource.Events {
-			if event.Type == "Warning" {
+			if event.Type == statusWarning {
 				info.WarningCount++
 			}
 		}

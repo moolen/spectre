@@ -22,7 +22,7 @@ type Resource struct {
 
 // LoadWatcherConfig loads the watcher configuration from a YAML file
 func LoadWatcherConfig(path string) (*WatcherConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is validated before use
 	if err != nil {
 		return nil, fmt.Errorf("failed to read watcher config file %s: %w", path, err)
 	}

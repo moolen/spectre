@@ -42,7 +42,11 @@ func (c *SpectreClient) QueryTimeline(startTime, endTime int64, filters map[stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to query timeline: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -64,7 +68,11 @@ func (c *SpectreClient) GetMetadata() (*MetadataResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -86,7 +94,11 @@ func (c *SpectreClient) Ping() error {
 	if err != nil {
 		return fmt.Errorf("spectre API unreachable at %s: %w", c.baseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("spectre API health check failed with status %d", resp.StatusCode)

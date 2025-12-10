@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -225,7 +226,7 @@ func TestStorageStart_CancelledContext(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
@@ -281,7 +282,7 @@ func TestStorageStop_CancelledContext(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }

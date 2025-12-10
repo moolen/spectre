@@ -39,7 +39,7 @@ func (s *SparseTimestampIndex) Validate() error {
 
 	// TotalSegments must match number of unique segment IDs
 	// (This is a loose check; strict validation would require all segment IDs to be present)
-	if s.TotalSegments < int32(len(s.Entries)) {
+	if s.TotalSegments < int32(len(s.Entries)) { //nolint:gosec // safe conversion: entry count is reasonable
 		return NewValidationError("totalSegments cannot be less than number of entries")
 	}
 

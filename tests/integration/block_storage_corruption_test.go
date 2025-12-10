@@ -11,6 +11,13 @@ import (
 	"github.com/moolen/spectre/internal/storage"
 )
 
+const (
+	kindPod     = "Pod"
+	kindService = "Service"
+	kindDaemonSet = "DaemonSet"
+	groupApps   = "apps"
+)
+
 // TestCorruptionDetection verifies that checksums detect block corruption
 // while leaving other blocks queryable
 func TestCorruptionDetection(t *testing.T) {
@@ -30,10 +37,10 @@ func TestCorruptionDetection(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		var kind, namespace string
 		if i < 100 {
-			kind = "Pod"
+			kind = kindPod
 			namespace = "default"
 		} else {
-			kind = "Service"
+			kind = kindService
 			namespace = "kube-system"
 		}
 
@@ -302,9 +309,9 @@ func createTestEventWithKindNamespaceCorruption(id int, timestamp int64, kind, n
 
 func getGroupForKindCorruption(kind string) string {
 	switch kind {
-	case "Deployment", "StatefulSet", "DaemonSet":
-		return "apps"
-	case "Pod", "Service":
+	case "Deployment", "StatefulSet", kindDaemonSet:
+		return groupApps
+	case kindPod, kindService:
 		return ""
 	default:
 		return ""

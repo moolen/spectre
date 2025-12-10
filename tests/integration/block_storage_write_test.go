@@ -11,6 +11,11 @@ import (
 	"github.com/moolen/spectre/internal/storage"
 )
 
+const (
+	kindDeployment  = "Deployment"
+	kindStatefulSet = "StatefulSet"
+)
+
 func TestBlockStorageWriteReadRoundtrip(t *testing.T) {
 	// Create temporary file
 	tmpFile := t.TempDir() + "/test_block_storage.bin"
@@ -323,9 +328,9 @@ func createTestEventWithKindNamespace(id int, hourTimestamp int64, kind, namespa
 
 func getGroupForKind(kind string) string {
 	switch kind {
-	case "Deployment", "StatefulSet", "DaemonSet":
-		return "apps"
-	case "Pod", "Service":
+	case kindDeployment, kindStatefulSet, kindDaemonSet:
+		return groupApps
+	case kindPod, kindService:
 		return ""
 	default:
 		return ""

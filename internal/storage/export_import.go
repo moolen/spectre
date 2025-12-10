@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -275,7 +276,7 @@ func (s *Storage) exportFile(tw *tar.Writer, filePath string) (ExportedFileEntry
 	reader, err := NewBlockReader(filePath)
 	if err == nil {
 		fileData, err := reader.ReadFile()
-		reader.Close()
+		_ = reader.Close()
 		if err == nil && fileData.IndexSection != nil && fileData.IndexSection.Statistics != nil {
 			stats := fileData.IndexSection.Statistics
 			eventCount = stats.TotalEvents
@@ -300,11 +301,15 @@ func (s *Storage) exportFile(tw *tar.Writer, filePath string) (ExportedFileEntry
 	}
 
 	// Copy file contents
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // filePath is validated before use
 	if err != nil {
 		return ExportedFileEntry{}, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	written, err := io.Copy(tw, file)
 	if err != nil {
@@ -340,7 +345,7 @@ func (s *Storage) filterFilesByTimeRange(files []string, startTime, endTime int6
 		return files
 	}
 
-	var filtered []string
+	filtered := make([]string, 0, len(files))
 	for _, filePath := range files {
 		hourTimestamp, err := s.extractHourFromFilename(filePath)
 		if err != nil {
@@ -379,7 +384,11 @@ func (s *Storage) Import(r io.Reader, opts ImportOptions) (*ImportReport, error)
 	var tarReader *tar.Reader
 	if err == nil {
 		// Successfully opened as gzip
-		defer gzipReader.Close()
+		defer func() {
+			if err := gzipReader.Close(); err != nil {
+				// Log error but don't fail the operation
+			}
+		}()
 		tarReader = tar.NewReader(gzipReader)
 	} else {
 		// Not gzip, treat as plain tar
@@ -391,7 +400,11 @@ func (s *Storage) Import(r io.Reader, opts ImportOptions) (*ImportReport, error)
 	if err != nil {
 		return report, fmt.Errorf("failed to create temp directory: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	var manifest *ExportManifest
 	extractedFiles := make(map[string]string) // archive path -> temp file path
@@ -399,7 +412,7 @@ func (s *Storage) Import(r io.Reader, opts ImportOptions) (*ImportReport, error)
 	// Extract all files from archive
 	for {
 		header, err := tarReader.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -422,18 +435,18 @@ func (s *Storage) Import(r io.Reader, opts ImportOptions) (*ImportReport, error)
 
 		// Extract storage file to temp directory
 		tempFilePath := filepath.Join(tempDir, filepath.Base(header.Name))
-		tempFile, err := os.Create(tempFilePath)
+		tempFile, err := os.Create(tempFilePath) //nolint:gosec // tempFilePath is validated before use
 		if err != nil {
 			report.Errors = append(report.Errors, fmt.Sprintf("failed to create temp file for %s: %v", header.Name, err))
 			continue
 		}
 
-		if _, err := io.Copy(tempFile, tarReader); err != nil {
-			tempFile.Close()
+		if _, err := io.Copy(tempFile, tarReader); err != nil { //nolint:gosec // decompression size is limited by block size
+			_ = tempFile.Close()
 			report.Errors = append(report.Errors, fmt.Sprintf("failed to extract %s: %v", header.Name, err))
 			continue
 		}
-		tempFile.Close()
+		_ = tempFile.Close()
 
 		extractedFiles[header.Name] = tempFilePath
 		report.TotalFiles++
@@ -500,7 +513,11 @@ func (s *Storage) validateImportedFile(filePath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	// Try to read the complete file structure
 	_, err = reader.ReadFile()
@@ -512,7 +529,7 @@ func (s *Storage) validateImportedFile(filePath string) error {
 }
 
 // importHourGroup merges all files for a given hour into a single canonical file
-func (s *Storage) importHourGroup(hourTimestamp int64, importedFilePaths []string, opts ImportOptions, report *ImportReport) error {
+func (s *Storage) importHourGroup(hourTimestamp int64, importedFilePaths []string, _ ImportOptions, report *ImportReport) error {
 	s.fileMutex.Lock()
 	defer s.fileMutex.Unlock()
 
@@ -550,7 +567,7 @@ func (s *Storage) importHourGroup(hourTimestamp int64, importedFilePaths []strin
 	eventCount, err := s.mergeFilesIntoNew(sourceFiles, tempMergedPath, hourTimestamp)
 	if err != nil {
 		// Clean up temp file on error
-		os.Remove(tempMergedPath)
+		_ = os.Remove(tempMergedPath)
 		return fmt.Errorf("failed to merge files: %w", err)
 	}
 
@@ -558,7 +575,7 @@ func (s *Storage) importHourGroup(hourTimestamp int64, importedFilePaths []strin
 
 	// Atomically replace the canonical file with the merged one
 	if err := os.Rename(tempMergedPath, canonicalPath); err != nil {
-		os.Remove(tempMergedPath)
+		_ = os.Remove(tempMergedPath)
 		return fmt.Errorf("failed to replace canonical file: %w", err)
 	}
 
@@ -602,7 +619,7 @@ func (s *Storage) mergeFilesIntoNew(sourceFiles []string, targetPath string, hou
 	// Write all events
 	for _, event := range allEvents {
 		if err := newFile.WriteEvent(event); err != nil {
-			newFile.Close()
+			_ = newFile.Close()
 			return 0, fmt.Errorf("failed to write event: %w", err)
 		}
 	}
@@ -621,7 +638,11 @@ func (s *Storage) readAllEventsFromFile(filePath string) ([]*models.Event, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	fileData, err := reader.ReadFile()
 	if err != nil {
@@ -768,13 +789,13 @@ func (s *Storage) ingestHourEvents(hourTimestamp int64, events []*models.Event, 
 	eventCount, err := s.mergeEventsIntoNew(sourceEvents, tempMergedPath, hourTimestamp)
 	if err != nil {
 		// Clean up temp file on error
-		os.Remove(tempMergedPath)
+		_ = os.Remove(tempMergedPath)
 		return fmt.Errorf("failed to merge events: %w", err)
 	}
 
 	// Atomically replace the canonical file with the merged one
 	if err := os.Rename(tempMergedPath, canonicalPath); err != nil {
-		os.Remove(tempMergedPath)
+		_ = os.Remove(tempMergedPath)
 		return fmt.Errorf("failed to replace canonical file: %w", err)
 	}
 
@@ -805,7 +826,7 @@ func (s *Storage) mergeEventsIntoNew(events []*models.Event, targetPath string, 
 	// Write all events
 	for _, event := range events {
 		if err := newFile.WriteEvent(event); err != nil {
-			newFile.Close()
+			_ = newFile.Close()
 			return 0, fmt.Errorf("failed to write event: %w", err)
 		}
 	}

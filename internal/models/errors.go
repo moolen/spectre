@@ -1,6 +1,9 @@
 package models
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ValidationError represents a validation error in models
 type ValidationError struct {
@@ -21,6 +24,6 @@ func (e *ValidationError) Error() string {
 
 // IsValidationError checks if an error is a validation error
 func IsValidationError(err error) bool {
-	_, ok := err.(*ValidationError)
-	return ok
+	var validationErr *ValidationError
+	return errors.As(err, &validationErr)
 }

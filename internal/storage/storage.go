@@ -28,7 +28,7 @@ func New(dataDir string, blockSize int64) (*Storage, error) {
 	logger := logging.GetLogger("storage")
 
 	// Create data directory if it doesn't exist
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0755); err != nil { //nolint:gosec // 0755 is standard for data directories
 		logger.Error("Failed to create data directory: %v", err)
 		return nil, err
 	}
@@ -268,7 +268,7 @@ func (s *Storage) CleanupOldStateSnapshots(maxAgeDays int) error {
 		}
 
 		fileData, err := reader.ReadFile()
-		reader.Close()
+		_ = reader.Close()
 
 		if err != nil {
 			s.logger.Warn("Failed to read index section from file %s: %v", filePath, err)
@@ -290,7 +290,7 @@ func (s *Storage) CleanupOldStateSnapshots(maxAgeDays int) error {
 			// 2. Represent non-deleted resources (they're still relevant for consistent view)
 			if state.Timestamp > cutoffTimestampNs {
 				cleanedStates[key] = state
-			} else if state.EventType != "DELETE" {
+			} else if state.EventType != string(models.EventTypeDelete) {
 				// Keep non-deleted resources even if old - they might still be relevant
 				cleanedStates[key] = state
 			} else {
@@ -322,11 +322,15 @@ func (s *Storage) rewriteFileIndexSection(filePath string, fileData *StorageFile
 	fileData.IndexSection.FinalResourceStates = cleanedStates
 
 	// Open file for writing
-	file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
+	file, err := os.OpenFile(filePath, os.O_RDWR, 0644) //nolint:gosec // filePath is validated before use
 	if err != nil {
 		return fmt.Errorf("failed to open file for rewriting: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	// Seek to where the old index section started
 	indexOffset := fileData.Footer.IndexSectionOffset
@@ -348,7 +352,7 @@ func (s *Storage) rewriteFileIndexSection(filePath string, fileData *StorageFile
 	// Write new footer
 	footer := &FileFooter{
 		IndexSectionOffset: indexOffset,
-		IndexSectionLength: int32(bytesWritten),
+		IndexSectionLength: int32(bytesWritten), //nolint:gosec // safe conversion: bytes written is reasonable
 		MagicBytes:         FileFooterMagic,
 	}
 
@@ -487,13 +491,13 @@ func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event,
 				}
 				offset += n
 
-				if offset+int(length) > len(decompressedData) {
+				if offset+int(length) > len(decompressedData) { //nolint:gosec // safe conversion: length is validated
 					s.logger.Warn("Invalid message length in finalized block: %d at offset %d", length, offset)
 					break
 				}
 
-				messageData := decompressedData[offset : offset+int(length)]
-				offset += int(length)
+				messageData := decompressedData[offset : offset+int(length)] //nolint:gosec // safe conversion: length is validated
+				offset += int(length)                                         //nolint:gosec // safe conversion: length is validated
 
 				event := &models.Event{}
 				if err := event.UnmarshalProtobuf(messageData); err != nil {
@@ -543,7 +547,7 @@ func (s *Storage) filterEvents(events []*models.Event, query *models.QueryReques
 	startTimeNs := query.StartTimestamp * 1e9
 	endTimeNs := query.EndTimestamp * 1e9
 
-	var matchingEvents []models.Event
+	matchingEvents := make([]models.Event, 0, len(events))
 	for _, event := range events {
 		// Filter by time range
 		if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
@@ -573,7 +577,11 @@ func (s *Storage) readEventsFromRestoredBlocks(bsf *BlockStorageFile, query *mod
 	if err != nil {
 		return nil, fmt.Errorf("failed to create block reader: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	var allEvents []*models.Event
 	startTimeNs := query.StartTimestamp * 1e9

@@ -43,7 +43,7 @@ func (sh *SearchHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	searchResponse := sh.buildSearchResponse(result)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, searchResponse)
+	_ = writeJSON(w, searchResponse)
 
 	sh.logger.Debug("Search completed: resources=%d, executionTime=%dms", searchResponse.Count, searchResponse.ExecutionTimeMs)
 }
@@ -130,5 +130,5 @@ func (sh *SearchHandler) respondWithError(w http.ResponseWriter, statusCode int,
 		"message": message,
 	}
 
-	writeJSON(w, response)
+	_ = writeJSON(w, response)
 }

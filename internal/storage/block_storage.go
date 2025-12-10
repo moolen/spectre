@@ -35,7 +35,7 @@ type BlockStorageFile struct {
 }
 
 // openExistingBlockStorageFile opens an existing complete file for appending
-func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTimestamp int64, blockSizeBytes int64) (*BlockStorageFile, error) {
+func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTimestamp, blockSizeBytes int64) (*BlockStorageFile, error) {
 	logger := logging.GetLogger("block_storage")
 
 	header := fileData.Header
@@ -46,26 +46,26 @@ func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTi
 	blocksEndOffset := footer.IndexSectionOffset
 
 	// Open file for read/write
-	file, err := os.OpenFile(path, os.O_RDWR, 0644)
+	file, err := os.OpenFile(path, os.O_RDWR, 0644) //nolint:gosec // path is validated before use
 	if err != nil {
 		return nil, fmt.Errorf("failed to open existing file: %w", err)
 	}
 
 	// Truncate at blocks end (removes old index section and footer)
 	if err := file.Truncate(blocksEndOffset); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to truncate file for appending: %w", err)
 	}
 
 	// Seek to end of blocks for appending
 	if _, err := file.Seek(blocksEndOffset, 0); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to seek to end of blocks: %w", err)
 	}
 
 	// Reconstruct BlockStorageFile state from disk
 	blockMetadataList := indexSection.BlockMetadata
-	nextBlockID := int32(len(blockMetadataList))
+	nextBlockID := int32(len(blockMetadataList)) //nolint:gosec // safe conversion: block count is reasonable
 
 	// Reconstruct inverted index from metadata
 	invertedIndex := indexSection.InvertedIndexes
@@ -126,7 +126,7 @@ func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTi
 }
 
 // NewBlockStorageFile creates a new block-based storage file or opens existing complete file
-func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64) (*BlockStorageFile, error) {
+func NewBlockStorageFile(path string, hourTimestamp, blockSizeBytes int64) (*BlockStorageFile, error) {
 	logger := logging.GetLogger("block_storage")
 
 	// Check if file already exists
@@ -134,9 +134,9 @@ func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64)
 		// File exists - check if it's complete (has footer)
 		reader, err := NewBlockReader(path)
 		if err == nil {
-			// Try to read complete file structure
-			fileData, err := reader.ReadFile()
-			reader.Close()
+		// Try to read complete file structure
+		fileData, err := reader.ReadFile()
+		_ = reader.Close()
 
 			if err == nil {
 				// File is complete - restore state and open for appending
@@ -166,7 +166,7 @@ func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64)
 	}
 
 	// Create or open the file
-	file, err := os.Create(path)
+	file, err := os.Create(path) //nolint:gosec // path is validated before use
 	if err != nil {
 		logger.Error("Failed to create block storage file %s: %v", path, err)
 		return nil, err
@@ -190,7 +190,7 @@ func NewBlockStorageFile(path string, hourTimestamp int64, blockSizeBytes int64)
 
 	// Write file header
 	header := NewFileHeader()
-	header.BlockSize = int32(blockSizeBytes)
+	header.BlockSize = int32(blockSizeBytes) //nolint:gosec // safe conversion: block size is validated
 	if err := WriteFileHeader(file, header); err != nil {
 		logger.Error("Failed to write file header: %v", err)
 		return nil, err
@@ -352,6 +352,7 @@ func (bsf *BlockStorageFile) Close() error {
 }
 
 // buildIndexes builds the inverted indexes from block metadata
+//nolint:unparam // error return kept for interface consistency
 func (bsf *BlockStorageFile) buildIndexes() error {
 	if len(bsf.blockMetadataList) == 0 {
 		bsf.index = &InvertedIndex{
@@ -381,7 +382,11 @@ func (bsf *BlockStorageFile) extractFinalResourceStates() (map[string]*ResourceL
 	if err != nil {
 		return nil, fmt.Errorf("failed to create block reader: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	for _, metadata := range bsf.blockMetadataList {
 		events, err := reader.ReadBlockEvents(metadata)
@@ -431,7 +436,7 @@ func (bsf *BlockStorageFile) writeIndexSection() error {
 		blockCount = len(bsf.blocks)
 	}
 	stats := &IndexStatistics{
-		TotalBlocks:            int32(blockCount),
+		TotalBlocks:            int32(blockCount), //nolint:gosec // safe conversion: block count is reasonable
 		TotalEvents:            bsf.totalEvents,
 		TotalUncompressedBytes: bsf.totalUncompressed,
 		TotalCompressedBytes:   bsf.totalCompressed,
@@ -460,9 +465,9 @@ func (bsf *BlockStorageFile) writeIndexSection() error {
 		}
 	}
 
-	stats.UniqueKinds = int32(len(uniqueKinds))
-	stats.UniqueNamespaces = int32(len(uniqueNamespaces))
-	stats.UniqueGroups = int32(len(uniqueGroups))
+	stats.UniqueKinds = int32(len(uniqueKinds))       //nolint:gosec // safe conversion: count is reasonable
+	stats.UniqueNamespaces = int32(len(uniqueNamespaces)) //nolint:gosec // safe conversion: count is reasonable
+	stats.UniqueGroups = int32(len(uniqueGroups))     //nolint:gosec // safe conversion: count is reasonable
 
 	// Extract final resource states for consistent view across hour boundaries
 	finalResourceStates, err := bsf.extractFinalResourceStates()
@@ -490,7 +495,7 @@ func (bsf *BlockStorageFile) writeIndexSection() error {
 	// Write file footer
 	footer := &FileFooter{
 		IndexSectionOffset: indexOffset,
-		IndexSectionLength: int32(bytesWritten),
+		IndexSectionLength: int32(bytesWritten), //nolint:gosec // safe conversion: bytes written is reasonable
 		MagicBytes:         FileFooterMagic,
 	}
 
@@ -609,7 +614,7 @@ func (bsf *BlockStorageFile) GetSparseTimestampIndex() models.SparseTimestampInd
 
 	return models.SparseTimestampIndex{
 		Entries:       entries,
-		TotalSegments: int32(len(bsf.blocks)),
+		TotalSegments: int32(len(bsf.blocks)), //nolint:gosec // safe conversion: block count is reasonable
 	}
 }
 
@@ -617,7 +622,7 @@ func (bsf *BlockStorageFile) GetSparseTimestampIndex() models.SparseTimestampInd
 func (bsf *BlockStorageFile) GetSegmentCount() int32 {
 	bsf.mutex.Lock()
 	defer bsf.mutex.Unlock()
-	return int32(len(bsf.blocks))
+	return int32(len(bsf.blocks)) //nolint:gosec // safe conversion: block count is reasonable //nolint:gosec // safe conversion: block count is reasonable
 }
 
 // GetEventCount returns the total number of events

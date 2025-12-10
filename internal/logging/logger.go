@@ -19,6 +19,12 @@ const (
 	WARN
 	// ERROR level for error messages
 	ERROR
+	// FATAL level for fatal messages
+	FATAL
+)
+
+const (
+	strError = "ERROR"
 )
 
 // LogField represents a structured logging field
@@ -51,8 +57,10 @@ func Initialize(levelStr string) {
 		level = INFO
 	case "WARN":
 		level = WARN
-	case "ERROR":
+	case strError:
 		level = ERROR
+	case "FATAL":
+		level = FATAL
 	}
 
 	globalLogger = &Logger{
@@ -97,15 +105,22 @@ func (l *Logger) Warn(msg string, args ...interface{}) {
 // Error logs an error message
 func (l *Logger) Error(msg string, args ...interface{}) {
 	if l.level <= ERROR {
-		l.logf("ERROR", msg, args...)
+		l.logf(strError, msg, args...)
+	}
+}
+
+func (l *Logger) Fatal(msg string, args ...interface{}) {
+	if l.level <= FATAL {
+		l.logf("FATAL", msg, args...)
+		os.Exit(1)
 	}
 }
 
 // ErrorWithErr logs an error message with an error object
 func (l *Logger) ErrorWithErr(msg string, err error, args ...interface{}) {
 	if l.level <= ERROR {
-		allArgs := append(args, err)
-		l.logf("ERROR", msg+" - %v", allArgs...)
+		args = append(args, err)
+		l.logf("ERROR", msg+" - %v", args...)
 	}
 }
 
@@ -116,14 +131,14 @@ func (l *Logger) logf(level, msg string, args ...interface{}) {
 	log.Println(logMsg)
 
 	// Also write to stderr for errors
-	if level == "ERROR" {
+	if level == strError {
 		fmt.Fprintf(os.Stderr, "%s\n", logMsg)
 	}
 }
 
 // GetTimestamp returns a formatted timestamp
 func GetTimestamp() string {
-	return fmt.Sprintf("%v", os.Getenv("LOG_TIMESTAMP"))
+	return os.Getenv("LOG_TIMESTAMP")
 }
 
 // WithName returns a new logger with a custom name
@@ -217,7 +232,7 @@ func (l *Logger) logWithFields(level, msg string, fields ...LogField) {
 	log.Println(logMsg)
 
 	// Also write to stderr for errors
-	if level == "ERROR" {
+	if level == strError {
 		fmt.Fprintf(os.Stderr, "%s\n", logMsg)
 	}
 }

@@ -28,7 +28,7 @@ type Config struct {
 }
 
 // LoadConfig creates a Config with the provided values
-func LoadConfig(dataDir string, apiPort int, logLevel string, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool) *Config {
+func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool) *Config {
 	cfg := &Config{
 		DataDir:               dataDir,
 		APIPort:               apiPort,

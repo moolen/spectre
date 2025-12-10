@@ -10,6 +10,12 @@ import (
 	"github.com/moolen/spectre/internal/mcp/client"
 )
 
+const (
+	statusUnknown = "Unknown"
+	statusError   = "Error"
+	statusWarning = "Warning"
+)
+
 // ClusterHealthTool implements the cluster_health MCP tool
 type ClusterHealthTool struct {
 	client *client.SpectreClient
@@ -84,10 +90,10 @@ func (t *ClusterHealthTool) Execute(ctx context.Context, input json.RawMessage) 
 
 	// If timestamps look like milliseconds, convert to seconds
 	if startTime > 10000000000 {
-		startTime = startTime / 1000
+		startTime /= 1000
 	}
 	if endTime > 10000000000 {
-		endTime = endTime / 1000
+		endTime /= 1000
 	}
 
 	// Validate time range
@@ -134,7 +140,7 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse, max
 		}
 
 		// Get current status from last segment
-		currentStatus := "Unknown"
+		currentStatus := statusUnknown
 		errorDuration := int64(0)
 		errorMessage := ""
 
@@ -144,7 +150,7 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse, max
 			errorMessage = lastSegment.Message
 
 			// Calculate error duration if in error state
-			if lastSegment.Status == "Error" || lastSegment.Status == "Warning" {
+			if lastSegment.Status == statusError || lastSegment.Status == statusWarning {
 				errorDuration = lastSegment.EndTime - lastSegment.StartTime
 			}
 		}
@@ -158,7 +164,7 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse, max
 		output.TotalResources++
 
 		// Track issues
-		if currentStatus == "Error" || currentStatus == "Warning" {
+		if currentStatus == statusError || currentStatus == statusWarning {
 			issues = append(issues, Issue{
 				ResourceID:        resource.ID,
 				Kind:              resource.Kind,
@@ -175,9 +181,9 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse, max
 		// Count by status for overall calculation
 		if currentStatus == "Ready" {
 			output.HealthyResourceCount++
-		} else if currentStatus == "Error" {
+		} else if currentStatus == statusError {
 			output.ErrorResourceCount++
-		} else if currentStatus == "Warning" {
+		} else if currentStatus == statusWarning {
 			output.WarningResourceCount++
 		}
 	}

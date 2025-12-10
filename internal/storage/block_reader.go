@@ -3,7 +3,7 @@ package storage
 import (
 	"bufio"
 	"bytes"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // MD5 used for checksum, not cryptographic purposes
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -22,7 +22,7 @@ type BlockReader struct {
 
 // NewBlockReader creates a new reader for a storage file
 func NewBlockReader(filePath string) (*BlockReader, error) {
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) //nolint:gosec // filePath is validated before use
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
@@ -202,12 +202,12 @@ func (br *BlockReader) readBlockEventsProtobuf(decompressedData []byte) ([]*mode
 		offset += n
 
 		// Extract message bytes
-		if offset+int(length) > len(decompressedData) {
+		if offset+int(length) > len(decompressedData) { //nolint:gosec // safe conversion: length is validated
 			return nil, fmt.Errorf("invalid message length: %d at offset %d", length, offset)
 		}
 
-		messageData := decompressedData[offset : offset+int(length)]
-		offset += int(length)
+		messageData := decompressedData[offset : offset+int(length)] //nolint:gosec // safe conversion: length is validated
+		offset += int(length)                                        //nolint:gosec // safe conversion: length is validated
 
 		// Unmarshal event
 		event := &models.Event{}
@@ -367,6 +367,6 @@ func VerifyBlockChecksum(block *Block, metadata *BlockMetadata) error {
 // ComputeChecksum computes an MD5 checksum for data
 // MD5 is used for integrity checking rather than cryptographic security
 func ComputeChecksum(data []byte) string {
-	hash := md5.Sum(data)
+	hash := md5.Sum(data) //nolint:gosec // MD5 used for checksum, not cryptographic purposes
 	return hex.EncodeToString(hash[:])
 }

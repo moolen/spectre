@@ -86,10 +86,10 @@ func (t *ResourceChangesTool) Execute(ctx context.Context, input json.RawMessage
 
 	// Convert milliseconds to seconds if needed
 	if startTime > 10000000000 {
-		startTime = startTime / 1000
+		startTime /= 1000
 	}
 	if endTime > 10000000000 {
-		endTime = endTime / 1000
+		endTime /= 1000
 	}
 
 	if startTime >= endTime {

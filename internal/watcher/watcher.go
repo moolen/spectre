@@ -257,6 +257,8 @@ func (w *Watcher) loadAndStartWatchers(ctx context.Context) error {
 }
 
 // startGVRWatcher starts a watcher for a single GVR (watching all namespaces for namespaced resources)
+//
+//nolint:unparam // error return kept for interface consistency, errors are logged instead
 func (w *Watcher) startGVRWatcher(ctx context.Context, gvr schema.GroupVersionResource, namespaced bool, kind string) error {
 	// Create watcher key for tracking (GVR only, no namespace)
 	watcherKey := fmt.Sprintf("%s/%s/%s", gvr.Group, gvr.Version, gvr.Resource)
@@ -284,7 +286,7 @@ func (w *Watcher) startGVRWatcher(ctx context.Context, gvr schema.GroupVersionRe
 			w.logger.Info("Starting watcher for %s (cluster-scoped)", watcherKey)
 		}
 
-		if err := w.watchLoop(watcherCtx, gvr, namespace, kind, namespaced, watcherKey); err != nil {
+		if err := w.watchLoop(watcherCtx, gvr, namespace, kind, namespaced); err != nil {
 			if watcherCtx.Err() == nil {
 				w.logger.Error("Watcher for %s failed: %v", watcherKey, err)
 			}
@@ -326,7 +328,7 @@ func (w *Watcher) resolveGVR(gvk schema.GroupVersionKind) (schema.GroupVersionRe
 }
 
 // watchLoop performs a raw List/Watch loop for a resource without caching
-func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource, namespace, kind string, namespaced bool, watcherKey string) error {
+func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource, namespace, _ string, namespaced bool) error {
 	// Get the resource interface
 	// For namespaced resources watching all namespaces, use empty namespace
 	// For cluster-scoped resources, namespace is already empty
@@ -502,6 +504,10 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 					if err := w.eventHandler.OnDelete(unstructuredObj); err != nil {
 						w.logger.Error("Error handling Delete event: %v", err)
 					}
+				case watch.Bookmark:
+					// Bookmark events are used for resync, we can ignore them
+				case watch.Error:
+					w.logger.Error("Watch error event received: %v", event.Object)
 				}
 			}
 		}

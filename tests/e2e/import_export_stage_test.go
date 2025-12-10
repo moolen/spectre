@@ -136,7 +136,7 @@ func (s *ImportExportStage) generated_service_with_timeline_events() *ImportExpo
 			UID:       serviceUID,
 		},
 		Data: []byte(fmt.Sprintf(
-			`{"apiVersion":"v1","kind":"Service","metadata":{"name":"%s","namespace":"%s","uid":"%s"},"spec":{"ports":[{"port":80,"targetPort":8080}],"selector":{"app":"test"}}}`,
+			`{"apiVersion":"v1","kind":"Service","metadata":{"name":%q,"namespace":%q,"uid":%q},"spec":{"ports":[{"port":80,"targetPort":8080}],"selector":{"app":"test"}}}`,
 			serviceName, s.testNamespaces[0], serviceUID,
 		)),
 	}
@@ -162,7 +162,7 @@ func (s *ImportExportStage) generated_service_with_timeline_events() *ImportExpo
 				UID:       serviceUID,
 			},
 			Data: []byte(fmt.Sprintf(
-				`{"apiVersion":"v1","kind":"Service","metadata":{"name":"%s","namespace":"%s","uid":"%s","resourceVersion":"%d"},"spec":{"ports":[{"port":80,"targetPort":%d}],"selector":{"app":"test","version":"v%d"}}}`,
+				`{"apiVersion":"v1","kind":"Service","metadata":{"name":%q,"namespace":%q,"uid":%q,"resourceVersion":"%d"},"spec":{"ports":[{"port":80,"targetPort":%d}],"selector":{"app":"test","version":"v%d"}}}`,
 				serviceName, s.testNamespaces[0], serviceUID, i+2, 8080+i, i+1,
 			)),
 		}
@@ -654,7 +654,7 @@ func (s *ImportExportStage) timeline_shows_status_segments() *ImportExportStage 
 		timelineURL := fmt.Sprintf("%s/v1/timeline?start=%d&end=%d&namespace=%s&kind=Service",
 			s.apiClient.BaseURL, startTime, endTime, s.testNamespaces[0])
 
-		req, err := http.NewRequestWithContext(timelineCtx, "GET", timelineURL, nil)
+		req, err := http.NewRequestWithContext(timelineCtx, "GET", timelineURL, http.NoBody)
 		if err != nil {
 			s.t.Logf("Failed to create timeline request: %v", err)
 			return false
@@ -996,7 +996,7 @@ func (s *ImportExportStage) generateTestEvents(baseTime time.Time, namespaces []
 						UID:       resourceUID,
 					},
 					Data: []byte(fmt.Sprintf(
-						`{"apiVersion":"apps/v1","kind":"%s","metadata":{"name":"%s","namespace":"%s"}}`,
+						`{"apiVersion":"apps/v1","kind":%q,"metadata":{"name":%q,"namespace":%q}}`,
 						kind, resourceName, ns,
 					)),
 				}

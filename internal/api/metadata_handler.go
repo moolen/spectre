@@ -115,7 +115,7 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	writeJSON(w, response)
+	_ = writeJSON(w, response)
 }
 
 // respondWithError sends an error response
@@ -128,5 +128,5 @@ func (mh *MetadataHandler) respondWithError(w http.ResponseWriter, statusCode in
 		"message": message,
 	}
 
-	writeJSON(w, response)
+	_ = writeJSON(w, response)
 }

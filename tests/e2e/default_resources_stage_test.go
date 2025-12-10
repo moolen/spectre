@@ -57,7 +57,6 @@ func (s *DefaultResourcesStage) two_test_namespaces() *DefaultResourcesStage {
 	s.testNamespace2 = "test-alternate"
 
 	for _, ns := range []string{s.testNamespace1, s.testNamespace2} {
-		ns := ns // capture loop variable for closure
 		err := s.k8sClient.CreateNamespace(ctx, ns)
 		s.require.NoError(err, "failed to create namespace %s", ns)
 		s.t.Cleanup(func() {

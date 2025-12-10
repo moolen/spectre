@@ -9,6 +9,11 @@ import (
 	"github.com/moolen/spectre/internal/storage"
 )
 
+const (
+	strTrue = "true"
+	strOne  = "1"
+)
+
 // ExportHandler handles storage export requests
 type ExportHandler struct {
 	storage *storage.Storage
@@ -62,8 +67,8 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse boolean flags
-	includeOpenHour := includeOpenHourStr == "true" || includeOpenHourStr == "1"
-	compression := compressionStr == "true" || compressionStr == "1" || compressionStr == ""
+	includeOpenHour := includeOpenHourStr == strTrue || includeOpenHourStr == strOne
+	compression := compressionStr == strTrue || compressionStr == strOne || compressionStr == ""
 
 	opts := storage.ExportOptions{
 		StartTime:       startTime,

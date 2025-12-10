@@ -14,19 +14,19 @@ import (
 )
 
 type UIStage struct {
-	t         *testing.T
-	require   *require.Assertions
-	assert    *assert.Assertions
-	testCtx   *helpers.TestContext
-	k8sClient *helpers.K8sClient
-	apiClient *helpers.APIClient
+	t           *testing.T
+	require     *require.Assertions
+	assert      *assert.Assertions
+	testCtx     *helpers.TestContext
+	k8sClient   *helpers.K8sClient
+	apiClient   *helpers.APIClient
 	browserTest *helpers.BrowserTest
 
-	testNamespace string
-	uiURL          string
-	timelineURL    string
-	deployments    []*appsv1.Deployment
-	namespaces     []string
+	// testNamespace string // unused field
+	uiURL       string
+	timelineURL string
+	deployments []*appsv1.Deployment
+	namespaces  []string
 }
 
 func NewUIStage(t *testing.T) (*UIStage, *UIStage, *UIStage) {
@@ -48,22 +48,6 @@ func (s *UIStage) a_test_environment() *UIStage {
 	s.k8sClient = s.testCtx.K8sClient
 	s.apiClient = s.testCtx.APIClient
 	s.uiURL = s.testCtx.PortForward.GetURL()
-	return s
-}
-
-func (s *UIStage) a_test_namespace() *UIStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	s.testNamespace = "test-ui"
-	err := s.k8sClient.CreateNamespace(ctx, s.testNamespace)
-	s.require.NoError(err, "failed to create namespace")
-	s.t.Cleanup(func() {
-		if err := s.k8sClient.DeleteNamespace(context.Background(), s.testNamespace); err != nil {
-			s.t.Logf("Warning: failed to delete namespace: %v", err)
-		}
-	})
-
 	return s
 }
 
@@ -221,10 +205,11 @@ func (s *UIStage) kind_option_is_selected(kind string) *UIStage {
 	return s
 }
 
-func (s *UIStage) kind_filter_is_set(kind string) *UIStage {
-	s.kind_dropdown_is_opened()
-	return s.kind_option_is_selected(kind)
-}
+// kind_filter_is_set is unused - keeping for potential future use
+// func (s *UIStage) kind_filter_is_set(kind string) *UIStage {
+// 	s.kind_dropdown_is_opened()
+// 	return s.kind_option_is_selected(kind)
+// }
 
 func (s *UIStage) search_filter_is_set(query string) *UIStage {
 	searchInput := s.browserTest.Page.GetByPlaceholder("Search resources by name...")
@@ -393,4 +378,3 @@ func (s *UIStage) kind_options_are_visible(kinds []string) *UIStage {
 	}
 	return s
 }
-

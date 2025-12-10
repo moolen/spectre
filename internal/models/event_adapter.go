@@ -71,6 +71,8 @@ func (e *Event) UnmarshalProtobuf(data []byte) error {
 		e.Type = EventTypeUpdate
 	case pb.EventType_DELETE:
 		e.Type = EventTypeDelete
+	case pb.EventType_EVENT_TYPE_UNSPECIFIED:
+		return fmt.Errorf("unspecified protobuf event type")
 	default:
 		return fmt.Errorf("unknown protobuf event type: %v", pbEvent.Type)
 	}

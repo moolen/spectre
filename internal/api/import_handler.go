@@ -75,7 +75,11 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 
 	// Prepare to read request body with size limit
 	limitedBody := io.LimitReader(r.Body, int64(MaxPayloadSize))
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			h.logger.Error("Failed to close request body: %v", err)
+		}
+	}()
 
 	// Decompress if needed based on Content-Encoding header
 	var decompressedBody io.Reader = limitedBody
@@ -89,12 +93,20 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusBadRequest, "INVALID_ENCODING", "Failed to decompress gzip data")
 			return
 		}
-		defer gzipReader.Close()
+		defer func() {
+			if err := gzipReader.Close(); err != nil {
+				h.logger.Error("Failed to close gzip reader: %v", err)
+			}
+		}()
 		decompressedBody = gzipReader
 
 	case "deflate":
 		deflateReader := flate.NewReader(limitedBody)
-		defer deflateReader.Close()
+		defer func() {
+			if err := deflateReader.Close(); err != nil {
+				h.logger.Error("Failed to close deflate reader: %v", err)
+			}
+		}()
 		decompressedBody = deflateReader
 
 	case "":
@@ -144,7 +156,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		"errors":         report.Errors,
 	}
 
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // handleArchiveImport processes a binary archive import request (existing behavior)
@@ -153,7 +165,11 @@ func (h *ImportHandler) handleArchiveImport(w http.ResponseWriter, r *http.Reque
 		logging.Field("validate_files", opts.ValidateFiles),
 		logging.Field("overwrite", opts.OverwriteExisting))
 
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			h.logger.Error("Failed to close request body: %v", err)
+		}
+	}()
 
 	// Read archive from request body with size limit
 	limitedBody := io.LimitReader(r.Body, int64(MaxPayloadSize))
@@ -188,5 +204,5 @@ func (h *ImportHandler) handleArchiveImport(w http.ResponseWriter, r *http.Reque
 		"errors":         report.Errors,
 	}
 
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
