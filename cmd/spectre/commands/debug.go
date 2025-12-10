@@ -330,6 +330,9 @@ func printDebugExtended(data *debugFileData, events []*models.Event, filter *deb
 		fmt.Printf("Checksum:       %s\n", block.Metadata.Checksum)
 		fmt.Printf("Min Timestamp:  %s\n", time.Unix(0, block.Metadata.TimestampMin).Format(time.RFC3339))
 		fmt.Printf("Max Timestamp:  %s\n", time.Unix(0, block.Metadata.TimestampMax).Format(time.RFC3339))
+		fmt.Printf("KindSet:        %v\n", block.Metadata.KindSet)
+		fmt.Printf("NamespaceSet:   %v\n", block.Metadata.NamespaceSet)
+		fmt.Printf("GroupSet:       %v\n", block.Metadata.GroupSet)
 	}
 
 	fmt.Println("\n=== Events ===")

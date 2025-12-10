@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"bufio"
-	"bytes"
 	"crypto/md5" //nolint:gosec // MD5 used for checksum, not cryptographic purposes
 	"encoding/binary"
 	"encoding/hex"
@@ -127,8 +125,11 @@ func (br *BlockReader) ReadBlockWithCache(filename string, metadata *BlockMetada
 		return nil, err
 	}
 
-	// Parse events from decompressed NDJSON data
-	events := parseNDJSONToEvents(decompressed)
+	// Parse events from decompressed protobuf data
+	events, err := br.readBlockEventsProtobuf(decompressed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse protobuf events: %w", err)
+	}
 
 	cachedBlock := &CachedBlock{
 		BlockID:  makeKey(filename, metadata.ID),
@@ -147,29 +148,6 @@ func (br *BlockReader) ReadBlockWithCache(filename string, metadata *BlockMetada
 	}
 
 	return cachedBlock, nil
-}
-
-// parseNDJSONToEvents parses newline-delimited JSON into []*models.Event
-func parseNDJSONToEvents(data []byte) []*models.Event {
-	var events []*models.Event
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var event *models.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			// Skip malformed events (logging would happen at query level)
-			continue
-		}
-
-		events = append(events, event)
-	}
-
-	return events
 }
 
 // ReadBlockEvents reads and decompresses a block, then parses events
