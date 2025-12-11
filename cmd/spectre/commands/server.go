@@ -28,7 +28,7 @@ var (
 	maxConcurrentRequests int
 	cacheMaxMB            int64
 	cacheEnabled          bool
-	importDir             string
+	importPath            string
 )
 
 var serverCmd = &cobra.Command{
@@ -49,7 +49,7 @@ func init() {
 	serverCmd.Flags().IntVar(&maxConcurrentRequests, "max-concurrent-requests", 100, "Maximum number of concurrent API requests")
 	serverCmd.Flags().Int64Var(&cacheMaxMB, "cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
 	serverCmd.Flags().BoolVar(&cacheEnabled, "cache-enabled", true, "Enable block cache (default: true)")
-	serverCmd.Flags().StringVar(&importDir, "import", "", "Import JSON event files from directory before starting server")
+	serverCmd.Flags().StringVar(&importPath, "import", "", "Import JSON event file or directory before starting server")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -106,25 +106,71 @@ func runServer(cmd *cobra.Command, args []string) {
 		logger.Info("Storage component created")
 
 		// Handle import if --import flag is provided
-		if importDir != "" {
-			logger.Info("Starting import from directory: %s", importDir)
-			fmt.Printf("Importing events from: %s\n", importDir)
+		if importPath != "" {
+			// Check if path is a file or directory
+			info, err := os.Stat(importPath)
+			if err != nil {
+				logger.Error("Failed to access import path: %v", err)
+				HandleError(err, "Import path error")
+			}
 
 			importOpts := storage.ImportOptions{
 				ValidateFiles:     true,
 				OverwriteExisting: true,
 			}
 
-			filesProcessed := 0
-			progressCallback := func(filename string, eventCount int) {
-				filesProcessed++
-				fmt.Printf("  [%d] Loaded %d events from %s\n", filesProcessed, eventCount, filename)
-			}
+			var report *importexport.ImportReport
 
-			report, err := importexport.WalkAndImportJSON(importDir, storageComponent, importOpts, progressCallback)
-			if err != nil {
-				logger.Error("Import failed: %v", err)
-				HandleError(err, "Import error")
+			if info.IsDir() {
+				// Import directory
+				logger.Info("Starting import from directory: %s", importPath)
+				fmt.Printf("Importing events from directory: %s\n", importPath)
+
+				filesProcessed := 0
+				progressCallback := func(filename string, eventCount int) {
+					filesProcessed++
+					fmt.Printf("  [%d] Loaded %d events from %s\n", filesProcessed, eventCount, filename)
+				}
+
+				report, err = importexport.WalkAndImportJSON(importPath, storageComponent, importOpts, progressCallback)
+				if err != nil {
+					logger.Error("Import failed: %v", err)
+					HandleError(err, "Import error")
+				}
+			} else {
+				// Import single file
+				logger.Info("Starting import from file: %s", importPath)
+				fmt.Printf("Importing events from file: %s\n", importPath)
+
+				startTime := time.Now()
+
+				// Read the JSON file
+				events, err := importexport.ImportJSONFile(importPath)
+				if err != nil {
+					logger.Error("Failed to read file: %v", err)
+					HandleError(err, "Import file error")
+				}
+
+				fmt.Printf("  Loaded %d events from %s\n", len(events), importPath)
+
+				// Import the events
+				storageReport, err := storageComponent.AddEventsBatch(events, importOpts)
+				if err != nil {
+					logger.Error("Import failed: %v", err)
+					HandleError(err, "Import error")
+				}
+
+				// Convert storage report to import report
+				report = &importexport.ImportReport{
+					TotalFiles:    1,
+					ImportedFiles: storageReport.ImportedFiles,
+					MergedHours:   storageReport.MergedHours,
+					SkippedFiles:  storageReport.SkippedFiles,
+					FailedFiles:   storageReport.FailedFiles,
+					TotalEvents:   storageReport.TotalEvents,
+					Errors:        storageReport.Errors,
+					Duration:      time.Since(startTime),
+				}
 			}
 
 			fmt.Println("\n" + importexport.FormatImportReport(report))
