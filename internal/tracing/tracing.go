@@ -2,7 +2,10 @@ package tracing
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
@@ -13,6 +16,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -25,8 +29,9 @@ type TracingProvider struct {
 
 // Config holds tracing configuration
 type Config struct {
-	Enabled  bool
-	Endpoint string // OTLP gRPC endpoint (e.g., "victorialogs:4317")
+	Enabled   bool
+	Endpoint  string // OTLP gRPC endpoint (e.g., "victorialogs:4317")
+	TLSCAPath string // Path to CA certificate for TLS verification (optional)
 }
 
 // NewTracingProvider creates and initializes the tracing provider
@@ -49,15 +54,43 @@ func NewTracingProvider(cfg Config) (*TracingProvider, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	exporter, err := otlptracegrpc.New(
-		ctx,
+	// Configure TLS if CA path is provided
+	var dialOptions []grpc.DialOption
+	var otlpOptions []otlptracegrpc.Option
+
+	if cfg.TLSCAPath != "" {
+		// Load CA certificate
+		caCert, err := os.ReadFile(cfg.TLSCAPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to append CA certificate to pool")
+		}
+
+		tlsConfig := &tls.Config{
+			RootCAs:    certPool,
+			MinVersion: tls.VersionTLS12,
+		}
+
+		creds := credentials.NewTLS(tlsConfig)
+		dialOptions = append(dialOptions, grpc.WithBlock(), grpc.WithTransportCredentials(creds))
+		logger.Info("TLS enabled for tracing with CA from: %s", cfg.TLSCAPath)
+	} else {
+		// Use insecure connection
+		dialOptions = append(dialOptions, grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		otlpOptions = append(otlpOptions, otlptracegrpc.WithInsecure())
+		logger.Info("TLS disabled for tracing (insecure mode)")
+	}
+
+	otlpOptions = append(otlpOptions,
 		otlptracegrpc.WithEndpoint(cfg.Endpoint),
-		otlptracegrpc.WithInsecure(), // For internal cluster communication
-		otlptracegrpc.WithDialOption(
-			grpc.WithBlock(),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		),
+		otlptracegrpc.WithDialOption(dialOptions...),
 	)
+
+	exporter, err := otlptracegrpc.New(ctx, otlpOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}

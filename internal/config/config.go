@@ -31,10 +31,13 @@ type Config struct {
 
 	// TracingEndpoint is the OTLP gRPC endpoint for trace export
 	TracingEndpoint string
+
+	// TracingTLSCAPath is the path to the CA certificate for TLS verification
+	TracingTLSCAPath string
 }
 
 // LoadConfig creates a Config with the provided values
-func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool, tracingEnabled bool, tracingEndpoint string) *Config {
+func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool, tracingEnabled bool, tracingEndpoint string, tracingTLSCAPath string) *Config {
 	cfg := &Config{
 		DataDir:               dataDir,
 		APIPort:               apiPort,
@@ -46,6 +49,7 @@ func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string,
 		BlockCacheEnabled:     blockCacheEnabled,
 		TracingEnabled:        tracingEnabled,
 		TracingEndpoint:       tracingEndpoint,
+		TracingTLSCAPath:      tracingTLSCAPath,
 	}
 
 	return cfg
