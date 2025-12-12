@@ -1,0 +1,140 @@
+package tracing
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/moolen/spectre/internal/logging"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+// TracingProvider wraps OpenTelemetry TracerProvider and implements lifecycle.Component
+type TracingProvider struct {
+	tracerProvider *sdktrace.TracerProvider
+	logger         *logging.Logger
+	enabled        bool
+}
+
+// Config holds tracing configuration
+type Config struct {
+	Enabled  bool
+	Endpoint string // OTLP gRPC endpoint (e.g., "victorialogs:4317")
+}
+
+// NewTracingProvider creates and initializes the tracing provider
+func NewTracingProvider(cfg Config) (*TracingProvider, error) {
+	logger := logging.GetLogger("tracing")
+
+	if !cfg.Enabled {
+		logger.Info("Tracing disabled")
+		return &TracingProvider{
+			logger:  logger,
+			enabled: false,
+		}, nil
+	}
+
+	if cfg.Endpoint == "" {
+		return nil, fmt.Errorf("tracing enabled but endpoint not configured")
+	}
+
+	// Create OTLP gRPC exporter
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	exporter, err := otlptracegrpc.New(
+		ctx,
+		otlptracegrpc.WithEndpoint(cfg.Endpoint),
+		otlptracegrpc.WithInsecure(), // For internal cluster communication
+		otlptracegrpc.WithDialOption(
+			grpc.WithBlock(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+	}
+
+	// Create resource with service information
+	res, err := resource.New(
+		ctx,
+		resource.WithAttributes(
+			semconv.ServiceName("spectre"),
+			semconv.ServiceVersion("0.1.0"),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resource: %w", err)
+	}
+
+	// Create tracer provider with always-on sampling
+	tracerProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()), // 100% sampling
+	)
+
+	// Set global tracer provider
+	otel.SetTracerProvider(tracerProvider)
+
+	logger.Info("Tracing initialized with endpoint: %s", cfg.Endpoint)
+
+	return &TracingProvider{
+		tracerProvider: tracerProvider,
+		logger:         logger,
+		enabled:        true,
+	}, nil
+}
+
+// Start implements lifecycle.Component interface
+func (tp *TracingProvider) Start(ctx context.Context) error {
+	if !tp.enabled {
+		tp.logger.Info("Tracing provider starting (disabled mode)")
+		return nil
+	}
+	tp.logger.Info("Tracing provider started")
+	return nil
+}
+
+// Stop implements lifecycle.Component interface
+func (tp *TracingProvider) Stop(ctx context.Context) error {
+	if !tp.enabled {
+		return nil
+	}
+
+	tp.logger.Info("Shutting down tracing provider...")
+
+	// Flush remaining spans
+	if err := tp.tracerProvider.Shutdown(ctx); err != nil {
+		tp.logger.Error("Error shutting down tracer provider: %v", err)
+		return err
+	}
+
+	tp.logger.Info("Tracing provider stopped")
+	return nil
+}
+
+// Name implements lifecycle.Component interface
+func (tp *TracingProvider) Name() string {
+	return "Tracing Provider"
+}
+
+// GetTracer returns a tracer for instrumenting code
+func (tp *TracingProvider) GetTracer(name string) trace.Tracer {
+	if !tp.enabled {
+		return otel.GetTracerProvider().Tracer(name)
+	}
+	return otel.GetTracerProvider().Tracer(name)
+}
+
+// IsEnabled returns whether tracing is enabled
+func (tp *TracingProvider) IsEnabled() bool {
+	return tp.enabled
+}

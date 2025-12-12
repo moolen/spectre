@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +16,7 @@ import (
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
+	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +32,10 @@ var (
 	cacheMaxMB            int64
 	cacheEnabled          bool
 	importPath            string
+	pprofEnabled          bool
+	pprofPort             int
+	tracingEnabled        bool
+	tracingEndpoint       string
 )
 
 var serverCmd = &cobra.Command{
@@ -50,6 +57,10 @@ func init() {
 	serverCmd.Flags().Int64Var(&cacheMaxMB, "cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
 	serverCmd.Flags().BoolVar(&cacheEnabled, "cache-enabled", true, "Enable block cache (default: true)")
 	serverCmd.Flags().StringVar(&importPath, "import", "", "Import JSON event file or directory before starting server")
+	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
+	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
+	serverCmd.Flags().BoolVar(&tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing (default: false)")
+	serverCmd.Flags().StringVar(&tracingEndpoint, "tracing-endpoint", "", "OTLP gRPC endpoint for traces (e.g., victorialogs:4317)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -63,6 +74,8 @@ func runServer(cmd *cobra.Command, args []string) {
 		maxConcurrentRequests,
 		cacheMaxMB,
 		cacheEnabled,
+		tracingEnabled,
+		tracingEndpoint,
 	)
 
 	// Validate configuration
@@ -85,6 +98,36 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
+
+	// Initialize tracing provider
+	tracingCfg := tracing.Config{
+		Enabled:  cfg.TracingEnabled,
+		Endpoint: cfg.TracingEndpoint,
+	}
+	tracingProvider, err := tracing.NewTracingProvider(tracingCfg)
+	if err != nil {
+		logger.Warn("Failed to initialize tracing (continuing without tracing): %v", err)
+		tracingProvider = nil
+	}
+
+	// Register tracing provider (no dependencies)
+	if tracingProvider != nil {
+		if err := manager.Register(tracingProvider); err != nil {
+			logger.Error("Failed to register tracing provider: %v", err)
+			HandleError(err, "Tracing registration error")
+		}
+	}
+
+	// Start pprof server if enabled
+	if pprofEnabled {
+		go func() {
+			pprofAddr := fmt.Sprintf(":%d", pprofPort)
+			logger.Info("Starting pprof server on %s", pprofAddr)
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				logger.Error("pprof server failed: %v", err)
+			}
+		}()
+	}
 
 	// In demo mode, skip storage and watcher initialization
 	var storageComponent *storage.Storage
@@ -192,19 +235,19 @@ func runServer(cmd *cobra.Command, args []string) {
 		// Create query executor with or without cache based on CLI flag
 		if cacheEnabled {
 			var err error
-			queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, cacheMaxMB)
+			queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, cacheMaxMB, tracingProvider)
 			if err != nil {
 				logger.Error("Failed to create cache: %v", err)
 				HandleError(err, "Cache initialization error")
 			}
 			logger.Info("Block cache enabled with max size: %dMB", cacheMaxMB)
 		} else {
-			queryExecutor = storage.NewQueryExecutor(storageComponent)
+			queryExecutor = storage.NewQueryExecutor(storageComponent, tracingProvider)
 			logger.Info("Block cache disabled")
 		}
 	}
 
-	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent, demo)
+	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent, demo, tracingProvider)
 	logger.Info("API server component created")
 
 	// Register components based on demo mode

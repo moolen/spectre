@@ -41,6 +41,16 @@ service:
   sessionAffinity: None
   sessionAffinityConfig: {}
 
+# Pprof profiling configuration
+pprof:
+  enabled: false
+  port: 9999
+
+# OpenTelemetry tracing configuration
+tracing:
+  enabled: false
+  endpoint: ""  # OTLP gRPC endpoint (e.g., "victorialogs:4317")
+
 # MCP (Model Context Protocol) sidecar configuration
 mcp:
   enabled: true

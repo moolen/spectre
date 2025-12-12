@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"github.com/moolen/spectre/internal/storage"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // TimelineHandler handles /v1/timeline requests
@@ -14,34 +18,75 @@ type TimelineHandler struct {
 	queryExecutor QueryExecutor
 	logger        *logging.Logger
 	validator     *Validator
+	tracer        trace.Tracer
 }
 
 // NewTimelineHandler creates a new timeline handler
-func NewTimelineHandler(queryExecutor QueryExecutor, logger *logging.Logger) *TimelineHandler {
+func NewTimelineHandler(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
 	return &TimelineHandler{
 		queryExecutor: queryExecutor,
 		logger:        logger,
 		validator:     NewValidator(),
+		tracer:        tracer,
 	}
 }
 
 // Handle handles timeline requests
 func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Start HTTP handler span
+	ctx, span := th.tracer.Start(ctx, "timeline.Handle",
+		trace.WithSpanKind(trace.SpanKindServer),
+		trace.WithAttributes(
+			attribute.String("http.method", r.Method),
+			attribute.String("http.route", "/v1/timeline"),
+		),
+	)
+	defer span.End()
+
 	query, err := th.parseQuery(r)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid request")
 		th.logger.Warn("Invalid request: %v", err)
 		th.respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
 
-	result, err := th.queryExecutor.Execute(query)
+	// Add query parameters as span attributes
+	span.SetAttributes(
+		attribute.Int64("query.start_timestamp", query.StartTimestamp),
+		attribute.Int64("query.end_timestamp", query.EndTimestamp),
+		attribute.String("query.namespace", query.Filters.Namespace),
+		attribute.String("query.kind", query.Filters.Kind),
+	)
+
+	// Execute query with context propagation
+	result, err := th.queryExecutor.Execute(ctx, query)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Query execution failed")
 		th.logger.Error("Query execution failed: %v", err)
 		th.respondWithError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to execute query")
 		return
 	}
 
-	timelineResponse := th.buildTimelineResponse(result, query)
+	// Add result metrics to span
+	span.SetAttributes(
+		attribute.Int("result.event_count", int(result.Count)),
+		attribute.Int("result.files_searched", int(result.FilesSearched)),
+		attribute.Int("result.segments_scanned", int(result.SegmentsScanned)),
+		attribute.Int("result.segments_skipped", int(result.SegmentsSkipped)),
+		attribute.Int64("result.execution_time_ms", int64(result.ExecutionTimeMs)),
+	)
+
+	timelineResponse := th.buildTimelineResponse(ctx, result, query)
+
+	span.SetAttributes(
+		attribute.Int("response.resource_count", timelineResponse.Count),
+	)
+	span.SetStatus(codes.Ok, "Request completed successfully")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -51,11 +96,11 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildTimelineResponse transforms QueryResult into TimelineResponse with full resource data
-func (th *TimelineHandler) buildTimelineResponse(queryResult *models.QueryResult, query *models.QueryRequest) *models.SearchResponse {
+func (th *TimelineHandler) buildTimelineResponse(ctx context.Context, queryResult *models.QueryResult, query *models.QueryRequest) *models.SearchResponse {
 	resourceBuilder := storage.NewResourceBuilder()
 	resourceMap := resourceBuilder.BuildResourcesFromEvents(queryResult.Events)
 
-	th.attachK8sEvents(resourceBuilder, resourceMap, query)
+	th.attachK8sEvents(ctx, resourceBuilder, resourceMap, query)
 
 	resources := make([]models.Resource, 0, len(resourceMap))
 	for _, resource := range resourceMap {
@@ -70,7 +115,7 @@ func (th *TimelineHandler) buildTimelineResponse(queryResult *models.QueryResult
 }
 
 // Attaches Kubernetes Events to resources for timeline dots and detail panel
-func (th *TimelineHandler) attachK8sEvents(resourceBuilder *storage.ResourceBuilder, resourceMap map[string]*models.Resource, query *models.QueryRequest) {
+func (th *TimelineHandler) attachK8sEvents(ctx context.Context, resourceBuilder *storage.ResourceBuilder, resourceMap map[string]*models.Resource, query *models.QueryRequest) {
 	if len(resourceMap) == 0 {
 		return
 	}
@@ -85,7 +130,7 @@ func (th *TimelineHandler) attachK8sEvents(resourceBuilder *storage.ResourceBuil
 		},
 	}
 
-	eventResult, err := th.queryExecutor.Execute(eventQuery)
+	eventResult, err := th.queryExecutor.Execute(ctx, eventQuery)
 	if err != nil {
 		th.logger.Warn("Failed to fetch Kubernetes events for timeline: %v", err)
 		return

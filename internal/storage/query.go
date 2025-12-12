@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -8,6 +9,10 @@ import (
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // QueryExecutor executes queries against stored events
@@ -16,31 +21,50 @@ type QueryExecutor struct {
 	storage      *Storage
 	filterEngine *FilterEngine
 	cache        *BlockCache
+	tracer       trace.Tracer
 }
 
 // NewQueryExecutor creates a new query executor
-func NewQueryExecutor(storage *Storage) *QueryExecutor {
+func NewQueryExecutor(storage *Storage, tracingProvider interface{}) *QueryExecutor {
+	tracer := getTracerFromProvider(tracingProvider, "spectre.storage")
 	return &QueryExecutor{
 		logger:       logging.GetLogger("query"),
 		storage:      storage,
 		filterEngine: NewFilterEngine(),
 		cache:        nil, // Cache will be initialized separately
+		tracer:       tracer,
 	}
 }
 
 // NewQueryExecutorWithCache creates a new query executor with block caching
-func NewQueryExecutorWithCache(storage *Storage, cacheMaxMB int64) (*QueryExecutor, error) {
+func NewQueryExecutorWithCache(storage *Storage, cacheMaxMB int64, tracingProvider interface{}) (*QueryExecutor, error) {
 	cache, err := NewBlockCache(cacheMaxMB)
 	if err != nil {
 		return nil, err
 	}
+
+	tracer := getTracerFromProvider(tracingProvider, "spectre.storage")
 
 	return &QueryExecutor{
 		logger:       logging.GetLogger("query"),
 		storage:      storage,
 		filterEngine: NewFilterEngine(),
 		cache:        cache,
+		tracer:       tracer,
 	}, nil
+}
+
+// Helper to extract tracer from provider
+func getTracerFromProvider(tracingProvider interface{}, name string) trace.Tracer {
+	if tracingProvider == nil {
+		return otel.GetTracerProvider().Tracer(name)
+	}
+
+	if tp, ok := tracingProvider.(interface{ GetTracer(string) trace.Tracer }); ok {
+		return tp.GetTracer(name)
+	}
+
+	return otel.GetTracerProvider().Tracer(name)
 }
 
 // SetCache sets the block cache for the executor
@@ -54,11 +78,25 @@ func (qe *QueryExecutor) GetCache() *BlockCache {
 }
 
 // Execute executes a query against stored events
-func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResult, error) {
+func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, error) {
+	// Start span for entire query execution
+	ctx, span := qe.tracer.Start(ctx, "storage.Execute",
+		trace.WithAttributes(
+			attribute.Int64("query.start_timestamp", query.StartTimestamp),
+			attribute.Int64("query.end_timestamp", query.EndTimestamp),
+			attribute.String("query.namespace", query.Filters.Namespace),
+			attribute.String("query.kind", query.Filters.Kind),
+			attribute.String("query.group", query.Filters.Group),
+		),
+	)
+	defer span.End()
+
 	start := time.Now()
 
 	// Validate query
 	if err := query.Validate(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Invalid query")
 		return nil, fmt.Errorf("invalid query: %w", err)
 	}
 
@@ -70,8 +108,12 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 	// Find all storage files that overlap with the time range
 	allFiles, err := qe.storage.getStorageFiles()
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get storage files")
 		return nil, fmt.Errorf("failed to get storage files: %w", err)
 	}
+
+	span.SetAttributes(attribute.Int("storage.total_files", len(allFiles)))
 
 	// Filter files: include those that overlap with query range, plus one file before for state snapshots
 	var filesToQuery []string
@@ -136,6 +178,8 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 		qe.logger.Debug("  - %s", f)
 	}
 
+	span.SetAttributes(attribute.Int("storage.files_to_query", len(filesToQuery)))
+
 	var allEvents []models.Event
 	filesSearched := 0
 	totalSegmentsScanned := int32(0)
@@ -144,13 +188,17 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 	// Query each filtered file
 	for _, filePath := range filesToQuery {
 		qe.logger.Debug("Querying file: %s", filePath)
-		events, segmentsScanned, segmentsSkipped, err := qe.queryFile(filePath, query)
+		events, segmentsScanned, segmentsSkipped, err := qe.queryFile(ctx, filePath, query)
 		if err != nil {
 			// Skip incomplete files (still being written) - this is expected for the current hour's file
 			if isIncompleteFileError(err) {
 				qe.logger.Debug("Skipping incomplete file %s (still being written)", filePath)
 			} else {
 				qe.logger.Warn("Failed to query file %s: %v", filePath, err)
+				span.AddEvent("file_query_error", trace.WithAttributes(
+					attribute.String("file_path", filePath),
+					attribute.String("error", err.Error()),
+				))
 			}
 			continue
 		}
@@ -229,11 +277,29 @@ func (qe *QueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResul
 		qe.logger.Info("No events found. Check debug logs for details on why segments/events were filtered out.")
 	}
 
+	// Add final metrics to span
+	span.SetAttributes(
+		attribute.Int("result.event_count", len(allEvents)),
+		attribute.Int("result.files_searched", filesSearched),
+		attribute.Int("result.segments_scanned", int(totalSegmentsScanned)),
+		attribute.Int("result.segments_skipped", int(totalSegmentsSkipped)),
+		attribute.Int64("result.execution_time_ms", executionTime.Milliseconds()),
+	)
+	span.SetStatus(codes.Ok, "Query executed successfully")
+
 	return result, nil
 }
 
 // queryFile queries a single storage file (supports both block storage and legacy segment formats)
-func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) ([]models.Event, int32, int32, error) {
+func (qe *QueryExecutor) queryFile(ctx context.Context, filePath string, query *models.QueryRequest) ([]models.Event, int32, int32, error) {
+	// Start span for single file query
+	_, span := qe.tracer.Start(ctx, "storage.queryFile",
+		trace.WithAttributes(
+			attribute.String("file.path", filePath),
+		),
+	)
+	defer span.End()
+
 	// Try to open file using BlockReader (block storage format)
 	reader, err := NewBlockReader(filePath)
 	if err != nil {
@@ -270,6 +336,10 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 	}
 
 	qe.logger.Debug("File %s: has %d blocks", filePath, len(fileData.IndexSection.BlockMetadata))
+
+	span.SetAttributes(
+		attribute.Int("file.block_count", len(fileData.IndexSection.BlockMetadata)),
+	)
 
 	var results []models.Event
 	var segmentsScanned int32
@@ -357,6 +427,13 @@ func (qe *QueryExecutor) queryFile(filePath string, query *models.QueryRequest) 
 		results = append(results, stateEvents...)
 	}
 
+	span.SetAttributes(
+		attribute.Int("file.events_found", len(results)),
+		attribute.Int("file.segments_scanned", int(segmentsScanned)),
+		attribute.Int("file.segments_skipped", int(segmentsSkipped)),
+	)
+	span.SetStatus(codes.Ok, "File queried successfully")
+
 	return results, segmentsScanned, segmentsSkipped, nil
 }
 
@@ -370,8 +447,8 @@ func isInvalidBlockFormatError(err error) bool {
 }
 
 // QueryCount returns the number of events matching the query
-func (qe *QueryExecutor) QueryCount(query *models.QueryRequest) (int64, error) {
-	result, err := qe.Execute(query)
+func (qe *QueryExecutor) QueryCount(ctx context.Context, query *models.QueryRequest) (int64, error) {
+	result, err := qe.Execute(ctx, query)
 	if err != nil {
 		return 0, err
 	}

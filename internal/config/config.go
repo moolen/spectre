@@ -25,10 +25,16 @@ type Config struct {
 
 	// BlockCacheEnabled indicates whether block caching is enabled
 	BlockCacheEnabled bool
+
+	// TracingEnabled indicates whether OpenTelemetry tracing is enabled
+	TracingEnabled bool
+
+	// TracingEndpoint is the OTLP gRPC endpoint for trace export
+	TracingEndpoint string
 }
 
 // LoadConfig creates a Config with the provided values
-func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool) *Config {
+func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool, tracingEnabled bool, tracingEndpoint string) *Config {
 	cfg := &Config{
 		DataDir:               dataDir,
 		APIPort:               apiPort,
@@ -38,6 +44,8 @@ func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string,
 		MaxConcurrentRequests: maxConcurrentRequests,
 		BlockCacheMaxMB:       blockCacheMaxMB,
 		BlockCacheEnabled:     blockCacheEnabled,
+		TracingEnabled:        tracingEnabled,
+		TracingEndpoint:       tracingEndpoint,
 	}
 
 	return cfg
@@ -67,6 +75,10 @@ func (c *Config) Validate() error {
 
 	if c.BlockCacheEnabled && c.BlockCacheMaxMB < 1 {
 		return NewConfigError("BlockCacheMaxMB must be at least 1 when cache is enabled")
+	}
+
+	if c.TracingEnabled && c.TracingEndpoint == "" {
+		return NewConfigError("TracingEndpoint must be set when tracing is enabled")
 	}
 
 	return nil

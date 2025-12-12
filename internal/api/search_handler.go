@@ -6,6 +6,7 @@ import (
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"github.com/moolen/spectre/internal/storage"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // SearchHandler handles /v1/search requests
@@ -13,19 +14,23 @@ type SearchHandler struct {
 	queryExecutor QueryExecutor
 	logger        *logging.Logger
 	validator     *Validator
+	tracer        trace.Tracer
 }
 
 // NewSearchHandler creates a new search handler
-func NewSearchHandler(queryExecutor QueryExecutor, logger *logging.Logger) *SearchHandler {
+func NewSearchHandler(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *SearchHandler {
 	return &SearchHandler{
 		queryExecutor: queryExecutor,
 		logger:        logger,
 		validator:     NewValidator(),
+		tracer:        tracer,
 	}
 }
 
 // Handle handles search requests
 func (sh *SearchHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	query, err := sh.parseQuery(r)
 	if err != nil {
 		sh.logger.Warn("Invalid request: %v", err)
@@ -33,7 +38,7 @@ func (sh *SearchHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := sh.queryExecutor.Execute(query)
+	result, err := sh.queryExecutor.Execute(ctx, query)
 	if err != nil {
 		sh.logger.Error("Query execution failed: %v", err)
 		sh.respondWithError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to execute query")
