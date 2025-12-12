@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"time"
@@ -80,7 +81,7 @@ func NewDemoQueryExecutor() *DemoQueryExecutor {
 }
 
 // Execute returns demo data for the requested query
-func (d *DemoQueryExecutor) Execute(query *models.QueryRequest) (*models.QueryResult, error) {
+func (d *DemoQueryExecutor) Execute(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, error) {
 	startTime := time.Now()
 
 	// Get the demo time range

@@ -10,6 +10,8 @@ import (
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ReadinessChecker is an interface for checking component readiness
@@ -27,15 +29,16 @@ type Server struct {
 	router           *http.ServeMux
 	readinessChecker ReadinessChecker
 	demoMode         bool
+	tracingProvider  interface{ GetTracer(string) trace.Tracer; IsEnabled() bool }
 }
 
 // New creates a new API server
-func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecker) *Server {
-	return NewWithStorage(port, queryExecutor, nil, readinessChecker, false)
+func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecker, tracingProvider interface{ GetTracer(string) trace.Tracer; IsEnabled() bool }) *Server {
+	return NewWithStorage(port, queryExecutor, nil, readinessChecker, false, tracingProvider)
 }
 
 // NewWithStorage creates a new API server with storage export/import capabilities
-func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker, demoMode bool) *Server {
+func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker, demoMode bool, tracingProvider interface{ GetTracer(string) trace.Tracer; IsEnabled() bool }) *Server {
 	s := &Server{
 		port:             port,
 		logger:           logging.GetLogger("api"),
@@ -44,6 +47,7 @@ func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Stor
 		router:           http.NewServeMux(),
 		readinessChecker: readinessChecker,
 		demoMode:         demoMode,
+		tracingProvider:  tracingProvider,
 	}
 
 	// Register handlers
@@ -66,9 +70,16 @@ func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Stor
 
 // registerHandlers registers all HTTP handlers
 func (s *Server) registerHandlers() {
-	searchHandler := NewSearchHandler(s.queryExecutor, s.logger)
-	timelineHandler := NewTimelineHandler(s.queryExecutor, s.logger)
-	metadataHandler := NewMetadataHandler(s.queryExecutor, s.logger)
+	var tracer trace.Tracer
+	if s.tracingProvider != nil && s.tracingProvider.IsEnabled() {
+		tracer = s.tracingProvider.GetTracer("spectre.api")
+	} else {
+		tracer = otel.GetTracerProvider().Tracer("spectre.api")
+	}
+
+	searchHandler := NewSearchHandler(s.queryExecutor, s.logger, tracer)
+	timelineHandler := NewTimelineHandler(s.queryExecutor, s.logger, tracer)
+	metadataHandler := NewMetadataHandler(s.queryExecutor, s.logger, tracer)
 
 	s.router.HandleFunc("/v1/search", s.withMethod(http.MethodGet, searchHandler.Handle))
 	s.router.HandleFunc("/v1/timeline", s.withMethod(http.MethodGet, timelineHandler.Handle))

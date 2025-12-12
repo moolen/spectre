@@ -42,5 +42,11 @@ spec:
       protocol: TCP
       name: mcp
     {{- end }}
+    {{- if .Values.pprof.enabled }}
+    - port: {{ .Values.pprof.port }}
+      targetPort: pprof
+      protocol: TCP
+      name: pprof
+    {{- end }}
   selector:
     {{- include "spectre.selectorLabels" . | nindent 4 }}

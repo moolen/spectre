@@ -79,6 +79,11 @@ spec:
         - name: http
           containerPort: {{ .Values.service.targetPort }}
           protocol: TCP
+        {{- if .Values.pprof.enabled }}
+        - name: pprof
+          containerPort: {{ .Values.pprof.port }}
+          protocol: TCP
+        {{- end }}
         args:
         - --data-dir={{ .Values.persistence.mountPath }}
         - --api-port={{ .Values.service.targetPort }}
@@ -86,6 +91,14 @@ spec:
         - --watcher-config=/etc/watcher/watcher.yaml
         - --segment-size={{ .Values.config.segmentSize | int64 }}
         - --max-concurrent-requests={{ .Values.config.maxConcurrentRequests }}
+        {{- if .Values.pprof.enabled }}
+        - --pprof-enabled=true
+        - --pprof-port={{ .Values.pprof.port }}
+        {{- end }}
+        {{- if .Values.tracing.enabled }}
+        - --tracing-enabled=true
+        - --tracing-endpoint={{ .Values.tracing.endpoint }}
+        {{- end }}
         {{- range .Values.extraArgs }}
         - {{ . }}
         {{- end }}

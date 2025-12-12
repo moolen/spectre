@@ -7,24 +7,29 @@ import (
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // MetadataHandler handles /v1/metadata requests
 type MetadataHandler struct {
 	queryExecutor QueryExecutor
 	logger        *logging.Logger
+	tracer        trace.Tracer
 }
 
 // NewMetadataHandler creates a new metadata handler
-func NewMetadataHandler(queryExecutor QueryExecutor, logger *logging.Logger) *MetadataHandler {
+func NewMetadataHandler(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *MetadataHandler {
 	return &MetadataHandler{
 		queryExecutor: queryExecutor,
 		logger:        logger,
+		tracer:        tracer,
 	}
 }
 
 // Handle handles metadata requests
 func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	params := r.URL.Query()
 	startStr := params.Get("start")
 	startTime, err := ParseOptionalTimestamp(startStr, 0)
@@ -46,7 +51,7 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		Filters:        models.QueryFilters{},
 	}
 
-	queryResult, err := mh.queryExecutor.Execute(query)
+	queryResult, err := mh.queryExecutor.Execute(ctx, query)
 	if err != nil {
 		mh.logger.Error("Failed to query events: %v", err)
 		mh.respondWithError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to fetch metadata")

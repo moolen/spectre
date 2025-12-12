@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +16,7 @@ import (
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
+	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +31,11 @@ var (
 	maxConcurrentRequests int
 	cacheMaxMB            int64
 	cacheEnabled          bool
-	importDir             string
+	importPath            string
+	pprofEnabled          bool
+	pprofPort             int
+	tracingEnabled        bool
+	tracingEndpoint       string
 )
 
 var serverCmd = &cobra.Command{
@@ -49,7 +56,11 @@ func init() {
 	serverCmd.Flags().IntVar(&maxConcurrentRequests, "max-concurrent-requests", 100, "Maximum number of concurrent API requests")
 	serverCmd.Flags().Int64Var(&cacheMaxMB, "cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
 	serverCmd.Flags().BoolVar(&cacheEnabled, "cache-enabled", true, "Enable block cache (default: true)")
-	serverCmd.Flags().StringVar(&importDir, "import", "", "Import JSON event files from directory before starting server")
+	serverCmd.Flags().StringVar(&importPath, "import", "", "Import JSON event file or directory before starting server")
+	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
+	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
+	serverCmd.Flags().BoolVar(&tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing (default: false)")
+	serverCmd.Flags().StringVar(&tracingEndpoint, "tracing-endpoint", "", "OTLP gRPC endpoint for traces (e.g., victorialogs:4317)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -63,6 +74,8 @@ func runServer(cmd *cobra.Command, args []string) {
 		maxConcurrentRequests,
 		cacheMaxMB,
 		cacheEnabled,
+		tracingEnabled,
+		tracingEndpoint,
 	)
 
 	// Validate configuration
@@ -86,6 +99,36 @@ func runServer(cmd *cobra.Command, args []string) {
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
 
+	// Initialize tracing provider
+	tracingCfg := tracing.Config{
+		Enabled:  cfg.TracingEnabled,
+		Endpoint: cfg.TracingEndpoint,
+	}
+	tracingProvider, err := tracing.NewTracingProvider(tracingCfg)
+	if err != nil {
+		logger.Warn("Failed to initialize tracing (continuing without tracing): %v", err)
+		tracingProvider = nil
+	}
+
+	// Register tracing provider (no dependencies)
+	if tracingProvider != nil {
+		if err := manager.Register(tracingProvider); err != nil {
+			logger.Error("Failed to register tracing provider: %v", err)
+			HandleError(err, "Tracing registration error")
+		}
+	}
+
+	// Start pprof server if enabled
+	if pprofEnabled {
+		go func() {
+			pprofAddr := fmt.Sprintf(":%d", pprofPort)
+			logger.Info("Starting pprof server on %s", pprofAddr)
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				logger.Error("pprof server failed: %v", err)
+			}
+		}()
+	}
+
 	// In demo mode, skip storage and watcher initialization
 	var storageComponent *storage.Storage
 	var watcherComponent *watcher.Watcher
@@ -106,25 +149,71 @@ func runServer(cmd *cobra.Command, args []string) {
 		logger.Info("Storage component created")
 
 		// Handle import if --import flag is provided
-		if importDir != "" {
-			logger.Info("Starting import from directory: %s", importDir)
-			fmt.Printf("Importing events from: %s\n", importDir)
+		if importPath != "" {
+			// Check if path is a file or directory
+			info, err := os.Stat(importPath)
+			if err != nil {
+				logger.Error("Failed to access import path: %v", err)
+				HandleError(err, "Import path error")
+			}
 
 			importOpts := storage.ImportOptions{
 				ValidateFiles:     true,
 				OverwriteExisting: true,
 			}
 
-			filesProcessed := 0
-			progressCallback := func(filename string, eventCount int) {
-				filesProcessed++
-				fmt.Printf("  [%d] Loaded %d events from %s\n", filesProcessed, eventCount, filename)
-			}
+			var report *importexport.ImportReport
 
-			report, err := importexport.WalkAndImportJSON(importDir, storageComponent, importOpts, progressCallback)
-			if err != nil {
-				logger.Error("Import failed: %v", err)
-				HandleError(err, "Import error")
+			if info.IsDir() {
+				// Import directory
+				logger.Info("Starting import from directory: %s", importPath)
+				fmt.Printf("Importing events from directory: %s\n", importPath)
+
+				filesProcessed := 0
+				progressCallback := func(filename string, eventCount int) {
+					filesProcessed++
+					fmt.Printf("  [%d] Loaded %d events from %s\n", filesProcessed, eventCount, filename)
+				}
+
+				report, err = importexport.WalkAndImportJSON(importPath, storageComponent, importOpts, progressCallback)
+				if err != nil {
+					logger.Error("Import failed: %v", err)
+					HandleError(err, "Import error")
+				}
+			} else {
+				// Import single file
+				logger.Info("Starting import from file: %s", importPath)
+				fmt.Printf("Importing events from file: %s\n", importPath)
+
+				startTime := time.Now()
+
+				// Read the JSON file
+				events, err := importexport.ImportJSONFile(importPath)
+				if err != nil {
+					logger.Error("Failed to read file: %v", err)
+					HandleError(err, "Import file error")
+				}
+
+				fmt.Printf("  Loaded %d events from %s\n", len(events), importPath)
+
+				// Import the events
+				storageReport, err := storageComponent.AddEventsBatch(events, importOpts)
+				if err != nil {
+					logger.Error("Import failed: %v", err)
+					HandleError(err, "Import error")
+				}
+
+				// Convert storage report to import report
+				report = &importexport.ImportReport{
+					TotalFiles:    1,
+					ImportedFiles: storageReport.ImportedFiles,
+					MergedHours:   storageReport.MergedHours,
+					SkippedFiles:  storageReport.SkippedFiles,
+					FailedFiles:   storageReport.FailedFiles,
+					TotalEvents:   storageReport.TotalEvents,
+					Errors:        storageReport.Errors,
+					Duration:      time.Since(startTime),
+				}
 			}
 
 			fmt.Println("\n" + importexport.FormatImportReport(report))
@@ -146,19 +235,19 @@ func runServer(cmd *cobra.Command, args []string) {
 		// Create query executor with or without cache based on CLI flag
 		if cacheEnabled {
 			var err error
-			queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, cacheMaxMB)
+			queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, cacheMaxMB, tracingProvider)
 			if err != nil {
 				logger.Error("Failed to create cache: %v", err)
 				HandleError(err, "Cache initialization error")
 			}
 			logger.Info("Block cache enabled with max size: %dMB", cacheMaxMB)
 		} else {
-			queryExecutor = storage.NewQueryExecutor(storageComponent)
+			queryExecutor = storage.NewQueryExecutor(storageComponent, tracingProvider)
 			logger.Info("Block cache disabled")
 		}
 	}
 
-	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent, demo)
+	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent, demo, tracingProvider)
 	logger.Info("API server component created")
 
 	// Register components based on demo mode
