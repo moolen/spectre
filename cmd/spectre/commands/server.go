@@ -36,6 +36,7 @@ var (
 	pprofPort             int
 	tracingEnabled        bool
 	tracingEndpoint       string
+	tracingTLSCAPath      string
 )
 
 var serverCmd = &cobra.Command{
@@ -61,6 +62,7 @@ func init() {
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
 	serverCmd.Flags().BoolVar(&tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing (default: false)")
 	serverCmd.Flags().StringVar(&tracingEndpoint, "tracing-endpoint", "", "OTLP gRPC endpoint for traces (e.g., victorialogs:4317)")
+	serverCmd.Flags().StringVar(&tracingTLSCAPath, "tracing-tls-ca", "", "Path to CA certificate for TLS verification (optional)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -76,6 +78,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		cacheEnabled,
 		tracingEnabled,
 		tracingEndpoint,
+		tracingTLSCAPath,
 	)
 
 	// Validate configuration
@@ -101,8 +104,9 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	// Initialize tracing provider
 	tracingCfg := tracing.Config{
-		Enabled:  cfg.TracingEnabled,
-		Endpoint: cfg.TracingEndpoint,
+		Enabled:   cfg.TracingEnabled,
+		Endpoint:  cfg.TracingEndpoint,
+		TLSCAPath: cfg.TracingTLSCAPath,
 	}
 	tracingProvider, err := tracing.NewTracingProvider(tracingCfg)
 	if err != nil {
