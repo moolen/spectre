@@ -79,6 +79,71 @@ func (qe *QueryExecutor) GetCache() *BlockCache {
 	return qe.cache
 }
 
+// fileMetadataResult holds the result of reading a file's metadata
+type fileMetadataResult struct {
+	filePath     string
+	fileHour     int64
+	timestampMin int64
+	timestampMax int64
+	err          error
+}
+
+// readFileMetadataConcurrently reads metadata from multiple files concurrently
+func (qe *QueryExecutor) readFileMetadataConcurrently(filePaths []string, fileHours []int64) []fileMetadataResult {
+	results := make([]fileMetadataResult, len(filePaths))
+	var wg sync.WaitGroup
+
+	// Use a worker pool to limit concurrent file operations
+	// This prevents opening too many files simultaneously
+	maxWorkers := 10
+	semaphore := make(chan struct{}, maxWorkers)
+
+	for i, filePath := range filePaths {
+		wg.Add(1)
+		go func(idx int, path string, hour int64) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			result := fileMetadataResult{
+				filePath: path,
+				fileHour: hour,
+			}
+
+			reader, err := NewBlockReader(path)
+			if err != nil {
+				result.err = err
+				results[idx] = result
+				return
+			}
+
+			fileData, err := reader.ReadFile()
+			_ = reader.Close()
+
+			if err != nil {
+				result.err = err
+				results[idx] = result
+				return
+			}
+
+			if fileData.IndexSection != nil && fileData.IndexSection.Statistics != nil {
+				stats := fileData.IndexSection.Statistics
+				result.timestampMin = stats.TimestampMin
+				result.timestampMax = stats.TimestampMax
+			} else {
+				result.err = fmt.Errorf("no statistics available")
+			}
+
+			results[idx] = result
+		}(i, filePath, fileHours[i])
+	}
+
+	wg.Wait()
+	return results
+}
+
 // Execute executes a query against stored events
 func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, error) {
 	// Start span for entire query execution
@@ -124,6 +189,10 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 	startTimeNs := query.StartTimestamp * 1e9
 	endTimeNs := query.EndTimestamp * 1e9
 
+	// First pass: categorize files into overlapping and need-metadata-check
+	var needMetadataCheck []string
+	var needMetadataCheckHours []int64
+
 	for _, filePath := range allFiles {
 		fileHour, err := qe.storage.extractHourFromFilename(filePath)
 		if err != nil {
@@ -138,35 +207,48 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 		fileHourOverlaps := fileEndNs > startTimeNs && fileHourNs < endTimeNs
 
 		if fileHourOverlaps {
-			// File hour overlaps, include it
+			// File hour overlaps, include it immediately
 			filesToQuery = append(filesToQuery, filePath)
 		} else {
-			// File hour doesn't overlap, but check file metadata to see if events overlap
-			// This handles cases where events with old timestamps are stored in current hour's file
-			reader, err := NewBlockReader(filePath)
-			if err == nil {
-				fileData, err := reader.ReadFile()
-				_ = reader.Close()
-				if err == nil && fileData.IndexSection != nil && fileData.IndexSection.Statistics != nil {
-					stats := fileData.IndexSection.Statistics
-					// Check if file's event timestamps overlap with query range
-					if stats.TimestampMax >= startTimeNs && stats.TimestampMin <= endTimeNs {
-						qe.logger.Debug("File %s hour doesn't overlap but events do (min=%d, max=%d), including it",
-							filePath, stats.TimestampMin, stats.TimestampMax)
-						filesToQuery = append(filesToQuery, filePath)
-						continue
-					}
-				}
+			// File hour doesn't overlap, need to check metadata
+			needMetadataCheck = append(needMetadataCheck, filePath)
+			needMetadataCheckHours = append(needMetadataCheckHours, fileHour)
+		}
+	}
+
+	// Second pass: read metadata concurrently for files that need checking
+	if len(needMetadataCheck) > 0 {
+		metadataStart := time.Now()
+		qe.logger.Debug("Reading metadata from %d files concurrently", len(needMetadataCheck))
+
+		results := qe.readFileMetadataConcurrently(needMetadataCheck, needMetadataCheckHours)
+
+		for _, result := range results {
+			if result.err != nil {
+				// Skip files with errors (they might be incomplete or corrupted)
+				continue
+			}
+
+			// Check if file's event timestamps overlap with query range
+			if result.timestampMax >= startTimeNs && result.timestampMin <= endTimeNs {
+				qe.logger.Debug("File %s hour doesn't overlap but events do (min=%d, max=%d), including it",
+					result.filePath, result.timestampMin, result.timestampMax)
+				filesToQuery = append(filesToQuery, result.filePath)
+				continue
 			}
 
 			// Track the most recent file before query start (for state snapshots)
+			fileHourNs := result.fileHour * 1e9
+			fileEndNs := fileHourNs + (3600 * 1e9)
 			if fileEndNs <= startTimeNs {
-				if fileHour > mostRecentFileBeforeHour {
-					mostRecentFileBeforeQuery = filePath
-					mostRecentFileBeforeHour = fileHour
+				if result.fileHour > mostRecentFileBeforeHour {
+					mostRecentFileBeforeQuery = result.filePath
+					mostRecentFileBeforeHour = result.fileHour
 				}
 			}
 		}
+
+		qe.logger.Debug("Metadata reading completed in %dms", time.Since(metadataStart).Milliseconds())
 	}
 
 	// Add the most recent file before query start to get state snapshots (only one file)
