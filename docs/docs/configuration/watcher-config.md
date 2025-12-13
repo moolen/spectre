@@ -595,15 +595,5 @@ Each event captured by the watcher includes:
 
 Events are written to block-based storage for efficient querying.
 
-## Related Documentation
-
-- [Architecture Overview](../architecture/overview.md) - Understanding Spectre's design
-- [Storage Configuration](./storage.md) - Configuring event storage
-- [API Reference](../../api/search.md) - Querying stored events
-- [Operations Guide](../../operations/monitoring.md) - Monitoring and troubleshooting
-
-## Examples in Repository
-
-See `hack/watcher.yaml` for an extended example configuration with various resource types and comments.
 
 <!-- Source: /home/moritz/dev/spectre/README.md lines 45-60, chart/values.yaml lines 104-127, internal/watcher/ -->
