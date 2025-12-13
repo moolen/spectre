@@ -4,11 +4,17 @@
   <img src="ui/public/ghost.svg" alt="Spectre" width="200">
 </div>
 
+<div align="center">
+
+📚 **[Documentation](https://moolen.github.io/spectre/)** | 🚀 **[Quick Start](#quick-start)** | 🤖 **[MCP Integration](#mcp)**
+
+</div>
+
 ## What is Spectre?
 
 Spectre is a Kubernetes event monitoring and auditing system. It captures all resource changes (create, update, delete) across your cluster and provides a powerful visualization dashboard to understand what happened, when it happened, and why.
 
-![Deployment Rollout](./docs/screenshot-2.png)
+![Deployment Rollout](./docs-backup/screenshot-2.png)
 
 ### Why Spectre?
 
