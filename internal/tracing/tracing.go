@@ -15,9 +15,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // TracingProvider wraps OpenTelemetry TracerProvider and implements lifecycle.Component
@@ -55,9 +53,9 @@ func NewTracingProvider(cfg Config) (*TracingProvider, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Configure TLS if CA path is provided
-	var dialOptions []grpc.DialOption
+	// Configure TLS options
 	var otlpOptions []otlptracegrpc.Option
+	otlpOptions = append(otlpOptions, otlptracegrpc.WithEndpoint(cfg.Endpoint))
 
 	if cfg.TLSCAPath != "" || cfg.TLSInsecure {
 		// TLS configuration
@@ -89,19 +87,14 @@ func NewTracingProvider(cfg Config) (*TracingProvider, error) {
 			logger.Info("TLS enabled for tracing with CA from: %s", cfg.TLSCAPath)
 		}
 
+		// Use TLS credentials
 		creds := credentials.NewTLS(tlsConfig)
-		dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
+		otlpOptions = append(otlpOptions, otlptracegrpc.WithTLSCredentials(creds))
 	} else {
 		// Use insecure connection (no TLS)
-		dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		otlpOptions = append(otlpOptions, otlptracegrpc.WithInsecure())
 		logger.Info("TLS disabled for tracing (insecure mode)")
 	}
-
-	otlpOptions = append(otlpOptions,
-		otlptracegrpc.WithEndpoint(cfg.Endpoint),
-		otlptracegrpc.WithDialOption(dialOptions...),
-	)
 
 	exporter, err := otlptracegrpc.New(ctx, otlpOptions...)
 	if err != nil {
