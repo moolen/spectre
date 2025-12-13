@@ -29,9 +29,10 @@ type TracingProvider struct {
 
 // Config holds tracing configuration
 type Config struct {
-	Enabled   bool
-	Endpoint  string // OTLP gRPC endpoint (e.g., "victorialogs:4317")
-	TLSCAPath string // Path to CA certificate for TLS verification (optional)
+	Enabled     bool
+	Endpoint    string // OTLP gRPC endpoint (e.g., "victorialogs:4317")
+	TLSCAPath   string // Path to CA certificate for TLS verification (optional)
+	TLSInsecure bool   // Skip TLS certificate verification (insecure)
 }
 
 // NewTracingProvider creates and initializes the tracing provider
@@ -58,29 +59,41 @@ func NewTracingProvider(cfg Config) (*TracingProvider, error) {
 	var dialOptions []grpc.DialOption
 	var otlpOptions []otlptracegrpc.Option
 
-	if cfg.TLSCAPath != "" {
-		// Load CA certificate
-		caCert, err := os.ReadFile(cfg.TLSCAPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
-		}
+	if cfg.TLSCAPath != "" || cfg.TLSInsecure {
+		// TLS configuration
+		var tlsConfig *tls.Config
 
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to append CA certificate to pool")
-		}
+		if cfg.TLSInsecure {
+			// Skip certificate verification
+			tlsConfig = &tls.Config{
+				InsecureSkipVerify: true,
+				MinVersion:         tls.VersionTLS12,
+			}
+			logger.Info("TLS enabled for tracing with certificate verification disabled (insecure mode)")
+		} else {
+			// Load CA certificate
+			caCert, err := os.ReadFile(cfg.TLSCAPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+			}
 
-		tlsConfig := &tls.Config{
-			RootCAs:    certPool,
-			MinVersion: tls.VersionTLS12,
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to append CA certificate to pool")
+			}
+
+			tlsConfig = &tls.Config{
+				RootCAs:    certPool,
+				MinVersion: tls.VersionTLS12,
+			}
+			logger.Info("TLS enabled for tracing with CA from: %s", cfg.TLSCAPath)
 		}
 
 		creds := credentials.NewTLS(tlsConfig)
-		dialOptions = append(dialOptions, grpc.WithBlock(), grpc.WithTransportCredentials(creds))
-		logger.Info("TLS enabled for tracing with CA from: %s", cfg.TLSCAPath)
+		dialOptions = append(dialOptions, grpc.WithTransportCredentials(creds))
 	} else {
-		// Use insecure connection
-		dialOptions = append(dialOptions, grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		// Use insecure connection (no TLS)
+		dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		otlpOptions = append(otlpOptions, otlptracegrpc.WithInsecure())
 		logger.Info("TLS disabled for tracing (insecure mode)")
 	}

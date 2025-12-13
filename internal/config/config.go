@@ -34,10 +34,13 @@ type Config struct {
 
 	// TracingTLSCAPath is the path to the CA certificate for TLS verification
 	TracingTLSCAPath string
+
+	// TracingTLSInsecure allows insecure TLS connections (skip verification)
+	TracingTLSInsecure bool
 }
 
 // LoadConfig creates a Config with the provided values
-func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool, tracingEnabled bool, tracingEndpoint string, tracingTLSCAPath string) *Config {
+func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled bool, tracingEnabled bool, tracingEndpoint string, tracingTLSCAPath string, tracingTLSInsecure bool) *Config {
 	cfg := &Config{
 		DataDir:               dataDir,
 		APIPort:               apiPort,
@@ -50,6 +53,7 @@ func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string,
 		TracingEnabled:        tracingEnabled,
 		TracingEndpoint:       tracingEndpoint,
 		TracingTLSCAPath:      tracingTLSCAPath,
+		TracingTLSInsecure:    tracingTLSInsecure,
 	}
 
 	return cfg

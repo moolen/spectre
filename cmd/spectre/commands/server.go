@@ -37,6 +37,7 @@ var (
 	tracingEnabled        bool
 	tracingEndpoint       string
 	tracingTLSCAPath      string
+	tracingTLSInsecure    bool
 )
 
 var serverCmd = &cobra.Command{
@@ -63,6 +64,7 @@ func init() {
 	serverCmd.Flags().BoolVar(&tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing (default: false)")
 	serverCmd.Flags().StringVar(&tracingEndpoint, "tracing-endpoint", "", "OTLP gRPC endpoint for traces (e.g., victorialogs:4317)")
 	serverCmd.Flags().StringVar(&tracingTLSCAPath, "tracing-tls-ca", "", "Path to CA certificate for TLS verification (optional)")
+	serverCmd.Flags().BoolVar(&tracingTLSInsecure, "tracing-tls-insecure", false, "Skip TLS certificate verification (insecure, use only for testing)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -79,6 +81,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		tracingEnabled,
 		tracingEndpoint,
 		tracingTLSCAPath,
+		tracingTLSInsecure,
 	)
 
 	// Validate configuration
@@ -104,9 +107,10 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	// Initialize tracing provider
 	tracingCfg := tracing.Config{
-		Enabled:   cfg.TracingEnabled,
-		Endpoint:  cfg.TracingEndpoint,
-		TLSCAPath: cfg.TracingTLSCAPath,
+		Enabled:      cfg.TracingEnabled,
+		Endpoint:     cfg.TracingEndpoint,
+		TLSCAPath:    cfg.TracingTLSCAPath,
+		TLSInsecure:  cfg.TracingTLSInsecure,
 	}
 	tracingProvider, err := tracing.NewTracingProvider(tracingCfg)
 	if err != nil {
