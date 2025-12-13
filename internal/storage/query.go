@@ -172,95 +172,97 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 		logging.Field("end_timestamp", query.EndTimestamp),
 		logging.Field("filters", fmt.Sprintf("%v", query.Filters)))
 
-	// Find all storage files that overlap with the time range
-	allFiles, err := qe.storage.getStorageFiles()
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "Failed to get storage files")
-		return nil, fmt.Errorf("failed to get storage files: %w", err)
-	}
-
-	span.SetAttributes(attribute.Int("storage.total_files", len(allFiles)))
-
-	// Filter files: include those that overlap with query range, plus one file before for state snapshots
-	var filesToQuery []string
-	var mostRecentFileBeforeQuery string
-	var mostRecentFileBeforeHour int64
 	startTimeNs := query.StartTimestamp * 1e9
 	endTimeNs := query.EndTimestamp * 1e9
 
-	// First pass: categorize files into overlapping and need-metadata-check
-	var needMetadataCheck []string
-	var needMetadataCheckHours []int64
+	// Use file index for fast file selection
+	fileIndex := qe.storage.GetFileIndex()
+	var filesToQuery []string
 
-	for _, filePath := range allFiles {
-		fileHour, err := qe.storage.extractHourFromFilename(filePath)
-		if err != nil {
-			qe.logger.Debug("Could not extract hour from file %s: %v", filePath, err)
-			continue
-		}
-
-		fileHourNs := fileHour * 1e9
-		fileEndNs := fileHourNs + (3600 * 1e9) // Files are 1 hour long
-
-		// Check if file hour overlaps with query time range
-		fileHourOverlaps := fileEndNs > startTimeNs && fileHourNs < endTimeNs
-
-		if fileHourOverlaps {
-			// File hour overlaps, include it immediately
-			filesToQuery = append(filesToQuery, filePath)
-		} else {
-			// File hour doesn't overlap, need to check metadata
-			needMetadataCheck = append(needMetadataCheck, filePath)
-			needMetadataCheckHours = append(needMetadataCheckHours, fileHour)
-		}
-	}
-
-	// Second pass: read metadata concurrently for files that need checking
-	if len(needMetadataCheck) > 0 {
-		metadataStart := time.Now()
-		qe.logger.Debug("Reading metadata from %d files concurrently", len(needMetadataCheck))
-
-		results := qe.readFileMetadataConcurrently(needMetadataCheck, needMetadataCheckHours)
-
-		for _, result := range results {
-			if result.err != nil {
-				// Skip files with errors (they might be incomplete or corrupted)
-				continue
-			}
-
-			// Check if file's event timestamps overlap with query range
-			if result.timestampMax >= startTimeNs && result.timestampMin <= endTimeNs {
-				qe.logger.Debug("File %s hour doesn't overlap but events do (min=%d, max=%d), including it",
-					result.filePath, result.timestampMin, result.timestampMax)
-				filesToQuery = append(filesToQuery, result.filePath)
-				continue
-			}
-
-			// Track the most recent file before query start (for state snapshots)
-			fileHourNs := result.fileHour * 1e9
-			fileEndNs := fileHourNs + (3600 * 1e9)
-			if fileEndNs <= startTimeNs {
-				if result.fileHour > mostRecentFileBeforeHour {
-					mostRecentFileBeforeQuery = result.filePath
-					mostRecentFileBeforeHour = result.fileHour
+	if fileIndex != nil && fileIndex.Count() > 0 {
+		// Fast path: use file index
+		fileSelectionStart := time.Now()
+		
+		// Get files that overlap with query range
+		overlappingFiles := fileIndex.GetFilesByTimeRange(startTimeNs, endTimeNs)
+		filesToQuery = append(filesToQuery, overlappingFiles...)
+		
+		// Get one file before query start for state snapshots
+		fileBeforeQuery := fileIndex.GetFileBeforeTime(startTimeNs)
+		if fileBeforeQuery != "" {
+			// Check if it's not already included
+			alreadyIncluded := false
+			for _, f := range filesToQuery {
+				if f == fileBeforeQuery {
+					alreadyIncluded = true
+					break
 				}
 			}
+			if !alreadyIncluded {
+				qe.logger.Debug("Including file before query for state snapshots: %s", fileBeforeQuery)
+				filesToQuery = append(filesToQuery, fileBeforeQuery)
+			}
+		}
+		
+		qe.logger.Debug("File selection via index completed in %dms, selected %d files",
+			time.Since(fileSelectionStart).Milliseconds(), len(filesToQuery))
+		
+		span.SetAttributes(
+			attribute.Int("storage.indexed_files", fileIndex.Count()),
+			attribute.Bool("storage.used_index", true),
+		)
+	} else {
+		// Fallback: traditional filename-based filtering without index
+		qe.logger.Debug("File index not available, using traditional file selection")
+		
+		allFiles, err := qe.storage.getStorageFiles()
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "Failed to get storage files")
+			return nil, fmt.Errorf("failed to get storage files: %w", err)
 		}
 
-		qe.logger.Debug("Metadata reading completed in %dms", time.Since(metadataStart).Milliseconds())
-	}
+		span.SetAttributes(
+			attribute.Int("storage.total_files", len(allFiles)),
+			attribute.Bool("storage.used_index", false),
+		)
 
-	// Add the most recent file before query start to get state snapshots (only one file)
-	if mostRecentFileBeforeQuery != "" {
-		qe.logger.Debug("Including one file before query for state snapshots: %s", mostRecentFileBeforeQuery)
-		filesToQuery = append(filesToQuery, mostRecentFileBeforeQuery)
+		// Filter files based on hour boundaries (strict mode)
+		var mostRecentFileBeforeQuery string
+		var mostRecentFileBeforeHour int64
+
+		for _, filePath := range allFiles {
+			fileHour, err := qe.storage.extractHourFromFilename(filePath)
+			if err != nil {
+				qe.logger.Debug("Could not extract hour from file %s: %v", filePath, err)
+				continue
+			}
+
+			fileHourNs := fileHour * 1e9
+			fileEndNs := fileHourNs + (3600 * 1e9) // Files are 1 hour long
+
+			// Check if file hour overlaps with query time range
+			// With strict hour boundaries, we can trust the filename
+			if fileEndNs > startTimeNs && fileHourNs < endTimeNs {
+				filesToQuery = append(filesToQuery, filePath)
+			} else if fileEndNs <= startTimeNs && fileHour > mostRecentFileBeforeHour {
+				// Track most recent file before query for state snapshots
+				mostRecentFileBeforeQuery = filePath
+				mostRecentFileBeforeHour = fileHour
+			}
+		}
+
+		// Add the most recent file before query start
+		if mostRecentFileBeforeQuery != "" {
+			qe.logger.Debug("Including file before query for state snapshots: %s", mostRecentFileBeforeQuery)
+			filesToQuery = append(filesToQuery, mostRecentFileBeforeQuery)
+		}
 	}
 
 	// Log file selection timing
 	fileSelectionTime := time.Since(start)
-	qe.logger.Debug("File selection completed in %dms, selected %d/%d files",
-		fileSelectionTime.Milliseconds(), len(filesToQuery), len(allFiles))
+	qe.logger.Debug("File selection completed in %dms, selected %d files",
+		fileSelectionTime.Milliseconds(), len(filesToQuery))
 	for _, f := range filesToQuery {
 		qe.logger.Debug("  - %s", f)
 	}
@@ -357,11 +359,18 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 		FilesSearched:   int32(filesSearched), //nolint:gosec // safe conversion: file count is reasonable
 	}
 
+	// Count all files for stats
+	allFilesForStats, _ := qe.storage.getStorageFiles()
+	totalFiles := len(allFilesForStats)
+	if totalFiles == 0 {
+		totalFiles = len(filesToQuery)
+	}
+
 	qe.logger.InfoWithFields("Query complete",
 		logging.Field("events_found", result.Count),
 		logging.Field("execution_time_ms", result.ExecutionTimeMs),
 		logging.Field("files_searched", filesSearched),
-		logging.Field("total_files", len(allFiles)),
+		logging.Field("total_files", totalFiles),
 		logging.Field("segments_scanned", totalSegmentsScanned),
 		logging.Field("segments_skipped", totalSegmentsSkipped))
 
@@ -373,7 +382,7 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 			stats.UsedMemory/(1024*1024), stats.MaxMemory/(1024*1024), stats.Evictions)
 	}
 
-	if result.Count == 0 && len(allFiles) > 0 {
+	if result.Count == 0 && totalFiles > 0 {
 		qe.logger.Info("No events found. Check debug logs for details on why segments/events were filtered out.")
 	}
 

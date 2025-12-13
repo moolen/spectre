@@ -21,6 +21,8 @@ type Storage struct {
 	currentFile *BlockStorageFile
 	fileMutex   sync.RWMutex
 	blockSize   int64
+	fileIndex   *FileIndex // Index for fast file selection
+	hourFiles   map[int64]*BlockStorageFile // Cache of open hourly files
 }
 
 // New creates a new Storage instance
@@ -33,10 +35,23 @@ func New(dataDir string, blockSize int64) (*Storage, error) {
 		return nil, err
 	}
 
+	// Initialize file index
+	fileIndex := NewFileIndex(dataDir, logger)
+
 	s := &Storage{
 		dataDir:   dataDir,
 		logger:    logger,
 		blockSize: blockSize,
+		fileIndex: fileIndex,
+		hourFiles: make(map[int64]*BlockStorageFile),
+	}
+
+	// Rebuild index on startup if it's empty or outdated
+	if fileIndex.Count() == 0 {
+		logger.Info("File index is empty, rebuilding...")
+		if err := fileIndex.Rebuild(dataDir, s.extractHourFromFilename); err != nil {
+			logger.Warn("Failed to rebuild file index: %v", err)
+		}
 	}
 
 	logger.Info("Storage initialized with directory: %s", dataDir)
@@ -44,80 +59,221 @@ func New(dataDir string, blockSize int64) (*Storage, error) {
 }
 
 // WriteEvent writes an event to storage
+// Events are routed to the correct hourly file based on their timestamp
 func (s *Storage) WriteEvent(event *models.Event) error {
 	s.fileMutex.Lock()
 	defer s.fileMutex.Unlock()
 
-	// Get or create the current hourly file
-	currentFile, err := s.getOrCreateCurrentFile()
+	// Determine which hour this event belongs to based on its timestamp
+	eventTime := time.Unix(0, event.Timestamp)
+	eventHour := time.Date(eventTime.Year(), eventTime.Month(), eventTime.Day(), 
+		eventTime.Hour(), 0, 0, 0, eventTime.Location())
+	eventHourTimestamp := eventHour.Unix()
+
+	// Get or create the file for this event's hour
+	hourFile, err := s.getOrCreateHourFile(eventHourTimestamp)
 	if err != nil {
-		s.logger.Error("Failed to get or create current file: %v", err)
+		s.logger.Error("Failed to get or create hour file for timestamp %d: %v", eventHourTimestamp, err)
 		return err
 	}
 
+	// Validate that event timestamp falls within hour boundaries
+	hourStartNs := eventHourTimestamp * 1e9
+	hourEndNs := hourStartNs + (3600 * 1e9)
+	if event.Timestamp < hourStartNs || event.Timestamp >= hourEndNs {
+		return fmt.Errorf("event timestamp %d is outside hour boundaries [%d, %d)", 
+			event.Timestamp, hourStartNs, hourEndNs)
+	}
+
 	// Write event to the file
-	if err := currentFile.WriteEvent(event); err != nil {
+	if err := hourFile.WriteEvent(event); err != nil {
 		s.logger.Error("Failed to write event to file: %v", err)
 		return err
+	}
+
+	// Update the current file pointer if this is the latest hour
+	now := time.Now()
+	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location())
+	if eventHourTimestamp == currentHour.Unix() {
+		s.currentFile = hourFile
 	}
 
 	return nil
 }
 
+// getOrCreateHourFile gets or creates a storage file for a specific hour
+// This allows writing events to any hour, not just the current one
+func (s *Storage) getOrCreateHourFile(hourTimestamp int64) (*BlockStorageFile, error) {
+	// Check if file is already open
+	if existingFile, ok := s.hourFiles[hourTimestamp]; ok {
+		return existingFile, nil
+	}
+
+	// Create time from hour timestamp
+	hourTime := time.Unix(hourTimestamp, 0)
+	
+	// Create file path
+	filePath := filepath.Join(s.dataDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+		hourTime.Year(), hourTime.Month(), hourTime.Day(), hourTime.Hour()))
+
+	// Check if file already exists on disk
+	if _, err := os.Stat(filePath); err == nil {
+		// File exists, open it for appending
+		s.logger.Debug("Opening existing file for hour %s", hourTime.Format("2006-01-02 15:04"))
+		
+		reader, err := NewBlockReader(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open reader for existing file: %w", err)
+		}
+
+		fileData, err := reader.ReadFile()
+		reader.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read existing file data: %w", err)
+		}
+
+		newFile, err := openExistingBlockStorageFile(filePath, fileData, hourTimestamp, s.blockSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to reopen file for appending: %w", err)
+		}
+
+		s.hourFiles[hourTimestamp] = newFile
+		return newFile, nil
+	}
+
+	// File doesn't exist, create new one
+	s.logger.Info("Creating new storage file for hour %s: %s", 
+		hourTime.Format("2006-01-02 15:04"), filePath)
+
+	// Get state carryover from previous hour if creating current hour file
+	var carryoverStates map[string]*ResourceLastState
+	prevHourTimestamp := hourTimestamp - 3600
+	if prevFile, ok := s.hourFiles[prevHourTimestamp]; ok {
+		carryoverStates = prevFile.finalResourceStates
+		s.logger.Debug("Found %d resource states from previous hour to carry over", len(carryoverStates))
+	}
+
+	newFile, err := NewBlockStorageFile(filePath, hourTimestamp, s.blockSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Carry over state snapshots from previous hour
+	if len(carryoverStates) > 0 {
+		newFile.finalResourceStates = carryoverStates
+		s.logger.Info("Carried over %d resource states to new file", len(carryoverStates))
+	}
+
+	s.hourFiles[hourTimestamp] = newFile
+
+	// Update file index
+	hourEnd := hourTimestamp + 3600
+	meta := &FileMetadata{
+		FilePath:     filePath,
+		HourStart:    hourTimestamp,
+		HourEnd:      hourEnd,
+		TimestampMin: hourTimestamp * 1e9,
+		TimestampMax: hourEnd * 1e9,
+		EventCount:   0,
+		FileSize:     0,
+	}
+	if err := s.fileIndex.AddOrUpdate(meta); err != nil {
+		s.logger.Warn("Failed to update file index: %v", err)
+	}
+
+	return newFile, nil
+}
+
 // getOrCreateCurrentFile gets or creates the storage file for the current hour
+// This is kept for backward compatibility
 func (s *Storage) getOrCreateCurrentFile() (*BlockStorageFile, error) {
 	now := time.Now()
 	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location())
-
-	// Check if we need to create a new file
-	if s.currentFile == nil || s.currentFile.hourTimestamp != currentHour.Unix() {
-		// Close the previous file if it exists and capture its final states
-		var carryoverStates map[string]*ResourceLastState
-		if s.currentFile != nil {
-			// Extract final states before closing
-			carryoverStates = s.currentFile.finalResourceStates
-			if err := s.currentFile.Close(); err != nil {
-				s.logger.Error("Failed to close previous file: %v", err)
-			}
-		}
-
-		// Create a new file for the current hour
-		filePath := filepath.Join(s.dataDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
-			now.Year(), now.Month(), now.Day(), now.Hour()))
-
-		newFile, err := NewBlockStorageFile(filePath, currentHour.Unix(), s.blockSize)
-		if err != nil {
-			return nil, err
-		}
-
-		// Carry over state snapshots from previous hour
-		if len(carryoverStates) > 0 {
-			newFile.finalResourceStates = carryoverStates
-			s.logger.Info("Carried over %d resource states from previous hour to new file", len(carryoverStates))
-		}
-
-		s.currentFile = newFile
-		s.logger.Info("Created new storage file: %s", filePath)
-	}
-
-	return s.currentFile, nil
+	return s.getOrCreateHourFile(currentHour.Unix())
 }
 
-// Close closes the storage and flushes any pending data
+// Close closes the storage and all open hour files
 func (s *Storage) Close() error {
 	s.fileMutex.Lock()
 	defer s.fileMutex.Unlock()
 
-	if s.currentFile != nil {
-		// Close is idempotent, so safe to call multiple times
-		if err := s.currentFile.Close(); err != nil {
-			s.logger.Error("Failed to close storage file: %v", err)
-			// Don't return error if already closed
+	// Close all open hour files
+	for hourTimestamp, file := range s.hourFiles {
+		s.logger.Debug("Closing hour file: %d", hourTimestamp)
+		if err := file.Close(); err != nil {
+			s.logger.Error("Failed to close hour file %d: %v", hourTimestamp, err)
 		}
-		s.currentFile = nil
+		
+		// Update file index with final stats
+		if file.path != "" {
+			meta := &FileMetadata{
+				FilePath:     file.path,
+				HourStart:    hourTimestamp,
+				HourEnd:      hourTimestamp + 3600,
+				TimestampMin: hourTimestamp * 1e9,
+				TimestampMax: (hourTimestamp + 3600) * 1e9,
+				EventCount:   file.totalEvents,
+			}
+			if info, err := os.Stat(file.path); err == nil {
+				meta.FileSize = info.Size()
+			}
+			if err := s.fileIndex.AddOrUpdate(meta); err != nil {
+				s.logger.Warn("Failed to update file index on close: %v", err)
+			}
+		}
+	}
+
+	s.hourFiles = make(map[int64]*BlockStorageFile)
+	s.currentFile = nil
+
+	// Save file index
+	if err := s.fileIndex.Save(); err != nil {
+		s.logger.Warn("Failed to save file index: %v", err)
 	}
 
 	s.logger.Info("Storage closed")
+	return nil
+}
+
+// CloseOldHourFiles closes hour files that are older than the specified duration
+// This prevents keeping too many files open
+func (s *Storage) CloseOldHourFiles(olderThan time.Duration) error {
+	s.fileMutex.Lock()
+	defer s.fileMutex.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-olderThan)
+
+	for hourTimestamp, file := range s.hourFiles {
+		hourTime := time.Unix(hourTimestamp, 0)
+		if hourTime.Before(cutoff) {
+			s.logger.Debug("Closing old hour file: %s", hourTime.Format("2006-01-02 15:04"))
+			if err := file.Close(); err != nil {
+				s.logger.Error("Failed to close old hour file: %v", err)
+			}
+			
+			// Update file index with final stats
+			if file.path != "" {
+				meta := &FileMetadata{
+					FilePath:     file.path,
+					HourStart:    hourTimestamp,
+					HourEnd:      hourTimestamp + 3600,
+					TimestampMin: hourTimestamp * 1e9,
+					TimestampMax: (hourTimestamp + 3600) * 1e9,
+					EventCount:   file.totalEvents,
+				}
+				if info, err := os.Stat(file.path); err == nil {
+					meta.FileSize = info.Size()
+				}
+				if err := s.fileIndex.AddOrUpdate(meta); err != nil {
+					s.logger.Warn("Failed to update file index: %v", err)
+				}
+			}
+			
+			delete(s.hourFiles, hourTimestamp)
+		}
+	}
+
 	return nil
 }
 
@@ -162,8 +318,15 @@ func (s *Storage) GetStorageStats() (map[string]interface{}, error) {
 		return nil, err
 	}
 	stats["fileCount"] = len(files)
+	stats["indexedFiles"] = s.fileIndex.Count()
+	stats["openHourFiles"] = len(s.hourFiles)
 
 	return stats, nil
+}
+
+// GetFileIndex returns the file index for query optimization
+func (s *Storage) GetFileIndex() *FileIndex {
+	return s.fileIndex
 }
 
 // getDirectorySize returns the total size of all files in a directory

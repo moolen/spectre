@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package storage;
+
+option go_package = "github.com/moolen/spectre/internal/storage";
+
+// PBIndexSection contains metadata and indexes for fast file access
+message PBIndexSection {
+  string format_version = 1;
+  repeated PBBlockMetadata block_metadata = 2;
+  PBInvertedIndex inverted_indexes = 3;
+  PBIndexStatistics statistics = 4;
+  map<string, PBResourceLastState> final_resource_states = 5;
+}
+
+message PBBlockMetadata {
+  int32 id = 1;
+  int64 offset = 2;
+  int64 compressed_length = 3;
+  int64 uncompressed_length = 4;
+  int32 event_count = 5;
+  int64 timestamp_min = 6;
+  int64 timestamp_max = 7;
+  string checksum = 8;
+
+  // Bloom filters as raw bytes (no Base64 encoding needed)
+  PBBloomFilter bloom_filter_kinds = 9;
+  PBBloomFilter bloom_filter_namespaces = 10;
+  PBBloomFilter bloom_filter_groups = 11;
+
+  // Sets for inverted index building
+  repeated string kind_set = 12;
+  repeated string namespace_set = 13;
+  repeated string group_set = 14;
+}
+
+message PBBloomFilter {
+  uint32 size = 1;
+  uint32 num_hashes = 2;
+  bytes bitset = 3;  // Raw bytes, not Base64
+}
+
+message PBInvertedIndex {
+  map<string, PBBlockIDList> kind_to_blocks = 1;
+  map<string, PBBlockIDList> namespace_to_blocks = 2;
+  map<string, PBBlockIDList> group_to_blocks = 3;
+}
+
+message PBBlockIDList {
+  repeated int32 block_ids = 1;
+}
+
+message PBIndexStatistics {
+  int32 total_blocks = 1;
+  int64 total_events = 2;
+  int64 total_uncompressed_bytes = 3;
+  int64 total_compressed_bytes = 4;
+  float compression_ratio = 5;
+  int32 unique_kinds = 6;
+  int32 unique_namespaces = 7;
+  int32 unique_groups = 8;
+  int64 timestamp_min = 9;
+  int64 timestamp_max = 10;
+}
+
+message PBResourceLastState {
+  string uid = 1;
+  string event_type = 2;
+  int64 timestamp = 3;
+  bytes resource_data = 4;  // JSON-encoded resource data
+}

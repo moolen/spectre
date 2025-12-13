@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -15,17 +17,17 @@ const (
 	FileFooterMagic = "RPKEND"
 
 	// Format versions - supports future evolution
-	// Version 1.0: Initial release with block-based compression and inverted indexing
+	// Version 1.0: Initial release with block-based compression and inverted indexing (JSON)
 	// Version 1.1: (Future) Enhanced metadata
-	// Version 2.0: (Future) Protobuf encoding support
-	DefaultFormatVersion = "1.0"
+	// Version 2.0: Protobuf encoding for IndexSection (current)
+	DefaultFormatVersion = "2.0"
 	FormatVersionV1_0    = "1.0"
 	FormatVersionV1_1    = "1.1" // Future: enhanced metadata
-	FormatVersionV2_0    = "2.0" // Future: protobuf support
+	FormatVersionV2_0    = "2.0" // Current: protobuf support
 
 	// Supported versions - newer readers must handle older formats
-	MinSupportedVersion = "1.0"
-	MaxSupportedVersion = "1.0" // Currently only 1.0 fully implemented
+	MinSupportedVersion = "2.0"
+	MaxSupportedVersion = "2.0" // Currently only 2.0 fully implemented
 
 	// Default compression algorithm
 	DefaultCompressionAlgorithm = "zstd"
@@ -345,16 +347,19 @@ type IndexSection struct {
 	FinalResourceStates map[string]*ResourceLastState `json:"final_resource_states,omitempty"`
 }
 
-// WriteIndexSection serializes IndexSection to a writer using JSON encoding
+// WriteIndexSection serializes IndexSection to a writer using Protobuf encoding
 func WriteIndexSection(w io.Writer, section *IndexSection) (int64, error) {
-	// Serialize to JSON
-	jsonData, err := json.MarshalIndent(section, "", "  ")
+	// Convert to protobuf message
+	pbSection := convertToProto(section)
+
+	// Marshal to bytes
+	data, err := proto.Marshal(pbSection)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal index section: %w", err)
 	}
 
 	// Write to writer
-	n, err := w.Write(jsonData)
+	n, err := w.Write(data)
 	if err != nil {
 		return 0, fmt.Errorf("failed to write index section: %w", err)
 	}
@@ -364,14 +369,19 @@ func WriteIndexSection(w io.Writer, section *IndexSection) (int64, error) {
 
 // ReadIndexSection deserializes IndexSection from a reader
 func ReadIndexSection(r io.Reader) (*IndexSection, error) {
-	var section IndexSection
-	decoder := json.NewDecoder(r)
-
-	if err := decoder.Decode(&section); err != nil {
-		return nil, fmt.Errorf("failed to decode index section: %w", err)
+	// Read all data
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read index section: %w", err)
 	}
 
-	return &section, nil
+	// Unmarshal protobuf
+	var pbSection PBIndexSection
+	if err := proto.Unmarshal(data, &pbSection); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal index section: %w", err)
+	}
+
+	return convertFromProto(&pbSection), nil
 }
 
 // BuildInvertedIndexes creates inverted indexes from block metadata
@@ -569,10 +579,10 @@ func ValidateVersion(version string) error {
 	// Check if version is supported
 	// For future compatibility, allow newer minor versions of supported major versions
 	// e.g., 1.0 reader can read 1.1, 1.2, etc. files
-	if majorVersion == "1" {
-		// Allow all 1.x versions (backward compatible)
+	if majorVersion == "1" || majorVersion == "2" {
+		// Allow all 1.x and 2.x versions (backward compatible)
 		return nil
 	}
 
-	return fmt.Errorf("unsupported version: %s (supported: 1.x)", version)
+	return fmt.Errorf("unsupported version: %s (supported: 1.x, 2.x)", version)
 }

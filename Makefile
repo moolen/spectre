@@ -1,4 +1,4 @@
-.PHONY: help build build-ui build-mcp run test clean docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install
+.PHONY: help build build-ui build-mcp run test clean docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto
 
 # Default target
 help:
@@ -6,6 +6,7 @@ help:
 	@echo "  build          - Build the application binary"
 	@echo "  build-ui       - Build the React UI"
 	@echo "  build-mcp      - Build the MCP server for Claude integration"
+	@echo "  proto          - Generate protobuf code"
 	@echo "  run            - Run the application locally"
 	@echo "  test           - Run all tests"
 	@echo "  test-unit      - Run unit tests only"
@@ -147,6 +148,12 @@ deps-verify:
 	@echo "Verifying dependencies..."
 	@go mod verify
 	@echo "Dependencies verified"
+
+# Generate protobuf code
+proto:
+	@echo "Generating protobuf code..."
+	@protoc --go_out=. --go_opt=paths=source_relative internal/storage/index.proto
+	@echo "Protobuf code generated successfully"
 
 # Generate favicons from SVG source
 favicons:

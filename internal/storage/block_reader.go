@@ -4,7 +4,6 @@ import (
 	"crypto/md5" //nolint:gosec // MD5 used for checksum, not cryptographic purposes
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
+	"google.golang.org/protobuf/proto"
 )
 
 // BlockReader handles reading and decompressing blocks from storage files
@@ -86,13 +86,13 @@ func (br *BlockReader) ReadIndexSection(offset int64, length int32) (*IndexSecti
 		return nil, fmt.Errorf("failed to read index section: %w", err)
 	}
 
-	// Unmarshal JSON
-	var section IndexSection
-	if err := json.Unmarshal(buf, &section); err != nil {
+	// Unmarshal protobuf
+	var pbSection PBIndexSection
+	if err := proto.Unmarshal(buf, &pbSection); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal index section: %w", err)
 	}
 
-	return &section, nil
+	return convertFromProto(&pbSection), nil
 }
 
 // ReadBlock reads and decompresses a block from file
