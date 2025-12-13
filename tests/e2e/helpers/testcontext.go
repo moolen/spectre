@@ -26,6 +26,15 @@ const (
 	chartDirectory        = "chart"
 )
 
+var (
+	// dockerBuildMutex ensures only one Docker build happens at a time
+	dockerBuildMutex sync.Mutex
+	// builtImages tracks which images have been built to avoid rebuilding
+	builtImages = make(map[string]bool)
+	// builtImagesMutex protects access to builtImages map
+	builtImagesMutex sync.RWMutex
+)
+
 // TestContext bundles shared infrastructure needed by scenario tests.
 type TestContext struct {
 	t           *testing.T
@@ -267,10 +276,28 @@ func buildAndLoadTestImage(t *testing.T, clusterName, imageRef string) error {
 		return err
 	}
 
-	t.Logf("Building Docker image %s", imageRef)
-	buildCmd := exec.Command("docker", "build", "-t", imageRef, root)
-	if err := runCommand(buildCmd); err != nil {
-		return err
+	// Use mutex to ensure only one Docker build happens at a time across all tests
+	dockerBuildMutex.Lock()
+	defer dockerBuildMutex.Unlock()
+
+	// Check if image was already built in this test run
+	builtImagesMutex.RLock()
+	alreadyBuilt := builtImages[imageRef]
+	builtImagesMutex.RUnlock()
+
+	if !alreadyBuilt {
+		t.Logf("Building Docker image %s", imageRef)
+		buildCmd := exec.Command("docker", "build", "-t", imageRef, root)
+		if err := runCommand(buildCmd); err != nil {
+			return err
+		}
+
+		// Mark image as built
+		builtImagesMutex.Lock()
+		builtImages[imageRef] = true
+		builtImagesMutex.Unlock()
+	} else {
+		t.Logf("Reusing already built Docker image %s", imageRef)
 	}
 
 	t.Logf("Loading Docker image %s into Kind cluster %s", imageRef, clusterName)
