@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
@@ -38,7 +39,8 @@ func NewQueryExecutor(storage *Storage, tracingProvider interface{}) *QueryExecu
 
 // NewQueryExecutorWithCache creates a new query executor with block caching
 func NewQueryExecutorWithCache(storage *Storage, cacheMaxMB int64, tracingProvider interface{}) (*QueryExecutor, error) {
-	cache, err := NewBlockCache(cacheMaxMB)
+	cacheLogger := logging.GetLogger("cache")
+	cache, err := NewBlockCache(cacheMaxMB, cacheLogger)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +175,10 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 		filesToQuery = append(filesToQuery, mostRecentFileBeforeQuery)
 	}
 
-	qe.logger.Debug("Will query %d files (found %d total files)", len(filesToQuery), len(allFiles))
+	// Log file selection timing
+	fileSelectionTime := time.Since(start)
+	qe.logger.Debug("File selection completed in %dms, selected %d/%d files",
+		fileSelectionTime.Milliseconds(), len(filesToQuery), len(allFiles))
 	for _, f := range filesToQuery {
 		qe.logger.Debug("  - %s", f)
 	}
@@ -187,6 +192,7 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 
 	// Query each filtered file
 	for _, filePath := range filesToQuery {
+		fileStart := time.Now()
 		qe.logger.Debug("Querying file: %s", filePath)
 		events, segmentsScanned, segmentsSkipped, err := qe.queryFile(ctx, filePath, query)
 		if err != nil {
@@ -202,6 +208,10 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 			}
 			continue
 		}
+
+		fileTime := time.Since(fileStart)
+		qe.logger.Debug("File query completed: path=%s, time=%dms, events=%d, scanned=%d, skipped=%d",
+			filePath, fileTime.Milliseconds(), len(events), segmentsScanned, segmentsSkipped)
 
 		allEvents = append(allEvents, events...)
 		filesSearched++
@@ -272,6 +282,14 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 		logging.Field("total_files", len(allFiles)),
 		logging.Field("segments_scanned", totalSegmentsScanned),
 		logging.Field("segments_skipped", totalSegmentsSkipped))
+
+	// Log cache statistics if cache is enabled
+	if qe.cache != nil {
+		stats := qe.cache.Stats()
+		qe.logger.Info("Cache stats: hits=%d, misses=%d, hitRate=%.2f%%, memory=%dMB/%dMB, evictions=%d",
+			stats.Hits, stats.Misses, stats.HitRate*100,
+			stats.UsedMemory/(1024*1024), stats.MaxMemory/(1024*1024), stats.Evictions)
+	}
 
 	if result.Count == 0 && len(allFiles) > 0 {
 		qe.logger.Info("No events found. Check debug logs for details on why segments/events were filtered out.")

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/moolen/spectre/internal/logging"
 )
 
 const (
@@ -407,7 +409,7 @@ func TestBlockReaderReadBlockWithCache_CacheHit(t *testing.T) {
 	metadata := indexSection.BlockMetadata[0]
 
 	// Create cache and pre-populate it with a cached block
-	cache, err := NewBlockCache(100) // 100MB cache
+	cache, err := NewBlockCache(100, logging.GetLogger("test")) // 100MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
@@ -493,7 +495,7 @@ func TestBlockReaderReadBlockWithCache_CacheMiss(t *testing.T) {
 	metadata := indexSection.BlockMetadata[0]
 
 	// Create empty cache
-	cache, err := NewBlockCache(100) // 100MB cache
+	cache, err := NewBlockCache(100, logging.GetLogger("test")) // 100MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -25,6 +26,7 @@ type BlockCache struct {
 	maxMemory  int64                            // Max memory in bytes (e.g., 100MB)
 	usedMemory int64                            // Current memory usage
 	mu         sync.RWMutex                     // Thread safety
+	logger     *logging.Logger                  // Logger for observability
 
 	// Metrics
 	hits       uint64 // Cache hits
@@ -34,13 +36,14 @@ type BlockCache struct {
 }
 
 // NewBlockCache creates a new block cache with specified max memory in MB
-func NewBlockCache(maxMemoryMB int64) (*BlockCache, error) {
+func NewBlockCache(maxMemoryMB int64, logger *logging.Logger) (*BlockCache, error) {
 	if maxMemoryMB <= 0 {
 		return nil, fmt.Errorf("maxMemoryMB must be positive, got %d", maxMemoryMB)
 	}
 
 	bc := &BlockCache{
 		maxMemory: maxMemoryMB * 1024 * 1024, // Convert to bytes
+		logger:    logger,
 	}
 
 	// Create LRU cache with eviction callback
@@ -54,13 +57,19 @@ func NewBlockCache(maxMemoryMB int64) (*BlockCache, error) {
 	}
 
 	bc.lru = lruCache
+	bc.logger.Debug("Cache initialized: maxMemory=%dMB", maxMemoryMB)
 	return bc, nil
 }
 
 // onEvict is called when an item is evicted from the LRU cache
-func (bc *BlockCache) onEvict(_ string, block *CachedBlock) {
+func (bc *BlockCache) onEvict(key string, block *CachedBlock) {
 	atomic.AddUint64(&bc.evictions, 1)
 	atomic.AddInt64(&bc.usedMemory, -block.Size)
+
+	usedMemoryMB := bc.usedMemory / (1024 * 1024)
+	maxMemoryMB := bc.maxMemory / (1024 * 1024)
+	bc.logger.Debug("Cache EVICT: key=%s, blockSize=%dKB, reason=LRU, usedMem=%dMB/%dMB",
+		key, block.Size/1024, usedMemoryMB, maxMemoryMB)
 }
 
 // Get retrieves a cached block or returns nil
@@ -71,10 +80,34 @@ func (bc *BlockCache) Get(filename string, blockID int32) *CachedBlock {
 	key := makeKey(filename, blockID)
 	if block, ok := bc.lru.Get(key); ok {
 		atomic.AddUint64(&bc.hits, 1)
+
+		// Calculate hit rate
+		total := atomic.LoadUint64(&bc.hits) + atomic.LoadUint64(&bc.misses)
+		hitRate := 0.0
+		if total > 0 {
+			hitRate = float64(atomic.LoadUint64(&bc.hits)) / float64(total)
+		}
+
+		usedMemoryMB := bc.usedMemory / (1024 * 1024)
+		maxMemoryMB := bc.maxMemory / (1024 * 1024)
+		bc.logger.Debug("Cache GET: key=%s, hit=true, hitRate=%.2f%%, usedMem=%dMB/%dMB",
+			key, hitRate*100, usedMemoryMB, maxMemoryMB)
 		return block
 	}
 
 	atomic.AddUint64(&bc.misses, 1)
+
+	// Calculate hit rate
+	total := atomic.LoadUint64(&bc.hits) + atomic.LoadUint64(&bc.misses)
+	hitRate := 0.0
+	if total > 0 {
+		hitRate = float64(atomic.LoadUint64(&bc.hits)) / float64(total)
+	}
+
+	usedMemoryMB := bc.usedMemory / (1024 * 1024)
+	maxMemoryMB := bc.maxMemory / (1024 * 1024)
+	bc.logger.Debug("Cache GET: key=%s, hit=false, hitRate=%.2f%%, usedMem=%dMB/%dMB",
+		key, hitRate*100, usedMemoryMB, maxMemoryMB)
 	return nil
 }
 
@@ -95,6 +128,10 @@ func (bc *BlockCache) Put(filename string, blockID int32, block *CachedBlock) er
 
 		// If still over limit after eviction, reject
 		if bc.usedMemory+blockSize > bc.maxMemory {
+			usedMemoryMB := bc.usedMemory / (1024 * 1024)
+			maxMemoryMB := bc.maxMemory / (1024 * 1024)
+			bc.logger.Warn("Cache PUT REJECTED: key=%s, blockSize=%dKB, reason=exceeds_memory, usedMem=%dMB/%dMB",
+				key, blockSize/1024, usedMemoryMB, maxMemoryMB)
 			return fmt.Errorf("block size %d exceeds remaining memory %d",
 				blockSize, bc.maxMemory-bc.usedMemory)
 		}
@@ -103,6 +140,11 @@ func (bc *BlockCache) Put(filename string, blockID int32, block *CachedBlock) er
 	bc.lru.Add(key, block)
 	bc.usedMemory += blockSize
 	atomic.AddUint64(&bc.bytesRead, uint64(blockSize)) //nolint:gosec // safe conversion: block size is positive
+
+	usedMemoryMB := bc.usedMemory / (1024 * 1024)
+	maxMemoryMB := bc.maxMemory / (1024 * 1024)
+	bc.logger.Debug("Cache PUT: key=%s, blockSize=%dKB, usedMem=%dMB/%dMB",
+		key, blockSize/1024, usedMemoryMB, maxMemoryMB)
 
 	return nil
 }

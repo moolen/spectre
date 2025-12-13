@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
+	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -16,6 +18,7 @@ import (
 type BlockReader struct {
 	filePath string
 	file     *os.File
+	logger   *logging.Logger
 }
 
 // NewBlockReader creates a new reader for a storage file
@@ -28,6 +31,7 @@ func NewBlockReader(filePath string) (*BlockReader, error) {
 	return &BlockReader{
 		filePath: filePath,
 		file:     file,
+		logger:   logging.GetLogger("block_reader"),
 	}, nil
 }
 
@@ -93,14 +97,26 @@ func (br *BlockReader) ReadIndexSection(offset int64, length int32) (*IndexSecti
 
 // ReadBlock reads and decompresses a block from file
 func (br *BlockReader) ReadBlock(metadata *BlockMetadata) ([]byte, error) {
+	// Time file seek operation
+	seekStart := time.Now()
 	if _, err := br.file.Seek(metadata.Offset, 0); err != nil {
 		return nil, fmt.Errorf("failed to seek to block: %w", err)
 	}
+	seekTime := time.Since(seekStart)
 
-	// Read compressed data
+	// Time file read operation
+	readStart := time.Now()
 	compressedData := make([]byte, metadata.CompressedLength)
 	if _, err := io.ReadFull(br.file, compressedData); err != nil {
 		return nil, fmt.Errorf("failed to read block data: %w", err)
+	}
+	readTime := time.Since(readStart)
+
+	// Log slow I/O operations (threshold: 100ms)
+	if seekTime.Milliseconds() > 100 || readTime.Milliseconds() > 100 {
+		br.logger.Warn("Slow file I/O: file=%s, blockID=%d, seekTime=%dms, readTime=%dms, size=%dKB",
+			br.filePath, metadata.ID, seekTime.Milliseconds(), readTime.Milliseconds(),
+			metadata.CompressedLength/1024)
 	}
 
 	// Decompress using gzip
@@ -120,10 +136,18 @@ func (br *BlockReader) ReadBlockWithCache(filename string, metadata *BlockMetada
 	}
 
 	// Cache miss: read and decompress
+	decompressStart := time.Now()
 	decompressed, err := br.ReadBlock(metadata)
+	decompressTime := time.Since(decompressStart)
+
 	if err != nil {
+		br.logger.Warn("Failed to read block: file=%s, blockID=%d, error=%v",
+			filename, metadata.ID, err)
 		return nil, err
 	}
+
+	br.logger.Debug("Block decompressed: file=%s, blockID=%d, compressedSize=%d, decompressedSize=%d, time=%dms",
+		filename, metadata.ID, metadata.CompressedLength, len(decompressed), decompressTime.Milliseconds())
 
 	// Parse events from decompressed protobuf data
 	events, err := br.readBlockEventsProtobuf(decompressed)
@@ -143,8 +167,8 @@ func (br *BlockReader) ReadBlockWithCache(filename string, metadata *BlockMetada
 	// Store in cache
 	if err := cache.Put(filename, metadata.ID, cachedBlock); err != nil {
 		// If cache full, log but continue (don't fail query)
-		// In production, this would use a logger
-		fmt.Printf("Warning: Failed to cache block: %v\n", err)
+		br.logger.Warn("Failed to cache block: file=%s, blockID=%d, blockSize=%dKB, error=%v",
+			filename, metadata.ID, cachedBlock.Size/1024, err)
 	}
 
 	return cachedBlock, nil

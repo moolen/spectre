@@ -3,6 +3,7 @@ package storage
 import (
 	"testing"
 
+	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -42,7 +43,7 @@ func TestNewBlockCache(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cache, err := NewBlockCache(tt.maxMemMB)
+			cache, err := NewBlockCache(tt.maxMemMB, logging.GetLogger("test"))
 			if tt.shouldErr {
 				if err == nil {
 					t.Errorf("expected error, got nil")
@@ -65,7 +66,7 @@ func TestNewBlockCache(t *testing.T) {
 
 // TestBlockCacheGetPut tests basic get/put operations
 func TestBlockCacheGetPut(t *testing.T) {
-	cache, err := NewBlockCache(10) // 10MB cache
+	cache, err := NewBlockCache(10, logging.GetLogger("test")) // 10MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestBlockCacheGetPut(t *testing.T) {
 
 // TestBlockCacheStats tests cache statistics
 func TestBlockCacheStats(t *testing.T) {
-	cache, err := NewBlockCache(10) // 10MB cache
+	cache, err := NewBlockCache(10, logging.GetLogger("test")) // 10MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestBlockCacheStats(t *testing.T) {
 
 // TestBlockCacheLRUEviction tests LRU eviction behavior
 func TestBlockCacheLRUEviction(t *testing.T) {
-	cache, err := NewBlockCache(1) // 1MB cache
+	cache, err := NewBlockCache(1, logging.GetLogger("test")) // 1MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestBlockCacheLRUEviction(t *testing.T) {
 
 // TestBlockCacheMemoryLimit tests that cache respects memory limit
 func TestBlockCacheMemoryLimit(t *testing.T) {
-	cache, err := NewBlockCache(1) // 1MB cache
+	cache, err := NewBlockCache(1, logging.GetLogger("test")) // 1MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
@@ -246,7 +247,7 @@ func TestBlockCacheMemoryLimit(t *testing.T) {
 
 // TestBlockCacheClear tests cache clearing
 func TestBlockCacheClear(t *testing.T) {
-	cache, err := NewBlockCache(10) // 10MB cache
+	cache, err := NewBlockCache(10, logging.GetLogger("test")) // 10MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
@@ -303,7 +304,7 @@ func TestBlockCacheMakeKey(t *testing.T) {
 
 // TestBlockCacheConcurrent tests concurrent access
 func TestBlockCacheConcurrent(t *testing.T) {
-	cache, err := NewBlockCache(100) // 100MB cache
+	cache, err := NewBlockCache(100, logging.GetLogger("test")) // 100MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
@@ -359,7 +360,7 @@ func TestBlockCacheConcurrent(t *testing.T) {
 
 // TestBlockCacheHitRateCalc tests hit rate calculation
 func TestBlockCacheHitRateCalc(t *testing.T) {
-	cache, err := NewBlockCache(10) // 10MB cache
+	cache, err := NewBlockCache(10, logging.GetLogger("test")) // 10MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
@@ -393,7 +394,7 @@ func TestBlockCacheHitRateCalc(t *testing.T) {
 
 // TestBlockCacheZeroHitRate tests hit rate when no accesses
 func TestBlockCacheZeroHitRate(t *testing.T) {
-	cache, err := NewBlockCache(10) // 10MB cache
+	cache, err := NewBlockCache(10, logging.GetLogger("test")) // 10MB cache
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}
