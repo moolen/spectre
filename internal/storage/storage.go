@@ -23,6 +23,11 @@ type Storage struct {
 	blockSize   int64
 	fileIndex   *FileIndex // Index for fast file selection
 	hourFiles   map[int64]*BlockStorageFile // Cache of open hourly files
+
+	// Background task management
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // New creates a new Storage instance
@@ -251,7 +256,7 @@ func (s *Storage) CloseOldHourFiles(olderThan time.Duration) error {
 			if err := file.Close(); err != nil {
 				s.logger.Error("Failed to close old hour file: %v", err)
 			}
-			
+
 			// Update file index with final stats
 			if file.path != "" {
 				meta := &FileMetadata{
@@ -269,12 +274,35 @@ func (s *Storage) CloseOldHourFiles(olderThan time.Duration) error {
 					s.logger.Warn("Failed to update file index: %v", err)
 				}
 			}
-			
+
 			delete(s.hourFiles, hourTimestamp)
 		}
 	}
 
 	return nil
+}
+
+// runFileCloser runs in the background and periodically closes old hour files
+func (s *Storage) runFileCloser() {
+	defer s.wg.Done()
+
+	// Close files older than 2 hours every 5 minutes
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	s.logger.Info("Started background file closer (interval: 5m, close files older than: 2h)")
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			s.logger.Info("Background file closer stopped")
+			return
+		case <-ticker.C:
+			if err := s.CloseOldHourFiles(2 * time.Hour); err != nil {
+				s.logger.Error("Failed to close old hour files: %v", err)
+			}
+		}
+	}
 }
 
 // getStorageFiles returns all storage files in the data directory
@@ -557,6 +585,13 @@ func (s *Storage) Start(ctx context.Context) error {
 	default:
 	}
 
+	// Create a context for background tasks
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
+	// Start background goroutine to periodically close old hour files
+	s.wg.Add(1)
+	go s.runFileCloser()
+
 	// Storage is already initialized in New(), so just verify it's ready
 	s.logger.Info("Storage component ready")
 	return nil
@@ -567,9 +602,16 @@ func (s *Storage) Start(ctx context.Context) error {
 func (s *Storage) Stop(ctx context.Context) error {
 	s.logger.Info("Stopping storage component")
 
+	// Cancel background tasks
+	if s.cancel != nil {
+		s.cancel()
+	}
+
 	done := make(chan error, 1)
 
 	go func() {
+		// Wait for background goroutines to finish
+		s.wg.Wait()
 		done <- s.Close()
 	}()
 
