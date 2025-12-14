@@ -151,6 +151,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		"status":         "success",
 		"total_events":   report.TotalEvents,
 		"merged_hours":   report.MergedHours,
+		"files_created":  report.MergedHours, // Number of storage files created/updated
 		"imported_files": report.ImportedFiles,
 		"duration":       report.Duration.String(),
 		"errors":         report.Errors,

@@ -243,6 +243,31 @@ func (a *APIClient) doRequest(ctx context.Context, method, url string, body io.R
 	return resp, nil
 }
 
+// Timeline queries the /v1/timeline endpoint.
+func (a *APIClient) Timeline(ctx context.Context, startTime, endTime int64, namespace, kind string) (*SearchResponse, error) {
+	url := fmt.Sprintf("%s/v1/timeline?start=%d&end=%d", a.BaseURL, startTime, endTime)
+
+	if namespace != "" {
+		url += fmt.Sprintf("&namespace=%s", namespace)
+	}
+	if kind != "" {
+		url += fmt.Sprintf("&kind=%s", kind)
+	}
+
+	resp, err := a.doRequest(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode timeline response: %w", err)
+	}
+
+	return &result, nil
+}
+
 // Health checks if the API is healthy.
 func (a *APIClient) Health(ctx context.Context) error {
 	url := a.BaseURL + "/health"
