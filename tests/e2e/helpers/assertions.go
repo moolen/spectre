@@ -37,7 +37,7 @@ func EventuallyResourceCreated(t *testing.T, client *APIClient, namespace, kind,
 	var result *Resource
 
 	assert.Eventually(t, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 
 		now := time.Now().Unix()
@@ -73,7 +73,7 @@ func EventuallyEventCreated(t *testing.T, client *APIClient, resourceID, reason 
 	var result *K8sEvent
 
 	assert.Eventually(t, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 
 		now := time.Now().Unix()
@@ -107,7 +107,7 @@ func EventuallyEventCount(t *testing.T, client *APIClient, resourceID string, ex
 	}
 
 	assert.Eventually(t, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 
 		now := time.Now().Unix()
@@ -132,7 +132,7 @@ func EventuallySegmentsCount(t *testing.T, client *APIClient, resourceID string,
 	}
 
 	assert.Eventually(t, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 
 		now := time.Now().Unix()

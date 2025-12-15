@@ -128,7 +128,7 @@ func SetupE2ETest(t *testing.T) *TestContext {
 	}
 	ctx.K8sClient = k8sClient
 
-	setupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	setupCtx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 
 	if err := ensureNamespace(setupCtx, k8sClient, ctx.Namespace); err != nil {

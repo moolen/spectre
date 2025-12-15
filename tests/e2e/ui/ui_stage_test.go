@@ -84,7 +84,7 @@ func (s *UIStage) navigated_to_root() *UIStage {
 }
 
 func (s *UIStage) deployment_is_created(name, namespace string) *UIStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	var deployment *appsv1.Deployment
@@ -109,14 +109,14 @@ func (s *UIStage) deployment_is_created(name, namespace string) *UIStage {
 }
 
 func (s *UIStage) deployments_are_created_in_namespaces(namespaces []string) *UIStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	for _, ns := range namespaces {
 		err := s.k8sClient.CreateNamespace(ctx, ns)
 		s.require.NoError(err, "failed to create namespace %s", ns)
 		s.t.Cleanup(func() {
-			if err := s.k8sClient.DeleteNamespace(context.Background(), ns); err != nil {
+			if err := s.k8sClient.DeleteNamespace(s.t.Context(), ns); err != nil {
 				s.t.Logf("Warning: failed to delete namespace: %v", err)
 			}
 		})

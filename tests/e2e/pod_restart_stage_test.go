@@ -45,14 +45,14 @@ func (s *PodRestartStage) a_test_environment() *PodRestartStage {
 }
 
 func (s *PodRestartStage) a_test_namespace_with_deployment() *PodRestartStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	s.testNamespace = "test-restart"
 	err := s.k8sClient.CreateNamespace(ctx, s.testNamespace)
 	s.require.NoError(err, "failed to create namespace")
 	s.t.Cleanup(func() {
-		if err := s.k8sClient.DeleteNamespace(context.Background(), s.testNamespace); err != nil {
+		if err := s.k8sClient.DeleteNamespace(s.t.Context(), s.testNamespace); err != nil {
 			s.t.Logf("Warning: failed to delete namespace: %v", err)
 		}
 	})
@@ -69,7 +69,7 @@ func (s *PodRestartStage) deployment_is_indexed() *PodRestartStage {
 }
 
 func (s *PodRestartStage) spectre_pod_is_restarted() *PodRestartStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	podList, err := s.testCtx.K8sClient.ListPods(ctx, "monitoring", "app.kubernetes.io/instance="+s.testCtx.ReleaseName)
@@ -84,7 +84,7 @@ func (s *PodRestartStage) spectre_pod_is_restarted() *PodRestartStage {
 }
 
 func (s *PodRestartStage) wait_for_spectre_to_be_ready() *PodRestartStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	err := helpers.WaitForAppReady(ctx, s.testCtx.K8sClient, "monitoring", s.testCtx.ReleaseName)
@@ -106,7 +106,7 @@ func (s *PodRestartStage) first_deployment_is_still_present() *PodRestartStage {
 }
 
 func (s *PodRestartStage) second_deployment_is_created() *PodRestartStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	deployment2Builder := helpers.NewDeploymentBuilder(s.t, "test-deployment-2", s.testNamespace)
@@ -124,7 +124,7 @@ func (s *PodRestartStage) second_deployment_is_indexed() *PodRestartStage {
 }
 
 func (s *PodRestartStage) both_deployments_are_searchable() *PodRestartStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	searchResp, err := s.apiClient.Search(ctx, time.Now().Unix()-120, time.Now().Unix()+10, s.testNamespace, "Deployment")

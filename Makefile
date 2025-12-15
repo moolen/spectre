@@ -61,24 +61,7 @@ run: build build-ui
 # Run all tests
 test:
 	@echo "Running all tests..."
-	@go test -v -cover ./...
-
-# Run unit tests only
-test-unit:
-	@echo "Running unit tests..."
-	@go test -v -cover ./tests/unit/...
-
-# Run integration tests
-test-integration:
-	@echo "Running integration tests..."
-	@go test -v -cover ./tests/integration/...
-
-# Run tests with coverage
-test-coverage:
-	@echo "Running tests with coverage..."
-	@go test -v -coverprofile=coverage.out ./...
-	@go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report: coverage.html"
+	@go test -v -cover -count 1 -timeout 30m ./...
 
 # Clean build artifacts
 clean:

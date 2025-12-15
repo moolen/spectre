@@ -21,12 +21,12 @@ type ConfigReloadStage struct {
 	k8sClient *helpers.K8sClient
 	apiClient *helpers.APIClient
 
-	testNamespace      string
-	statefulSet        *appsv1.StatefulSet
-	deployment         *appsv1.Deployment
-	foundAfterReload   bool
-	newWatcherConfig   string
-	configMapName      string
+	testNamespace    string
+	statefulSet      *appsv1.StatefulSet
+	deployment       *appsv1.Deployment
+	foundAfterReload bool
+	newWatcherConfig string
+	configMapName    string
 }
 
 func NewConfigReloadStage(t *testing.T) (*ConfigReloadStage, *ConfigReloadStage, *ConfigReloadStage) {
@@ -50,14 +50,14 @@ func (s *ConfigReloadStage) a_test_environment() *ConfigReloadStage {
 }
 
 func (s *ConfigReloadStage) a_test_namespace() *ConfigReloadStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	s.testNamespace = "test-config"
 	err := s.k8sClient.CreateNamespace(ctx, s.testNamespace)
 	s.require.NoError(err, "failed to create namespace")
 	s.t.Cleanup(func() {
-		if err := s.k8sClient.DeleteNamespace(context.Background(), s.testNamespace); err != nil {
+		if err := s.k8sClient.DeleteNamespace(s.t.Context(), s.testNamespace); err != nil {
 			s.t.Logf("Warning: failed to delete namespace: %v", err)
 		}
 	})
@@ -66,7 +66,7 @@ func (s *ConfigReloadStage) a_test_namespace() *ConfigReloadStage {
 }
 
 func (s *ConfigReloadStage) statefulset_is_created() *ConfigReloadStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	ssBuilder := helpers.NewStatefulSetBuilder(s.t, "test-statefulset", s.testNamespace)
@@ -85,7 +85,7 @@ func (s *ConfigReloadStage) statefulset_is_created() *ConfigReloadStage {
 }
 
 func (s *ConfigReloadStage) statefulset_is_not_found_with_default_config() *ConfigReloadStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	searchResp, err := s.apiClient.Search(ctx, time.Now().Unix()-60, time.Now().Unix()+10, s.testNamespace, "StatefulSet")
@@ -104,7 +104,7 @@ func (s *ConfigReloadStage) statefulset_is_not_found_with_default_config() *Conf
 }
 
 func (s *ConfigReloadStage) watcher_config_is_updated_to_include_statefulset() *ConfigReloadStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	s.configMapName = fmt.Sprintf("%s-spectre", s.testCtx.ReleaseName)
@@ -126,7 +126,7 @@ func (s *ConfigReloadStage) watcher_config_is_updated_to_include_statefulset() *
 }
 
 func (s *ConfigReloadStage) wait_for_hot_reload() *ConfigReloadStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	// Poll for the StatefulSet to appear in the API, which indicates hot-reload worked
@@ -166,7 +166,7 @@ func (s *ConfigReloadStage) statefulset_is_found_after_reload() *ConfigReloadSta
 }
 
 func (s *ConfigReloadStage) deployment_can_still_be_captured() *ConfigReloadStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	deployment, err := helpers.CreateTestDeployment(ctx, s.t, s.k8sClient, s.testNamespace)
@@ -181,7 +181,7 @@ func (s *ConfigReloadStage) deployment_can_still_be_captured() *ConfigReloadStag
 }
 
 func (s *ConfigReloadStage) metadata_includes_both_resource_kinds() *ConfigReloadStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	metadataStart := time.Now().Unix() - 500

@@ -75,7 +75,7 @@ func (s *MCPStdioStage) mcp_subprocess_is_started() *MCPStdioStage {
 }
 
 func (s *MCPStdioStage) subprocess_is_ready() *MCPStdioStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	err := helpers.WaitForMCPReady(ctx, s.subprocess, 10*time.Second)
@@ -85,7 +85,7 @@ func (s *MCPStdioStage) subprocess_is_ready() *MCPStdioStage {
 }
 
 func (s *MCPStdioStage) session_is_initialized() *MCPStdioStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	result, err := s.subprocess.Initialize(ctx)
@@ -129,7 +129,7 @@ func (s *MCPStdioStage) capabilities_include_tools_and_prompts() *MCPStdioStage 
 }
 
 func (s *MCPStdioStage) tools_are_listed() *MCPStdioStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	tools, err := s.subprocess.ListTools(ctx)
@@ -209,7 +209,7 @@ func (s *MCPStdioStage) each_tool_has_description_and_schema() *MCPStdioStage {
 }
 
 func (s *MCPStdioStage) cluster_health_tool_is_called() *MCPStdioStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 30*time.Second)
 	defer cancel()
 
 	args := map[string]interface{}{
@@ -247,7 +247,7 @@ func (s *MCPStdioStage) tool_result_is_not_error() *MCPStdioStage {
 }
 
 func (s *MCPStdioStage) prompts_are_listed() *MCPStdioStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	prompts, err := s.subprocess.ListPrompts(ctx)
@@ -297,7 +297,7 @@ func (s *MCPStdioStage) expected_prompts_are_present() *MCPStdioStage {
 }
 
 func (s *MCPStdioStage) post_mortem_prompt_is_retrieved() *MCPStdioStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	args := map[string]interface{}{

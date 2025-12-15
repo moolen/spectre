@@ -204,12 +204,12 @@ func (mh *ManifestHelper) ParseYAML(manifest string) ([]map[string]interface{}, 
 func (hd *HelmDeployer) debugDeploymentFailure(releaseName string) {
 	hd.t.Logf("=== DEBUGGING DEPLOYMENT FAILURE FOR: %s ===", releaseName)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(hd.t.Context(), 30*time.Second)
 	defer cancel()
 
 	// Get PVCs
 	hd.runKubectl(ctx, "get", "pvc", "-n", hd.Namespace)
-	
+
 	// Describe PVCs
 	pvcListCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", hd.KubeConfig, "get", "pvc", "-n", hd.Namespace, "-o", "name")
 	if pvcOutput, err := pvcListCmd.Output(); err == nil {
@@ -236,7 +236,7 @@ func (hd *HelmDeployer) debugDeploymentFailure(releaseName string) {
 			if pod != "" {
 				hd.t.Logf("--- Describing %s ---", pod)
 				hd.runKubectl(ctx, "describe", pod, "-n", hd.Namespace)
-				
+
 				// Get pod logs if available
 				hd.t.Logf("--- Logs for %s ---", pod)
 				hd.runKubectl(ctx, "logs", pod, "-n", hd.Namespace, "--all-containers", "--prefix")

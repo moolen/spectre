@@ -92,7 +92,7 @@ func (s *TimelinePerformanceStage) events_spanning_hours(hours int) *TimelinePer
 // When methods
 
 func (s *TimelinePerformanceStage) events_are_imported() *TimelinePerformanceStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	importPayload := map[string]interface{}{
@@ -134,7 +134,7 @@ func (s *TimelinePerformanceStage) events_are_imported() *TimelinePerformanceSta
 	// Wait for namespace to appear in metadata
 	s.t.Logf("Waiting for namespace %s to appear in metadata...", s.testNamespace)
 	helpers.EventuallyCondition(s.t, func() bool {
-		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		metadataCtx, metadataCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer metadataCancel()
 
 		// Query metadata for the time range of imported events
@@ -174,7 +174,7 @@ func (s *TimelinePerformanceStage) events_are_imported() *TimelinePerformanceSta
 	// Verify we can query the data via search API first
 	s.t.Logf("Verifying data is searchable...")
 	helpers.EventuallyCondition(s.t, func() bool {
-		searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer searchCancel()
 
 		startTime := s.baseTime.Unix()
@@ -212,7 +212,7 @@ func (s *TimelinePerformanceStage) timeline_is_queried_for_last_hour() *Timeline
 	// Wait for data to be indexed and available via timeline API
 	var lastResp *helpers.SearchResponse
 	helpers.EventuallyCondition(s.t, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer cancel()
 
 		resp, err := s.apiClient.Timeline(ctx, startTs, endTs, s.testNamespace, "Deployment")
