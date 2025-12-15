@@ -136,6 +136,11 @@ func SetupE2ETest(t *testing.T) *TestContext {
 		t.Fatalf("failed to ensure namespace %s: %v", ctx.Namespace, err)
 	}
 
+	if err := k8sClient.WaitForStorageClass(setupCtx, "standard", 30*time.Second); err != nil {
+		ctx.Cleanup()
+		t.Fatalf("failed to wait for storage class: %v", err)
+	}
+
 	values, imageRef, err := loadHelmValues()
 	if err != nil {
 		ctx.Cleanup()
