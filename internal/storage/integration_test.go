@@ -49,7 +49,7 @@ func TestIntegration_WriteAndQuery(t *testing.T) {
 	defer storage.Close()
 
 	// Create query executor
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query all events
 	query := &models.QueryRequest{
@@ -58,7 +58,7 @@ func TestIntegration_WriteAndQuery(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestIntegration_FilteredQuery(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query for Pods only
 	query := &models.QueryRequest{
@@ -126,7 +126,7 @@ func TestIntegration_FilteredQuery(t *testing.T) {
 		Filters:        models.QueryFilters{Kind: kindPod},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestIntegration_InMemoryAndFileEvents(t *testing.T) {
 		}
 	}
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query should find both file and in-memory events
 	query := &models.QueryRequest{
@@ -192,7 +192,7 @@ func TestIntegration_InMemoryAndFileEvents(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestIntegration_MultipleFiles(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query across both files
 	query := &models.QueryRequest{
@@ -274,7 +274,7 @@ func TestIntegration_MultipleFiles(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -317,14 +317,14 @@ func TestIntegration_ConcurrentWrites(t *testing.T) {
 	}
 
 	// Query events
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 100,
 		EndTimestamp:   baseTime + 100,
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -366,14 +366,14 @@ func TestIntegration_QueryStatistics(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 3600,
 		EndTimestamp:   baseTime,
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}

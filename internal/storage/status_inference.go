@@ -96,8 +96,13 @@ func inferDeploymentStatus(obj *resourceData) string {
 		return resourceStatusWarning
 	}
 
-	if cond := obj.condition("Progressing"); cond != nil && cond.isTrue() {
-		return resourceStatusWarning
+	if cond := obj.condition("Progressing"); cond != nil {
+		if cond.isFalse() && cond.isErrorLike() {
+			return resourceStatusError
+		}
+		if cond.isTrue() {
+			return resourceStatusWarning
+		}
 	}
 
 	if desired > 0 && available < desired {
@@ -161,15 +166,22 @@ func inferReplicaSetStatus(obj *resourceData) string {
 	ready := obj.statusInt("readyReplicas")
 	available := obj.statusInt("availableReplicas")
 
-	if obj.specInt("replicas") == obj.statusInt("replicas") {
-		return resourceStatusReady
+	if desired > 0 && ready >= desired {
+		// If availableReplicas is set, check it too
+		if available > 0 && available >= desired {
+			return resourceStatusReady
+		}
+		// If availableReplicas is not set, just check ready
+		if available == 0 {
+			return resourceStatusReady
+		}
 	}
 
-	if desired > 0 && ready >= desired && available >= desired {
-		return resourceStatusReady
+	if desired > 0 && ready < desired {
+		return resourceStatusWarning
 	}
 
-	if desired > 0 && available < desired {
+	if desired > 0 && available > 0 && available < desired {
 		return resourceStatusWarning
 	}
 
@@ -180,6 +192,25 @@ func inferPodStatus(obj *resourceData) string {
 	status := obj.status()
 	if status == nil {
 		return ""
+	}
+
+	// Check for container-level issues first
+	containerIssues := InspectContainerStates(obj)
+
+	// ImagePullBackOff should cause Error status even though it's not a critical container issue
+	for _, issue := range containerIssues {
+		if issue.IssueType == issueTypeImagePullBackOff {
+			return resourceStatusError
+		}
+	}
+
+	if HasCriticalContainerIssues(containerIssues) {
+		return resourceStatusError
+	}
+
+	// If there are any container issues (non-critical), consider it a warning
+	if len(containerIssues) > 0 {
+		return resourceStatusWarning
 	}
 
 	switch strings.ToLower(obj.statusString("phase")) {
@@ -221,12 +252,24 @@ func inferNodeStatus(obj *resourceData) string {
 		return ""
 	}
 
-	if readyCond.isFalse() || readyCond.isUnknown() {
+	// Phase 4: Enhanced node detection - NotReady is Error
+	if readyCond.isFalse() {
 		return resourceStatusError
 	}
 
-	for _, t := range []string{"MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable"} {
-		if cond := obj.condition(t); cond != nil && cond.isTrue() {
+	if readyCond.isUnknown() {
+		return resourceStatusError
+	}
+
+	// Phase 4: NetworkUnavailable is Error (critical networking issue)
+	if cond := obj.condition("NetworkUnavailable"); cond != nil && cond.isTrue() {
+		return resourceStatusError
+	}
+
+	// Phase 4: Pressure conditions are Warning
+	pressureConditions := []string{"MemoryPressure", "DiskPressure", "PIDPressure"}
+	for _, condType := range pressureConditions {
+		if cond := obj.condition(condType); cond != nil && cond.isTrue() {
 			return resourceStatusWarning
 		}
 	}
@@ -254,7 +297,7 @@ func inferJobStatus(obj *resourceData) string {
 		return resourceStatusError
 	}
 	if obj.statusInt("active") > 0 {
-		return resourceStatusWarning
+		return resourceStatusReady
 	}
 
 	return ""
@@ -438,7 +481,7 @@ func containsErrorKeyword(text string) bool {
 		return false
 	}
 
-	keywords := []string{"error", "fail", "invalid", "crash", "timeout", "stalled"}
+	keywords := []string{"error", "fail", "invalid", "crash", "timeout", "stalled", "deadline", "exceeded"}
 	for _, keyword := range keywords {
 		if strings.Contains(textLower, keyword) {
 			return true

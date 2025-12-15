@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +68,8 @@ func TestResourceStateTracking_CompleteWorkflow(t *testing.T) {
 		t.Fatal("no storage files found after hour 1")
 	}
 
-	reader, _ := NewBlockReader(files[0])
+	// Check the most recent file (last in sorted list) for final resource states
+	reader, _ := NewBlockReader(files[len(files)-1])
 	fileData, _ := reader.ReadFile()
 	reader.Close()
 
@@ -114,7 +117,7 @@ func TestResourceStateTracking_CompleteWorkflow(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	now := time.Now()
 	currentHour := now.Unix()
@@ -126,7 +129,7 @@ func TestResourceStateTracking_CompleteWorkflow(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("query execution failed: %v", err)
 	}
@@ -318,8 +321,9 @@ func TestResourceStateTracking_StateUpdate(t *testing.T) {
 	}
 
 	// Verify state snapshot has the latest state
+	// Check the most recent file (events may span multiple hourly files)
 	files, _ := storage.getStorageFiles()
-	reader, _ := NewBlockReader(files[0])
+	reader, _ := NewBlockReader(files[len(files)-1])
 	fileData, _ := reader.ReadFile()
 	reader.Close()
 
@@ -398,7 +402,10 @@ func TestResourceStateTracking_FilteredConsistentView(t *testing.T) {
 
 	// Verify state snapshots exist in the file
 	files, _ := storage.getStorageFiles()
-	reader, _ := NewBlockReader(files[0])
+	sort.Strings(files) // Sort files to ensure consistent ordering
+
+	// Check the most recent file (last in sorted order) which should have all 3 states
+	reader, _ := NewBlockReader(files[len(files)-1])
 	fileData, _ := reader.ReadFile()
 	reader.Close()
 
@@ -470,7 +477,10 @@ func TestResourceStateTracking_DeletedResourceExcluded(t *testing.T) {
 
 	// Verify state snapshot shows DELETE
 	files, _ := storage.getStorageFiles()
-	reader, _ := NewBlockReader(files[0])
+	sort.Strings(files) // Sort files to ensure consistent ordering
+
+	// Check the most recent file (last in sorted order) which should have the DELETE state
+	reader, _ := NewBlockReader(files[len(files)-1])
 	fileData, _ := reader.ReadFile()
 	reader.Close()
 
@@ -492,7 +502,7 @@ func TestResourceStateTracking_DeletedResourceExcluded(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	currentHour := now.Unix()
 
 	query := &models.QueryRequest{
@@ -501,7 +511,7 @@ func TestResourceStateTracking_DeletedResourceExcluded(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}
@@ -733,7 +743,7 @@ func TestResourceStateTracking_QueryTimeRangeBoundary(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query 1: Last 60 minutes (from sixtyMinutesAgo to now)
 	// This query SHOULD NOT include the pod from 80 minutes ago (created before query start)
@@ -746,7 +756,7 @@ func TestResourceStateTracking_QueryTimeRangeBoundary(t *testing.T) {
 		},
 	}
 
-	result60, err := executor.Execute(query60min)
+	result60, err := executor.Execute(context.Background(), query60min)
 	if err != nil {
 		t.Fatalf("query for 60 minutes failed: %v", err)
 	}
@@ -762,7 +772,7 @@ func TestResourceStateTracking_QueryTimeRangeBoundary(t *testing.T) {
 		},
 	}
 
-	result90, err := executor.Execute(query90min)
+	result90, err := executor.Execute(context.Background(), query90min)
 	if err != nil {
 		t.Fatalf("query for 90 minutes failed: %v", err)
 	}
@@ -864,7 +874,7 @@ func TestResourceStateTracking_BugReproduction_RestartScenario(t *testing.T) {
 	}
 	defer storage2.Close()
 
-	executor := NewQueryExecutor(storage2)
+	executor := NewQueryExecutor(storage2, nil)
 
 	// Query for resources in past 60 minutes
 	// Since the resource was created 80 min ago, it SHOULD appear as PreExisting
@@ -878,7 +888,7 @@ func TestResourceStateTracking_BugReproduction_RestartScenario(t *testing.T) {
 		},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}
@@ -953,7 +963,7 @@ func TestResourceStateTracking_ConsistentViewWithinRange(t *testing.T) {
 	}
 	defer storage2.Close()
 
-	executor := NewQueryExecutor(storage2)
+	executor := NewQueryExecutor(storage2, nil)
 
 	// Query from 90 min ago to now - this SHOULD include the resource
 	query := &models.QueryRequest{
@@ -965,7 +975,7 @@ func TestResourceStateTracking_ConsistentViewWithinRange(t *testing.T) {
 		},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}
@@ -990,7 +1000,7 @@ func TestResourceStateTracking_ConsistentViewWithinRange(t *testing.T) {
 		},
 	}
 
-	result2, err := executor.Execute(query2)
+	result2, err := executor.Execute(context.Background(), query2)
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}

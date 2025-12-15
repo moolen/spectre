@@ -397,10 +397,10 @@ func TestValidateVersion(t *testing.T) {
 		{"valid 1.0", "1.0", false},
 		{"valid 1.1", "1.1", false},
 		{"valid 1.2", "1.2", false},
+		{"valid 2.0", "2.0", false},
 		{"valid 1", "1", true},
 		{"invalid empty", "", true},
 		{"invalid format", "invalid", true},
-		{"invalid major", "2.0", true},
 		{"invalid starts with dot", ".1", true},
 	}
 

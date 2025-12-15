@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -118,8 +119,8 @@ func TestExportImport(t *testing.T) {
 		report.ImportedFiles, report.MergedHours, report.TotalEvents, report.Duration)
 
 	// Verify that we can query the imported data
-	queryExecutor := NewQueryExecutor(destStorage)
-	queryResult, err := queryExecutor.Execute(&models.QueryRequest{
+	queryExecutor := NewQueryExecutor(destStorage, nil)
+	queryResult, err := queryExecutor.Execute(context.Background(), &models.QueryRequest{
 		StartTimestamp: baseTime.Unix(),
 		EndTimestamp:   baseTime.Add(2 * time.Hour).Unix(),
 		Filters: models.QueryFilters{
@@ -320,10 +321,10 @@ func TestImportMerge(t *testing.T) {
 	}
 
 	// Verify we can query both sets of events
-	queryExecutor := NewQueryExecutor(destStorage)
+	queryExecutor := NewQueryExecutor(destStorage, nil)
 
 	// Query for source events
-	sourceResult, err := queryExecutor.Execute(&models.QueryRequest{
+	sourceResult, err := queryExecutor.Execute(context.Background(), &models.QueryRequest{
 		StartTimestamp: baseTime.Unix(),
 		EndTimestamp:   baseTime.Add(2 * time.Hour).Unix(),
 		Filters: models.QueryFilters{
@@ -340,7 +341,7 @@ func TestImportMerge(t *testing.T) {
 	}
 
 	// Query for dest events
-	destResult, err := queryExecutor.Execute(&models.QueryRequest{
+	destResult, err := queryExecutor.Execute(context.Background(), &models.QueryRequest{
 		StartTimestamp: baseTime.Unix(),
 		EndTimestamp:   baseTime.Add(2 * time.Hour).Unix(),
 		Filters: models.QueryFilters{

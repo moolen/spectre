@@ -2,7 +2,6 @@ package storage
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"testing"
 
@@ -30,8 +29,8 @@ func TestReadFileHeader(t *testing.T) {
 	if readHeader.MagicBytes != "RPKBLOCK" {
 		t.Errorf("Expected RPKBLOCK, got %s", readHeader.MagicBytes)
 	}
-	if readHeader.FormatVersion != "1.0" {
-		t.Errorf("Expected version 1.0, got %s", readHeader.FormatVersion)
+	if readHeader.FormatVersion != storage.FormatVersionV2_0 {
+		t.Errorf("Expected version %s, got %s", storage.FormatVersionV2_0, readHeader.FormatVersion)
 	}
 	if readHeader.CompressionAlgorithm != "gzip" {
 		t.Errorf("Expected gzip, got %s", readHeader.CompressionAlgorithm)
@@ -122,7 +121,7 @@ func TestBlockReaderRoundtrip(t *testing.T) {
 
 	// Write a simple index section
 	indexSection := &storage.IndexSection{
-		FormatVersion:   "1.0",
+		FormatVersion:   storage.FormatVersionV2_0,
 		BlockMetadata:   []*storage.BlockMetadata{},
 		InvertedIndexes: &storage.InvertedIndex{},
 		Statistics: &storage.IndexStatistics{
@@ -130,19 +129,19 @@ func TestBlockReaderRoundtrip(t *testing.T) {
 			TotalEvents:      0,
 			CompressionRatio: 1.0,
 		},
+		FinalResourceStates: make(map[string]*storage.ResourceLastState),
 	}
 
-	indexData, _ := json.MarshalIndent(indexSection, "", "  ")
 	indexOffset, _ := file.Seek(0, 1)
-
-	if _, err := file.Write(indexData); err != nil {
+	indexLength, err := storage.WriteIndexSection(file, indexSection)
+	if err != nil {
 		t.Fatalf("Failed to write index: %v", err)
 	}
 
 	// Write footer
 	footer := &storage.FileFooter{
 		IndexSectionOffset: indexOffset,
-		IndexSectionLength: int32(len(indexData)),
+		IndexSectionLength: int32(indexLength),
 		MagicBytes:         "RPKEND",
 	}
 
@@ -185,7 +184,7 @@ func TestBlockReaderRoundtrip(t *testing.T) {
 		t.Fatalf("Failed to read index section: %v", err)
 	}
 
-	if indexSection2.FormatVersion != "1.0" {
-		t.Errorf("Expected format version 1.0, got %s", indexSection2.FormatVersion)
+	if indexSection2.FormatVersion != storage.FormatVersionV2_0 {
+		t.Errorf("Expected format version %s, got %s", storage.FormatVersionV2_0, indexSection2.FormatVersion)
 	}
 }

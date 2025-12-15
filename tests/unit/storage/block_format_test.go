@@ -43,8 +43,8 @@ func TestFileHeaderSerialization(t *testing.T) {
 	if header2.MagicBytes != magicRPKBLOCK {
 		t.Errorf("Expected magic RPKBLOCK, got %s", header2.MagicBytes)
 	}
-	if header2.FormatVersion != version1_0 {
-		t.Errorf("Expected version 1.0, got %s", header2.FormatVersion)
+	if header2.FormatVersion != storage.FormatVersionV2_0 {
+		t.Errorf("Expected version 2.0, got %s", header2.FormatVersion)
 	}
 	if header2.CompressionAlgorithm != "zstd" {
 		t.Errorf("Expected zstd, got %s", header2.CompressionAlgorithm)
@@ -572,7 +572,7 @@ func TestGetCandidateBlocksMultipleFilters(t *testing.T) {
 
 func TestValidateVersion(t *testing.T) {
 	// Valid versions
-	validVersions := []string{"1.0", "1.1", "1.2", "1.99"}
+	validVersions := []string{storage.FormatVersionV2_0, storage.FormatVersionV1_1, storage.FormatVersionV1_0}
 	for _, v := range validVersions {
 		if err := storage.ValidateVersion(v); err != nil {
 			t.Errorf("Version %s should be valid, got error: %v", v, err)
@@ -580,7 +580,7 @@ func TestValidateVersion(t *testing.T) {
 	}
 
 	// Invalid versions
-	invalidVersions := []string{"", "2.0", "0.9", "invalid", "1", ".0"}
+	invalidVersions := []string{"", "0.9", "invalid", "1", ".0"}
 	for _, v := range invalidVersions {
 		if err := storage.ValidateVersion(v); err == nil {
 			t.Errorf("Version %s should be invalid, but got no error", v)

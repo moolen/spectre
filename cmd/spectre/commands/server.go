@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+
+	//nolint:gosec // We are using pprof for debugging
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
@@ -34,6 +36,9 @@ var (
 	importPath            string
 	pprofEnabled          bool
 	pprofPort             int
+	pprofReadTimeout      time.Duration
+	pprofWriteTimeout     time.Duration
+	pprofIdleTimeout      time.Duration
 	tracingEnabled        bool
 	tracingEndpoint       string
 	tracingTLSCAPath      string
@@ -61,6 +66,9 @@ func init() {
 	serverCmd.Flags().StringVar(&importPath, "import", "", "Import JSON event file or directory before starting server")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
+	serverCmd.Flags().DurationVar(&pprofReadTimeout, "pprof-read-timeout", 15*time.Second, "Read timeout for pprof server (default: 15s)")
+	serverCmd.Flags().DurationVar(&pprofWriteTimeout, "pprof-write-timeout", 15*time.Second, "Write timeout for pprof server (default: 15s)")
+	serverCmd.Flags().DurationVar(&pprofIdleTimeout, "pprof-idle-timeout", 60*time.Second, "Idle timeout for pprof server (default: 60s)")
 	serverCmd.Flags().BoolVar(&tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing (default: false)")
 	serverCmd.Flags().StringVar(&tracingEndpoint, "tracing-endpoint", "", "OTLP gRPC endpoint for traces (e.g., victorialogs:4317)")
 	serverCmd.Flags().StringVar(&tracingTLSCAPath, "tracing-tls-ca", "", "Path to CA certificate for TLS verification (optional)")
@@ -107,10 +115,10 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	// Initialize tracing provider
 	tracingCfg := tracing.Config{
-		Enabled:      cfg.TracingEnabled,
-		Endpoint:     cfg.TracingEndpoint,
-		TLSCAPath:    cfg.TracingTLSCAPath,
-		TLSInsecure:  cfg.TracingTLSInsecure,
+		Enabled:     cfg.TracingEnabled,
+		Endpoint:    cfg.TracingEndpoint,
+		TLSCAPath:   cfg.TracingTLSCAPath,
+		TLSInsecure: cfg.TracingTLSInsecure,
 	}
 	tracingProvider, err := tracing.NewTracingProvider(tracingCfg)
 	if err != nil {
@@ -131,7 +139,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		go func() {
 			pprofAddr := fmt.Sprintf(":%d", pprofPort)
 			logger.Info("Starting pprof server on %s", pprofAddr)
-			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil { //nolint:gosec // We are using pprof for debugging
 				logger.Error("pprof server failed: %v", err)
 			}
 		}()

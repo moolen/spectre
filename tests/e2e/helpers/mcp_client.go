@@ -248,7 +248,7 @@ func (m *MCPClient) SetLoggingLevel(ctx context.Context, level string) error {
 // Health checks if the MCP server is healthy.
 func (m *MCPClient) Health(ctx context.Context) error {
 	url := m.BaseURL + "/health"
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create health check request: %w", err)
 	}

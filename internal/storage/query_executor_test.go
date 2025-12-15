@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +23,7 @@ func TestQueryExecutorExecute_EmptyStorage(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	now := time.Now().Unix()
 	query := &models.QueryRequest{
 		StartTimestamp: now - 3600,
@@ -29,7 +31,7 @@ func TestQueryExecutorExecute_EmptyStorage(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -80,14 +82,14 @@ func TestQueryExecutorExecute_WithEvents(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 3600,
 		EndTimestamp:   baseTime,
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -135,7 +137,7 @@ func TestQueryExecutorExecute_WithFilters(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query for Pods only
 	query := &models.QueryRequest{
@@ -144,7 +146,7 @@ func TestQueryExecutorExecute_WithFilters(t *testing.T) {
 		Filters:        models.QueryFilters{Kind: kindPod},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -165,7 +167,7 @@ func TestQueryExecutorExecute_InvalidQuery(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Invalid query: start > end
 	query := &models.QueryRequest{
@@ -174,7 +176,7 @@ func TestQueryExecutorExecute_InvalidQuery(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	_, err = executor.Execute(query)
+	_, err = executor.Execute(context.Background(), query)
 	if err == nil {
 		t.Error("expected error for invalid query")
 	}
@@ -197,14 +199,14 @@ func TestQueryExecutorExecute_WithInMemoryEvents(t *testing.T) {
 		t.Fatalf("failed to write event: %v", err)
 	}
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 100,
 		EndTimestamp:   baseTime + 100,
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -249,14 +251,14 @@ func TestQueryExecutorQueryCount(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 3600,
 		EndTimestamp:   baseTime,
 		Filters:        models.QueryFilters{},
 	}
 
-	count, err := executor.QueryCount(query)
+	count, err := executor.QueryCount(context.Background(), query)
 	if err != nil {
 		t.Fatalf("QueryCount failed: %v", err)
 	}
@@ -285,7 +287,7 @@ func TestQueryExecutorQueryIncompleteFile(t *testing.T) {
 
 	// Don't close storage - file is incomplete
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 100,
 		EndTimestamp:   baseTime + 100,
@@ -293,7 +295,7 @@ func TestQueryExecutorQueryIncompleteFile(t *testing.T) {
 	}
 
 	// Should handle incomplete file gracefully
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute should handle incomplete files: %v", err)
 	}
@@ -339,7 +341,7 @@ func TestQueryExecutorExecute_TimeRangeFiltering(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query for last hour only
 	query := &models.QueryRequest{
@@ -348,17 +350,41 @@ func TestQueryExecutorExecute_TimeRangeFiltering(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	// Should only get events from last hour
+	// Should get events from last hour (pod2 and pod3) plus state snapshot for pod1
+	// pod1 existed before the query window, so it appears as a state snapshot
+	expectedCount := 3 // 2 regular events + 1 state snapshot
+	if len(result.Events) != expectedCount {
+		t.Errorf("expected %d events (2 regular + 1 state snapshot), got %d", expectedCount, len(result.Events))
+	}
+
+	// Verify regular events are within the time range, state snapshots can be before
+	regularEventCount := 0
+	stateSnapshotCount := 0
 	for _, event := range result.Events {
-		eventTime := time.Unix(0, event.Timestamp).Unix()
-		if eventTime < baseTime-3600 || eventTime > baseTime {
-			t.Errorf("event outside time range: %d not in [%d, %d]", eventTime, baseTime-3600, baseTime)
+		if strings.HasPrefix(event.ID, "state-") {
+			stateSnapshotCount++
+			// State snapshots represent pre-existing resources, so timestamp can be before query start
+		} else {
+			regularEventCount++
+			eventTime := time.Unix(0, event.Timestamp).Unix()
+			// Regular events must be within the query time range (inclusive bounds)
+			if eventTime < baseTime-3600 || eventTime > baseTime {
+				t.Errorf("regular event outside time range: %d not in [%d, %d]", eventTime, baseTime-3600, baseTime)
+			}
 		}
+	}
+
+	// Verify we got the expected mix
+	if regularEventCount != 2 {
+		t.Errorf("expected 2 regular events, got %d", regularEventCount)
+	}
+	if stateSnapshotCount != 1 {
+		t.Errorf("expected 1 state snapshot, got %d", stateSnapshotCount)
 	}
 }
 
@@ -423,14 +449,14 @@ func TestQueryExecutorExecute_MultipleFiles(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 7200,
 		EndTimestamp:   baseTime,
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -479,7 +505,7 @@ func TestQueryExecutorExecute_NamespaceFilter(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query for default namespace only
 	query := &models.QueryRequest{
@@ -488,7 +514,7 @@ func TestQueryExecutorExecute_NamespaceFilter(t *testing.T) {
 		Filters:        models.QueryFilters{Namespace: "default"},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -536,7 +562,7 @@ func TestQueryExecutorExecute_CombinedFilters(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query for Pods in default namespace
 	query := &models.QueryRequest{
@@ -545,7 +571,7 @@ func TestQueryExecutorExecute_CombinedFilters(t *testing.T) {
 		Filters:        models.QueryFilters{Kind: kindPod, Namespace: "default"},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -591,14 +617,14 @@ func TestQueryExecutorExecute_ResultStatistics(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 3600,
 		EndTimestamp:   baseTime,
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -629,7 +655,7 @@ func TestQueryExecutorExecute_EmptyResult(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	now := time.Now().Unix()
 
 	// Query for future time range (no events)
@@ -639,7 +665,7 @@ func TestQueryExecutorExecute_EmptyResult(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -661,7 +687,7 @@ func TestQueryExecutorExecute_NonExistentDirectory(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	now := time.Now().Unix()
 	query := &models.QueryRequest{
 		StartTimestamp: now - 3600,
@@ -670,7 +696,7 @@ func TestQueryExecutorExecute_NonExistentDirectory(t *testing.T) {
 	}
 
 	// Should handle empty directory gracefully
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute should handle empty directory: %v", err)
 	}
@@ -735,14 +761,14 @@ func TestQueryExecutorExecute_OpenFileWithoutIndexAndClosedFile(t *testing.T) {
 	// DON'T close storage - so the current file remains open with no footer/index
 
 	// === PART 3: Query for all events (both closed file and open file) ===
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 10800, // 3 hours ago
 		EndTimestamp:   baseTime + 3600,  // 1 hour in future
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -839,14 +865,14 @@ func TestQueryExecutorExecute_OpenFileRestoredBlocksAndNewEvents(t *testing.T) {
 	// Don't close storage2 - file has restored blocks + new unbuffered events
 
 	// === PART 3: Query for all events ===
-	executor := NewQueryExecutor(storage2)
+	executor := NewQueryExecutor(storage2, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 7200, // 2 hours ago
 		EndTimestamp:   baseTime + 3600, // 1 hour in future
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -919,14 +945,14 @@ func TestQueryExecutorExecute_OnlyRestoredBlocksNoNewEvents(t *testing.T) {
 	// Don't close storage2 - file has restored blocks but no new events
 
 	// === PART 3: Query for restored events only ===
-	executor := NewQueryExecutor(storage2)
+	executor := NewQueryExecutor(storage2, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 7200, // 2 hours ago
 		EndTimestamp:   baseTime + 3600, // 1 hour in future
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -1002,14 +1028,14 @@ func TestQueryExecutorExecute_WithNamespaceFilterOnOpenFile(t *testing.T) {
 	}
 
 	// === PART 3: Query with namespace filter ===
-	executor := NewQueryExecutor(storage2)
+	executor := NewQueryExecutor(storage2, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 7200,
 		EndTimestamp:   baseTime + 3600,
 		Filters:        models.QueryFilters{Namespace: "default"},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -1080,14 +1106,14 @@ func TestQueryExecutorExecute_CurrentFileStillBeingWritten(t *testing.T) {
 
 	// === PART 2: Query WITHOUT closing storage ===
 	// The file is still open, has no footer, but has events in memory + on disk
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 600, // 10 minutes ago
 		EndTimestamp:   baseTime,       // now
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -1156,14 +1182,14 @@ func TestQueryExecutorExecute_CurrentFileFinalizedBlocksNotInMemory(t *testing.T
 	// - No footer has been written (file is still open)
 
 	// === PART 2: Query the current file while it's still being written ===
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	query := &models.QueryRequest{
 		StartTimestamp: baseTime - 2400, // 40 minutes ago
 		EndTimestamp:   baseTime + 3600, // 1 hour in future
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}

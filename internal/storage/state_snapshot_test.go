@@ -119,7 +119,7 @@ func TestStateSnapshot_ConsistentView(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	// Query just the last hour
 	now := time.Now()
@@ -130,7 +130,7 @@ func TestStateSnapshot_ConsistentView(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(t.Context(), query)
 	if err != nil {
 		t.Fatalf("query execution failed: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestStateSnapshot_DeletedResourceHidden(t *testing.T) {
 	}
 	defer storage.Close()
 
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 
 	now := time.Now()
 	currentHour := now.Unix()
@@ -226,7 +226,7 @@ func TestStateSnapshot_DeletedResourceHidden(t *testing.T) {
 		Filters:        models.QueryFilters{},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(t.Context(), query)
 	if err != nil {
 		t.Fatalf("query execution failed: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestStateSnapshot_FilteredQuery(t *testing.T) {
 	defer storage.Close()
 
 	// Query with namespace filter
-	executor := NewQueryExecutor(storage)
+	executor := NewQueryExecutor(storage, nil)
 	now := time.Now()
 	currentHour := now.Unix()
 
@@ -289,7 +289,7 @@ func TestStateSnapshot_FilteredQuery(t *testing.T) {
 		},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(t.Context(), query)
 	if err != nil {
 		t.Fatalf("query execution failed: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestStateSnapshot_FilteredQuery(t *testing.T) {
 		},
 	}
 
-	result2, err := executor.Execute(query2)
+	result2, err := executor.Execute(t.Context(), query2)
 	if err != nil {
 		t.Fatalf("query execution failed: %v", err)
 	}
@@ -385,12 +385,13 @@ func TestStateSnapshot_MultipleUpdates(t *testing.T) {
 	}
 
 	// Read and verify state snapshot has latest update
+	// Check the most recent file (events may span multiple hourly files)
 	files, err := storage.getStorageFiles()
 	if err != nil {
 		t.Fatalf("failed to get storage files: %v", err)
 	}
 
-	reader, err := NewBlockReader(files[0])
+	reader, err := NewBlockReader(files[len(files)-1])
 	if err != nil {
 		t.Fatalf("failed to open block reader: %v", err)
 	}

@@ -25,12 +25,10 @@ type TimelinePerformanceStage struct {
 	apiClient *helpers.APIClient
 
 	// Test data
-	baseTime       time.Time
-	hoursToSpan    int
-	events         []*models.Event
-	testNamespace  string
-	resourceUID    string
-	resourceName   string
+	baseTime      time.Time
+	hoursToSpan   int
+	events        []*models.Event
+	testNamespace string
 
 	// Query performance tracking
 	queryDurationMs    int
@@ -150,22 +148,23 @@ func (s *TimelinePerformanceStage) events_are_imported() *TimelinePerformanceSta
 		}
 
 		for _, ns := range metadata.Namespaces {
-			if ns == s.testNamespace {
-				s.t.Logf("✓ Namespace %s found in metadata", s.testNamespace)
-				// Also verify we have Deployment kind
-				hasDeploymentKind := false
-				for _, kind := range metadata.Kinds {
-					if kind == "Deployment" {
-						hasDeploymentKind = true
-						break
-					}
-				}
-				if !hasDeploymentKind {
-					s.t.Logf("Deployment kind not yet in metadata, found kinds: %v", metadata.Kinds)
-					return false
-				}
-				return true
+			if ns != s.testNamespace {
+				continue
 			}
+			s.t.Logf("✓ Namespace %s found in metadata", s.testNamespace)
+			// Also verify we have Deployment kind
+			hasDeploymentKind := false
+			for _, kind := range metadata.Kinds {
+				if kind == "Deployment" {
+					hasDeploymentKind = true
+					break
+				}
+			}
+			if !hasDeploymentKind {
+				s.t.Logf("Deployment kind not yet in metadata, found kinds: %v", metadata.Kinds)
+				return false
+			}
+			return true
 		}
 
 		s.t.Logf("Namespace %s not yet in metadata, found: %v", s.testNamespace, metadata.Namespaces)

@@ -14,6 +14,10 @@ const (
 	statusUnknown = "Unknown"
 	statusError   = "Error"
 	statusWarning = "Warning"
+
+	overallStatusCritical = "Critical"
+	overallStatusDegraded = "Degraded"
+	overallStatusHealthy  = "Healthy"
 )
 
 // ClusterHealthTool implements the cluster_health MCP tool
@@ -38,18 +42,18 @@ type ClusterHealthInput struct {
 
 // ResourceStatusCount represents count of resources in each status
 type ResourceStatusCount struct {
-	Kind                string   `json:"kind"`
-	Ready               int      `json:"ready"`
-	Warning             int      `json:"warning"`
-	Error               int      `json:"error"`
-	Terminating         int      `json:"terminating"`
-	Unknown             int      `json:"unknown"`
-	TotalCount          int      `json:"total_count"`
-	ErrorRate           float64  `json:"error_rate"`
-	WarningResources    []string `json:"warning_resources,omitempty"`
-	ErrorResources      []string `json:"error_resources,omitempty"`
+	Kind                 string   `json:"kind"`
+	Ready                int      `json:"ready"`
+	Warning              int      `json:"warning"`
+	Error                int      `json:"error"`
+	Terminating          int      `json:"terminating"`
+	Unknown              int      `json:"unknown"`
+	TotalCount           int      `json:"total_count"`
+	ErrorRate            float64  `json:"error_rate"`
+	WarningResources     []string `json:"warning_resources,omitempty"`
+	ErrorResources       []string `json:"error_resources,omitempty"`
 	TerminatingResources []string `json:"terminating_resources,omitempty"`
-	UnknownResources    []string `json:"unknown_resources,omitempty"`
+	UnknownResources     []string `json:"unknown_resources,omitempty"`
 }
 
 // Issue represents a resource with persistent issues
@@ -67,14 +71,14 @@ type Issue struct {
 
 // ClusterHealthOutput represents the output of cluster_health tool
 type ClusterHealthOutput struct {
-	OverallStatus       string                  `json:"overall_status"` // Healthy, Degraded, Critical
-	TotalResources      int                     `json:"total_resources"`
-	ResourcesByKind     []ResourceStatusCount   `json:"resources_by_kind"`
-	TopIssues           []Issue                 `json:"top_issues,omitempty"`
-	ErrorResourceCount  int                     `json:"error_resource_count"`
-	WarningResourceCount int                    `json:"warning_resource_count"`
-	HealthyResourceCount int                    `json:"healthy_resource_count"`
-	AggregationTimeMs   int64                   `json:"aggregation_time_ms"`
+	OverallStatus        string                `json:"overall_status"` // Healthy, Degraded, Critical
+	TotalResources       int                   `json:"total_resources"`
+	ResourcesByKind      []ResourceStatusCount `json:"resources_by_kind"`
+	TopIssues            []Issue               `json:"top_issues,omitempty"`
+	ErrorResourceCount   int                   `json:"error_resource_count"`
+	WarningResourceCount int                   `json:"warning_resource_count"`
+	HealthyResourceCount int                   `json:"healthy_resource_count"`
+	AggregationTimeMs    int64                 `json:"aggregation_time_ms"`
 }
 
 // Execute runs the cluster_health tool
@@ -87,6 +91,11 @@ func (t *ClusterHealthTool) Execute(ctx context.Context, input json.RawMessage) 
 	// Parse timestamps - if they're in milliseconds, convert to seconds
 	startTime := params.StartTime
 	endTime := params.EndTime
+
+	// Validate required parameters
+	if startTime == 0 || endTime == 0 {
+		return nil, fmt.Errorf("start_time and end_time are required")
+	}
 
 	// If timestamps look like milliseconds, convert to seconds
 	if startTime > 10000000000 {
@@ -115,13 +124,14 @@ func (t *ClusterHealthTool) Execute(ctx context.Context, input json.RawMessage) 
 	// Apply default limit: 100 (default), max 500
 	maxResources := ApplyDefaultLimit(params.MaxResources, 100, 500)
 
-	output := t.analyzeHealth(response, maxResources)
+	output := analyzeHealth(response, maxResources)
 	output.AggregationTimeMs = time.Since(start).Milliseconds()
 
 	return output, nil
 }
 
-func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse, maxResources int) *ClusterHealthOutput {
+// analyzeHealth analyzes cluster health from timeline response
+func analyzeHealth(response *client.TimelineResponse, maxResources int) *ClusterHealthOutput {
 	output := &ClusterHealthOutput{
 		ResourcesByKind: make([]ResourceStatusCount, 0),
 	}
@@ -218,11 +228,11 @@ func (t *ClusterHealthTool) analyzeHealth(response *client.TimelineResponse, max
 
 	// Determine overall status
 	if output.ErrorResourceCount > 0 {
-		output.OverallStatus = "Critical"
+		output.OverallStatus = overallStatusCritical
 	} else if output.WarningResourceCount > 0 {
-		output.OverallStatus = "Degraded"
+		output.OverallStatus = overallStatusDegraded
 	} else {
-		output.OverallStatus = "Healthy"
+		output.OverallStatus = overallStatusHealthy
 	}
 
 	// Sort issues by error duration (descending) and take top 10

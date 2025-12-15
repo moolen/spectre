@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -55,7 +56,7 @@ func TestIntegration_StateSnapshotPreExistingFlag(t *testing.T) {
 	}
 	defer storage2.Close()
 
-	executor := NewQueryExecutor(storage2)
+	executor := NewQueryExecutor(storage2, nil)
 
 	// Query for last 30 minutes (but resource is 80 min old, so will come from state snapshot)
 	queryStart := now.Add(-30 * time.Minute).Unix()
@@ -70,7 +71,7 @@ func TestIntegration_StateSnapshotPreExistingFlag(t *testing.T) {
 		},
 	}
 
-	result, err := executor.Execute(query)
+	result, err := executor.Execute(context.Background(), query)
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}
