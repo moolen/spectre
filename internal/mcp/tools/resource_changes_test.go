@@ -3,6 +3,7 @@ package tools
 import (
 	"testing"
 
+	"github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/storage"
 )
 
@@ -184,7 +185,7 @@ func TestCalculateImpactScore_OOMKilledContainer(t *testing.T) {
 	summary := ResourceChangeSummary{
 		ErrorEvents:   0,
 		WarningEvents: 0,
-		ContainerIssues: []storage.ContainerIssue{
+		ContainerIssues: []analyzer.ContainerIssue{
 			{
 				IssueType:    "OOMKilled",
 				ImpactScore:  0.4,
@@ -205,7 +206,7 @@ func TestCalculateImpactScore_CrashLoopBackOff(t *testing.T) {
 	summary := ResourceChangeSummary{
 		ErrorEvents:   0,
 		WarningEvents: 0,
-		ContainerIssues: []storage.ContainerIssue{
+		ContainerIssues: []analyzer.ContainerIssue{
 			{
 				IssueType:    "CrashLoopBackOff",
 				ImpactScore:  0.35,
@@ -226,7 +227,7 @@ func TestCalculateImpactScore_ImagePullBackOff(t *testing.T) {
 	summary := ResourceChangeSummary{
 		ErrorEvents:   0,
 		WarningEvents: 0,
-		ContainerIssues: []storage.ContainerIssue{
+		ContainerIssues: []analyzer.ContainerIssue{
 			{
 				IssueType:   "ImagePullBackOff",
 				ImpactScore: 0.25,
@@ -246,7 +247,7 @@ func TestCalculateImpactScore_HighRestartCount(t *testing.T) {
 	summary := ResourceChangeSummary{
 		ErrorEvents:   0,
 		WarningEvents: 0,
-		ContainerIssues: []storage.ContainerIssue{
+		ContainerIssues: []analyzer.ContainerIssue{
 			{
 				IssueType:    "HighRestartCount",
 				RestartCount: 15,
@@ -352,7 +353,7 @@ func TestCalculateImpactScore_ComplexScenario(t *testing.T) {
 		StatusTransitions: []StatusTransition{
 			{FromStatus: "Ready", ToStatus: "Error"},
 		},
-		ContainerIssues: []storage.ContainerIssue{
+		ContainerIssues: []analyzer.ContainerIssue{
 			{
 				IssueType:    "OOMKilled",
 				ImpactScore:  0.4,

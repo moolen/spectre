@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/mcp/client"
-	"github.com/moolen/spectre/internal/storage"
 )
 
 const (
@@ -162,7 +162,7 @@ func analyzeHealth(response *client.TimelineResponse, maxResources int) *Cluster
 
 			// Infer detailed error messages from resource data
 			if lastSegment.Status == statusError || lastSegment.Status == statusWarning {
-				errorMessages := storage.InferErrorMessages(resource.Kind, lastSegment.ResourceData, lastSegment.Status)
+				errorMessages := analyzer.InferErrorMessages(resource.Kind, lastSegment.ResourceData, lastSegment.Status)
 				if len(errorMessages) > 0 {
 					errorMessage = strings.Join(errorMessages, "; ")
 				} else {

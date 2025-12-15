@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/mcp/client"
 	"github.com/moolen/spectre/internal/storage"
 )
@@ -335,7 +336,7 @@ func TestResourceChanges_ZeroImpactScore(t *testing.T) {
 		WarningEvents:     0,
 		EventCount:        1, // Low count
 		StatusTransitions: []StatusTransition{},
-		ContainerIssues:   []storage.ContainerIssue{},
+		ContainerIssues:   []analyzer.ContainerIssue{},
 		EventPatterns:     []storage.EventPattern{},
 	}
 

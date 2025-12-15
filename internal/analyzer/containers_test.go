@@ -1,4 +1,4 @@
-package storage
+package analyzer
 
 import (
 	"testing"
