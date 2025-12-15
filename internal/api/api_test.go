@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 const (
@@ -23,7 +26,7 @@ type mockQueryExecutor struct {
 	executeFunc func(*models.QueryRequest) (*models.QueryResult, error)
 }
 
-func (m *mockQueryExecutor) Execute(q *models.QueryRequest) (*models.QueryResult, error) {
+func (m *mockQueryExecutor) Execute(ctx context.Context, q *models.QueryRequest) (*models.QueryResult, error) {
 	if m.executeFunc != nil {
 		return m.executeFunc(q)
 	}
@@ -41,6 +44,17 @@ type mockReadinessChecker struct {
 
 func (m *mockReadinessChecker) IsReady() bool {
 	return m.ready
+}
+
+// mockTelemetryProvider is a mock implementation for telemetry
+type mockTelemetryProvider struct{}
+
+func (m *mockTelemetryProvider) GetTracer(name string) trace.Tracer {
+	return noop.NewTracerProvider().Tracer(name)
+}
+
+func (m *mockTelemetryProvider) IsEnabled() bool {
+	return false
 }
 
 // Helper functions for creating test events
@@ -277,7 +291,7 @@ func TestSearchHandler_Handle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExecutor := &mockQueryExecutor{executeFunc: tt.mockExecute}
 			logger := logging.GetLogger("test")
-			handler := NewSearchHandler(mockExecutor, logger)
+			handler := NewSearchHandler(mockExecutor, logger, noop.NewTracerProvider().Tracer("test"))
 
 			req := httptest.NewRequest(tt.method, "/v1/search?"+tt.queryParams.Encode(), http.NoBody)
 			rr := httptest.NewRecorder()
@@ -471,7 +485,7 @@ func TestTimelineHandler_Handle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExecutor := &mockQueryExecutor{executeFunc: tt.mockExecute}
 			logger := logging.GetLogger("test")
-			handler := NewTimelineHandler(mockExecutor, logger)
+			handler := NewTimelineHandler(mockExecutor, logger, noop.NewTracerProvider().Tracer("test"))
 
 			req := httptest.NewRequest(tt.method, "/v1/timeline?"+tt.queryParams.Encode(), http.NoBody)
 			rr := httptest.NewRecorder()
@@ -714,7 +728,7 @@ func TestMetadataHandler_Handle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExecutor := &mockQueryExecutor{executeFunc: tt.mockExecute}
 			logger := logging.GetLogger("test")
-			handler := NewMetadataHandler(mockExecutor, logger)
+			handler := NewMetadataHandler(mockExecutor, logger, noop.NewTracerProvider().Tracer("test"))
 
 			req := httptest.NewRequest(tt.method, "/v1/metadata?"+tt.queryParams.Encode(), http.NoBody)
 			rr := httptest.NewRecorder()
@@ -1051,7 +1065,7 @@ func TestParseOptionalTimestamp(t *testing.T) {
 func TestServer_Routes(t *testing.T) {
 	mockExecutor := &mockQueryExecutor{}
 	mockChecker := &mockReadinessChecker{ready: true}
-	server := New(8080, mockExecutor, mockChecker)
+	server := New(8080, mockExecutor, mockChecker, &mockTelemetryProvider{})
 
 	tests := []struct {
 		name       string
@@ -1085,7 +1099,7 @@ func TestServer_MethodEnforcement(t *testing.T) {
 		},
 	}
 	mockChecker := &mockReadinessChecker{ready: true}
-	server := New(8080, mockExecutor, mockChecker)
+	server := New(8080, mockExecutor, mockChecker, &mockTelemetryProvider{})
 
 	tests := []struct {
 		name       string
@@ -1130,7 +1144,7 @@ func TestServer_ReadinessCheck(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockChecker := &mockReadinessChecker{ready: tt.ready}
-			server := New(8080, mockExecutor, mockChecker)
+			server := New(8080, mockExecutor, mockChecker, &mockTelemetryProvider{})
 
 			req := httptest.NewRequest(http.MethodGet, "/ready", http.NoBody)
 			rr := httptest.NewRecorder()
@@ -1159,7 +1173,7 @@ func TestServer_ReadinessCheck(t *testing.T) {
 func TestCORS_Middleware(t *testing.T) {
 	mockExecutor := &mockQueryExecutor{}
 	mockChecker := &mockReadinessChecker{ready: true}
-	server := New(8080, mockExecutor, mockChecker)
+	server := New(8080, mockExecutor, mockChecker, &mockTelemetryProvider{})
 
 	tests := []struct {
 		name         string

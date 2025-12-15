@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,9 +15,10 @@ import (
 )
 
 var (
-	spectreURL     string
-	httpAddr       string
-	transportType  string
+	spectreURL      string
+	httpAddr        string
+	transportType   string
+	mcpEndpointPath string
 )
 
 var mcpCmd = &cobra.Command{
@@ -35,6 +37,7 @@ func init() {
 	mcpCmd.Flags().StringVar(&spectreURL, "spectre-url", getEnv("SPECTRE_URL", "http://localhost:8080"), "URL to Spectre API server")
 	mcpCmd.Flags().StringVar(&httpAddr, "http-addr", getEnv("MCP_HTTP_ADDR", ":8081"), "HTTP server address (host:port)")
 	mcpCmd.Flags().StringVar(&transportType, "transport", "http", "Transport type: http or stdio")
+	mcpCmd.Flags().StringVar(&mcpEndpointPath, "mcp-endpoint", getEnv("MCP_ENDPOINT", "/mcp"), "HTTP endpoint path for MCP requests")
 }
 
 func runMCP(cmd *cobra.Command, args []string) {
@@ -66,8 +69,17 @@ func runMCP(cmd *cobra.Command, args []string) {
 }
 
 func runHTTPTransport(server *mcp.MCPServer, logger *logging.Logger) {
+	// Ensure endpoint path starts with /
+	endpointPath := mcpEndpointPath
+	if endpointPath == "" {
+		endpointPath = "/mcp"
+	} else if endpointPath[0] != '/' {
+		endpointPath = "/" + endpointPath
+	}
+
 	// Create HTTP transport
-	transport := httpTransport.NewTransport(httpAddr, server, Version)
+	transport := httpTransport.NewTransport(httpAddr, server, Version, endpointPath)
+	logger.Info("MCP endpoint configured at: %s", endpointPath)
 
 	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -114,7 +126,7 @@ func runStdioTransport(server *mcp.MCPServer, logger *logging.Logger) {
 	// Start transport in a goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		if err := transport.Start(ctx); err != nil && err != context.Canceled {
+		if err := transport.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			errCh <- err
 		}
 	}()

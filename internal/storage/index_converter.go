@@ -9,6 +9,8 @@ import (
 )
 
 // convertToProto converts IndexSection to protobuf message
+//
+//nolint:dupl // Conversion functions have similar structure by design
 func convertToProto(section *IndexSection) *PBIndexSection {
 	pbSection := &PBIndexSection{
 		FormatVersion: section.FormatVersion,
@@ -65,6 +67,8 @@ func convertToProto(section *IndexSection) *PBIndexSection {
 }
 
 // convertFromProto converts protobuf message to IndexSection
+//
+//nolint:dupl // Conversion functions have similar structure by design
 func convertFromProto(pbSection *PBIndexSection) *IndexSection {
 	section := &IndexSection{
 		FormatVersion: pbSection.FormatVersion,
@@ -136,8 +140,8 @@ func convertBloomFilterToProto(bf *StandardBloomFilter) *PBBloomFilter {
 	}
 
 	return &PBBloomFilter{
-		Size:      uint32(bf.filter.BitSet().Len()),
-		NumHashes: uint32(bf.filter.K()),
+		Size:      uint32(bf.filter.BitSet().Len()), //nolint:gosec
+		NumHashes: uint32(bf.filter.K()),            //nolint:gosec
 		Bitset:    bitsetBytes,
 	}
 }

@@ -25,16 +25,24 @@ type FileMetadata struct {
 // FileIndex maintains an in-memory index of storage files with their time boundaries
 // This allows fast file selection for queries without reading file metadata
 type FileIndex struct {
-	mu          sync.RWMutex
-	files       map[string]*FileMetadata // key is file path
-	indexPath   string                   // path to persisted index
-	logger      interface{ Info(string, ...interface{}); Debug(string, ...interface{}); Warn(string, ...interface{}) }
+	mu        sync.RWMutex
+	files     map[string]*FileMetadata // key is file path
+	indexPath string                   // path to persisted index
+	logger    interface {
+		Info(string, ...interface{})
+		Debug(string, ...interface{})
+		Warn(string, ...interface{})
+	}
 	autoSave    bool
 	strictHours bool // if true, enforce strict hour boundaries
 }
 
 // NewFileIndex creates a new file index
-func NewFileIndex(dataDir string, logger interface{ Info(string, ...interface{}); Debug(string, ...interface{}); Warn(string, ...interface{}) }) *FileIndex {
+func NewFileIndex(dataDir string, logger interface {
+	Info(string, ...interface{})
+	Debug(string, ...interface{})
+	Warn(string, ...interface{})
+}) *FileIndex {
 	indexPath := filepath.Join(dataDir, ".file_index.json")
 	fi := &FileIndex{
 		files:       make(map[string]*FileMetadata),
@@ -152,7 +160,7 @@ func (fi *FileIndex) Load() error {
 	fi.mu.Lock()
 	defer fi.mu.Unlock()
 
-	data, err := os.ReadFile(fi.indexPath) //nolint:gosec // path is controlled
+	data, err := os.ReadFile(fi.indexPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // Not an error, just no index yet
@@ -281,7 +289,12 @@ func (fi *FileIndex) readFileTimestamps(filePath string) (int64, int64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	defer reader.Close()
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			// Log error but don't fail the operation
+			fi.logger.Warn("Failed to close reader: %v", closeErr)
+		}
+	}()
 
 	footer, err := reader.ReadFileFooter()
 	if err != nil {

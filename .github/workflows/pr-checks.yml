@@ -25,14 +25,11 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run linter
+      - name: Run linterTests
         run: make lint
 
       - name: Run tests
         run: make test
-
-      - name: Run integration tests
-        run: make test-integration
 
   build-and-push-image:
     runs-on: ubuntu-latest

@@ -246,6 +246,53 @@ func (k *K8sClient) GetClusterVersion(ctx context.Context) (string, error) {
 	return version.GitVersion, nil
 }
 
+// WaitForStorageClass waits for a storage class and its provisioner to be available.
+func (k *K8sClient) WaitForStorageClass(ctx context.Context, name string, timeout time.Duration) error {
+	k.t.Logf("Waiting for StorageClass to be available: %s", name)
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	// First wait for the StorageClass resource to exist
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for StorageClass %s to be available", name)
+		case <-ticker.C:
+			_, err := k.Clientset.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
+			if err == nil {
+				k.t.Logf("✓ StorageClass is available: %s", name)
+				goto waitForProvisioner
+			}
+		}
+	}
+
+waitForProvisioner:
+	// Wait for the local-path-provisioner pod to be ready
+	k.t.Logf("Waiting for local-path-provisioner to be ready")
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for local-path-provisioner to be ready")
+		case <-ticker.C:
+			pods, err := k.Clientset.CoreV1().Pods("local-path-storage").List(ctx, metav1.ListOptions{
+				LabelSelector: "app=local-path-provisioner",
+			})
+			if err == nil && len(pods.Items) > 0 {
+				for i := range pods.Items {
+					if isPodReady(&pods.Items[i]) {
+						k.t.Logf("✓ Storage provisioner is ready")
+						return nil
+					}
+				}
+			}
+		}
+	}
+}
+
 // UpdateConfigMap updates the data in an existing ConfigMap.
 func (k *K8sClient) UpdateConfigMap(ctx context.Context, namespace, name string, data map[string]string) error {
 	k.t.Logf("Updating ConfigMap %s/%s", namespace, name)

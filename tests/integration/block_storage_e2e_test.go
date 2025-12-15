@@ -211,8 +211,8 @@ func TestEndToEndBlockStorage(t *testing.T) {
 	t.Logf("Blocks with checksums: %d/%d", checksumCount, blockCount)
 
 	// Verify version
-	if fileData.Header.FormatVersion != "1.0" {
-		t.Errorf("Unexpected format version: %s", fileData.Header.FormatVersion)
+	if fileData.Header.FormatVersion != storage.DefaultFormatVersion {
+		t.Errorf("Unexpected format version: expected %s, got %s", storage.DefaultFormatVersion, fileData.Header.FormatVersion)
 	}
 
 	t.Log("=== Phase 5: Summary ===")
@@ -260,8 +260,6 @@ func TestEndToEndBlockStorage(t *testing.T) {
 	if !success {
 		t.Fatal("E2E test failed verification")
 	}
-
-	t.Log("\n✓✓✓ End-to-End Test PASSED ✓✓✓")
 }
 
 // Helper function

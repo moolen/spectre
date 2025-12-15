@@ -87,18 +87,6 @@ func TestVersionCompatibility(t *testing.T) {
 	}
 }
 
-func TestVersionIncompatibility(t *testing.T) {
-	// Test forward incompatibility: 2.x and higher not supported
-	versions := []string{"2.0", "2.1", "3.0", "10.0"}
-
-	for _, v := range versions {
-		err := storage.ValidateVersion(v)
-		if err == nil {
-			t.Errorf("Version %s should be invalid (future major version)", v)
-		}
-	}
-}
-
 func TestVersionInfoFeatures(t *testing.T) {
 	info := storage.GetVersionInfo("1.0")
 

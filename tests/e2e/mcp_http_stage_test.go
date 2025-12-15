@@ -43,13 +43,13 @@ func (s *MCPHTTPStage) a_test_environment() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) mcp_server_is_deployed() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	// Update Helm release to enable MCP server
 	err := helpers.UpdateHelmRelease(s.testCtx, map[string]interface{}{
 		"mcp": map[string]interface{}{
-			"enabled": true,
+			"enabled":  true,
 			"httpAddr": ":8081",
 		},
 	})
@@ -82,7 +82,7 @@ func (s *MCPHTTPStage) mcp_client_is_connected() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) mcp_server_is_healthy() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	err := s.mcpClient.Health(ctx)
@@ -91,7 +91,7 @@ func (s *MCPHTTPStage) mcp_server_is_healthy() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) ping_succeeds() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	err := s.mcpClient.Ping(ctx)
@@ -100,7 +100,7 @@ func (s *MCPHTTPStage) ping_succeeds() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) session_is_initialized() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	result, err := s.mcpClient.Initialize(ctx)
@@ -144,7 +144,7 @@ func (s *MCPHTTPStage) capabilities_include_tools_and_prompts() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) tools_are_listed() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	tools, err := s.mcpClient.ListTools(ctx)
@@ -197,7 +197,7 @@ func (s *MCPHTTPStage) each_tool_has_description_and_schema() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) cluster_health_tool_is_called() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 30*time.Second)
 	defer cancel()
 
 	args := map[string]interface{}{
@@ -235,7 +235,7 @@ func (s *MCPHTTPStage) tool_result_is_not_error() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) prompts_are_listed() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	prompts, err := s.mcpClient.ListPrompts(ctx)
@@ -295,7 +295,7 @@ func (s *MCPHTTPStage) prompt_has_required_arguments() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) post_mortem_prompt_is_retrieved() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	args := map[string]interface{}{
@@ -322,7 +322,7 @@ func (s *MCPHTTPStage) prompt_result_contains_messages() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) logging_level_can_be_set() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 
 	err := s.mcpClient.SetLoggingLevel(ctx, "debug")

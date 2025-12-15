@@ -57,7 +57,11 @@ func (t *Transport) Start(ctx context.Context) error {
 
 	scanner := bufio.NewScanner(t.stdin)
 	writer := bufio.NewWriter(t.stdout)
-	defer writer.Flush()
+	defer func() {
+		if err := writer.Flush(); err != nil {
+			logger.Error("Failed to flush writer on shutdown: %v", err)
+		}
+	}()
 
 	for {
 		select {

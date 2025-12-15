@@ -98,7 +98,7 @@ func (pf *PortForwarder) run(kubeConfigPath string) error {
 	}
 
 	// Get pods in the namespace with service selector
-	pods, err := clientset.CoreV1().Pods(pf.Namespace).List(context.Background(), metav1.ListOptions{})
+	pods, err := clientset.CoreV1().Pods(pf.Namespace).List(pf.t.Context(), metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -137,7 +137,7 @@ func (pf *PortForwarder) run(kubeConfigPath string) error {
 func (pf *PortForwarder) WaitForReady(timeout time.Duration) error {
 	pf.t.Logf("Waiting for service to be ready at %s", pf.GetURL())
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(pf.t.Context(), timeout)
 	defer cancel()
 
 	ticker := time.NewTicker(500 * time.Millisecond)

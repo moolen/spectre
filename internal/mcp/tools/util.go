@@ -28,7 +28,7 @@ func TruncateList(list []string, maxItems int) []string {
 // ApplyDefaultLimit returns the provided limit, or defaultLimit if limit is 0
 // Caps the limit at maxLimit to prevent excessive responses
 func ApplyDefaultLimit(limit, defaultLimit, maxLimit int) int {
-	if limit == 0 {
+	if limit <= 0 {
 		return defaultLimit
 	}
 	if limit > maxLimit {

@@ -46,7 +46,7 @@ func (s *DefaultResourcesStage) a_test_environment() *DefaultResourcesStage {
 }
 
 func (s *DefaultResourcesStage) two_test_namespaces() *DefaultResourcesStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	version, err := s.k8sClient.GetClusterVersion(ctx)
@@ -60,7 +60,7 @@ func (s *DefaultResourcesStage) two_test_namespaces() *DefaultResourcesStage {
 		err := s.k8sClient.CreateNamespace(ctx, ns)
 		s.require.NoError(err, "failed to create namespace %s", ns)
 		s.t.Cleanup(func() {
-			if err := s.k8sClient.DeleteNamespace(context.Background(), ns); err != nil {
+			if err := s.k8sClient.DeleteNamespace(s.t.Context(), ns); err != nil {
 				s.t.Logf("Warning: failed to delete namespace %s: %v", ns, err)
 			}
 		})
@@ -70,7 +70,7 @@ func (s *DefaultResourcesStage) two_test_namespaces() *DefaultResourcesStage {
 }
 
 func (s *DefaultResourcesStage) deployment_is_created_in_first_namespace() *DefaultResourcesStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	deployment, err := helpers.CreateTestDeployment(ctx, s.t, s.k8sClient, s.testNamespace1)
@@ -103,7 +103,7 @@ func (s *DefaultResourcesStage) deployment_is_indexed() *DefaultResourcesStage {
 }
 
 func (s *DefaultResourcesStage) namespace_filter_works() *DefaultResourcesStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	searchResp, err := s.apiClient.Search(ctx, time.Now().Unix()-90, time.Now().Unix()+10, s.testNamespace1, "Deployment")
@@ -123,7 +123,7 @@ func (s *DefaultResourcesStage) namespace_filter_works() *DefaultResourcesStage 
 }
 
 func (s *DefaultResourcesStage) unfiltered_query_returns_all_namespaces() *DefaultResourcesStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	searchRespAll, err := s.apiClient.Search(ctx, time.Now().Unix()-90, time.Now().Unix()+10, "", "Deployment")
@@ -134,7 +134,7 @@ func (s *DefaultResourcesStage) unfiltered_query_returns_all_namespaces() *Defau
 }
 
 func (s *DefaultResourcesStage) wrong_namespace_filter_returns_no_results() *DefaultResourcesStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	searchRespWrong, err := s.apiClient.Search(ctx, time.Now().Unix()-90, time.Now().Unix()+10, s.testNamespace2, "Deployment")
@@ -152,7 +152,7 @@ func (s *DefaultResourcesStage) wrong_namespace_filter_returns_no_results() *Def
 }
 
 func (s *DefaultResourcesStage) metadata_contains_expected_data() *DefaultResourcesStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
 	metadata, err := s.apiClient.GetMetadata(ctx, nil, nil)

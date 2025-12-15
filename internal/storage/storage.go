@@ -21,7 +21,7 @@ type Storage struct {
 	currentFile *BlockStorageFile
 	fileMutex   sync.RWMutex
 	blockSize   int64
-	fileIndex   *FileIndex // Index for fast file selection
+	fileIndex   *FileIndex                  // Index for fast file selection
 	hourFiles   map[int64]*BlockStorageFile // Cache of open hourly files
 
 	// Background task management
@@ -71,7 +71,7 @@ func (s *Storage) WriteEvent(event *models.Event) error {
 
 	// Determine which hour this event belongs to based on its timestamp
 	eventTime := time.Unix(0, event.Timestamp)
-	eventHour := time.Date(eventTime.Year(), eventTime.Month(), eventTime.Day(), 
+	eventHour := time.Date(eventTime.Year(), eventTime.Month(), eventTime.Day(),
 		eventTime.Hour(), 0, 0, 0, eventTime.Location())
 	eventHourTimestamp := eventHour.Unix()
 
@@ -86,7 +86,7 @@ func (s *Storage) WriteEvent(event *models.Event) error {
 	hourStartNs := eventHourTimestamp * 1e9
 	hourEndNs := hourStartNs + (3600 * 1e9)
 	if event.Timestamp < hourStartNs || event.Timestamp >= hourEndNs {
-		return fmt.Errorf("event timestamp %d is outside hour boundaries [%d, %d)", 
+		return fmt.Errorf("event timestamp %d is outside hour boundaries [%d, %d)",
 			event.Timestamp, hourStartNs, hourEndNs)
 	}
 
@@ -116,7 +116,7 @@ func (s *Storage) getOrCreateHourFile(hourTimestamp int64) (*BlockStorageFile, e
 
 	// Create time from hour timestamp
 	hourTime := time.Unix(hourTimestamp, 0)
-	
+
 	// Create file path
 	filePath := filepath.Join(s.dataDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
 		hourTime.Year(), hourTime.Month(), hourTime.Day(), hourTime.Hour()))
@@ -125,14 +125,16 @@ func (s *Storage) getOrCreateHourFile(hourTimestamp int64) (*BlockStorageFile, e
 	if _, err := os.Stat(filePath); err == nil {
 		// File exists, open it for appending
 		s.logger.Debug("Opening existing file for hour %s", hourTime.Format("2006-01-02 15:04"))
-		
+
 		reader, err := NewBlockReader(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open reader for existing file: %w", err)
 		}
 
 		fileData, err := reader.ReadFile()
-		reader.Close()
+		if closeErr := reader.Close(); closeErr != nil {
+			s.logger.Warn("Failed to close reader: %v", closeErr)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to read existing file data: %w", err)
 		}
@@ -147,15 +149,53 @@ func (s *Storage) getOrCreateHourFile(hourTimestamp int64) (*BlockStorageFile, e
 	}
 
 	// File doesn't exist, create new one
-	s.logger.Info("Creating new storage file for hour %s: %s", 
+	s.logger.Info("Creating new storage file for hour %s: %s",
 		hourTime.Format("2006-01-02 15:04"), filePath)
 
 	// Get state carryover from previous hour if creating current hour file
 	var carryoverStates map[string]*ResourceLastState
 	prevHourTimestamp := hourTimestamp - 3600
+
+	// First try to get from open files (in-memory)
 	if prevFile, ok := s.hourFiles[prevHourTimestamp]; ok {
-		carryoverStates = prevFile.finalResourceStates
-		s.logger.Debug("Found %d resource states from previous hour to carry over", len(carryoverStates))
+		// Previous hour file is still open - extract states dynamically
+		var err error
+		carryoverStates, err = prevFile.extractFinalResourceStates()
+		if err != nil {
+			s.logger.Warn("Failed to extract states from open previous hour file: %v", err)
+			carryoverStates = make(map[string]*ResourceLastState)
+		} else {
+			s.logger.Debug("Extracted %d resource states from previous hour (in-memory) to carry over", len(carryoverStates))
+		}
+	} else {
+		// If previous hour file is not open, try to load it from disk
+		prevHourTime := time.Unix(prevHourTimestamp, 0)
+		prevFilePath := filepath.Join(s.dataDir, fmt.Sprintf("%04d-%02d-%02d-%02d.bin",
+			prevHourTime.Year(), prevHourTime.Month(), prevHourTime.Day(), prevHourTime.Hour()))
+
+		s.logger.Debug("Checking for previous hour file to load states: %s", prevFilePath)
+		if _, err := os.Stat(prevFilePath); err == nil {
+			// Previous hour file exists, load its final resource states
+			s.logger.Debug("Previous hour file exists, loading final resource states...")
+			reader, err := NewBlockReader(prevFilePath)
+			if err != nil {
+				s.logger.Warn("Failed to open previous hour file for state carryover: %v", err)
+			} else {
+				fileData, err := reader.ReadFile()
+				reader.Close()
+				if err != nil {
+					s.logger.Warn("Failed to read previous hour file for state carryover: %v", err)
+				} else if len(fileData.IndexSection.FinalResourceStates) > 0 {
+					carryoverStates = fileData.IndexSection.FinalResourceStates
+					s.logger.Info("Loaded %d resource states from previous hour file on disk: %s",
+						len(carryoverStates), prevFilePath)
+				} else {
+					s.logger.Debug("Previous hour file has no final resource states")
+				}
+			}
+		} else {
+			s.logger.Debug("Previous hour file does not exist: %s", prevFilePath)
+		}
 	}
 
 	newFile, err := NewBlockStorageFile(filePath, hourTimestamp, s.blockSize)
@@ -189,14 +229,6 @@ func (s *Storage) getOrCreateHourFile(hourTimestamp int64) (*BlockStorageFile, e
 	return newFile, nil
 }
 
-// getOrCreateCurrentFile gets or creates the storage file for the current hour
-// This is kept for backward compatibility
-func (s *Storage) getOrCreateCurrentFile() (*BlockStorageFile, error) {
-	now := time.Now()
-	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location())
-	return s.getOrCreateHourFile(currentHour.Unix())
-}
-
 // Close closes the storage and all open hour files
 func (s *Storage) Close() error {
 	s.fileMutex.Lock()
@@ -208,7 +240,7 @@ func (s *Storage) Close() error {
 		if err := file.Close(); err != nil {
 			s.logger.Error("Failed to close hour file %d: %v", hourTimestamp, err)
 		}
-		
+
 		// Update file index with final stats
 		if file.path != "" {
 			meta := &FileMetadata{
@@ -635,41 +667,44 @@ func (s *Storage) Name() string {
 	return "Storage"
 }
 
-// GetInMemoryEvents returns events from the current in-memory buffer that match the query
-// This allows querying unflushed/buffered data for low-latency queries
-// For restored files, it also includes events from restored blocks that are still on disk
-func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event, error) {
-	s.fileMutex.RLock()
-	defer s.fileMutex.RUnlock()
-
-	if s.currentFile == nil {
-		return []models.Event{}, nil
+// getOpenFileByPath returns the open BlockStorageFile for a given path if it exists.
+func (s *Storage) getOpenFileByPath(path string) *BlockStorageFile {
+	for _, file := range s.hourFiles {
+		if file != nil && file.path == path {
+			return file
+		}
 	}
+	return nil
+}
 
+// collectEventsFromOpenFile gathers events from an open block storage file.
+// It includes:
+// - Restored blocks (on disk) when the file was reopened for appending
+// - Finalized blocks kept in memory (file still open, no footer yet)
+// - Current buffer events (not yet finalized)
+func (s *Storage) collectEventsFromOpenFile(bsf *BlockStorageFile, query *models.QueryRequest) ([]*models.Event, error) {
 	var allEvents []*models.Event
 
-	// Get events from restored blocks if file was restored (has blockMetadataList but blocks is empty)
-	s.currentFile.mutex.Lock()
-	hasRestoredBlocks := len(s.currentFile.blockMetadataList) > 0 && len(s.currentFile.blocks) == 0
+	startTimeNs := query.StartTimestamp * 1e9
+	endTimeNs := query.EndTimestamp * 1e9
+
+	bsf.mutex.Lock()
+	defer bsf.mutex.Unlock()
+
+	// Restored blocks: blockMetadataList populated, blocks slice empty
+	hasRestoredBlocks := len(bsf.blockMetadataList) > 0 && len(bsf.blocks) == 0
 	if hasRestoredBlocks {
-		// File was restored - read events from restored blocks on disk
-		restoredEvents, err := s.readEventsFromRestoredBlocks(s.currentFile, query)
+		restoredEvents, err := s.readEventsFromRestoredBlocks(bsf, query)
 		if err != nil {
-			s.currentFile.mutex.Unlock()
 			s.logger.Warn("Failed to read events from restored blocks: %v", err)
-			// Continue with just buffer events
 		} else {
 			allEvents = append(allEvents, restoredEvents...)
 		}
 	}
 
-	// Get events from finalized blocks that are in memory (current file still being written)
-	// These blocks have been finalized to disk but the file hasn't been closed with a footer yet
-	if len(s.currentFile.blocks) > 0 {
-		startTimeNs := query.StartTimestamp * 1e9
-		endTimeNs := query.EndTimestamp * 1e9
-
-		for _, block := range s.currentFile.blocks {
+	// Finalized blocks that are still in memory (file open, no footer yet)
+	if len(bsf.blocks) > 0 {
+		for _, block := range bsf.blocks {
 			if block.Metadata == nil {
 				continue
 			}
@@ -679,30 +714,27 @@ func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event,
 				continue
 			}
 
-			// Decompress the block data
 			decompressedData, err := DecompressBlock(block)
 			if err != nil {
 				s.logger.Warn("Failed to decompress finalized block: %v", err)
 				continue
 			}
 
-			// Parse events from length-prefixed protobuf format
 			offset := 0
 			for offset < len(decompressedData) {
-				// Parse varint length
 				length, n := binary.Uvarint(decompressedData[offset:])
 				if n <= 0 {
-					break // End of data
+					break
 				}
 				offset += n
 
-				if offset+int(length) > len(decompressedData) { //nolint:gosec // safe conversion: length is validated
+				if offset+int(length) > len(decompressedData) { //nolint:gosec // length validated below
 					s.logger.Warn("Invalid message length in finalized block: %d at offset %d", length, offset)
 					break
 				}
 
-				messageData := decompressedData[offset : offset+int(length)] //nolint:gosec // safe conversion: length is validated
-				offset += int(length)                                         //nolint:gosec // safe conversion: length is validated
+				messageData := decompressedData[offset : offset+int(length)] //nolint:gosec // length validated
+				offset += int(length)                                        //nolint:gosec // length validated
 
 				event := &models.Event{}
 				if err := event.UnmarshalProtobuf(messageData); err != nil {
@@ -710,7 +742,6 @@ func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event,
 					continue
 				}
 
-				// Filter by time range and resource filters
 				if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
 					continue
 				}
@@ -722,20 +753,59 @@ func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event,
 		}
 	}
 
-	// Get events from the current buffer
-	currentBuffer := s.currentFile.currentBuffer
+	// Current buffer events
+	currentBuffer := bsf.currentBuffer
 	if currentBuffer != nil && currentBuffer.GetEventCount() > 0 {
 		bufferEvents, err := currentBuffer.GetEvents()
 		if err != nil {
-			s.currentFile.mutex.Unlock()
 			s.logger.Error("Failed to get events from buffer: %v", err)
-			return []models.Event{}, err
+			return nil, err
 		}
 		allEvents = append(allEvents, bufferEvents...)
 	}
-	s.currentFile.mutex.Unlock()
 
-	// Filter events based on the query
+	return allEvents, nil
+}
+
+// GetEventsFromOpenFile returns events from an open file (identified by path).
+// It returns found=false when the file is not currently open.
+func (s *Storage) GetEventsFromOpenFile(path string, query *models.QueryRequest) ([]models.Event, bool, error) {
+	s.fileMutex.RLock()
+	defer s.fileMutex.RUnlock()
+
+	openFile := s.getOpenFileByPath(path)
+	if openFile == nil {
+		return nil, false, nil
+	}
+
+	events, err := s.collectEventsFromOpenFile(openFile, query)
+	if err != nil {
+		return nil, true, err
+	}
+
+	if len(events) == 0 {
+		return []models.Event{}, true, nil
+	}
+
+	return s.filterEvents(events, query), true, nil
+}
+
+// GetInMemoryEvents returns events from the current in-memory buffer that match the query
+// This allows querying unflushed/buffered data for low-latency queries
+// For restored files, it also includes events from restored blocks that are still on disk
+func (s *Storage) GetInMemoryEvents(query *models.QueryRequest) ([]models.Event, error) {
+	s.fileMutex.RLock()
+	defer s.fileMutex.RUnlock()
+
+	if s.currentFile == nil {
+		return []models.Event{}, nil
+	}
+
+	allEvents, err := s.collectEventsFromOpenFile(s.currentFile, query)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(allEvents) == 0 {
 		return []models.Event{}, nil
 	}

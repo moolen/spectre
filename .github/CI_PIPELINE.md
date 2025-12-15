@@ -59,7 +59,6 @@ make docker-build
 
 # Run tests
 make test
-make test-integration
 ```
 
 ## Helm Chart Deployment

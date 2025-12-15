@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 // ResourceChangesTool implements the resource_changes MCP tool
@@ -44,17 +45,19 @@ type ChangeDetail struct {
 
 // ResourceChangeSummary represents changes for a single resource
 type ResourceChangeSummary struct {
-	ResourceID        string          `json:"resource_id"`
-	Kind              string          `json:"kind"`
-	Namespace         string          `json:"namespace"`
-	Name              string          `json:"name"`
-	ImpactScore       float64         `json:"impact_score"` // 0-1.0
-	Changes           []ChangeDetail  `json:"changes"`
-	ChangeCount       int             `json:"change_count"`
-	EventCount        int             `json:"event_count"`
-	ErrorEvents       int             `json:"error_events"`
-	WarningEvents     int             `json:"warning_events"`
-	StatusTransitions []StatusTransition `json:"status_transitions,omitempty"`
+	ResourceID        string                   `json:"resource_id"`
+	Kind              string                   `json:"kind"`
+	Namespace         string                   `json:"namespace"`
+	Name              string                   `json:"name"`
+	ImpactScore       float64                  `json:"impact_score"` // 0-1.0
+	Changes           []ChangeDetail           `json:"changes"`
+	ChangeCount       int                      `json:"change_count"`
+	EventCount        int                      `json:"event_count"`
+	ErrorEvents       int                      `json:"error_events"`
+	WarningEvents     int                      `json:"warning_events"`
+	StatusTransitions []StatusTransition       `json:"status_transitions,omitempty"`
+	ContainerIssues   []storage.ContainerIssue `json:"container_issues,omitempty"` // Container-level problems
+	EventPatterns     []storage.EventPattern   `json:"event_patterns,omitempty"`   // Detected event patterns
 }
 
 // StatusTransition represents a change in resource status
@@ -84,6 +87,11 @@ func (t *ResourceChangesTool) Execute(ctx context.Context, input json.RawMessage
 	startTime := params.StartTime
 	endTime := params.EndTime
 
+	// Validate required parameters
+	if startTime == 0 || endTime == 0 {
+		return nil, fmt.Errorf("start_time and end_time are required")
+	}
+
 	// Convert milliseconds to seconds if needed
 	if startTime > 10000000000 {
 		startTime /= 1000
@@ -94,6 +102,11 @@ func (t *ResourceChangesTool) Execute(ctx context.Context, input json.RawMessage
 
 	if startTime >= endTime {
 		return nil, fmt.Errorf("start_time must be before end_time")
+	}
+
+	// Validate impact threshold
+	if params.ImpactThreshold < 0 || params.ImpactThreshold > 1.0 {
+		return nil, fmt.Errorf("impact_threshold must be between 0 and 1.0")
 	}
 
 	start := time.Now()
@@ -133,9 +146,12 @@ func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, 
 			Name:              resource.Name,
 			Changes:           make([]ChangeDetail, 0),
 			StatusTransitions: make([]StatusTransition, 0),
+			ContainerIssues:   make([]storage.ContainerIssue, 0),
+			EventPatterns:     make([]storage.EventPattern, 0),
 		}
 
-		// Count events
+		// Convert K8sEvents to event data for pattern analysis
+		eventData := make([]storage.K8sEventData, 0, len(resource.Events))
 		for _, event := range resource.Events {
 			summary.EventCount++
 			if event.Type == "Warning" {
@@ -144,9 +160,19 @@ func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, 
 			if strings.Contains(event.Reason, "Error") || strings.Contains(event.Reason, "Failed") {
 				summary.ErrorEvents++
 			}
+
+			// Convert to event data format for pattern analysis
+			eventData = append(eventData, storage.K8sEventData{
+				Reason:  event.Reason,
+				Message: event.Message,
+				Type:    event.Type,
+			})
 		}
 
-		// Analyze status transitions
+		// Analyze event patterns (Phase 2)
+		summary.EventPatterns = storage.AnalyzeEventPatterns(eventData)
+
+		// Analyze status transitions and extract container issues from Pod resources
 		previousStatus := ""
 		for _, segment := range resource.StatusSegments {
 			if previousStatus != "" && segment.Status != previousStatus {
@@ -160,10 +186,19 @@ func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, 
 				})
 			}
 			previousStatus = segment.Status
+
+			// For Pod resources, check for container issues in the latest segment
+			if strings.EqualFold(resource.Kind, "Pod") && segment.ResourceData != nil {
+				issues, err := storage.GetContainerIssuesFromJSON(segment.ResourceData)
+				if err == nil && len(issues) > 0 {
+					// Only keep the most recent container issues
+					summary.ContainerIssues = issues
+				}
+			}
 		}
 
 		// Calculate impact score
-		summary.ImpactScore = t.calculateImpactScore(&summary)
+		summary.ImpactScore = calculateImpactScore(&summary)
 
 		// Only include if above threshold
 		if impactThreshold > 0 && summary.ImpactScore < impactThreshold {
@@ -190,8 +225,39 @@ func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, 
 	return output
 }
 
-func (t *ResourceChangesTool) calculateImpactScore(summary *ResourceChangeSummary) float64 {
+// calculateImpactScore calculates the impact score for a resource change summary
+func calculateImpactScore(summary *ResourceChangeSummary) float64 {
 	score := 0.0
+
+	// Container-level issues (Phase 1)
+	for _, issue := range summary.ContainerIssues {
+		switch issue.IssueType {
+		case "OOMKilled":
+			score += 0.40 // High impact - resource issue
+		case "CrashLoopBackOff":
+			score += 0.35 // High impact - app issue
+		case "ImagePullBackOff":
+			score += 0.25 // Medium impact - config issue
+		case "VeryHighRestartCount":
+			score += 0.35 // High restart count
+		case "HighRestartCount":
+			score += 0.20 // Moderate restart count
+		}
+	}
+
+	// Event patterns (Phase 2 & 3)
+	for _, pattern := range summary.EventPatterns {
+		switch pattern.PatternType {
+		case "Evicted":
+			score += 0.35 // High impact - node pressure
+		case "LivenessProbe":
+			score += 0.35 // High impact - will cause restarts
+		case "FailedScheduling", "DNSFailure", "StartupProbe":
+			score += 0.30 // Medium-high impact
+		case "ReadinessProbe", "Preempted", "ProbeFailure":
+			score += 0.25 // Medium impact
+		}
+	}
 
 	// Error events have high impact
 	if summary.ErrorEvents > 0 {
@@ -215,6 +281,11 @@ func (t *ResourceChangesTool) calculateImpactScore(summary *ResourceChangeSummar
 	// High event count indicates churn
 	if summary.EventCount > 10 {
 		score += 0.1
+	}
+
+	// Very high event volume
+	if summary.EventCount > 50 {
+		score += 0.2
 	}
 
 	// Cap at 1.0

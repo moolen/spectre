@@ -64,7 +64,7 @@ func NewTracingProvider(cfg Config) (*TracingProvider, error) {
 		if cfg.TLSInsecure {
 			// Skip certificate verification
 			tlsConfig = &tls.Config{
-				InsecureSkipVerify: true,
+				InsecureSkipVerify: true, //nolint:gosec // We are using insecure mode
 				MinVersion:         tls.VersionTLS12,
 			}
 			logger.Info("TLS enabled for tracing with certificate verification disabled (insecure mode)")

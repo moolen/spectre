@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -367,12 +368,130 @@ func (bsf *BlockStorageFile) buildIndexes() error {
 	return nil
 }
 
+// parseEventsFromBlockData parses protobuf-encoded events from decompressed block data
+func parseEventsFromBlockData(decompressedData []byte) ([]*models.Event, error) {
+	var events []*models.Event
+	offset := 0
+
+	// Read length-prefixed protobuf messages
+	for offset < len(decompressedData) {
+		// Parse varint length
+		length, n := binary.Uvarint(decompressedData[offset:])
+		if n <= 0 {
+			break // End of data
+		}
+		offset += n
+
+		// Extract message bytes
+		if offset+int(length) > len(decompressedData) {
+			return nil, fmt.Errorf("invalid message length: %d at offset %d", length, offset)
+		}
+
+		messageData := decompressedData[offset : offset+int(length)]
+		offset += int(length)
+
+		// Unmarshal event
+		event := &models.Event{}
+		if err := event.UnmarshalProtobuf(messageData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal event at offset %d: %w", offset, err)
+		}
+
+		events = append(events, event)
+	}
+
+	return events, nil
+}
+
+// extractFinalResourceStatesFromMemory extracts final resource states from in-memory blocks
+// This is used for open files that haven't been closed yet
+func (bsf *BlockStorageFile) extractFinalResourceStatesFromMemory() (map[string]*ResourceLastState, error) {
+	// Start with carried-over states from previous hour (if any)
+	finalStates := make(map[string]*ResourceLastState)
+	for key, state := range bsf.finalResourceStates {
+		finalStates[key] = state
+	}
+
+	// Process finalized blocks that are in memory
+	for _, block := range bsf.blocks {
+		// Decompress block to get events
+		decompressed, err := DecompressBlock(block)
+		if err != nil {
+			bsf.logger.Warn("Failed to decompress block %d for state extraction: %v", block.ID, err)
+			continue
+		}
+
+		// Parse events from decompressed data
+		events, err := parseEventsFromBlockData(decompressed)
+		if err != nil {
+			bsf.logger.Warn("Failed to parse events from block %d for state extraction: %v", block.ID, err)
+			continue
+		}
+
+		// For each event, update the final state for that resource
+		for _, event := range events {
+			// Create resource key: group/version/kind/namespace/name
+			resourceKey := fmt.Sprintf("%s/%s/%s/%s/%s",
+				event.Resource.Group,
+				event.Resource.Version,
+				event.Resource.Kind,
+				event.Resource.Namespace,
+				event.Resource.Name,
+			)
+
+			// Store or update the final state
+			finalStates[resourceKey] = &ResourceLastState{
+				UID:          event.Resource.UID,
+				EventType:    string(event.Type),
+				Timestamp:    event.Timestamp,
+				ResourceData: event.Data,
+			}
+		}
+	}
+
+	// Also process unflushed events in the current buffer
+	if bsf.currentBuffer != nil && bsf.currentBuffer.GetEventCount() > 0 {
+		bufferEvents, err := bsf.currentBuffer.GetEvents()
+		if err != nil {
+			bsf.logger.Warn("Failed to get events from current buffer: %v", err)
+		} else {
+			// Process events from buffer
+			for _, event := range bufferEvents {
+				resourceKey := fmt.Sprintf("%s/%s/%s/%s/%s",
+					event.Resource.Group,
+					event.Resource.Version,
+					event.Resource.Kind,
+					event.Resource.Namespace,
+					event.Resource.Name,
+				)
+
+				finalStates[resourceKey] = &ResourceLastState{
+					UID:          event.Resource.UID,
+					EventType:    string(event.Type),
+					Timestamp:    event.Timestamp,
+					ResourceData: event.Data,
+				}
+			}
+		}
+	}
+
+	return finalStates, nil
+}
+
 // extractFinalResourceStates extracts the final state of each resource from all blocks
 // Returns a map where key is "group/version/kind/namespace/name" and value is the ResourceLastState
 func (bsf *BlockStorageFile) extractFinalResourceStates() (map[string]*ResourceLastState, error) {
-	finalStates := make(map[string]*ResourceLastState)
+	// If file is still open (has blocks in memory), use memory-based extraction
+	if len(bsf.blocks) > 0 || (bsf.currentBuffer != nil && bsf.currentBuffer.GetEventCount() > 0) {
+		return bsf.extractFinalResourceStatesFromMemory()
+	}
 
-	// If no blocks exist, return empty map
+	// Start with carried-over states from previous hour (if any)
+	finalStates := make(map[string]*ResourceLastState)
+	for key, state := range bsf.finalResourceStates {
+		finalStates[key] = state
+	}
+
+	// If no blocks exist, return carried-over states
 	if len(bsf.blockMetadataList) == 0 {
 		return finalStates, nil
 	}

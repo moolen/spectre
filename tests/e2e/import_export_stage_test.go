@@ -77,7 +77,7 @@ func (s *ImportExportStage) a_test_environment() *ImportExportStage {
 // Test data generation methods
 
 func (s *ImportExportStage) test_data_in_two_namespaces() *ImportExportStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Minute)
 	defer cancel()
 
 	s.testNamespaces = []string{"import-1", "import-2"}
@@ -261,7 +261,7 @@ func (s *ImportExportStage) resources_are_indexed() *ImportExportStage {
 
 	for _, ns := range s.testNamespaces {
 		helpers.EventuallyCondition(s.t, func() bool {
-			searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 			defer searchCancel()
 
 			now := time.Now().Unix()
@@ -313,7 +313,7 @@ func (s *ImportExportStage) data_is_exported_to_file() *ImportExportStage {
 }
 
 func (s *ImportExportStage) data_is_imported_from_binary_file() *ImportExportStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Minute)
 	defer cancel()
 
 	exportFile, err := os.Open(s.exportPath)
@@ -349,7 +349,7 @@ func (s *ImportExportStage) data_is_imported_from_binary_file() *ImportExportSta
 }
 
 func (s *ImportExportStage) events_are_imported_via_json() *ImportExportStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
 	importPayload := map[string]interface{}{
@@ -386,7 +386,7 @@ func (s *ImportExportStage) events_are_imported_via_json() *ImportExportStage {
 // Spectre lifecycle methods
 
 func (s *ImportExportStage) spectre_is_uninstalled() *ImportExportStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Minute)
 	defer cancel()
 
 	var err error
@@ -409,7 +409,7 @@ func (s *ImportExportStage) spectre_is_uninstalled() *ImportExportStage {
 }
 
 func (s *ImportExportStage) test_resources_are_deleted() *ImportExportStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Minute)
 	defer cancel()
 
 	for _, ns := range s.testNamespaces {
@@ -430,7 +430,7 @@ func (s *ImportExportStage) test_resources_are_deleted() *ImportExportStage {
 }
 
 func (s *ImportExportStage) spectre_is_redeployed() *ImportExportStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Minute)
 	defer cancel()
 
 	values, imageRef, err := helpers.LoadHelmValues()
@@ -458,7 +458,7 @@ func (s *ImportExportStage) spectre_is_redeployed() *ImportExportStage {
 }
 
 func (s *ImportExportStage) old_data_is_not_present() *ImportExportStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Minute)
 	defer cancel()
 
 	time.Sleep(5 * time.Second)
@@ -484,7 +484,7 @@ func (s *ImportExportStage) old_data_is_not_present() *ImportExportStage {
 
 func (s *ImportExportStage) namespaces_appear_in_metadata() *ImportExportStage {
 	helpers.EventuallyCondition(s.t, func() bool {
-		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		metadataCtx, metadataCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer metadataCancel()
 
 		metadata, err := s.apiClient.GetMetadata(metadataCtx, nil, nil)
@@ -516,7 +516,7 @@ func (s *ImportExportStage) namespaces_appear_in_metadata() *ImportExportStage {
 
 func (s *ImportExportStage) expected_resource_kinds_are_present() *ImportExportStage {
 	helpers.EventuallyCondition(s.t, func() bool {
-		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		metadataCtx, metadataCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer metadataCancel()
 
 		metadata, err := s.apiClient.GetMetadata(metadataCtx, nil, nil)
@@ -555,7 +555,7 @@ func (s *ImportExportStage) expected_resource_kinds_are_present() *ImportExportS
 
 func (s *ImportExportStage) service_kind_is_present() *ImportExportStage {
 	helpers.EventuallyCondition(s.t, func() bool {
-		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		metadataCtx, metadataCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer metadataCancel()
 
 		metadata, err := s.apiClient.GetMetadata(metadataCtx, nil, nil)
@@ -586,7 +586,7 @@ func (s *ImportExportStage) all_resources_are_queryable() *ImportExportStage {
 	for _, ns := range s.testNamespaces {
 		for _, kind := range resourceKinds {
 			helpers.EventuallyCondition(s.t, func() bool {
-				searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 				defer searchCancel()
 
 				resp, err := s.apiClient.Search(searchCtx, startTime, endTime, ns, kind)
@@ -612,7 +612,7 @@ func (s *ImportExportStage) all_resources_are_queryable() *ImportExportStage {
 func (s *ImportExportStage) deployments_can_be_queried() *ImportExportStage {
 	for _, ns := range s.testNamespaces {
 		helpers.EventuallyCondition(s.t, func() bool {
-			searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 			defer searchCancel()
 
 			resp, err := s.apiClient.Search(searchCtx, s.exportTimestamp-900, s.exportTimestamp+60, ns, "Deployment")
@@ -630,7 +630,7 @@ func (s *ImportExportStage) deployments_can_be_queried() *ImportExportStage {
 }
 
 func (s *ImportExportStage) specific_deployment_is_present() *ImportExportStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Minute)
 	defer cancel()
 
 	searchResp, err := s.apiClient.Search(ctx, s.exportTimestamp-900, s.exportTimestamp+60, "import-1", "Deployment")
@@ -668,7 +668,7 @@ func (s *ImportExportStage) specific_resources_are_present_by_name() *ImportExpo
 
 	for _, expected := range expectedResources {
 		helpers.EventuallyCondition(s.t, func() bool {
-			searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 			defer searchCancel()
 
 			resp, err := s.apiClient.Search(searchCtx, startTime, endTime, expected.namespace, expected.kind)
@@ -698,7 +698,7 @@ func (s *ImportExportStage) service_is_found_via_search() *ImportExportStage {
 	endTime := s.baseTime.Unix() + 300
 
 	helpers.EventuallyCondition(s.t, func() bool {
-		searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer searchCancel()
 
 		resp, err := s.apiClient.Search(searchCtx, startTime, endTime, s.testNamespaces[0], "Service")
@@ -726,7 +726,7 @@ func (s *ImportExportStage) timeline_shows_status_segments() *ImportExportStage 
 	endTime := s.baseTime.Unix() + 300
 
 	helpers.EventuallyCondition(s.t, func() bool {
-		timelineCtx, timelineCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		timelineCtx, timelineCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer timelineCancel()
 
 		timelineURL := fmt.Sprintf("%s/v1/timeline?start=%d&end=%d&namespace=%s&kind=Service",
@@ -797,7 +797,7 @@ func (s *ImportExportStage) kubernetes_event_kind_is_present() *ImportExportStag
 	endTime := s.baseTime.Unix() + 300
 
 	helpers.EventuallyCondition(s.t, func() bool {
-		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		metadataCtx, metadataCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer metadataCancel()
 
 		metadata, err := s.apiClient.GetMetadata(metadataCtx, &startTime, &endTime)
@@ -832,7 +832,7 @@ func (s *ImportExportStage) kubernetes_events_can_be_queried() *ImportExportStag
 	// So we query for Pod resources and verify they have events attached
 	for _, ns := range s.testNamespaces {
 		helpers.EventuallyCondition(s.t, func() bool {
-			searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 			defer searchCancel()
 
 			resp, err := s.apiClient.Search(searchCtx, startTime, endTime, ns, "Pod")
@@ -863,7 +863,7 @@ func (s *ImportExportStage) specific_kubernetes_event_is_present() *ImportExport
 	// Events are not standalone resources but are attached via InvolvedObjectUID
 	for _, ns := range s.testNamespaces {
 		helpers.EventuallyCondition(s.t, func() bool {
-			timelineCtx, timelineCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			timelineCtx, timelineCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 			defer timelineCancel()
 
 			// Use timeline API to get resources with their attached events
@@ -1057,7 +1057,7 @@ func (s *ImportExportStage) verify_imported_data_is_present_via_metadata_api() *
 	endTime := time.Now().Unix() + 300
 
 	helpers.EventuallyCondition(s.t, func() bool {
-		metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		metadataCtx, metadataCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer metadataCancel()
 
 		metadata, err := s.apiClient.GetMetadata(metadataCtx, &startTime, &endTime)
@@ -1096,7 +1096,7 @@ func (s *ImportExportStage) verify_resources_can_be_queried_via_search_api() *Im
 	for _, ns := range s.testNamespaces {
 		for _, kind := range resourceKinds {
 			helpers.EventuallyCondition(s.t, func() bool {
-				searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 				defer searchCancel()
 
 				resp, err := s.apiClient.Search(searchCtx, startTime, endTime, ns, kind)
@@ -1136,7 +1136,7 @@ func (s *ImportExportStage) specific_resources_are_present_by_name_for_cli_impor
 
 	for _, expected := range expectedResources {
 		helpers.EventuallyCondition(s.t, func() bool {
-			searchCtx, searchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			searchCtx, searchCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 			defer searchCancel()
 
 			resp, err := s.apiClient.Search(searchCtx, startTime, endTime, expected.namespace, expected.kind)

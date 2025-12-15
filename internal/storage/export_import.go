@@ -496,6 +496,14 @@ func (s *Storage) Import(r io.Reader, opts ImportOptions) (*ImportReport, error)
 
 	report.Duration = time.Since(startTime)
 
+	// Rebuild file index to make new files discoverable by queries
+	if err := s.fileIndex.Rebuild(s.dataDir, s.extractHourFromFilename); err != nil {
+		s.logger.Warn("Failed to rebuild file index after import: %v", err)
+		// Don't fail the import if index rebuild fails - the data is still there
+	} else {
+		s.logger.Info("File index rebuilt after import")
+	}
+
 	s.logger.InfoWithFields("Storage import completed",
 		logging.Field("total_files", report.TotalFiles),
 		logging.Field("imported", report.ImportedFiles),
@@ -722,6 +730,14 @@ func (s *Storage) AddEventsBatch(events []*models.Event, opts ImportOptions) (*I
 	report.TotalEvents = totalEvents
 	report.ImportedFiles = len(events) // Track individual events as items imported
 	report.Duration = time.Since(startTime)
+
+	// Rebuild file index to make new files discoverable by queries
+	if err := s.fileIndex.Rebuild(s.dataDir, s.extractHourFromFilename); err != nil {
+		s.logger.Warn("Failed to rebuild file index after batch import: %v", err)
+		// Don't fail the import if index rebuild fails - the data is still there
+	} else {
+		s.logger.Info("File index rebuilt after batch import")
+	}
 
 	s.logger.InfoWithFields("Batch event ingestion completed",
 		logging.Field("total_events", totalEvents),

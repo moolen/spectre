@@ -12,20 +12,22 @@ import (
 
 // Transport implements HTTP-based MCP transport
 type Transport struct {
-	handler *mcp.Handler
-	server  *http.Server
-	addr    string
-	version string
+	handler      *mcp.Handler
+	server       *http.Server
+	addr         string
+	version      string
+	endpointPath string
 }
 
 // NewTransport creates a new HTTP transport
-func NewTransport(addr string, mcpServer *mcp.MCPServer, version string) *Transport {
+func NewTransport(addr string, mcpServer *mcp.MCPServer, version, endpointPath string) *Transport {
 	handler := mcp.NewHandler(mcpServer, version)
 
 	t := &Transport{
-		handler: handler,
-		addr:    addr,
-		version: version,
+		handler:      handler,
+		addr:         addr,
+		version:      version,
+		endpointPath: endpointPath,
 	}
 
 	t.server = &http.Server{
@@ -82,7 +84,7 @@ func (t *Transport) createHTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 
 	// Main MCP endpoint
-	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST "+t.endpointPath, func(w http.ResponseWriter, r *http.Request) {
 		t.handleMCPRequest(w, r)
 	})
 

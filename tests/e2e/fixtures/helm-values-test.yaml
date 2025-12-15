@@ -36,6 +36,9 @@ storage:
     maxAge: 1h
     maxSize: 100Mi
 
+persistence:
+  storageClassName: standard
+
 podAnnotations:
   test: "true"
 
