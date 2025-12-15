@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/storage"
 )
 
 const (
@@ -157,10 +159,18 @@ func analyzeHealth(response *client.TimelineResponse, maxResources int) *Cluster
 		if len(resource.StatusSegments) > 0 {
 			lastSegment := resource.StatusSegments[len(resource.StatusSegments)-1]
 			currentStatus = lastSegment.Status
-			errorMessage = lastSegment.Message
 
-			// Calculate error duration if in error state
+			// Infer detailed error messages from resource data
 			if lastSegment.Status == statusError || lastSegment.Status == statusWarning {
+				errorMessages := storage.InferErrorMessages(resource.Kind, lastSegment.ResourceData, lastSegment.Status)
+				if len(errorMessages) > 0 {
+					errorMessage = strings.Join(errorMessages, "; ")
+				} else {
+					// Fallback to segment message if no specific errors found
+					errorMessage = lastSegment.Message
+				}
+
+				// Calculate error duration if in error state
 				errorDuration = lastSegment.EndTime - lastSegment.StartTime
 			}
 		}
