@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
@@ -62,8 +63,8 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		attribute.String("query.kind", query.Filters.Kind),
 	)
 
-	// Execute query with context propagation
-	result, err := th.queryExecutor.Execute(ctx, query)
+	// Execute both queries concurrently
+	result, eventResult, err := th.executeConcurrentQueries(ctx, query)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Query execution failed")
@@ -79,9 +80,11 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		attribute.Int("result.segments_scanned", int(result.SegmentsScanned)),
 		attribute.Int("result.segments_skipped", int(result.SegmentsSkipped)),
 		attribute.Int64("result.execution_time_ms", int64(result.ExecutionTimeMs)),
+		attribute.Int("result.k8s_event_count", int(eventResult.Count)),
+		attribute.Int64("result.k8s_events_execution_time_ms", int64(eventResult.ExecutionTimeMs)),
 	)
 
-	timelineResponse := th.buildTimelineResponse(ctx, result, query)
+	timelineResponse := th.buildTimelineResponse(result, eventResult)
 
 	span.SetAttributes(
 		attribute.Int("response.resource_count", timelineResponse.Count),
@@ -95,12 +98,96 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	th.logger.Debug("Timeline completed: resources=%d, executionTime=%dms", timelineResponse.Count, timelineResponse.ExecutionTimeMs)
 }
 
+// executeConcurrentQueries executes resource and Event queries concurrently
+func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, *models.QueryResult, error) {
+	// Create child span for concurrent execution
+	ctx, span := th.tracer.Start(ctx, "timeline.executeConcurrentQueries")
+	defer span.End()
+
+	var (
+		resourceResult *models.QueryResult
+		eventResult    *models.QueryResult
+		resourceErr    error
+		eventErr       error
+		wg             sync.WaitGroup
+	)
+
+	// Build Event query upfront
+	eventQuery := &models.QueryRequest{
+		StartTimestamp: query.StartTimestamp,
+		EndTimestamp:   query.EndTimestamp,
+		Filters: models.QueryFilters{
+			Kind:      "Event",
+			Version:   "v1",
+			Namespace: query.Filters.Namespace,
+		},
+	}
+
+	wg.Add(2)
+
+	// Execute resource query
+	go func() {
+		defer wg.Done()
+		_, resourceSpan := th.tracer.Start(ctx, "timeline.resourceQuery")
+		defer resourceSpan.End()
+
+		resourceResult, resourceErr = th.queryExecutor.Execute(ctx, query)
+		if resourceErr != nil {
+			resourceSpan.RecordError(resourceErr)
+			resourceSpan.SetStatus(codes.Error, "Resource query failed")
+		}
+	}()
+
+	// Execute Event query
+	go func() {
+		defer wg.Done()
+		_, eventSpan := th.tracer.Start(ctx, "timeline.eventQuery")
+		defer eventSpan.End()
+
+		eventResult, eventErr = th.queryExecutor.Execute(ctx, eventQuery)
+		if eventErr != nil {
+			eventSpan.RecordError(eventErr)
+			eventSpan.SetStatus(codes.Error, "Event query failed")
+			th.logger.Warn("Failed to fetch Kubernetes events for timeline: %v", eventErr)
+			// Non-critical: Event query failure shouldn't fail the entire request
+		}
+	}()
+
+	wg.Wait()
+
+	// Handle errors with priority on resource query (critical)
+	if resourceErr != nil {
+		return nil, nil, resourceErr
+	}
+
+	// If Event query failed, return empty result instead of nil
+	if eventErr != nil {
+		eventResult = &models.QueryResult{
+			Events: []models.Event{},
+		}
+	}
+
+	span.SetAttributes(
+		attribute.Int("resource_count", int(resourceResult.Count)),
+		attribute.Int("event_count", int(eventResult.Count)),
+	)
+
+	th.logger.Debug("Concurrent queries completed: resources=%d (%dms), events=%d (%dms)",
+		resourceResult.Count, resourceResult.ExecutionTimeMs,
+		eventResult.Count, eventResult.ExecutionTimeMs)
+
+	return resourceResult, eventResult, nil
+}
+
 // buildTimelineResponse transforms QueryResult into TimelineResponse with full resource data
-func (th *TimelineHandler) buildTimelineResponse(ctx context.Context, queryResult *models.QueryResult, query *models.QueryRequest) *models.SearchResponse {
+func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *models.QueryResult) *models.SearchResponse {
 	resourceBuilder := storage.NewResourceBuilder()
 	resourceMap := resourceBuilder.BuildResourcesFromEvents(queryResult.Events)
 
-	th.attachK8sEvents(ctx, resourceBuilder, resourceMap, query)
+	// Attach pre-fetched K8s events
+	if len(eventResult.Events) > 0 {
+		resourceBuilder.AttachK8sEvents(resourceMap, eventResult.Events)
+	}
 
 	resources := make([]models.Resource, 0, len(resourceMap))
 	for _, resource := range resourceMap {
@@ -112,31 +199,6 @@ func (th *TimelineHandler) buildTimelineResponse(ctx context.Context, queryResul
 		Count:           len(resources),
 		ExecutionTimeMs: int64(queryResult.ExecutionTimeMs),
 	}
-}
-
-// Attaches Kubernetes Events to resources for timeline dots and detail panel
-func (th *TimelineHandler) attachK8sEvents(ctx context.Context, resourceBuilder *storage.ResourceBuilder, resourceMap map[string]*models.Resource, query *models.QueryRequest) {
-	if len(resourceMap) == 0 {
-		return
-	}
-
-	eventQuery := &models.QueryRequest{
-		StartTimestamp: query.StartTimestamp,
-		EndTimestamp:   query.EndTimestamp,
-		Filters: models.QueryFilters{
-			Kind:      "Event",
-			Version:   "v1",
-			Namespace: query.Filters.Namespace,
-		},
-	}
-
-	eventResult, err := th.queryExecutor.Execute(ctx, eventQuery)
-	if err != nil {
-		th.logger.Warn("Failed to fetch Kubernetes events for timeline: %v", err)
-		return
-	}
-
-	resourceBuilder.AttachK8sEvents(resourceMap, eventResult.Events)
 }
 
 // parseQuery parses and validates query parameters (same as SearchHandler)
