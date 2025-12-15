@@ -147,3 +147,290 @@ tests:
     asserts:
       - isNull:
           path: spec.tls
+
+  # MCP Ingress Tests
+  - it: should not create Ingress when MCP is disabled and main ingress is disabled
+    set:
+      ingress:
+        enabled: false
+      mcp:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create MCP ingress rule when MCP is disabled
+    set:
+      ingress:
+        enabled: true
+        hosts:
+          - host: spectre.example.com
+            paths:
+              - path: /
+                pathType: Prefix
+      mcp:
+        enabled: false
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: spec.rules[0].host
+          value: spectre.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8080
+
+  - it: should not create MCP ingress rule when MCP ingress is disabled
+    set:
+      ingress:
+        enabled: true
+        hosts:
+          - host: spectre.example.com
+            paths:
+              - path: /
+                pathType: Prefix
+        mcp:
+          enabled: false
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: spec.rules[0].host
+          value: spectre.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8080
+
+  - it: should create Ingress when only MCP ingress is enabled
+    set:
+      ingress:
+        enabled: false
+        mcp:
+          enabled: true
+          host: mcp.spectre.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: spec.rules[0].host
+          value: mcp.spectre.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8081
+
+  - it: should create MCP ingress rule with correct host and port
+    set:
+      ingress:
+        enabled: true
+        hosts:
+          - host: spectre.example.com
+            paths:
+              - path: /
+                pathType: Prefix
+        mcp:
+          enabled: true
+          host: mcp.spectre.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: spec.rules[0].host
+          value: spectre.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8080
+      - equal:
+          path: spec.rules[1].host
+          value: mcp.spectre.example.com
+      - equal:
+          path: spec.rules[1].http.paths[0].backend.service.name
+          value: RELEASE-NAME-spectre
+      - equal:
+          path: spec.rules[1].http.paths[0].backend.service.port.number
+          value: 8081
+      - equal:
+          path: spec.rules[1].http.paths[0].path
+          value: /
+      - equal:
+          path: spec.rules[1].http.paths[0].pathType
+          value: Prefix
+
+  - it: should configure custom MCP hostname
+    set:
+      ingress:
+        enabled: false
+        mcp:
+          enabled: true
+          host: custom-mcp.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - equal:
+          path: spec.rules[0].host
+          value: custom-mcp.example.com
+
+  - it: should configure MCP ingress with multiple paths
+    set:
+      ingress:
+        enabled: false
+        mcp:
+          enabled: true
+          host: mcp.spectre.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+            - path: /api
+              pathType: Exact
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /
+      - equal:
+          path: spec.rules[0].http.paths[0].pathType
+          value: Prefix
+      - equal:
+          path: spec.rules[0].http.paths[1].path
+          value: /api
+      - equal:
+          path: spec.rules[0].http.paths[1].pathType
+          value: Exact
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8081
+      - equal:
+          path: spec.rules[0].http.paths[1].backend.service.port.number
+          value: 8081
+
+  - it: should configure MCP TLS
+    set:
+      ingress:
+        enabled: false
+        mcp:
+          enabled: true
+          host: mcp.spectre.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+          tls:
+            - secretName: mcp-tls
+              hosts:
+                - mcp.spectre.example.com
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - equal:
+          path: spec.tls[0].secretName
+          value: mcp-tls
+      - contains:
+          path: spec.tls[0].hosts
+          content: mcp.spectre.example.com
+
+  - it: should configure both main and MCP TLS
+    set:
+      ingress:
+        enabled: true
+        hosts:
+          - host: spectre.example.com
+            paths:
+              - path: /
+                pathType: Prefix
+        tls:
+          - secretName: main-tls
+            hosts:
+              - spectre.example.com
+        mcp:
+          enabled: true
+          host: mcp.spectre.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+          tls:
+            - secretName: mcp-tls
+              hosts:
+                - mcp.spectre.example.com
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - equal:
+          path: spec.tls[0].secretName
+          value: main-tls
+      - contains:
+          path: spec.tls[0].hosts
+          content: spectre.example.com
+      - equal:
+          path: spec.tls[1].secretName
+          value: mcp-tls
+      - contains:
+          path: spec.tls[1].hosts
+          content: mcp.spectre.example.com
+
+  - it: should not configure TLS section when both main and MCP TLS are empty
+    set:
+      ingress:
+        enabled: true
+        hosts:
+          - host: spectre.example.com
+            paths:
+              - path: /
+                pathType: Prefix
+        tls: []
+        mcp:
+          enabled: true
+          host: mcp.spectre.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+          tls: []
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - isNull:
+          path: spec.tls
+
+  - it: should not include main ingress rules when main ingress is disabled but MCP ingress is enabled
+    set:
+      ingress:
+        enabled: false
+        mcp:
+          enabled: true
+          host: mcp.spectre.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      mcp:
+        enabled: true
+        port: 8081
+    asserts:
+      - isKind:
+          of: Ingress
+      - equal:
+          path: spec.rules[0].host
+          value: mcp.spectre.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8081

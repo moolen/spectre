@@ -221,6 +221,13 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+  mcp:
+    enabled: false
+    host: mcp.spectre.example.com
+    paths:
+      - path: /
+        pathType: Prefix
+    tls: []
 
 serviceMonitor:
   enabled: false
