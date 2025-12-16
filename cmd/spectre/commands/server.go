@@ -263,7 +263,15 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, watcherComponent, demo, tracingProvider)
+	// Set up readiness checker: use watcher if available, otherwise use no-op
+	var readinessChecker api.ReadinessChecker
+	if watcherComponent != nil {
+		readinessChecker = watcherComponent
+	} else {
+		readinessChecker = &api.NoOpReadinessChecker{}
+	}
+
+	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, readinessChecker, demo, tracingProvider)
 	logger.Info("API server component created")
 
 	// Register components based on demo mode
