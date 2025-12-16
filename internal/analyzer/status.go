@@ -438,7 +438,7 @@ func (r *resourceData) statusInt(key string) int64 {
 	return getIntValue(r.status(), key)
 }
 
-func (r *resourceData) statusString(key string) string {
+func (r *resourceData) statusString(key string) string { //nolint:unparam // key parameter is generic and may be used with different values
 	return getStringValue(r.status(), key)
 }
 

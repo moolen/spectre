@@ -182,7 +182,7 @@ func (s *Storage) getOrCreateHourFile(hourTimestamp int64) (*BlockStorageFile, e
 				s.logger.Warn("Failed to open previous hour file for state carryover: %v", err)
 			} else {
 				fileData, err := reader.ReadFile()
-				reader.Close()
+				_ = reader.Close()
 				if err != nil {
 					s.logger.Warn("Failed to read previous hour file for state carryover: %v", err)
 				} else if len(fileData.IndexSection.FinalResourceStates) > 0 {

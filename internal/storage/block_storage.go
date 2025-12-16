@@ -135,9 +135,9 @@ func NewBlockStorageFile(path string, hourTimestamp, blockSizeBytes int64) (*Blo
 		// File exists - check if it's complete (has footer)
 		reader, err := NewBlockReader(path)
 		if err == nil {
-		// Try to read complete file structure
-		fileData, err := reader.ReadFile()
-		_ = reader.Close()
+			// Try to read complete file structure
+			fileData, err := reader.ReadFile()
+			_ = reader.Close()
 
 			if err == nil {
 				// File is complete - restore state and open for appending
@@ -353,6 +353,7 @@ func (bsf *BlockStorageFile) Close() error {
 }
 
 // buildIndexes builds the inverted indexes from block metadata
+//
 //nolint:unparam // error return kept for interface consistency
 func (bsf *BlockStorageFile) buildIndexes() error {
 	if len(bsf.blockMetadataList) == 0 {
@@ -383,12 +384,14 @@ func parseEventsFromBlockData(decompressedData []byte) ([]*models.Event, error) 
 		offset += n
 
 		// Extract message bytes
-		if offset+int(length) > len(decompressedData) {
+		// Check for integer overflow: ensure length fits in int and doesn't cause overflow
+		if length > uint64(^uint(0)>>1) || offset+int(length) > len(decompressedData) {
 			return nil, fmt.Errorf("invalid message length: %d at offset %d", length, offset)
 		}
 
-		messageData := decompressedData[offset : offset+int(length)]
-		offset += int(length)
+		lengthInt := int(length)
+		messageData := decompressedData[offset : offset+lengthInt]
+		offset += lengthInt
 
 		// Unmarshal event
 		event := &models.Event{}
@@ -404,7 +407,7 @@ func parseEventsFromBlockData(decompressedData []byte) ([]*models.Event, error) 
 
 // extractFinalResourceStatesFromMemory extracts final resource states from in-memory blocks
 // This is used for open files that haven't been closed yet
-func (bsf *BlockStorageFile) extractFinalResourceStatesFromMemory() (map[string]*ResourceLastState, error) {
+func (bsf *BlockStorageFile) extractFinalResourceStatesFromMemory() (map[string]*ResourceLastState, error) { //nolint:unparam // error return kept for interface compatibility
 	// Start with carried-over states from previous hour (if any)
 	finalStates := make(map[string]*ResourceLastState)
 	for key, state := range bsf.finalResourceStates {
@@ -584,9 +587,9 @@ func (bsf *BlockStorageFile) writeIndexSection() error {
 		}
 	}
 
-	stats.UniqueKinds = int32(len(uniqueKinds))       //nolint:gosec // safe conversion: count is reasonable
+	stats.UniqueKinds = int32(len(uniqueKinds))           //nolint:gosec // safe conversion: count is reasonable
 	stats.UniqueNamespaces = int32(len(uniqueNamespaces)) //nolint:gosec // safe conversion: count is reasonable
-	stats.UniqueGroups = int32(len(uniqueGroups))     //nolint:gosec // safe conversion: count is reasonable
+	stats.UniqueGroups = int32(len(uniqueGroups))         //nolint:gosec // safe conversion: count is reasonable
 
 	// Extract final resource states for consistent view across hour boundaries
 	finalResourceStates, err := bsf.extractFinalResourceStates()

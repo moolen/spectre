@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const podPhasePending = "pending"
+
 // InferErrorMessages extracts detailed error messages from resource data
 // Returns a slice of error strings describing what is wrong with the resource
 func InferErrorMessages(kind string, data json.RawMessage, status string) []string {
@@ -23,10 +25,10 @@ func InferErrorMessages(kind string, data json.RawMessage, status string) []stri
 		return nil
 	}
 
-	return inferResourceSpecificErrors(strings.ToLower(kind), obj, status)
+	return inferResourceSpecificErrors(strings.ToLower(kind), obj)
 }
 
-func inferResourceSpecificErrors(kind string, obj *resourceData, status string) []string {
+func inferResourceSpecificErrors(kind string, obj *resourceData) []string {
 	switch kind {
 	case "pod":
 		return inferPodErrors(obj)
@@ -73,9 +75,9 @@ func inferPodErrors(obj *resourceData) []string {
 			}
 		case issueTypeOOMKilled:
 			msg = fmt.Sprintf("OOMKilled (container: %s, exit code: %d)", issue.ContainerName, issue.ExitCode)
-		case "HighRestartCount":
+		case issueTypeHighRestartCount:
 			msg = fmt.Sprintf("High restart count (container: %s, restarts: %d)", issue.ContainerName, issue.RestartCount)
-		case "VeryHighRestartCount":
+		case issueTypeVeryHighRestartCount:
 			msg = fmt.Sprintf("Very high restart count (container: %s, restarts: %d)", issue.ContainerName, issue.RestartCount)
 		default:
 			msg = fmt.Sprintf("%s (container: %s)", issue.IssueType, issue.ContainerName)
@@ -86,7 +88,7 @@ func inferPodErrors(obj *resourceData) []string {
 	// Check pod phase
 	phase := strings.ToLower(obj.statusString("phase"))
 	switch phase {
-	case "pending":
+	case podPhasePending:
 		// Check for scheduling issues
 		conditions := obj.conditions()
 		if cond := findCondition(conditions, "PodScheduled"); cond != nil && cond.isFalse() {
@@ -332,7 +334,7 @@ func inferPVCErrors(obj *resourceData) []string {
 
 	phase := strings.ToLower(obj.statusString("phase"))
 	switch phase {
-	case "pending":
+	case podPhasePending:
 		// Check for specific reasons
 		conditions := obj.conditions()
 		if len(conditions) > 0 {

@@ -6,9 +6,11 @@ import (
 )
 
 const (
-	issueTypeCrashLoopBackOff = "CrashLoopBackOff"
-	issueTypeImagePullBackOff = "ImagePullBackOff"
-	issueTypeOOMKilled        = "OOMKilled"
+	issueTypeCrashLoopBackOff   = "CrashLoopBackOff"
+	issueTypeImagePullBackOff   = "ImagePullBackOff"
+	issueTypeOOMKilled          = "OOMKilled"
+	issueTypeHighRestartCount   = "HighRestartCount"
+	issueTypeVeryHighRestartCount = "VeryHighRestartCount"
 )
 
 // ContainerIssue represents a detected container-level problem
@@ -112,12 +114,12 @@ func inspectContainerStatusList(containerStatuses []any) []ContainerIssue {
 		// >5 restarts is Warning, >10 is higher impact
 		if restartCount > 5 {
 			impactScore := 0.20
-			issueType := "HighRestartCount"
+			issueType := issueTypeHighRestartCount
 			message := "Container has restarted multiple times"
 
 			if restartCount > 10 {
 				impactScore = 0.35
-				issueType = "VeryHighRestartCount"
+				issueType = issueTypeVeryHighRestartCount
 			}
 
 			// Only add this if we haven't already detected a more specific issue

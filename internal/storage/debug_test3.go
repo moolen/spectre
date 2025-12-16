@@ -13,8 +13,8 @@ func TestDebugStateCarryover(t *testing.T) {
 
 	storage, _ := New(tmpDir, 1024*1024)
 	event1 := createTestEvent("long-lived-pod", "default", "Pod", baseTime.UnixNano())
-	storage.WriteEvent(event1)
-	storage.Close()
+	_ = storage.WriteEvent(event1)
+	_ = storage.Close()
 
 	t.Logf("Hour 1: Created long-lived-pod")
 
@@ -22,7 +22,7 @@ func TestDebugStateCarryover(t *testing.T) {
 	files, _ := storage.getStorageFiles()
 	reader, _ := NewBlockReader(files[0])
 	fileData, _ := reader.ReadFile()
-	reader.Close()
+	_ = reader.Close()
 	t.Logf("Hour 1 file: %d final states", len(fileData.IndexSection.FinalResourceStates))
 	for key := range fileData.IndexSection.FinalResourceStates {
 		t.Logf("  - %s", key)
@@ -31,8 +31,8 @@ func TestDebugStateCarryover(t *testing.T) {
 	// Hour 2: Create unrelated-pod
 	storage, _ = New(tmpDir, 1024*1024)
 	event2 := createTestEvent("unrelated-pod", "default", "Pod", baseTime.Add(1*time.Hour).UnixNano())
-	storage.WriteEvent(event2)
-	storage.Close()
+	_ = storage.WriteEvent(event2)
+	_ = storage.Close()
 
 	t.Logf("\nHour 2: Created unrelated-pod")
 
@@ -40,7 +40,7 @@ func TestDebugStateCarryover(t *testing.T) {
 	files, _ = storage.getStorageFiles()
 	reader, _ = NewBlockReader(files[len(files)-1])
 	fileData, _ = reader.ReadFile()
-	reader.Close()
+	_ = reader.Close()
 	t.Logf("Hour 2 file: %d final states", len(fileData.IndexSection.FinalResourceStates))
 	for key := range fileData.IndexSection.FinalResourceStates {
 		t.Logf("  - %s", key)
@@ -49,8 +49,8 @@ func TestDebugStateCarryover(t *testing.T) {
 	// Hour 3: Create another-pod
 	storage, _ = New(tmpDir, 1024*1024)
 	event3 := createTestEvent("another-pod", "default", "Pod", baseTime.Add(2*time.Hour).UnixNano())
-	storage.WriteEvent(event3)
-	storage.Close()
+	_ = storage.WriteEvent(event3)
+	_ = storage.Close()
 
 	t.Logf("\nHour 3: Created another-pod")
 
@@ -58,7 +58,7 @@ func TestDebugStateCarryover(t *testing.T) {
 	files, _ = storage.getStorageFiles()
 	reader, _ = NewBlockReader(files[len(files)-1])
 	fileData, _ = reader.ReadFile()
-	reader.Close()
+	_ = reader.Close()
 	t.Logf("Hour 3 file: %d final states", len(fileData.IndexSection.FinalResourceStates))
 	for key := range fileData.IndexSection.FinalResourceStates {
 		t.Logf("  - %s", key)
