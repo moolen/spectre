@@ -225,7 +225,7 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 			continue
 		}
 		fileData, err := reader.ReadFile()
-		reader.Close()
+		_ = reader.Close()
 		if err != nil {
 			// Skip files with errors
 			continue
@@ -782,71 +782,6 @@ func (qe *QueryExecutor) getStateSnapshotEventsWithDeleted(finalStates map[strin
 
 		// Skip resources that were deleted in ANY file
 		if deletedResources[resourceKey] {
-			continue
-		}
-
-		// Create synthetic event from state snapshot
-		// Use a special marker timestamp (the state timestamp, but ensure it's within query range)
-		eventTimestamp := state.Timestamp
-
-		// Only include if timestamp is at or before query end time
-		// This ensures we show consistent view of resources that existed at query time
-		queryEndNs := query.EndTimestamp * 1e9
-		if eventTimestamp > queryEndNs {
-			// State happened after query range - skip it
-			continue
-		}
-
-		// Parse the resource key back to metadata
-		parts := strings.Split(resourceKey, "/")
-		if len(parts) != 5 {
-			qe.logger.Warn("Invalid resource key format: %s", resourceKey)
-			continue
-		}
-
-		resource := models.ResourceMetadata{
-			Group:     parts[0],
-			Version:   parts[1],
-			Kind:      parts[2],
-			Namespace: parts[3],
-			Name:      parts[4],
-			UID:       state.UID,
-		}
-
-		// Check if resource matches filters
-		if !resource.Matches(query.Filters) {
-			continue
-		}
-
-		// Create synthetic event from state
-		event := models.Event{
-			ID:        fmt.Sprintf("state-%s-%d", resourceKey, state.Timestamp),
-			Timestamp: eventTimestamp,
-			Type:      models.EventType(state.EventType),
-			Resource:  resource,
-			Data:      state.ResourceData,
-		}
-
-		stateEvents = append(stateEvents, event)
-	}
-
-	return stateEvents
-}
-
-// getStateSnapshotEvents converts final resource states to synthetic events
-// for resources that don't have actual events in the query range
-func (qe *QueryExecutor) getStateSnapshotEvents(finalStates map[string]*ResourceLastState,
-	query *models.QueryRequest, resourcesWithEvents map[string]bool) []models.Event {
-	stateEvents := make([]models.Event, 0, len(finalStates))
-
-	for resourceKey, state := range finalStates {
-		// Skip if this resource already has events in the query results
-		if resourcesWithEvents[resourceKey] {
-			continue
-		}
-
-		// Skip deleted resources - they shouldn't appear in the consistent view
-		if state.EventType == string(models.EventTypeDelete) {
 			continue
 		}
 

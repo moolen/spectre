@@ -3,14 +3,15 @@ package commands
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/mcp"
-	httpTransport "github.com/moolen/spectre/internal/mcp/transport/http"
-	stdioTransport "github.com/moolen/spectre/internal/mcp/transport/stdio"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +30,9 @@ Spectre functionality as MCP tools for AI assistants.
 
 Supports two transport modes:
   - http: HTTP server mode (default, suitable for independent deployment)
-  - stdio: Standard input/output mode (for subprocess-based MCP clients)`,
+  - stdio: Standard input/output mode (for subprocess-based MCP clients)
+
+HTTP mode includes a /health endpoint for health checks.`,
 	Run: runMCP,
 }
 
@@ -49,102 +52,107 @@ func runMCP(cmd *cobra.Command, args []string) {
 	logger.Info("Starting Spectre MCP Server (transport: %s)", transportType)
 	logger.Info("Connecting to Spectre API at %s", spectreURL)
 
-	// Create MCP server
-	server, err := mcp.NewMCPServer(spectreURL)
+	// Create Spectre MCP server
+	spectreServer, err := mcp.NewSpectreServer(spectreURL, Version)
 	if err != nil {
 		logger.Fatal("Failed to create MCP server: %v", err)
 	}
 
 	logger.Info("Successfully connected to Spectre API")
 
-	// Create transport based on type
-	switch transportType {
-	case "http":
-		runHTTPTransport(server, logger)
-	case "stdio":
-		runStdioTransport(server, logger)
-	default:
-		logger.Fatal("Invalid transport type: %s (must be 'http' or 'stdio')", transportType)
-	}
-}
+	// Get the underlying mcp-go server
+	mcpServer := spectreServer.GetMCPServer()
 
-func runHTTPTransport(server *mcp.MCPServer, logger *logging.Logger) {
-	// Ensure endpoint path starts with /
-	endpointPath := mcpEndpointPath
-	if endpointPath == "" {
-		endpointPath = "/mcp"
-	} else if endpointPath[0] != '/' {
-		endpointPath = "/" + endpointPath
-	}
-
-	// Create HTTP transport
-	transport := httpTransport.NewTransport(httpAddr, server, Version, endpointPath)
-	logger.Info("MCP endpoint configured at: %s", endpointPath)
-
-	// Handle graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	// Create context that cancels on signal
+	// Set up signal handling
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start server in a goroutine
-	go func() {
-		if err := transport.Start(ctx); err != nil {
-			logger.Fatal("Failed to start HTTP transport: %v", err)
-		}
-	}()
-
-	// Wait for shutdown signal
-	sig := <-sigCh
-	logger.Info("Received signal: %v, shutting down gracefully...", sig)
-
-	// Cancel context to trigger shutdown
-	cancel()
-
-	// Stop the transport
-	if err := transport.Stop(); err != nil {
-		logger.Error("Error during shutdown: %v", err)
-	}
-
-	logger.Info("Server stopped")
-}
-
-func runStdioTransport(server *mcp.MCPServer, logger *logging.Logger) {
-	// Create stdio transport
-	transport := stdioTransport.NewTransport(server, Version)
-
-	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Create context that cancels on signal
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Start transport in a goroutine
-	errCh := make(chan error, 1)
 	go func() {
-		if err := transport.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			errCh <- err
-		}
-	}()
-
-	// Wait for shutdown signal or error
-	select {
-	case sig := <-sigCh:
+		sig := <-sigCh
 		logger.Info("Received signal: %v, shutting down gracefully...", sig)
 		cancel()
-	case err := <-errCh:
-		if err != nil {
+	}()
+
+	// Start appropriate transport
+	switch transportType {
+	case "http":
+		// Ensure endpoint path starts with /
+		endpointPath := mcpEndpointPath
+		if endpointPath == "" {
+			endpointPath = "/mcp"
+		} else if endpointPath[0] != '/' {
+			endpointPath = "/" + endpointPath
+		}
+
+		logger.Info("Starting HTTP server on %s (endpoint: %s)", httpAddr, endpointPath)
+
+		// Create custom mux with health endpoint
+		mux := http.NewServeMux()
+
+		// Add health endpoint
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("ok"))
+		})
+
+		// Create StreamableHTTP server with stateless session management
+		// This is important for compatibility with clients that don't manage sessions
+		streamableServer := server.NewStreamableHTTPServer(
+			mcpServer,
+			server.WithEndpointPath(endpointPath),
+			server.WithStateLess(true), // Enable stateless mode for backward compatibility
+		)
+
+		// Register MCP handler at the endpoint path
+		mux.Handle(endpointPath, streamableServer)
+
+		// Create HTTP server with our custom mux
+		httpSrv := &http.Server{
+			Addr:              httpAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second, // Prevent Slowloris attacks
+		}
+
+		// Provide custom HTTP server to streamable server
+		// (we need to recreate it with the custom server option)
+		streamableServer = server.NewStreamableHTTPServer(
+			mcpServer,
+			server.WithEndpointPath(endpointPath),
+			server.WithStateLess(true), // Enable stateless mode
+			server.WithStreamableHTTPServer(httpSrv),
+		)
+
+		// Start server in goroutine
+		errCh := make(chan error, 1)
+		go func() {
+			if err := streamableServer.Start(httpAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- err
+			}
+		}()
+
+		// Wait for shutdown signal or error
+		select {
+		case <-ctx.Done():
+			logger.Info("Shutting down HTTP server...")
+			if err := streamableServer.Shutdown(context.Background()); err != nil {
+				logger.Error("Error during shutdown: %v", err)
+			}
+		case err := <-errCh:
+			logger.Error("Server error: %v", err)
+		}
+
+	case "stdio":
+		logger.Info("Starting stdio transport")
+		if err := server.ServeStdio(mcpServer); err != nil {
 			logger.Error("Stdio transport error: %v", err)
 		}
-	}
 
-	// Stop the transport
-	if err := transport.Stop(); err != nil {
-		logger.Error("Error during shutdown: %v", err)
+	default:
+		logger.Fatal("Invalid transport type: %s (must be 'http' or 'stdio')", transportType)
 	}
 
 	logger.Info("Server stopped")

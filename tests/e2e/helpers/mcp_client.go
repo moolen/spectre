@@ -222,9 +222,16 @@ func (m *MCPClient) ListPrompts(ctx context.Context) ([]PromptDefinition, error)
 
 // GetPrompt gets a prompt by name with the given arguments.
 func (m *MCPClient) GetPrompt(ctx context.Context, promptName string, args map[string]interface{}) (map[string]interface{}, error) {
+	// Convert all argument values to strings as required by MCP protocol
+	// (mcp-go's GetPromptParams expects map[string]string)
+	stringArgs := make(map[string]string)
+	for k, v := range args {
+		stringArgs[k] = fmt.Sprintf("%v", v)
+	}
+
 	params := map[string]interface{}{
 		"name":      promptName,
-		"arguments": args,
+		"arguments": stringArgs,
 	}
 
 	resp, err := m.sendRequest(ctx, "prompts/get", params)

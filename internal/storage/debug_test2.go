@@ -69,7 +69,7 @@ func TestDebugMultipleEvents(t *testing.T) {
 		t.Logf("File %d: %s", i, file)
 		reader, _ := NewBlockReader(file)
 		fileData, _ := reader.ReadFile()
-		reader.Close()
+		_ = reader.Close()
 		t.Logf("  - Events: %d", fileData.IndexSection.Statistics.TotalEvents)
 		t.Logf("  - Final resource states: %d", len(fileData.IndexSection.FinalResourceStates))
 		for key := range fileData.IndexSection.FinalResourceStates {
