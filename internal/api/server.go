@@ -19,6 +19,15 @@ type ReadinessChecker interface {
 	IsReady() bool
 }
 
+// NoOpReadinessChecker is a ReadinessChecker that always returns true.
+// Use this when no readiness checking is needed (e.g., when watcher is disabled).
+type NoOpReadinessChecker struct{}
+
+// IsReady always returns true for the no-op checker.
+func (n *NoOpReadinessChecker) IsReady() bool {
+	return true
+}
+
 // Server handles HTTP API requests
 type Server struct {
 	port             int
@@ -29,16 +38,25 @@ type Server struct {
 	router           *http.ServeMux
 	readinessChecker ReadinessChecker
 	demoMode         bool
-	tracingProvider  interface{ GetTracer(string) trace.Tracer; IsEnabled() bool }
+	tracingProvider  interface {
+		GetTracer(string) trace.Tracer
+		IsEnabled() bool
+	}
 }
 
 // New creates a new API server
-func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecker, tracingProvider interface{ GetTracer(string) trace.Tracer; IsEnabled() bool }) *Server {
+func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecker, tracingProvider interface {
+	GetTracer(string) trace.Tracer
+	IsEnabled() bool
+}) *Server {
 	return NewWithStorage(port, queryExecutor, nil, readinessChecker, false, tracingProvider)
 }
 
 // NewWithStorage creates a new API server with storage export/import capabilities
-func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker, demoMode bool, tracingProvider interface{ GetTracer(string) trace.Tracer; IsEnabled() bool }) *Server {
+func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker, demoMode bool, tracingProvider interface {
+	GetTracer(string) trace.Tracer
+	IsEnabled() bool
+}) *Server {
 	s := &Server{
 		port:             port,
 		logger:           logging.GetLogger("api"),
