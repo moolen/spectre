@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/mcp/client"
 	"github.com/moolen/spectre/internal/storage"
 )
@@ -56,8 +57,8 @@ type ResourceChangeSummary struct {
 	ErrorEvents       int                      `json:"error_events"`
 	WarningEvents     int                      `json:"warning_events"`
 	StatusTransitions []StatusTransition       `json:"status_transitions,omitempty"`
-	ContainerIssues   []storage.ContainerIssue `json:"container_issues,omitempty"` // Container-level problems
-	EventPatterns     []storage.EventPattern   `json:"event_patterns,omitempty"`   // Detected event patterns
+	ContainerIssues   []analyzer.ContainerIssue `json:"container_issues,omitempty"` // Container-level problems
+	EventPatterns     []storage.EventPattern    `json:"event_patterns,omitempty"`   // Detected event patterns
 }
 
 // StatusTransition represents a change in resource status
@@ -146,7 +147,7 @@ func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, 
 			Name:              resource.Name,
 			Changes:           make([]ChangeDetail, 0),
 			StatusTransitions: make([]StatusTransition, 0),
-			ContainerIssues:   make([]storage.ContainerIssue, 0),
+			ContainerIssues:   make([]analyzer.ContainerIssue, 0),
 			EventPatterns:     make([]storage.EventPattern, 0),
 		}
 
@@ -189,7 +190,7 @@ func (t *ResourceChangesTool) analyzeChanges(response *client.TimelineResponse, 
 
 			// For Pod resources, check for container issues in the latest segment
 			if strings.EqualFold(resource.Kind, "Pod") && segment.ResourceData != nil {
-				issues, err := storage.GetContainerIssuesFromJSON(segment.ResourceData)
+				issues, err := analyzer.GetContainerIssuesFromJSON(segment.ResourceData)
 				if err == nil && len(issues) > 0 {
 					// Only keep the most recent container issues
 					summary.ContainerIssues = issues

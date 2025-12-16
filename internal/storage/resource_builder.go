@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	corev1 "k8s.io/api/core/v1"
@@ -104,7 +105,7 @@ func (rb *ResourceBuilder) BuildStatusSegments(resourceUID string, allEvents []m
 		segment := models.StatusSegment{
 			StartTime:    event.Timestamp / 1e9, // Convert to seconds
 			EndTime:      endTime / 1e9,
-			Status:       InferStatusFromResource(event.Resource.Kind, event.Data, string(event.Type)),
+			Status:       analyzer.InferStatusFromResource(event.Resource.Kind, event.Data, string(event.Type)),
 			Message:      rb.generateMessage(event),
 			ResourceData: event.Data,
 		}
