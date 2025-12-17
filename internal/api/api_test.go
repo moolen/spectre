@@ -37,6 +37,10 @@ func (m *mockQueryExecutor) Execute(ctx context.Context, q *models.QueryRequest)
 	}, nil
 }
 
+func (m *mockQueryExecutor) SetSharedCache(cache interface{}) {
+	// Mock doesn't need to implement caching
+}
+
 // mockReadinessChecker is a mock implementation of ReadinessChecker
 type mockReadinessChecker struct {
 	ready bool

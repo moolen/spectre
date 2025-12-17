@@ -160,6 +160,7 @@ type CacheStats struct {
 	Evictions           uint64
 	BytesDecompressed   uint64
 	HitRate             float64
+	Invalidations       uint64
 }
 
 // Stats returns cache statistics

@@ -165,3 +165,8 @@ func (d *DemoQueryExecutor) Execute(ctx context.Context, query *models.QueryRequ
 		FilesSearched:   1,
 	}, nil
 }
+
+// SetSharedCache is a no-op for demo executor (implements QueryExecutor interface)
+func (d *DemoQueryExecutor) SetSharedCache(cache interface{}) {
+	// Demo executor doesn't use caching
+}

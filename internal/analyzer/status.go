@@ -28,6 +28,20 @@ func InferStatusFromResource(kind string, data json.RawMessage, eventType string
 		return inferStatusFromEventType(eventType)
 	}
 
+	return InferStatusFromParsedData(kind, obj, eventType)
+}
+
+// InferStatusFromParsedData inspects pre-parsed resource data and produces a best-effort status.
+// This is an optimization to avoid re-parsing the same JSON multiple times.
+func InferStatusFromParsedData(kind string, obj *ResourceData, eventType string) string {
+	if strings.EqualFold(eventType, "DELETE") {
+		return resourceStatusTerminating
+	}
+
+	if obj == nil {
+		return inferStatusFromEventType(eventType)
+	}
+
 	if obj.isDeleting() {
 		return resourceStatusTerminating
 	}
@@ -365,16 +379,26 @@ func inferStatusFromEventType(eventType string) string {
 	}
 }
 
-type resourceData struct {
+// ResourceData represents parsed Kubernetes resource data for status inference.
+// This type is exported to allow caching of parsed data to avoid repeated JSON unmarshaling.
+type ResourceData struct {
 	object map[string]any
 }
 
-func newResourceData(data json.RawMessage) (*resourceData, error) {
+type resourceData = ResourceData // Alias for backward compatibility
+
+func newResourceData(data json.RawMessage) (*ResourceData, error) {
 	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return nil, err
 	}
-	return &resourceData{object: obj}, nil
+	return &ResourceData{object: obj}, nil
+}
+
+// ParseResourceData parses resource JSON data into a ResourceData structure.
+// This is exported to allow caching of parsed data to avoid repeated unmarshaling.
+func ParseResourceData(data json.RawMessage) (*ResourceData, error) {
+	return newResourceData(data)
 }
 
 func (r *resourceData) status() map[string]any {
