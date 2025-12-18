@@ -1,29 +1,48 @@
-.PHONY: help build build-ui build-mcp run test clean docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto
+.PHONY: help build build-ui build-mcp run test test-go test-ui test-e2e test-e2e-ui test-e2e-all clean docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto
 
 # Default target
 help:
 	@echo "Kubernetes Event Monitor - Available targets:"
+	@echo ""
+	@echo "Build:"
 	@echo "  build          - Build the application binary"
 	@echo "  build-ui       - Build the React UI"
 	@echo "  build-mcp      - Build the MCP server for Claude integration"
 	@echo "  proto          - Generate protobuf code"
+	@echo ""
+	@echo "Run:"
 	@echo "  run            - Run the application locally"
-	@echo "  test           - Run all tests"
+	@echo ""
+	@echo "Test:"
+	@echo "  test           - Run all tests (Go + UI)"
+	@echo "  test-go        - Run Go tests only"
+	@echo "  test-ui        - Run UI tests only"
+	@echo "  test-e2e       - Run e2e tests"
+	@echo "  test-e2e-ui    - Run UI e2e tests"
+	@echo "  test-e2e-all   - Run all e2e tests"
 	@echo "  test-unit      - Run unit tests only"
 	@echo "  test-integration - Run integration tests only"
 	@echo "  test-coverage  - Run tests with coverage report"
-	@echo "  clean          - Clean build artifacts and temporary files"
+	@echo ""
+	@echo "Code Quality:"
 	@echo "  lint           - Run linter (golangci-lint if available)"
 	@echo "  fmt            - Format code with gofmt"
 	@echo "  vet            - Run go vet"
+	@echo ""
+	@echo "Docker & Deployment:"
 	@echo "  docker-build   - Build Docker image"
 	@echo "  docker-run     - Run application in Docker"
 	@echo "  deploy         - Deploy to Kubernetes via Helm"
+	@echo ""
+	@echo "Helm:"
 	@echo "  helm-lint      - Lint Helm chart"
 	@echo "  helm-unittest  - Run Helm unit tests"
 	@echo "  helm-unittest-install - Install helm-unittest plugin"
 	@echo "  helm-test      - Run Helm tests (requires active k8s cluster)"
 	@echo "  helm-test-local - Create Kind cluster and run Helm tests locally"
+	@echo ""
+	@echo "Other:"
+	@echo "  clean          - Clean build artifacts and temporary files"
 	@echo "  watch          - Watch and rebuild on file changes (requires entr)"
 	@echo "  favicons       - Generate all favicon versions from favicon.svg"
 
@@ -58,10 +77,33 @@ run: build build-ui
 	@export KUBECONFIG=$(KUBECONFIG); \
 	$(BINARY_PATH) server
 
-# Run all tests
-test:
-	@echo "Running all tests..."
+# Run Go tests only
+test-go:
+	@echo "Running Go tests..."
 	@go test -v -cover -count 1 -timeout 30m ./...
+
+# Run UI tests only
+test-ui:
+	@echo "Running UI tests..."
+	@cd ui && npm ci --prefer-offline --no-audit --no-fund 2>/dev/null && npm run test
+
+# Run all tests (Go + UI)
+test: test-go test-ui
+	@echo "All tests completed successfully!"
+
+# Run e2e tests
+test-e2e:
+	@echo "Running e2e tests..."
+	@go test -v -timeout 60m ./tests/e2e/...
+
+# Run UI e2e tests
+test-e2e-ui:
+	@echo "Running UI e2e tests..."
+	@go test -v -timeout 60m ./tests/e2e/ui/...
+
+# Run all e2e tests
+test-e2e-all: test-e2e test-e2e-ui
+	@echo "All e2e tests completed!"
 
 # Clean build artifacts
 clean:
@@ -136,6 +178,10 @@ deps-verify:
 proto:
 	@echo "Generating protobuf code..."
 	@protoc --go_out=. --go_opt=paths=source_relative internal/storage/index.proto
+	@protoc --go_out=. --go_opt=module=github.com/moolen/spectre internal/models/event.proto
+	@protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		internal/api/proto/timeline.proto
 	@echo "Protobuf code generated successfully"
 
 # Generate favicons from SVG source
@@ -147,7 +193,7 @@ favicons:
 # Install helm-unittest plugin
 helm-unittest-install:
 	@echo "Installing helm-unittest plugin..."
-	@helm plugin list | grep -q unittest || helm plugin install https://github.com/helm-unittest/helm-unittest.git
+	@helm plugin list | grep -q unittest || helm plugin install https://github.com/helm-unittest/helm-unittest.git --version v1.0.2
 	@echo "helm-unittest plugin installed"
 
 # Run helm unit tests

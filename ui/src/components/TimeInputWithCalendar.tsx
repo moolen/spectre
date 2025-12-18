@@ -4,6 +4,7 @@ interface TimeInputWithCalendarProps {
   value: string;
   onChange: (value: string) => void;
   onDateSelected?: (date: Date) => void;
+  onEnter?: () => void;
   placeholder?: string;
   label?: string;
   className?: string;
@@ -13,6 +14,7 @@ export const TimeInputWithCalendar: React.FC<TimeInputWithCalendarProps> = ({
   value,
   onChange,
   onDateSelected,
+  onEnter,
   placeholder = 'e.g., now, 2h ago, 2024-01-01',
   label,
   className = '',
@@ -98,6 +100,13 @@ export const TimeInputWithCalendar: React.FC<TimeInputWithCalendarProps> = ({
     return formatDateTimeLocal(new Date());
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && onEnter) {
+      e.preventDefault();
+      onEnter();
+    }
+  };
+
   return (
     <div ref={containerRef} className="relative">
       {label && (
@@ -110,6 +119,7 @@ export const TimeInputWithCalendar: React.FC<TimeInputWithCalendarProps> = ({
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className={`w-full px-3 py-1.5 pr-10 text-sm border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 ${className}`}
         />

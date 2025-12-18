@@ -50,7 +50,7 @@ func (s *MCPHTTPStage) mcp_server_is_deployed() *MCPHTTPStage {
 	err := helpers.UpdateHelmRelease(s.testCtx, map[string]interface{}{
 		"mcp": map[string]interface{}{
 			"enabled":  true,
-			"httpAddr": ":8081",
+			"httpAddr": ":8082",
 		},
 	})
 	s.require.NoError(err, "failed to update Helm release with MCP enabled")
@@ -65,7 +65,7 @@ func (s *MCPHTTPStage) mcp_server_is_deployed() *MCPHTTPStage {
 func (s *MCPHTTPStage) mcp_client_is_connected() *MCPHTTPStage {
 	// Create port-forward for MCP server
 	serviceName := s.testCtx.ReleaseName + "-spectre"
-	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetKubeConfig(), s.testCtx.Namespace, serviceName, 8081)
+	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetKubeConfig(), s.testCtx.Namespace, serviceName, 8082)
 	s.require.NoError(err, "failed to create MCP port-forward")
 
 	err = mcpPortForward.WaitForReady(30 * time.Second)

@@ -21,6 +21,12 @@ type QueryResult struct {
 
 	// FilesSearched is the number of hourly files searched
 	FilesSearched int32 `json:"filesSearched"`
+
+	// QueryStartTime is the start timestamp of the query in nanoseconds (for segment extension)
+	QueryStartTime int64 `json:"-"`
+
+	// QueryEndTime is the end timestamp of the query in nanoseconds (for segment extension)
+	QueryEndTime int64 `json:"-"`
 }
 
 // Validate checks that the query result is well-formed

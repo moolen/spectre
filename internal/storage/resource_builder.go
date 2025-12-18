@@ -27,6 +27,16 @@ func NewResourceBuilder() *ResourceBuilder {
 // BuildResourcesFromEvents groups events by resource UID and creates Resource objects
 // Optimized to pre-index events by UID, reducing O(n×m) to O(n+m) complexity
 func (rb *ResourceBuilder) BuildResourcesFromEvents(events []models.Event) map[string]*models.Resource {
+	return rb.BuildResourcesFromEventsWithQueryTime(events, 0)
+}
+
+func (rb *ResourceBuilder) BuildResourcesFromEventsWithQueryTime(events []models.Event, queryStartTimeNs int64) map[string]*models.Resource {
+	// Temporary logging to debug gap fix
+	rb.logger.Info("BuildResourcesFromEventsWithQueryTime called: events=%d, queryStartTimeNs=%d", len(events), queryStartTimeNs)
+	// Log first 3 event IDs to check for state- prefix
+	for i := 0; i < 3 && i < len(events); i++ {
+		rb.logger.Info("Event %d: id=%s, timestamp=%d", i, events[i].ID, events[i].Timestamp/1e9)
+	}
 	resources := make(map[string]*models.Resource)
 
 	// Filter out Kubernetes Event resources; they will be processed separately
@@ -53,7 +63,7 @@ func (rb *ResourceBuilder) BuildResourcesFromEvents(events []models.Event) map[s
 		resource := rb.CreateResource(resourceEvents[0])
 
 		// Build status segments using pre-filtered events - O(k) not O(n)!
-		resource.StatusSegments = rb.BuildStatusSegmentsFromEvents(resourceEvents)
+		resource.StatusSegments = rb.BuildStatusSegmentsFromEventsWithQueryTime(resourceEvents, queryStartTimeNs)
 
 		// Mark as pre-existing if the first event is a state snapshot
 		if len(resource.StatusSegments) > 0 {
@@ -97,6 +107,10 @@ func (rb *ResourceBuilder) CreateResource(event models.Event) *models.Resource {
 // This is the optimized version that works with pre-indexed events
 // It caches parsed resource data to avoid repeated JSON unmarshaling (Performance Optimization Phase 4)
 func (rb *ResourceBuilder) BuildStatusSegmentsFromEvents(resourceEvents []models.Event) []models.StatusSegment {
+	return rb.BuildStatusSegmentsFromEventsWithQueryTime(resourceEvents, 0)
+}
+
+func (rb *ResourceBuilder) BuildStatusSegmentsFromEventsWithQueryTime(resourceEvents []models.Event, queryStartTimeNs int64) []models.StatusSegment {
 	if len(resourceEvents) == 0 {
 		return nil
 	}
@@ -112,6 +126,55 @@ func (rb *ResourceBuilder) BuildStatusSegmentsFromEvents(resourceEvents []models
 	// This reduces 5,707 unmarshal operations (439 resources × 13 segments) to ~6,000 (one per event)
 	// Expected savings: ~0.60s (17% total CPU) based on CPU profile analysis
 	resourceDataCache := make(map[string]*analyzer.ResourceData, len(resourceEvents))
+
+	// Check if we need to create a leading segment for pre-existing resources
+	// This handles the case where a resource existed before the query window
+	// but the first event is after the query start time
+	var leadingSegmentNeeded bool
+	var leadingSegmentStatus string
+	var leadingSegmentMessage string
+	var leadingSegmentData json.RawMessage
+
+	if queryStartTimeNs > 0 && len(resourceEvents) > 0 {
+		firstEvent := resourceEvents[0]
+		// If first event is a state snapshot (pre-existing) and occurs after query start,
+		// we need a leading segment from query start to first event
+		if strings.HasPrefix(firstEvent.ID, "state-") && firstEvent.Timestamp > queryStartTimeNs {
+			leadingSegmentNeeded = true
+			leadingSegmentData = firstEvent.Data
+
+			// Determine the status for the leading segment
+			parsedData, err := analyzer.ParseResourceData(firstEvent.Data)
+			if err == nil {
+				resourceDataCache[firstEvent.ID] = parsedData
+				leadingSegmentStatus = analyzer.InferStatusFromParsedData(firstEvent.Resource.Kind, parsedData, string(firstEvent.Type))
+			} else {
+				leadingSegmentStatus = analyzer.InferStatusFromResource(firstEvent.Resource.Kind, firstEvent.Data, string(firstEvent.Type))
+			}
+			leadingSegmentMessage = "Resource existed before query window"
+			
+			// Debug logging to verify the fix is working
+			logging.GetLogger("resource_builder").Debug(
+				"Creating leading segment: resource=%s/%s, queryStart=%d, firstEvent=%d, gap=%ds",
+				firstEvent.Resource.Kind, firstEvent.Resource.Name,
+				queryStartTimeNs/1e9, firstEvent.Timestamp/1e9,
+				(firstEvent.Timestamp-queryStartTimeNs)/1e9,
+			)
+		}
+	}
+
+	// Create leading segment if needed
+	if leadingSegmentNeeded {
+		firstEventTime := resourceEvents[0].Timestamp
+		leadingSegment := models.StatusSegment{
+			StartTime:    queryStartTimeNs / 1e9, // Convert to seconds
+			EndTime:      firstEventTime / 1e9,
+			Status:       leadingSegmentStatus,
+			Message:      leadingSegmentMessage,
+			ResourceData: leadingSegmentData,
+		}
+		segments = append(segments, leadingSegment)
+	}
 
 	for i, event := range resourceEvents {
 		var endTime int64
@@ -149,7 +212,44 @@ func (rb *ResourceBuilder) BuildStatusSegmentsFromEvents(resourceEvents []models
 		segments = append(segments, segment)
 	}
 
+	// Merge consecutive segments with the same status
+	//return rb.mergeConsecutiveSegments(segments)
 	return segments
+}
+
+// mergeConsecutiveSegments combines adjacent segments with identical status
+// This prevents visual clutter in the timeline when multiple events don't change the resource status
+func (rb *ResourceBuilder) mergeConsecutiveSegments(segments []models.StatusSegment) []models.StatusSegment {
+	if len(segments) <= 1 {
+		return segments
+	}
+
+	merged := make([]models.StatusSegment, 0, len(segments))
+	current := segments[0]
+
+	for i := 1; i < len(segments); i++ {
+		next := segments[i]
+
+		// If status is the same, extend the current segment
+		if current.Status == next.Status {
+			// Keep the first segment's start time and resource data
+			// Update the end time to encompass the next segment
+			current.EndTime = next.EndTime
+			// Optionally update message if the next one is more informative
+			if next.Message != "" && len(next.Message) > len(current.Message) {
+				current.Message = next.Message
+			}
+		} else {
+			// Status changed, save current segment and start a new one
+			merged = append(merged, current)
+			current = next
+		}
+	}
+
+	// Don't forget the last segment
+	merged = append(merged, current)
+
+	return merged
 }
 
 // BuildStatusSegments derives status segments from event timeline

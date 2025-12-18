@@ -9,6 +9,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -310,4 +311,29 @@ func (k *K8sClient) UpdateConfigMap(ctx context.Context, namespace, name string,
 
 	k.t.Logf("✓ ConfigMap updated: %s/%s", namespace, name)
 	return nil
+}
+
+// WaitForNamespaceDeleted waits for a namespace to be fully deleted
+func (k *K8sClient) WaitForNamespaceDeleted(ctx context.Context, namespace string, timeout time.Duration) error {
+	k.t.Helper()
+	
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for namespace %s to be deleted", namespace)
+		case <-ticker.C:
+			_, err := k.Clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				k.t.Logf("✓ Namespace deleted: %s", namespace)
+				return nil
+			}
+			// Continue waiting
+		}
+	}
 }

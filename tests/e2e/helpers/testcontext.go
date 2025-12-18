@@ -33,6 +33,12 @@ var (
 	builtImages = make(map[string]bool)
 	// builtImagesMutex protects access to builtImages map
 	builtImagesMutex sync.RWMutex
+
+	// cachedHelmValues stores Helm values loaded once in TestMain
+	cachedHelmValues   map[string]interface{}
+	cachedImageRef     string
+	cachedValuesMutex  sync.RWMutex
+	helmValuesLoaded   bool
 )
 
 // TestContext bundles shared infrastructure needed by scenario tests.
@@ -72,13 +78,13 @@ func (tc *TestContext) ReconnectPortForward() error {
 		}
 	}
 
-	// Create a new port-forward
+	// Create new port-forward
 	serviceName := fmt.Sprintf("%s-spectre", tc.ReleaseName)
+
 	portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetKubeConfig(), tc.Namespace, serviceName, defaultServicePort)
 	if err != nil {
 		return fmt.Errorf("failed to create new port-forward: %w", err)
 	}
-
 	if err := portForwarder.WaitForReady(30 * time.Second); err != nil {
 		return fmt.Errorf("service not reachable via new port-forward: %w", err)
 	}
@@ -90,38 +96,68 @@ func (tc *TestContext) ReconnectPortForward() error {
 	return nil
 }
 
-// SetupE2ETest provisions an isolated Kind cluster, deploys the app via Helm, and
-// returns a fully configured test context for scenarios to build upon.
+// SetupE2ETest provisions test infrastructure using the shared Kind cluster.
+// Each test gets its own unique namespace for isolation.
 func SetupE2ETest(t *testing.T) *TestContext {
 	t.Helper()
 
-	clusterName := newClusterName(t.Name())
-	testCluster, err := CreateKindCluster(t, clusterName)
-	if err != nil {
-		t.Fatalf("failed to create Kind cluster: %v", err)
-	}
+	// Get shared cluster from package-level variable
+	// This will be set by TestMain in shared_cluster.go
+	sharedCluster := getSharedCluster(t)
+
+	// Create unique namespace for this test
+	namespace := fmt.Sprintf("test-%s-%06d", 
+		sanitizeName(t.Name()), 
+		time.Now().UnixNano()%1_000_000)
+	
+	releaseName := buildReleaseName(namespace)
 
 	ctx := &TestContext{
 		t:           t,
-		Cluster:     testCluster,
-		Namespace:   defaultNamespace,
-		ReleaseName: buildReleaseName(clusterName),
+		Cluster:     sharedCluster,
+		Namespace:   namespace,
+		ReleaseName: releaseName,
 	}
 
+	// Cleanup: Delete namespace (NOT cluster!)
 	ctx.cleanupFn = func() {
+		if ctx.APIClient != nil {
+			if err := ctx.APIClient.Close(); err != nil {
+				t.Logf("Warning: failed to close API client: %v", err)
+			}
+		}
 		if ctx.PortForward != nil {
 			if err := ctx.PortForward.Stop(); err != nil {
 				t.Logf("Warning: failed to stop port-forward: %v", err)
 			}
 		}
-		if ctx.Cluster != nil {
-			if err := ctx.Cluster.Delete(); err != nil {
-				t.Logf("Warning: failed to delete Kind cluster: %v", err)
+
+		// Delete namespace (cascading delete of all resources)
+		deleteCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		if ctx.K8sClient != nil {
+			// Uninstall Helm release first
+			if err := uninstallHelmRelease(t, sharedCluster.GetKubeConfig(), namespace, releaseName); err != nil {
+				t.Logf("Warning: failed to uninstall Helm release: %v", err)
+			}
+
+			// Delete namespace
+			if err := ctx.K8sClient.DeleteNamespace(deleteCtx, namespace); err != nil {
+				t.Logf("Warning: failed to delete namespace: %v", err)
+			} else {
+				// Wait for namespace deletion
+				if err := ctx.K8sClient.WaitForNamespaceDeleted(deleteCtx, namespace, 90*time.Second); err != nil {
+					t.Logf("Warning: timeout waiting for namespace deletion: %v", err)
+				} else {
+					t.Logf("✓ Test namespace cleaned up: %s", namespace)
+				}
 			}
 		}
 	}
 
-	k8sClient, err := NewK8sClient(t, testCluster.GetKubeConfig())
+	// Setup K8s client
+	k8sClient, err := NewK8sClient(t, sharedCluster.GetKubeConfig())
 	if err != nil {
 		ctx.Cleanup()
 		t.Fatalf("failed to create Kubernetes client: %v", err)
@@ -131,53 +167,58 @@ func SetupE2ETest(t *testing.T) *TestContext {
 	setupCtx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 
-	if err := ensureNamespace(setupCtx, k8sClient, ctx.Namespace); err != nil {
+	// Create test namespace
+	t.Logf("Creating test namespace: %s", namespace)
+	if err := k8sClient.CreateNamespace(setupCtx, namespace); err != nil {
 		ctx.Cleanup()
-		t.Fatalf("failed to ensure namespace %s: %v", ctx.Namespace, err)
+		t.Fatalf("failed to create namespace: %v", err)
 	}
 
-	if err := k8sClient.WaitForStorageClass(setupCtx, "standard", 30*time.Second); err != nil {
-		ctx.Cleanup()
-		t.Fatalf("failed to wait for storage class: %v", err)
-	}
-
-	values, imageRef, err := loadHelmValues()
+	// Get cached Helm values (loaded once in TestMain)
+	values, _, err := getCachedHelmValues()
 	if err != nil {
-		ctx.Cleanup()
-		t.Fatalf("failed to load Helm values: %v", err)
+		// Fallback to loading if not cached
+		values, _, err = loadHelmValues()
+		if err != nil {
+			ctx.Cleanup()
+			t.Fatalf("failed to load Helm values: %v", err)
+		}
 	}
 
-	if err := buildAndLoadTestImage(t, testCluster.Name, imageRef); err != nil {
-		ctx.Cleanup()
-		t.Fatalf("failed to build/load test image: %v", err)
-	}
+	// Set the namespace in values to match the test namespace
+	values["namespace"] = namespace
 
-	if err := ensureHelmRelease(t, testCluster.GetKubeConfig(), ctx.Namespace, ctx.ReleaseName, values); err != nil {
+	// Deploy Helm release in test namespace
+	t.Logf("Deploying Helm release: %s in namespace %s", releaseName, namespace)
+	if err := ensureHelmRelease(t, sharedCluster.GetKubeConfig(), namespace, releaseName, values); err != nil {
 		ctx.Cleanup()
 		t.Fatalf("failed to deploy: %v", err)
 	}
 
-	t.Logf("Waiting for app to be ready")
-	if err := WaitForAppReady(setupCtx, k8sClient, ctx.Namespace, ctx.ReleaseName); err != nil {
+	// Wait for deployment
+	t.Logf("Waiting for app to be ready in namespace %s", namespace)
+	if err := WaitForAppReady(setupCtx, k8sClient, namespace, releaseName); err != nil {
 		ctx.Cleanup()
 		t.Fatalf("app deployment not ready: %v", err)
 	}
 
-	serviceName := fmt.Sprintf("%s-spectre", ctx.ReleaseName)
-	portForwarder, err := NewPortForwarder(t, testCluster.GetKubeConfig(), ctx.Namespace, serviceName, defaultServicePort)
+	// Setup port forwarding
+	serviceName := fmt.Sprintf("%s-spectre", releaseName)
+	portForwarder, err := NewPortForwarder(t, sharedCluster.GetKubeConfig(), namespace, serviceName, defaultServicePort)
 	if err != nil {
 		ctx.Cleanup()
 		t.Fatalf("failed to create port-forward: %v", err)
 	}
 	if err := portForwarder.WaitForReady(30 * time.Second); err != nil {
 		ctx.Cleanup()
-		t.Fatalf("app service not reachable via port-forward: %v", err)
+		t.Fatalf("service not reachable via port-forward: %v", err)
 	}
 
 	ctx.PortForward = portForwarder
 	ctx.APIClient = NewAPIClient(t, portForwarder.GetURL())
 
 	t.Cleanup(ctx.Cleanup)
+	t.Logf("✓ Test environment ready in namespace: %s", namespace)
 	return ctx
 }
 
@@ -187,6 +228,10 @@ func UpdateHelmRelease(tc *TestContext, overrides map[string]interface{}) error 
 		return fmt.Errorf("failed to load Helm values: %w", err)
 	}
 	values = mergeMaps(values, overrides)
+	
+	// Inject the namespace to match the test namespace
+	values["namespace"] = tc.Namespace
+	
 	if err := ensureHelmRelease(tc.t, tc.Cluster.GetKubeConfig(), tc.Namespace, tc.ReleaseName, values); err != nil {
 		return fmt.Errorf("failed to deploy: %w", err)
 	}
@@ -435,4 +480,73 @@ func newClusterName(testName string) string {
 
 	suffix := time.Now().UnixNano() % 1_000_000
 	return fmt.Sprintf("%s-%06d", base, suffix)
+}
+
+// SetCachedHelmValues stores Helm values for reuse across tests
+func SetCachedHelmValues(values map[string]interface{}, imageRef string) {
+	cachedValuesMutex.Lock()
+	defer cachedValuesMutex.Unlock()
+	cachedHelmValues = values
+	cachedImageRef = imageRef
+	helmValuesLoaded = true
+}
+
+// getCachedHelmValues retrieves cached Helm values
+func getCachedHelmValues() (map[string]interface{}, string, error) {
+	cachedValuesMutex.RLock()
+	defer cachedValuesMutex.RUnlock()
+	
+	if !helmValuesLoaded {
+		return nil, "", fmt.Errorf("helm values not cached")
+	}
+	
+	// Return a copy to avoid concurrent modifications
+	valuesCopy := make(map[string]interface{})
+	for k, v := range cachedHelmValues {
+		valuesCopy[k] = v
+	}
+	
+	return valuesCopy, cachedImageRef, nil
+}
+
+// getSharedCluster retrieves the shared cluster or fails the test
+func getSharedCluster(t *testing.T) *TestCluster {
+	t.Helper()
+	
+	if sharedClusterInstance == nil {
+		t.Fatal("Shared cluster not initialized. TestMain should have called SetSharedCluster(). " +
+			"Make sure you're running tests via 'go test' and not individually.")
+	}
+	
+	return sharedClusterInstance
+}
+
+// sharedClusterInstance is set by the e2e package's TestMain
+var sharedClusterInstance *TestCluster
+
+// SetSharedCluster sets the shared cluster instance (called by TestMain)
+func SetSharedCluster(cluster *TestCluster) {
+	sharedClusterInstance = cluster
+}
+
+// uninstallHelmRelease removes a Helm release
+func uninstallHelmRelease(t *testing.T, kubeconfig, namespace, releaseName string) error {
+	t.Helper()
+	
+	cmd := exec.Command("helm", "uninstall", releaseName,
+		"--kubeconfig", kubeconfig,
+		"--namespace", namespace,
+		"--wait",
+		"--timeout", "2m",
+	)
+	
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Log but don't fail if release doesn't exist
+		if !strings.Contains(string(output), "not found") {
+			return fmt.Errorf("helm uninstall failed: %w\nOutput: %s", err, output)
+		}
+	}
+	
+	return nil
 }

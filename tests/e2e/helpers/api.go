@@ -88,15 +88,14 @@ type EventsResponse struct {
 }
 
 // NewAPIClient creates a new API client.
+// baseURL is the HTTP REST API endpoint with gRPC-Web support
 func NewAPIClient(t *testing.T, baseURL string) *APIClient {
 	t.Logf("Creating API client for: %s", baseURL)
 
 	return &APIClient{
 		BaseURL: baseURL,
-		Client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-		t: t,
+		Client:  &http.Client{Timeout: 10 * time.Second},
+		t:       t,
 	}
 }
 
@@ -244,6 +243,7 @@ func (a *APIClient) doRequest(ctx context.Context, method, url string, body io.R
 }
 
 // Timeline queries the /v1/timeline endpoint.
+// This uses the same REST API as Search but with timeline-specific logic.
 func (a *APIClient) Timeline(ctx context.Context, startTime, endTime int64, namespace, kind string) (*SearchResponse, error) {
 	url := fmt.Sprintf("%s/v1/timeline?start=%d&end=%d", a.BaseURL, startTime, endTime)
 
@@ -276,5 +276,11 @@ func (a *APIClient) Health(ctx context.Context) error {
 		return err
 	}
 	resp.Body.Close()
+	return nil
+}
+
+// Close cleans up API client resources.
+func (a *APIClient) Close() error {
+	// No cleanup needed for HTTP-only client
 	return nil
 }

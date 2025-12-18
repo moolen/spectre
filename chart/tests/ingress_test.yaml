@@ -193,7 +193,7 @@ tests:
           enabled: false
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - isKind:
           of: Ingress
@@ -216,7 +216,7 @@ tests:
               pathType: Prefix
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - isKind:
           of: Ingress
@@ -225,7 +225,7 @@ tests:
           value: mcp.spectre.example.com
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.port.number
-          value: 8081
+          value: 8082
 
   - it: should create MCP ingress rule with correct host and port
     set:
@@ -244,7 +244,7 @@ tests:
               pathType: Prefix
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - isKind:
           of: Ingress
@@ -262,7 +262,7 @@ tests:
           value: RELEASE-NAME-spectre
       - equal:
           path: spec.rules[1].http.paths[0].backend.service.port.number
-          value: 8081
+          value: 8082
       - equal:
           path: spec.rules[1].http.paths[0].path
           value: /
@@ -282,7 +282,7 @@ tests:
               pathType: Prefix
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - equal:
           path: spec.rules[0].host
@@ -302,7 +302,7 @@ tests:
               pathType: Exact
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - equal:
           path: spec.rules[0].http.paths[0].path
@@ -318,10 +318,10 @@ tests:
           value: Exact
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.port.number
-          value: 8081
+          value: 8082
       - equal:
           path: spec.rules[0].http.paths[1].backend.service.port.number
-          value: 8081
+          value: 8082
 
   - it: should configure MCP TLS
     set:
@@ -339,7 +339,7 @@ tests:
                 - mcp.spectre.example.com
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - equal:
           path: spec.tls[0].secretName
@@ -373,7 +373,7 @@ tests:
                 - mcp.spectre.example.com
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - equal:
           path: spec.tls[0].secretName
@@ -407,7 +407,7 @@ tests:
           tls: []
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - isNull:
           path: spec.tls
@@ -424,7 +424,7 @@ tests:
               pathType: Prefix
       mcp:
         enabled: true
-        port: 8081
+        port: 8082
     asserts:
       - isKind:
           of: Ingress
@@ -433,4 +433,4 @@ tests:
           value: mcp.spectre.example.com
       - equal:
           path: spec.rules[0].http.paths[0].backend.service.port.number
-          value: 8081
+          value: 8082

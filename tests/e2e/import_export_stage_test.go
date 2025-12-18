@@ -436,6 +436,9 @@ func (s *ImportExportStage) spectre_is_redeployed() *ImportExportStage {
 	values, imageRef, err := helpers.LoadHelmValues()
 	s.require.NoError(err, "failed to load Helm values")
 
+	// Inject namespace to match test namespace
+	values["namespace"] = s.testCtx.Namespace
+
 	err = helpers.BuildAndLoadTestImage(s.t, s.testCtx.Cluster.Name, imageRef)
 	s.require.NoError(err, "failed to build/load image")
 
@@ -1047,7 +1050,8 @@ func (s *ImportExportStage) port_forward_to_spectre() *ImportExportStage {
 		}
 	})
 	err = portForwarder.WaitForReady(30 * time.Second)
-	s.require.NoError(err, "service not reachable via port-forward")
+	s.require.NoError(err, "HTTP service not reachable via port-forward")
+
 	s.apiClient = helpers.NewAPIClient(s.t, portForwarder.GetURL())
 	return s
 }

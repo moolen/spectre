@@ -202,7 +202,7 @@ func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *
 // buildTimelineResponse transforms QueryResult into TimelineResponse with full resource data
 func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *models.QueryResult) *models.SearchResponse {
 	resourceBuilder := storage.NewResourceBuilder()
-	resourceMap := resourceBuilder.BuildResourcesFromEvents(queryResult.Events)
+	resourceMap := resourceBuilder.BuildResourcesFromEventsWithQueryTime(queryResult.Events, queryResult.QueryStartTime)
 
 	// Attach pre-fetched K8s events
 	if len(eventResult.Events) > 0 {
