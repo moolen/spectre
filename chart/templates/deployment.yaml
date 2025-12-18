@@ -103,8 +103,10 @@ spec:
         - {{ . }}
         {{- end }}
         volumeMounts:
+        {{- if .Values.persistence.enabled }}
         - name: data
           mountPath: {{ .Values.persistence.mountPath }}
+        {{- end }}
         - name: watcher-config
           mountPath: /etc/watcher
           readOnly: true
@@ -169,12 +171,10 @@ spec:
           {{- toYaml .Values.mcp.resources | nindent 12 }}
       {{- end }}
       volumes:
-      - name: data
         {{- if .Values.persistence.enabled }}
+      - name: data
         persistentVolumeClaim:
           claimName: {{ default (include "spectre.fullname" .) .Values.persistence.existingClaim }}
-        {{- else }}
-        emptyDir: {}
         {{- end }}
       - name: watcher-config
         configMap:

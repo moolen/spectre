@@ -271,7 +271,6 @@ func (s *TimelineGRPCService) resourceToProto(res *models.Resource) *pb.Timeline
 	for i, seg := range res.StatusSegments {
 		// Extract reason and determine if status is inferred
 		reason, inferred := s.extractReasonFromResourceData(seg.ResourceData)
-		fmt.Println(string(seg.ResourceData))
 		pbResource.StatusSegments[i] = &pb.StatusSegment{
 			Id:           fmt.Sprintf("%s-%d", res.ID, i),
 			ResourceId:   res.ID,
