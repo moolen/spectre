@@ -75,9 +75,7 @@ export class TimelineGrpcService {
     visibleCount: number = 50
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const allResources: TimelineResource[] = [];
       let metadata: TimelineMetadata | undefined;
-      let sentFirstBatch = false;
 
       this.client.GetTimeline(request).subscribe({
         next: (chunk: TimelineChunk) => {
@@ -92,47 +90,12 @@ export class TimelineGrpcService {
           }
 
           if (chunk.batch) {
-            // Accumulate resources from this batch
-            allResources.push(...chunk.batch.resources);
-
-            // Send first batch immediately when we have enough for visible area
-            if (!sentFirstBatch && allResources.length >= visibleCount) {
-              sentFirstBatch = true;
-              onChunk({
-                metadata,
-                resources: allResources.slice(0, visibleCount),
-                isComplete: false,
-              });
-            }
-
-            // If this is the final batch, send everything
-            if (chunk.batch.isFinalBatch) {
-              if (sentFirstBatch) {
-                // Send remaining resources (everything after the first visible batch)
-                const remaining = allResources.slice(visibleCount);
-                if (remaining.length > 0) {
-                  onChunk({
-                    metadata,
-                    resources: remaining,
-                    isComplete: true,
-                  });
-                } else {
-                  // All resources were already sent in first batch
-                  onChunk({
-                    metadata,
-                    resources: [],
-                    isComplete: true,
-                  });
-                }
-              } else {
-                // Small dataset - send everything at once
-                onChunk({
-                  metadata,
-                  resources: allResources,
-                  isComplete: true,
-                });
-              }
-            }
+            // Send each batch immediately as it arrives (one batch per kind)
+            onChunk({
+              metadata,
+              resources: chunk.batch.resources,
+              isComplete: chunk.batch.isFinalBatch,
+            });
           }
         },
         error: (err) => {

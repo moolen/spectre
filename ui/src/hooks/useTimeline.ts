@@ -104,6 +104,7 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
     }
     abortControllerRef.current = new AbortController();
     accumulatedResourcesRef.current = [];
+    let isFirstBatch = true;
 
     // Flush batch function - applies accumulated resources to state
     const flushBatch = () => {
@@ -111,11 +112,19 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
         const batchedResources = [...accumulatedResourcesRef.current];
         const batchSize = batchedResources.length;
 
-        // Use startTransition for non-critical updates (not the first batch)
-        startTransition(() => {
+        if (isFirstBatch) {
+          // First batch: urgent update to show data immediately
           setResources(prev => [...prev, ...batchedResources]);
           setLoadedCount(prev => prev + batchSize);
-        });
+          setLoading(false); // Stop showing spinner after first batch
+          isFirstBatch = false;
+        } else {
+          // Subsequent batches: use startTransition for non-critical updates
+          startTransition(() => {
+            setResources(prev => [...prev, ...batchedResources]);
+            setLoadedCount(prev => prev + batchSize);
+          });
+        }
 
         accumulatedResourcesRef.current = [];
       }
@@ -182,12 +191,6 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
         batchTimeoutRef.current = null;
       }
       flushBatch();
-
-      // Final update with complete dataset
-      setResources(result);
-      setTotalCount(result.length);
-      setLoadedCount(result.length);
-      setLoading(false);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         // Request was cancelled, ignore

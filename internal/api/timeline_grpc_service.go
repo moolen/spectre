@@ -149,84 +149,36 @@ func (s *TimelineGRPCService) sendMetadata(stream pb.TimelineService_GetTimeline
 	return stream.Send(chunk)
 }
 
-// streamResourceBatches streams resources in batches, grouped by kind
+// streamResourceBatches streams resources in batches, one batch per kind
 func (s *TimelineGRPCService) streamResourceBatches(stream pb.TimelineService_GetTimelineServer, groups []*GroupedResources) error {
 	for groupIdx, group := range groups {
-		resources := group.Resources
 		isLastGroup := groupIdx == len(groups)-1
 
-		// Determine batch sizes dynamically:
-		// - First batch: 30 resources (viewport)
-		// - Subsequent batches: 100 resources
-		batchSizes := s.calculateBatchSizes(len(resources))
+		// Convert all models.Resource to pb.TimelineResource for this kind
+		pbResources := make([]*pb.TimelineResource, len(group.Resources))
+		for i, res := range group.Resources {
+			pbResources[i] = s.resourceToProto(&res)
+		}
 
-		offset := 0
-		for batchIdx, batchSize := range batchSizes {
-			end := offset + batchSize
-			if end > len(resources) {
-				end = len(resources)
-			}
-
-			batch := resources[offset:end]
-			isFinalBatch := isLastGroup && batchIdx == len(batchSizes)-1
-
-			// Convert models.Resource to pb.TimelineResource
-			pbResources := make([]*pb.TimelineResource, len(batch))
-			for i, res := range batch {
-				pbResources[i] = s.resourceToProto(&res)
-			}
-
-			chunk := &pb.TimelineChunk{
-				ChunkType: &pb.TimelineChunk_Batch{
-					Batch: &pb.ResourceBatch{
-						Kind:         group.Kind,
-						Resources:    pbResources,
-						IsFinalBatch: isFinalBatch,
-					},
+		chunk := &pb.TimelineChunk{
+			ChunkType: &pb.TimelineChunk_Batch{
+				Batch: &pb.ResourceBatch{
+					Kind:         group.Kind,
+					Resources:    pbResources,
+					IsFinalBatch: isLastGroup,
 				},
-			}
+			},
+		}
 
-			if err := stream.Send(chunk); err != nil {
-				return fmt.Errorf("failed to send batch: %w", err)
-			}
-
-			offset = end
+		if err := stream.Send(chunk); err != nil {
+			return fmt.Errorf("failed to send batch: %w", err)
 		}
 	}
 
 	return nil
 }
 
-// calculateBatchSizes determines batch sizes for progressive rendering
-// First batch: 30 (viewport), subsequent batches: 100
-func (s *TimelineGRPCService) calculateBatchSizes(totalResources int) []int {
-	if totalResources == 0 {
-		return []int{}
-	}
 
-	batchSizes := []int{}
-	remaining := totalResources
-
-	// First batch: min(30, remaining)
-	firstBatchSize := 30
-	if remaining < firstBatchSize {
-		firstBatchSize = remaining
-	}
-	batchSizes = append(batchSizes, firstBatchSize)
-	remaining -= firstBatchSize
-
-	// Subsequent batches: 100 each
-	for remaining > 0 {
-		batchSize := 100
-		if remaining < batchSize {
-			batchSize = remaining
-		}
-		batchSizes = append(batchSizes, batchSize)
-		remaining -= batchSize
-	}
-
-	return batchSizes
-}
 
 // protoToQueryRequest converts protobuf request to internal QueryRequest
 func (s *TimelineGRPCService) protoToQueryRequest(req *pb.TimelineRequest) (*models.QueryRequest, error) {
