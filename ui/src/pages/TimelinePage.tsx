@@ -54,8 +54,6 @@ function TimelinePage() {
 
     if (!startParam || !endParam) {
       setTimeRange(null);
-      setRawTimeExpressions({});
-      originalUrlParamsRef.current = null;
       return;
     }
 
@@ -245,7 +243,7 @@ function TimelinePage() {
   }, [autoRefresh, timeRange]);
 
   // Fetch timeline data from backend API
-  const { resources, loading, error } = useTimeline({
+  const { resources, loading, error, totalCount, loadedCount } = useTimeline({
     startTime: timeRange?.start,
     endTime: timeRange?.end,
     rawStart: rawTimeExpressions.start,
@@ -359,6 +357,17 @@ function TimelinePage() {
                 </svg>
               </div>
               <p>Loading resources...</p>
+              {totalCount > 0 && (
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-64 h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 transition-all duration-300"
+                      style={{ width: `${(loadedCount / totalCount) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-gray-500">{loadedCount} / {totalCount} resources</p>
+                </div>
+              )}
             </div>
           ) : filteredResources.length > 0 ? (
              <Timeline

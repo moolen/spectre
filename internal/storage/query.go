@@ -17,22 +17,25 @@ import (
 
 // QueryExecutor executes queries against stored events
 type QueryExecutor struct {
-	logger       *logging.Logger
-	storage      *Storage
-	filterEngine *FilterEngine
-	cache        *BlockCache
-	tracer       trace.Tracer
+	logger        *logging.Logger
+	storage       *Storage
+	filterEngine  *FilterEngine
+	cache         *BlockCache
+	metadataCache *FileMetadataCache
+	sharedCache   *SharedFileDataCache // Optional: shared across concurrent queries
+	tracer        trace.Tracer
 }
 
 // NewQueryExecutor creates a new query executor
 func NewQueryExecutor(storage *Storage, tracingProvider interface{}) *QueryExecutor {
 	tracer := getTracerFromProvider(tracingProvider, "spectre.storage")
 	return &QueryExecutor{
-		logger:       logging.GetLogger("query"),
-		storage:      storage,
-		filterEngine: NewFilterEngine(),
-		cache:        nil, // Cache will be initialized separately
-		tracer:       tracer,
+		logger:        logging.GetLogger("query"),
+		storage:       storage,
+		filterEngine:  NewFilterEngine(),
+		cache:         nil, // Cache will be initialized separately
+		metadataCache: nil, // Metadata cache will be initialized separately
+		tracer:        tracer,
 	}
 }
 
@@ -44,14 +47,21 @@ func NewQueryExecutorWithCache(storage *Storage, cacheMaxMB int64, tracingProvid
 		return nil, err
 	}
 
+	// Create file metadata cache (default 10MB)
+	metadataCache, err := NewFileMetadataCache(10, cacheLogger)
+	if err != nil {
+		return nil, err
+	}
+
 	tracer := getTracerFromProvider(tracingProvider, "spectre.storage")
 
 	return &QueryExecutor{
-		logger:       logging.GetLogger("query"),
-		storage:      storage,
-		filterEngine: NewFilterEngine(),
-		cache:        cache,
-		tracer:       tracer,
+		logger:        logging.GetLogger("query"),
+		storage:       storage,
+		filterEngine:  NewFilterEngine(),
+		cache:         cache,
+		metadataCache: metadataCache,
+		tracer:        tracer,
 	}, nil
 }
 
@@ -76,6 +86,33 @@ func (qe *QueryExecutor) SetCache(cache *BlockCache) {
 // GetCache returns the block cache if it exists
 func (qe *QueryExecutor) GetCache() *BlockCache {
 	return qe.cache
+}
+
+// SetMetadataCache sets the file metadata cache for the executor
+func (qe *QueryExecutor) SetMetadataCache(cache *FileMetadataCache) {
+	qe.metadataCache = cache
+}
+
+// GetMetadataCache returns the file metadata cache if it exists
+func (qe *QueryExecutor) GetMetadataCache() *FileMetadataCache {
+	return qe.metadataCache
+}
+
+// SetSharedCache sets the shared file data cache for this executor
+// This is used to share file data across concurrent queries (e.g., in timeline handler)
+func (qe *QueryExecutor) SetSharedCache(cache interface{}) {
+	if cache == nil {
+		qe.sharedCache = nil
+		return
+	}
+	if sharedCache, ok := cache.(*SharedFileDataCache); ok {
+		qe.sharedCache = sharedCache
+	}
+}
+
+// GetSharedCache returns the shared file data cache if it exists
+func (qe *QueryExecutor) GetSharedCache() *SharedFileDataCache {
+	return qe.sharedCache
 }
 
 // Execute executes a query against stored events
@@ -216,32 +253,10 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 	totalSegmentsScanned := int32(0)
 	totalSegmentsSkipped := int32(0)
 
-	// First pass: collect deleted resources from all files to exclude them from state snapshots
+	// Single-pass: query files and collect deleted resources simultaneously
+	// This eliminates the need for a separate first pass
 	deletedResources := make(map[string]bool)
-	for _, filePath := range filesToQuery {
-		reader, err := NewBlockReader(filePath)
-		if err != nil {
-			// Skip files that can't be read (might be incomplete)
-			continue
-		}
-		fileData, err := reader.ReadFile()
-		_ = reader.Close()
-		if err != nil {
-			// Skip files with errors
-			continue
-		}
 
-		// Check for deleted resources in final states
-		for resourceKey, state := range fileData.IndexSection.FinalResourceStates {
-			if state.EventType == string(models.EventTypeDelete) {
-				deletedResources[resourceKey] = true
-			}
-		}
-	}
-
-	qe.logger.Debug("Found %d deleted resources across all files", len(deletedResources))
-
-	// Query each filtered file
 	for _, filePath := range filesToQuery {
 		fileStart := time.Now()
 		qe.logger.Debug("Querying file: %s", filePath)
@@ -303,9 +318,11 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 	// Regular events must be within query time range
 	regularEvents = qe.filterEngine.FilterByTimeRange(regularEvents, startTimeNs, endTimeNs)
 
-	// Track which resources have regular events
+	// Track which resources have regular events and their first event time
 	// State snapshots for these resources should be excluded to avoid duplicates
+	// UNLESS there's a gap between query start and first event
 	resourcesWithRegularEvents := make(map[string]bool)
+	firstRegularEventTime := make(map[string]int64)
 	for _, event := range regularEvents {
 		resourceKey := fmt.Sprintf("%s/%s/%s/%s/%s",
 			event.Resource.Group,
@@ -314,20 +331,26 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 			event.Resource.Namespace,
 			event.Resource.Name)
 		resourcesWithRegularEvents[resourceKey] = true
+		
+		// Track first event time
+		if existingTime, exists := firstRegularEventTime[resourceKey]; !exists || event.Timestamp < existingTime {
+			firstRegularEventTime[resourceKey] = event.Timestamp
+		}
 	}
 
 	// State snapshots represent resources that existed before the query window
 	// Include them only if:
-	// 1. Their timestamp is before the query start (pre-existing resources)
+	// 1. Their timestamp is at or before the query start (pre-existing resources)
 	// 2. The resource doesn't have regular events in the query range
 	//
 	// Note: state snapshots are only generated from files that overlap with the query range,
 	// so we don't need additional timestamp filtering here
 	var filteredSnapshots []models.Event
 	for _, event := range stateSnapshots {
-		// Only include state snapshots from before the query start time
+		// Only include state snapshots from at or before the query start time
 		// This ensures we only show truly "pre-existing" resources
-		if event.Timestamp < startTimeNs {
+		// Use <= because we may have adjusted timestamps to query start for gap filling
+		if event.Timestamp <= startTimeNs {
 			resourceKey := fmt.Sprintf("%s/%s/%s/%s/%s",
 				event.Resource.Group,
 				event.Resource.Version,
@@ -336,8 +359,16 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 				event.Resource.Name)
 
 			// Skip if this resource already has a regular event in the results
+			// UNLESS there's a gap between query start and first event (for gap filling)
 			if resourcesWithRegularEvents[resourceKey] {
-				continue
+				firstEventTime, hasFirstEvent := firstRegularEventTime[resourceKey]
+				// Keep state snapshot if first event is after query start (gap exists)
+				if !hasFirstEvent || firstEventTime <= startTimeNs {
+					continue
+				}
+				// Gap exists - keep the state snapshot for leading segment creation
+				qe.logger.Info("Keeping state snapshot for %s: gap between query start and first event (%d vs %d)",
+					resourceKey, startTimeNs/1e9, firstEventTime/1e9)
 			}
 
 			filteredSnapshots = append(filteredSnapshots, event)
@@ -385,6 +416,8 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 		SegmentsScanned: totalSegmentsScanned,
 		SegmentsSkipped: totalSegmentsSkipped,
 		FilesSearched:   int32(filesSearched), //nolint:gosec // safe conversion: file count is reasonable
+		QueryStartTime:  startTimeNs,
+		QueryEndTime:    endTimeNs,
 	}
 
 	// Count all files for stats
@@ -402,12 +435,18 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 		logging.Field("segments_scanned", totalSegmentsScanned),
 		logging.Field("segments_skipped", totalSegmentsSkipped))
 
-	// Log cache statistics if cache is enabled
+	// Log cache statistics if caches are enabled
 	if qe.cache != nil {
 		stats := qe.cache.Stats()
-		qe.logger.Info("Cache stats: hits=%d, misses=%d, hitRate=%.2f%%, memory=%dMB/%dMB, evictions=%d",
+		qe.logger.Info("Block cache stats: hits=%d, misses=%d, hitRate=%.2f%%, memory=%dMB/%dMB, evictions=%d",
 			stats.Hits, stats.Misses, stats.HitRate*100,
 			stats.UsedMemory/(1024*1024), stats.MaxMemory/(1024*1024), stats.Evictions)
+	}
+	if qe.metadataCache != nil {
+		stats := qe.metadataCache.Stats()
+		qe.logger.Info("Metadata cache stats: hits=%d, misses=%d, hitRate=%.2f%%, memory=%dMB/%dMB, invalidations=%d",
+			stats.Hits, stats.Misses, stats.HitRate*100,
+			stats.UsedMemory/(1024*1024), stats.MaxMemory/(1024*1024), stats.Invalidations)
 	}
 
 	if result.Count == 0 && totalFiles > 0 {
@@ -438,61 +477,74 @@ func (qe *QueryExecutor) queryFileWithSnapshotsWithDeleted(ctx context.Context, 
 	)
 	defer span.End()
 
-	// Try to open file using BlockReader (block storage format)
-	reader, err := NewBlockReader(filePath)
-	if err != nil {
-		// If this is an open file without footer, fall back to in-memory/open-file query
-		if events, found, memErr := qe.storage.GetEventsFromOpenFile(filePath, query); found {
-			if memErr != nil {
-				return nil, 0, 0, memErr
-			}
-			return events, 0, 0, nil
-		}
+	// Try to read file metadata (with caching if available)
+	var fileData *StorageFileData
+	var err error
+	var cacheHit bool
+	var sharedCacheHit bool
 
-		// If it's not a valid block storage file, try legacy segment format
-		if isInvalidBlockFormatError(err) {
-			return nil, 0, 0, fmt.Errorf("file %s is not block storage format", filePath)
+	// First check shared cache (concurrent query coordination)
+	if qe.sharedCache != nil {
+		fileData, err = qe.sharedCache.GetOrLoad(filePath, func() (*StorageFileData, error) {
+			// This loader function is called only if file not in shared cache
+			return qe.loadFileData(filePath)
+		})
+		if err == nil {
+			sharedCacheHit = true
+			qe.logger.Debug("Shared cache hit for %s", filePath)
+		} else {
+			qe.logger.Debug("Shared cache load failed for %s: %v", filePath, err)
 		}
-		// If file is incomplete (no footer), try to query it
-		if isIncompleteFileError(err) {
-			qe.logger.Debug("File %s is incomplete, attempting to query by scanning segments", filePath)
-			return qe.queryIncompleteFile(filePath, query)
-		}
-		return nil, 0, 0, err
 	}
-	defer func() {
-		if err := reader.Close(); err != nil {
-			// Log error but don't fail the operation
-		}
-	}()
 
-	// Read complete file structure
-	fileData, err := reader.ReadFile()
-	if err != nil {
-		// Defer will handle the close
-		// If it's not a valid block storage file, try legacy segment format
-		if isInvalidBlockFormatError(err) {
-			return nil, 0, 0, fmt.Errorf("file %s is not block storage format", filePath)
+	// If not in shared cache, try metadata cache
+	if fileData == nil && qe.metadataCache != nil {
+		fileData, err = qe.metadataCache.Get(filePath)
+		cacheHit = (err == nil)
+		if err != nil {
+			qe.logger.Debug("File metadata cache miss for %s: %v", filePath, err)
 		}
-		if isIncompleteFileError(err) {
-			// For open files (no footer), read events from in-memory/restored structures
-			if events, found, memErr := qe.storage.GetEventsFromOpenFile(filePath, query); found {
-				if memErr != nil {
-					return nil, 0, 0, memErr
+	}
+
+	// If no cache hit, load from disk
+	if fileData == nil {
+		fileData, err = qe.loadFileData(filePath)
+		if err != nil {
+			// Handle special cases for incomplete/open files
+			if isIncompleteFileError(err) {
+				// Try to query as open file
+				if events, found, memErr := qe.storage.GetEventsFromOpenFile(filePath, query); found {
+					if memErr != nil {
+						return nil, 0, 0, memErr
+					}
+					return events, 0, 0, nil
 				}
-				return events, 0, 0, nil
+				qe.logger.Debug("File %s is incomplete, attempting to query by scanning segments", filePath)
+				return qe.queryIncompleteFile(filePath, query)
 			}
-
-			qe.logger.Debug("File %s is incomplete, attempting to query by scanning segments", filePath)
-			return qe.queryIncompleteFile(filePath, query)
+			// Other errors
+			if isInvalidBlockFormatError(err) {
+				return nil, 0, 0, fmt.Errorf("file %s is not block storage format", filePath)
+			}
+			return nil, 0, 0, err
 		}
-		return nil, 0, 0, err
 	}
 
-	qe.logger.Debug("File %s: has %d blocks", filePath, len(fileData.IndexSection.BlockMetadata))
+	// Collect deleted resources from this file's final states
+	// This happens inline during the query pass (eliminates separate first pass)
+	for resourceKey, state := range fileData.IndexSection.FinalResourceStates {
+		if state.EventType == string(models.EventTypeDelete) {
+			deletedResources[resourceKey] = true
+		}
+	}
+
+	qe.logger.Debug("File %s: has %d blocks (shared cache hit: %v, metadata cache hit: %v)", 
+		filePath, len(fileData.IndexSection.BlockMetadata), sharedCacheHit, cacheHit)
 
 	span.SetAttributes(
 		attribute.Int("file.block_count", len(fileData.IndexSection.BlockMetadata)),
+		attribute.Bool("file.metadata_cache_hit", cacheHit),
+		attribute.Bool("file.shared_cache_hit", sharedCacheHit),
 	)
 
 	var results []models.Event
@@ -505,6 +557,22 @@ func (qe *QueryExecutor) queryFileWithSnapshotsWithDeleted(ctx context.Context, 
 
 	// Track which resources have events in the query results
 	resourcesWithEvents := make(map[string]bool)
+	// Track the first event timestamp for each resource
+	resourceFirstEventTime := make(map[string]int64)
+
+	// Get block reader for reading block data
+	// We always need a fresh reader because:
+	// 1. If metadata came from cache, we never had a reader
+	// 2. If we loaded via loadFileData(), the reader was closed
+	blockReader, err := NewBlockReader(filePath)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to open block reader: %w", err)
+	}
+	defer func() {
+		if err := blockReader.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	// Iterate through blocks
 	for _, blockMeta := range fileData.IndexSection.BlockMetadata {
@@ -529,7 +597,7 @@ func (qe *QueryExecutor) queryFileWithSnapshotsWithDeleted(ctx context.Context, 
 
 		if qe.cache != nil {
 			// Use cached block reader (events are already parsed)
-			cachedBlock, err := reader.ReadBlockWithCache(filePath, blockMeta, qe.cache)
+			cachedBlock, err := blockReader.ReadBlockWithCache(filePath, blockMeta, qe.cache)
 			if err != nil {
 				qe.logger.Warn("Failed to read block %d from file %s: %v", blockMeta.ID, filePath, err)
 				segmentsSkipped++
@@ -538,7 +606,7 @@ func (qe *QueryExecutor) queryFileWithSnapshotsWithDeleted(ctx context.Context, 
 			events = cachedBlock.Events
 		} else {
 			// Use original non-cached reader
-			events, err = reader.ReadBlockEvents(blockMeta)
+			events, err = blockReader.ReadBlockEvents(blockMeta)
 			if err != nil {
 				qe.logger.Warn("Failed to read block %d from file %s: %v", blockMeta.ID, filePath, err)
 				segmentsSkipped++
@@ -551,17 +619,22 @@ func (qe *QueryExecutor) queryFileWithSnapshotsWithDeleted(ctx context.Context, 
 		// Filter events by time range and resource filters
 		var blockEvents []models.Event
 		for _, event := range events {
-			// Track all resources seen in this block (even those outside time range)
-			// This prevents creating state snapshots for resources we already have events from
-			resourceKey := qe.getResourceKey(event.Resource)
-			resourcesWithEvents[resourceKey] = true
-
 			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
 				continue
 			}
 
 			if !qe.filterEngine.MatchesFilters(event, query.Filters) {
 				continue
+			}
+
+			// Track resources that have events IN the query time range
+			// This prevents creating duplicate state snapshots for resources with real events
+			resourceKey := qe.getResourceKey(event.Resource)
+			resourcesWithEvents[resourceKey] = true
+			
+			// Track first event timestamp for each resource
+			if existingTime, exists := resourceFirstEventTime[resourceKey]; !exists || event.Timestamp < existingTime {
+				resourceFirstEventTime[resourceKey] = event.Timestamp
 			}
 
 			blockEvents = append(blockEvents, *event)
@@ -576,7 +649,7 @@ func (qe *QueryExecutor) queryFileWithSnapshotsWithDeleted(ctx context.Context, 
 	if includeStateSnapshots && len(fileData.IndexSection.FinalResourceStates) > 0 {
 		qe.logger.Debug("File %s: checking state snapshots - has %d final resource states", filePath, len(fileData.IndexSection.FinalResourceStates))
 		qe.logger.Debug("File %s: creating state snapshot events from %d final states", filePath, len(fileData.IndexSection.FinalResourceStates))
-		stateEvents := qe.getStateSnapshotEventsWithDeleted(fileData.IndexSection.FinalResourceStates, query, resourcesWithEvents, deletedResources)
+		stateEvents := qe.getStateSnapshotEventsWithDeleted(fileData.IndexSection.FinalResourceStates, query, resourcesWithEvents, resourceFirstEventTime, deletedResources)
 		qe.logger.Debug("File %s: added %d state snapshot events", filePath, len(stateEvents))
 		results = append(results, stateEvents...)
 	} else if !includeStateSnapshots {
@@ -766,18 +839,29 @@ func (qe *QueryExecutor) getResourceKey(resource models.ResourceMetadata) string
 // getStateSnapshotEventsWithDeleted converts final resource states to synthetic events
 // for resources that don't have actual events in the query range, excluding globally deleted resources
 func (qe *QueryExecutor) getStateSnapshotEventsWithDeleted(finalStates map[string]*ResourceLastState,
-	query *models.QueryRequest, resourcesWithEvents map[string]bool, deletedResources map[string]bool) []models.Event {
+	query *models.QueryRequest, resourcesWithEvents map[string]bool, resourceFirstEventTime map[string]int64, deletedResources map[string]bool) []models.Event {
 	stateEvents := make([]models.Event, 0, len(finalStates))
 
 	for resourceKey, state := range finalStates {
-		// Skip if this resource already has events in the query results
-		if resourcesWithEvents[resourceKey] {
-			continue
-		}
-
 		// Skip deleted resources - they shouldn't appear in the consistent view
 		if state.EventType == string(models.EventTypeDelete) {
 			continue
+		}
+		
+		// Skip if this resource already has events in the query results
+		// UNLESS the first event is after query start (for gap filling)
+		queryStartNs := query.StartTimestamp * 1e9
+		hasEvents := resourcesWithEvents[resourceKey]
+		firstEventTime, hasFirstEventTime := resourceFirstEventTime[resourceKey]
+		firstEventAfterQueryStart := hasFirstEventTime && firstEventTime > queryStartNs
+		
+		if hasEvents && !firstEventAfterQueryStart {
+			qe.logger.Info("Skipping state snapshot for %s: hasEvents=%v, firstEventAfterQueryStart=%v", resourceKey, hasEvents, firstEventAfterQueryStart)
+			continue
+		}
+		if hasEvents && firstEventAfterQueryStart {
+			qe.logger.Info("Creating state snapshot for %s: first event (%d) is after query start (%d)", 
+				resourceKey, firstEventTime/1e9, queryStartNs/1e9)
 		}
 
 		// Skip resources that were deleted in ANY file
@@ -788,10 +872,19 @@ func (qe *QueryExecutor) getStateSnapshotEventsWithDeleted(finalStates map[strin
 		// Create synthetic event from state snapshot
 		// Use a special marker timestamp (the state timestamp, but ensure it's within query range)
 		eventTimestamp := state.Timestamp
+		queryEndNs := query.EndTimestamp * 1e9
+
+		// If state is before query start, use query start as segment start
+		// This prevents visual gaps when resource existed before the query window
+		if eventTimestamp < queryStartNs {
+			originalTimestamp := eventTimestamp
+			eventTimestamp = queryStartNs
+			qe.logger.Debug("Adjusted state snapshot timestamp: resource=%s, original=%d, adjusted=%d, gap=%ds",
+				resourceKey, originalTimestamp/1e9, eventTimestamp/1e9, (queryStartNs-originalTimestamp)/1e9)
+		}
 
 		// Only include if timestamp is at or before query end time
 		// This ensures we show consistent view of resources that existed at query time
-		queryEndNs := query.EndTimestamp * 1e9
 		if eventTimestamp > queryEndNs {
 			// State happened after query range - skip it
 			continue
@@ -831,4 +924,32 @@ func (qe *QueryExecutor) getStateSnapshotEventsWithDeleted(finalStates map[strin
 	}
 
 	return stateEvents
+}
+
+// loadFileData loads file metadata from disk
+// This is a helper function used by both metadata cache and shared cache
+func (qe *QueryExecutor) loadFileData(filePath string) (*StorageFileData, error) {
+	reader, err := NewBlockReader(filePath)
+	if err != nil {
+		// If this is an open file without footer, fall back to in-memory/open-file query
+		// Note: this returns nil, nil to indicate no file data available (caller handles differently)
+		if isIncompleteFileError(err) {
+			return nil, fmt.Errorf("incomplete file: %w", err)
+		}
+		return nil, err
+	}
+	defer func() {
+		if err := reader.Close(); err != nil {
+			// Log error but don't fail the operation
+			qe.logger.Debug("Failed to close reader for %s: %v", filePath, err)
+		}
+	}()
+
+	// Read complete file structure
+	fileData, err := reader.ReadFile()
+	if err != nil {
+		return nil, err
+	}
+
+	return fileData, nil
 }

@@ -29,6 +29,10 @@ resources:
     cpu: "500m"
 
 # Service configuration
+# Port allocation:
+#   - 8080: HTTP REST API with gRPC-Web support (main service)
+#   - 8082: MCP HTTP server (sidecar)
+#   - 9999: pprof profiling endpoint
 service:
   type: ClusterIP
   port: 8080
@@ -54,9 +58,9 @@ tracing:
 # MCP (Model Context Protocol) sidecar configuration
 mcp:
   enabled: true
-  spectreURL: "http://localhost:8080"  # Connect to main container via localhost
-  httpAddr: ":8081"
-  port: 8081
+  spectreURL: "http://localhost:8080"  # Connect to main container via localhost (REST API)
+  httpAddr: ":8082"
+  port: 8082
   resources:
     requests:
       memory: "64Mi"

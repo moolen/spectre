@@ -3,15 +3,19 @@ package api
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/improbable-eng/grpc-web/go/grpcweb"
+	"github.com/moolen/spectre/internal/api/pb"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
 )
 
 // ReadinessChecker is an interface for checking component readiness
@@ -28,10 +32,12 @@ func (n *NoOpReadinessChecker) IsReady() bool {
 	return true
 }
 
-// Server handles HTTP API requests
+// Server handles HTTP API requests and gRPC requests
 type Server struct {
 	port             int
 	server           *http.Server
+	grpcServer       *grpc.Server
+	grpcListener     net.Listener
 	logger           *logging.Logger
 	queryExecutor    QueryExecutor
 	storage          *storage.Storage
@@ -68,11 +74,44 @@ func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Stor
 		tracingProvider:  tracingProvider,
 	}
 
+	// Create gRPC server first (needed for gRPC-Web wrapper)
+	s.grpcServer = grpc.NewServer()
+
+	// Get tracer for gRPC service
+	var tracer trace.Tracer
+	if tracingProvider != nil && tracingProvider.IsEnabled() {
+		tracer = tracingProvider.GetTracer("spectre.api.grpc")
+	} else {
+		tracer = otel.GetTracerProvider().Tracer("spectre.api.grpc")
+	}
+
+	// Register gRPC services
+	timelineGRPCService := NewTimelineGRPCService(queryExecutor, s.logger, tracer)
+	pb.RegisterTimelineServiceServer(s.grpcServer, timelineGRPCService)
+
+	// Wrap gRPC server with gRPC-Web support
+	grpcWebWrapper := grpcweb.WrapServer(s.grpcServer,
+		grpcweb.WithCorsForRegisteredEndpointsOnly(false),
+		grpcweb.WithOriginFunc(func(origin string) bool {
+			// Allow all origins for development
+			return true
+		}),
+	)
+
 	// Register handlers
 	s.registerHandlers()
 
-	// Wrap router with CORS middleware
-	handler := s.corsMiddleware(s.router)
+	// Create HTTP handler that routes gRPC-Web requests to gRPC server, others to router
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a gRPC-Web request
+		if grpcWebWrapper.IsGrpcWebRequest(r) || grpcWebWrapper.IsAcceptableGrpcCorsRequest(r) {
+			grpcWebWrapper.ServeHTTP(w, r)
+			return
+		}
+
+		// Otherwise, use the regular router with CORS middleware
+		s.corsMiddleware(s.router).ServeHTTP(w, r)
+	})
 
 	// Create HTTP server
 	s.server = &http.Server{
@@ -213,9 +252,9 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 }
 
 // Start implements the lifecycle.Component interface
-// Starts the HTTP server and begins listening for requests
+// Starts the HTTP server and gRPC server, and begins listening for requests
 func (s *Server) Start(ctx context.Context) error {
-	s.logger.Info("Starting API server on port %d", s.port)
+	s.logger.Info("Starting API servers on ports %d (HTTP) and %d (gRPC)", s.port, s.port+1)
 
 	// Check context isn't already cancelled
 	select {
@@ -224,24 +263,49 @@ func (s *Server) Start(ctx context.Context) error {
 	default:
 	}
 
-	// Start server in a goroutine
+	// Start HTTP server in a goroutine
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.logger.Error("Server error: %v", err)
+			s.logger.Error("HTTP server error: %v", err)
 		}
 	}()
 
-	s.logger.Info("API server started and listening on port %d", s.port)
+	s.logger.Info("HTTP API server started and listening on port %d", s.port)
+
+	// Start gRPC server on different port
+	grpcPort := s.port + 1
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
+	if err != nil {
+		return fmt.Errorf("failed to listen on gRPC port: %w", err)
+	}
+	s.grpcListener = lis
+
+	// Start gRPC server in a goroutine
+	go func() {
+		s.logger.Info("Starting gRPC server on port %d", grpcPort)
+		if err := s.grpcServer.Serve(lis); err != nil {
+			s.logger.Error("gRPC server error: %v", err)
+		}
+	}()
+
+	s.logger.Info("gRPC API server started and listening on port %d", grpcPort)
 	return nil
 }
 
 // Stop implements the lifecycle.Component interface
-// Gracefully stops the HTTP server
+// Gracefully stops the HTTP server and gRPC server
 func (s *Server) Stop(ctx context.Context) error {
-	s.logger.Info("Stopping API server...")
+	s.logger.Info("Stopping API servers...")
 
+	// Stop gRPC server
+	if s.grpcServer != nil {
+		s.logger.Info("Stopping gRPC server...")
+		s.grpcServer.GracefulStop()
+		s.logger.Info("gRPC server stopped")
+	}
+
+	// Stop HTTP server
 	done := make(chan error, 1)
-
 	go func() {
 		// Gracefully shutdown server
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -252,13 +316,13 @@ func (s *Server) Stop(ctx context.Context) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			s.logger.Error("API server shutdown error: %v", err)
+			s.logger.Error("HTTP server shutdown error: %v", err)
 			return err
 		}
-		s.logger.Info("API server stopped")
+		s.logger.Info("HTTP server stopped")
 		return nil
 	case <-ctx.Done():
-		s.logger.Warn("API server shutdown timeout")
+		s.logger.Warn("HTTP server shutdown timeout")
 		return ctx.Err()
 	}
 }
@@ -317,6 +381,25 @@ func (s *Server) handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) 
 	response := map[string]string{
 		"error":   "METHOD_NOT_ALLOWED",
 		"message": fmt.Sprintf("Method %s not allowed for %s", r.Method, r.URL.Path),
+	}
+
+	_ = writeJSON(w, response)
+}
+
+// handleIncorrectGRPCPath handles requests to gRPC paths over HTTP
+// Returns a helpful error message pointing to the correct HTTP endpoint
+func (s *Server) handleIncorrectGRPCPath(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+
+	response := map[string]interface{}{
+		"error":   "INCORRECT_ENDPOINT",
+		"message": "This is a gRPC endpoint. Use the HTTP REST API instead.",
+		"correct_endpoint": map[string]string{
+			"http": "/v1/timeline",
+			"grpc": fmt.Sprintf("grpc://localhost:%d/api.TimelineService/GetTimeline", s.port+1),
+		},
+		"details": "The gRPC service is available on a separate port. For HTTP requests, use /v1/timeline with query parameters.",
 	}
 
 	_ = writeJSON(w, response)

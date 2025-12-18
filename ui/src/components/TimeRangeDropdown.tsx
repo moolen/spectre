@@ -188,6 +188,7 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
                   setStartInput(value);
                   handleCustomInputChange();
                 }}
+                onEnter={handleConfirm}
                 label="Start Time"
                 placeholder="e.g., 2h ago, 2025-12-02 13:00"
               />
@@ -197,6 +198,7 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
                   setEndInput(value);
                   handleCustomInputChange();
                 }}
+                onEnter={handleConfirm}
                 label="End Time"
                 placeholder="e.g., now, 2025-12-02 15:00"
               />

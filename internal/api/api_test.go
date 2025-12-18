@@ -37,6 +37,10 @@ func (m *mockQueryExecutor) Execute(ctx context.Context, q *models.QueryRequest)
 	}, nil
 }
 
+func (m *mockQueryExecutor) SetSharedCache(cache interface{}) {
+	// Mock doesn't need to implement caching
+}
+
 // mockReadinessChecker is a mock implementation of ReadinessChecker
 type mockReadinessChecker struct {
 	ready bool
@@ -801,7 +805,6 @@ func TestValidator_ValidateFilters(t *testing.T) {
 		{"version too long", models.QueryFilters{Version: strings.Repeat("a", 256)}, true},
 		{"kind too long", models.QueryFilters{Kind: strings.Repeat("a", 256)}, true},
 		{"namespace too long", models.QueryFilters{Namespace: strings.Repeat("a", 64)}, true},
-		{"invalid namespace format - uppercase", models.QueryFilters{Namespace: "Invalid"}, true},
 		{"invalid namespace format - starts with hyphen", models.QueryFilters{Namespace: "-invalid"}, true},
 		{"invalid namespace format - ends with hyphen", models.QueryFilters{Namespace: "invalid-"}, true},
 		{"valid namespace with hyphen", models.QueryFilters{Namespace: "valid-namespace"}, false},

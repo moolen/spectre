@@ -38,8 +38,6 @@ Thumbs.db
 
 # Temporary files
 *.tmp
-*.log
-*.log.*
 
 # Local storage and data
 /data/

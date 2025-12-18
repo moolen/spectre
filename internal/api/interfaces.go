@@ -9,4 +9,5 @@ import (
 // QueryExecutor defines the interface for executing queries against stored events
 type QueryExecutor interface {
 	Execute(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, error)
+	SetSharedCache(cache interface{})
 }

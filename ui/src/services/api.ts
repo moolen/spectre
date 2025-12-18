@@ -11,7 +11,7 @@ import {
   EventsResponse,
   SegmentsResponse,
 } from './apiTypes';
-import { K8sResource, K8sEvent, ResourceStatusSegment } from '../types';
+import { K8sResource, K8sEvent, ResourceStatusSegment, ResourceStatus } from '../types';
 import {
   transformSearchResponse,
   transformStatusSegment,
@@ -20,6 +20,14 @@ import {
 } from './dataTransformer';
 import { buildDemoMetadata, buildDemoTimelineResponse, TimelineFilters } from '../demo/demoDataService';
 import { isHumanFriendlyExpression, parseTimeExpression } from '../utils/timeParsing';
+import { TimelineGrpcService, TimelineStreamResult as GrpcStreamResult } from './timeline-grpc';
+import { TimelineResource as GrpcTimelineResource, TimelineMetadata } from '../generated/timeline';
+
+export interface ApiTimelineStreamResult {
+  metadata?: TimelineMetadata;
+  resources: K8sResource[];
+  isComplete: boolean;
+}
 
 // Check if demo mode is enabled at build time
 const BUILD_TIME_DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
@@ -70,12 +78,15 @@ interface ApiClientConfig {
 class ApiClient {
   private baseUrl: string;
   private timeout: number = 30000; // 30 seconds default
+  private grpcService: TimelineGrpcService;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl;
     if (config.timeout) {
       this.timeout = config.timeout;
     }
+    // gRPC-Web is served on the HTTP port, not the gRPC port
+    this.grpcService = new TimelineGrpcService(this.baseUrl);
   }
 
   /**
@@ -203,6 +214,115 @@ class ApiClient {
       }
       // Re-throw validation and other errors
       throw error;
+    }
+  }
+
+  /**
+   * Get timeline data using gRPC streaming
+   * Returns timeline data in batches for progressive rendering
+   */
+  async getTimelineGrpc(
+    startTime: string | number,
+    endTime: string | number,
+    filters?: TimelineFilters,
+    onChunk?: (result: ApiTimelineStreamResult) => void,
+    visibleCount: number = 50
+  ): Promise<K8sResource[]> {
+    // Demo mode not supported for gRPC yet - fall back to REST
+    if (getDemoMode()) {
+      return this.getTimeline(startTime, endTime, filters);
+    }
+
+    // Normalize timestamps to seconds
+    const startSeconds = typeof startTime === 'string' && isHumanFriendlyExpression(startTime)
+      ? Math.floor((parseTimeExpression(startTime)?.getTime() ?? Date.now()) / 1000)
+      : normalizeToSeconds(startTime);
+
+    const endSeconds = typeof endTime === 'string' && isHumanFriendlyExpression(endTime)
+      ? Math.floor((parseTimeExpression(endTime)?.getTime() ?? Date.now()) / 1000)
+      : normalizeToSeconds(endTime);
+
+    const request = {
+      startTimestamp: startSeconds,
+      endTimestamp: endSeconds,
+      namespace: filters?.namespace ?? '',
+      kind: filters?.kind ?? '',
+      name: '',
+      labelSelector: '',
+    };
+
+    const allResources: K8sResource[] = [];
+
+    if (onChunk) {
+      // Streaming mode - invoke callback for each chunk
+      await this.grpcService.fetchTimeline(request, (result) => {
+        // Transform gRPC resources to K8sResource format
+        const transformed = result.resources.map(r => this.transformGrpcResource(r));
+        allResources.push(...transformed);
+
+        // Forward to caller with transformed data
+        onChunk({
+          metadata: result.metadata,
+          resources: transformed,
+          isComplete: result.isComplete,
+        });
+      }, visibleCount);
+    } else {
+      // Non-streaming mode - wait for all data
+      const result = await this.grpcService.fetchTimelineComplete(request);
+      allResources.push(...result.resources.map(r => this.transformGrpcResource(r)));
+    }
+
+    return allResources;
+  }
+
+  /**
+   * Transform gRPC TimelineResource to K8sResource format
+   */
+  private transformGrpcResource(grpcResource: GrpcTimelineResource): K8sResource {
+    // Parse apiVersion to extract group and version
+    const [groupVersion, version] = grpcResource.apiVersion.includes('/')
+      ? grpcResource.apiVersion.split('/')
+      : ['', grpcResource.apiVersion];
+
+    return {
+      id: grpcResource.id,
+      name: grpcResource.name,
+      kind: grpcResource.kind,
+      group: groupVersion,
+      version: version || groupVersion,
+      namespace: grpcResource.namespace,
+      statusSegments: grpcResource.statusSegments.map(seg => ({
+        start: new Date(seg.startTime * 1000),
+        end: new Date(seg.endTime * 1000),
+        status: seg.status as any as ResourceStatus,
+        message: seg.message || undefined,
+        resourceData: seg.resourceData ? this.decodeResourceData(seg.resourceData) : undefined,
+      })),
+      events: grpcResource.events.map((evt, idx) => ({
+        id: evt.uid || `evt-${idx}`,
+        timestamp: new Date(evt.timestamp * 1000),
+        type: evt.type,
+        reason: evt.reason,
+        message: evt.message,
+        count: 1, // gRPC events don't have count, default to 1
+      })),
+    };
+  }
+
+  /**
+   * Decode resource data from gRPC bytes to JSON object
+   */
+  private decodeResourceData(data: Uint8Array): any {
+    try {
+      // Convert Uint8Array to string
+      const decoder = new TextDecoder('utf-8');
+      const jsonString = decoder.decode(data);
+      // Parse JSON string to object
+      return JSON.parse(jsonString);
+    } catch (error) {
+      console.error('Failed to decode resourceData:', error);
+      return undefined;
     }
   }
 

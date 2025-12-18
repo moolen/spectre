@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package api;
+
+option go_package = "github.com/moolen/spectre/internal/api/pb";
+
+// TimelineRequest parameters
+message TimelineRequest {
+  int64 start_timestamp = 1;
+  int64 end_timestamp = 2;
+  string namespace = 3;
+  string kind = 4;
+  string name = 5;
+  string label_selector = 6;
+}
+
+// TimelineMetadata sent first in stream
+message TimelineMetadata {
+  int32 total_count = 1;
+  int32 files_searched = 2;
+  int32 segments_scanned = 3;
+  int32 segments_skipped = 4;
+  int64 query_execution_time_ms = 5;
+}
+
+// StatusSegment represents resource status over time
+message StatusSegment {
+  string id = 1;
+  string resource_id = 2;
+  string status = 3;
+  string reason = 4;
+  string message = 5;
+  int64 start_time = 6;
+  int64 end_time = 7;
+  bool inferred = 8;
+  bytes resource_data = 9; // Full Kubernetes resource JSON
+}
+
+// K8sEvent represents a Kubernetes Event
+message K8sEvent {
+  string uid = 1;
+  string type = 2;
+  string reason = 3;
+  string message = 4;
+  int64 timestamp = 5;
+  string involved_object_uid = 6;
+}
+
+// TimelineResource represents a single resource with its timeline
+message TimelineResource {
+  string id = 1;
+  string kind = 2;
+  string api_version = 3;
+  string namespace = 4;
+  string name = 5;
+  int64 created_at = 6;
+  int64 deleted_at = 7;
+  map<string, string> labels = 8;
+  repeated StatusSegment status_segments = 9;
+  repeated K8sEvent events = 10;
+  bool pre_existing = 11;
+}
+
+// TimelineChunk contains a batch of resources
+message TimelineChunk {
+  oneof chunk_type {
+    TimelineMetadata metadata = 1;
+    ResourceBatch batch = 2;
+  }
+}
+
+// ResourceBatch contains grouped resources
+message ResourceBatch {
+  string kind = 1; // The kind for this batch
+  repeated TimelineResource resources = 2;
+  bool is_final_batch = 3; // Indicates this is the last batch
+}
+
+// TimelineService definition
+service TimelineService {
+  rpc GetTimeline(TimelineRequest) returns (stream TimelineChunk);
+}

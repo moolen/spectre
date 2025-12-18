@@ -53,7 +53,8 @@ func (v *Validator) ValidateFilters(filters models.QueryFilters) error {
 		if len(filters.Namespace) > 63 {
 			return NewValidationError("namespace must be 63 characters or less")
 		}
-		// Kubernetes namespace naming rules
+		// Kubernetes namespace naming rules - allow empty string (means all namespaces)
+		// Only validate format if namespace is non-empty
 		if !isValidNamespace(filters.Namespace) {
 			return NewValidationError("invalid namespace format")
 		}
@@ -76,20 +77,30 @@ func (v *Validator) ValidateQuery(query *models.QueryRequest) error {
 }
 
 // isValidNamespace checks if a namespace name is valid per Kubernetes naming rules
+// Kubernetes namespaces are DNS subdomain names: [a-z0-9]([-a-z0-9]*[a-z0-9])?
+// But we'll be more lenient to allow common namespace patterns
 func isValidNamespace(namespace string) bool {
-	if namespace == "" || len(namespace) > 63 {
+	if namespace == "" {
+		// Empty namespace means "all namespaces" - this is valid
+		return true
+	}
+
+	if len(namespace) > 63 {
 		return false
 	}
 
 	// Kubernetes namespaces must start and end with alphanumeric characters
-	// and can contain hyphens in the middle
+	// and can contain hyphens, dots, and underscores in the middle
+	// We'll allow both lowercase and uppercase for compatibility
 	for i, ch := range namespace {
 		if i == 0 || i == len(namespace)-1 {
-			if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+			// Must start and end with alphanumeric
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
 				return false
 			}
 		} else {
-			if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-') {
+			// Middle can have hyphens, dots, underscores, and alphanumeric
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.' || ch == '_') {
 				return false
 			}
 		}

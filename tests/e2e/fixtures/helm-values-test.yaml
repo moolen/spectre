@@ -1,3 +1,6 @@
+# Namespace will be set dynamically by test code
+# namespace: <set-by-test>
+
 config:
   logLevel: debug
 

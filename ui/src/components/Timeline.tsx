@@ -95,22 +95,9 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const prevDomain = useRef(timeDomain);
 
-  // Sort resources for consistent ordering across reloads
-  // Sort by: namespace (asc), kind (asc), name (asc)
-  const sortedResources = useMemo(() => {
-    return [...resources].sort((a, b) => {
-      // First sort by namespace
-      const nsCompare = a.namespace.localeCompare(b.namespace);
-      if (nsCompare !== 0) return nsCompare;
-
-      // Then by kind
-      const kindCompare = a.kind.localeCompare(b.kind);
-      if (kindCompare !== 0) return kindCompare;
-
-      // Finally by name
-      return a.name.localeCompare(b.name);
-    });
-  }, [resources]);
+  // API already provides resources sorted by namespace, kind, and name
+  // No need for client-side sorting - this improves performance significantly
+  const sortedResources = resources;
 
   // Scales (memoized to prevent flicker during non-data updates)
   const innerWidth = width - MARGIN.left - MARGIN.right;
@@ -129,7 +116,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   // Define Zoom Behavior - constrained to the configured time range
   const zoom = useMemo(() => d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([1, 1000]) // Min scale 1 = can't zoom out beyond full view
+      .scaleExtent([1, 30000]) // Min scale 1 = can't zoom out beyond full view, max 30000 for millisecond precision
       .translateExtent([[0, 0], [innerWidth, height]]) // Limit panning to content area
       .extent([[0, 0], [innerWidth, height]]), [innerWidth, height]);
 
@@ -449,7 +436,14 @@ export const Timeline: React.FC<TimelineProps> = ({
         const isHorizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
         if (isHorizontal) {
             event.preventDefault();
-            zoom.translateBy(svg, -event.deltaX, 0);
+            const t = d3.zoomTransform(svg.node()!);
+            // Apply aggressive zoom-aware damping: inversely proportional to zoom level
+            const dampingFactor = Math.max(0.00001, 1 / t.k);
+            const dampedDelta = event.deltaX * dampingFactor;
+            // Cap maximum translation speed to prevent extreme jumps
+            const maxDelta = 50;
+            const finalDelta = Math.max(-maxDelta, Math.min(maxDelta, dampedDelta));
+            zoom.translateBy(svg, -finalDelta, 0);
         }
     }, { passive: false });
 
@@ -788,7 +782,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       </svg>
 
       {/* Zoom Controls */}
-      <div className="absolute flex gap-2 z-[10]" style={{ top: `${MARGIN.top + 10}px`, right: '10px' }}>
+      <div className="fixed flex gap-2 z-[10]" style={{ top: `120px`, right: '10px' }}>
         <button
           onClick={() => {
             if (!svgRef.current) return;
@@ -796,7 +790,8 @@ export const Timeline: React.FC<TimelineProps> = ({
             const currentTransform = d3.zoomTransform(svg.node()!);
             const newScale = Math.max(1, currentTransform.k * 0.8); // Zoom out by 20%
             const centerX = innerWidth / 2;
-            const newTx = currentTransform.x + (centerX * (currentTransform.k - newScale)) / currentTransform.k;
+            // Zoom around the center: keep the point at centerX fixed
+            const newTx = centerX - (centerX - currentTransform.x) * (newScale / currentTransform.k);
             const newTransform = d3.zoomIdentity.translate(newTx, 0).scale(newScale);
             svg.transition()
               .duration(300)
@@ -820,9 +815,10 @@ export const Timeline: React.FC<TimelineProps> = ({
             if (!svgRef.current) return;
             const svg = d3.select(svgRef.current);
             const currentTransform = d3.zoomTransform(svg.node()!);
-            const newScale = Math.min(1000, currentTransform.k * 1.25); // Zoom in by 25%
+            const newScale = Math.min(30000, currentTransform.k * 1.25); // Zoom in by 25%
             const centerX = innerWidth / 2;
-            const newTx = currentTransform.x + (centerX * (currentTransform.k - newScale)) / currentTransform.k;
+            // Zoom around the center: keep the point at centerX fixed
+            const newTx = centerX - (centerX - currentTransform.x) * (newScale / currentTransform.k);
             const newTransform = d3.zoomIdentity.translate(newTx, 0).scale(newScale);
             svg.transition()
               .duration(300)
@@ -858,7 +854,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v.01M12 12v.01M12 16v.01M9 12h.01m3 0h.01m3 0h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8V6a2 2 0 012-2h2M3 16v2a2 2 0 002 2h2m10-16h2a2 2 0 012 2v2m0 8v2a2 2 0 01-2 2h-2" />
           </svg>
         </button>
       </div>

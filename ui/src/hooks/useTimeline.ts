@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react';
 import { K8sResource } from '../types';
 import { apiClient } from '../services/api';
 
@@ -7,6 +7,8 @@ interface UseTimelineResult {
   loading: boolean;
   error: Error | null;
   refresh: () => void;
+  totalCount: number;
+  loadedCount: number;
 }
 
 interface UseTimelineOptions {
@@ -40,6 +42,11 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
   const [resources, setResources] = useState<K8sResource[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [loadedCount, setLoadedCount] = useState<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const accumulatedResourcesRef = useRef<K8sResource[]>([]);
+  const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Serialize filters for stable dependency tracking
   const filtersKey = useMemo(() => {
@@ -81,43 +88,138 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
       return; // No changes, skip fetch
     }
 
-    // Update refs
+    // Update refs BEFORE fetching to prevent duplicate calls
     prevStartTimeRef.current = startTimeMs;
     prevEndTimeRef.current = endTimeMs;
     prevFiltersRef.current = filtersKey;
     prevRefreshTokenRef.current = refreshToken;
 
+    // Cancel any previous request and pending batches
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    if (batchTimeoutRef.current) {
+      clearTimeout(batchTimeoutRef.current);
+      batchTimeoutRef.current = null;
+    }
+    abortControllerRef.current = new AbortController();
+    accumulatedResourcesRef.current = [];
+
+    // Flush batch function - applies accumulated resources to state
+    const flushBatch = () => {
+      if (accumulatedResourcesRef.current.length > 0) {
+        const batchedResources = [...accumulatedResourcesRef.current];
+        const batchSize = batchedResources.length;
+
+        // Use startTransition for non-critical updates (not the first batch)
+        startTransition(() => {
+          setResources(prev => [...prev, ...batchedResources]);
+          setLoadedCount(prev => prev + batchSize);
+        });
+
+        accumulatedResourcesRef.current = [];
+      }
+    };
+
     try {
       setLoading(true);
       setError(null);
+      setResources([]);
+      setTotalCount(0);
+      setLoadedCount(0);
 
-      // Fetch timeline data from backend API using provided time range
-      // This endpoint returns full resource data with statusSegments and events
-      // Prefer raw expressions if available, otherwise use timestamps
-      const data = await apiClient.getTimeline(
-        options?.rawStart || startTimeMs!,
-        options?.rawEnd || endTimeMs!,
-        options?.filters
+      // Fetch timeline data from backend using gRPC streaming
+      // Use raw string expressions if provided, otherwise use millisecond timestamps
+      const startParam = options?.rawStart || startTimeMs;
+      const endParam = options?.rawEnd || endTimeMs;
+
+      if (!startParam || !endParam) {
+        setLoading(false);
+        return;
+      }
+
+      const BATCH_SIZE = 50; // Flush every 50 resources
+      const BATCH_DELAY_MS = 150; // Or after 150ms of no new data
+
+      // Use gRPC streaming with batched progressive rendering
+      const result = await apiClient.getTimelineGrpc(
+        startParam,
+        endParam,
+        options?.filters,
+        (chunk) => {
+          console.log("getTimeline Grpc: chunk.resources", chunk.resources);
+          // Update total count from metadata (first chunk) - this is critical
+          if (chunk.metadata?.totalCount !== undefined) {
+            setTotalCount(chunk.metadata.totalCount);
+          }
+
+          // Accumulate resources for batching
+          accumulatedResourcesRef.current.push(...chunk.resources);
+
+          // Flush if we hit batch size or it's the last chunk
+          if (accumulatedResourcesRef.current.length >= BATCH_SIZE || chunk.isComplete) {
+            if (batchTimeoutRef.current) {
+              clearTimeout(batchTimeoutRef.current);
+              batchTimeoutRef.current = null;
+            }
+            flushBatch();
+          } else {
+            // Debounce: flush after delay if no new data arrives
+            if (batchTimeoutRef.current) {
+              clearTimeout(batchTimeoutRef.current);
+            }
+            batchTimeoutRef.current = setTimeout(() => {
+              flushBatch();
+              batchTimeoutRef.current = null;
+            }, BATCH_DELAY_MS);
+          }
+        }
       );
 
-      setResources(data);
+      // Final cleanup: flush any remaining resources
+      if (batchTimeoutRef.current) {
+        clearTimeout(batchTimeoutRef.current);
+        batchTimeoutRef.current = null;
+      }
+      flushBatch();
+
+      // Final update with complete dataset
+      setResources(result);
+      setTotalCount(result.length);
+      setLoadedCount(result.length);
+      setLoading(false);
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // Request was cancelled, ignore
+        return;
+      }
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch timeline data';
       setError(new Error(errorMessage));
-      console.error('Timeline fetch error:', err);
-    } finally {
       setLoading(false);
     }
-  }, [startTimeMs, endTimeMs, filtersKey, options?.filters, refreshToken]);
+  }, [startTimeMs, endTimeMs, filtersKey, options?.rawStart, options?.rawEnd, refreshToken]);
 
   useEffect(() => {
     fetchData();
+
+    // Cleanup: abort ongoing request and clear batch timeout on unmount or when dependencies change
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (batchTimeoutRef.current) {
+        clearTimeout(batchTimeoutRef.current);
+        batchTimeoutRef.current = null;
+      }
+    };
   }, [fetchData]);
 
   return {
     resources,
     loading,
     error,
-    refresh: () => fetchData(true)
+    refresh: () => fetchData(true),
+    totalCount,
+    loadedCount
   };
 };

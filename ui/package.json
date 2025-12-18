@@ -8,34 +8,43 @@
     "build": "vite build",
     "build:watch": "vite build --watch",
     "preview": "vite preview",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
+    "test": "vitest --run",
+    "test:watch": "vitest",
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.10.2",
     "@google/genai": "^1.30.0",
     "d3": "^7.9.0",
+    "google-protobuf": "^4.0.1",
+    "grpc-web": "^2.0.2",
     "playwright": "^1.57.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^6.28.0"
+    "react-router-dom": "^6.28.0",
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
     "@types/d3": "^7.4.0",
+    "@types/google-protobuf": "^3.15.12",
     "@types/node": "^22.14.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "@vitest/ui": "^4.0.16",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.34.0",
     "eslint-plugin-react-hooks": "^4.6.2",
     "jsdom": "^27.2.0",
     "prettier": "^3.2.0",
+    "protoc-gen-grpc-web": "^1.5.0",
+    "ts-proto": "^2.8.3",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "vitest": "^1.1.0"
+    "vitest": "^4.0.16"
   }
 }

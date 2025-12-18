@@ -72,6 +72,10 @@ func (m *mockConcurrentQueryExecutor) GetMaxConcurrent() int32 {
 	return atomic.LoadInt32(&m.maxConcurrent)
 }
 
+func (m *mockConcurrentQueryExecutor) SetSharedCache(cache interface{}) {
+	// Mock doesn't need to implement caching
+}
+
 // TestExecuteConcurrentQueries_BothQueriesSucceed tests the happy path
 func TestExecuteConcurrentQueries_BothQueriesSucceed(t *testing.T) {
 	logger := logging.GetLogger("test")
