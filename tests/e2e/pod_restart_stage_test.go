@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -48,7 +50,9 @@ func (s *PodRestartStage) a_test_namespace_with_deployment() *PodRestartStage {
 	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
-	s.testNamespace = "test-restart"
+	// Generate unique namespace name to avoid collisions with cluster reuse
+	suffix := rand.Intn(999999)
+	s.testNamespace = fmt.Sprintf("test-restart-%d", suffix)
 	err := s.k8sClient.CreateNamespace(ctx, s.testNamespace)
 	s.require.NoError(err, "failed to create namespace")
 	s.t.Cleanup(func() {

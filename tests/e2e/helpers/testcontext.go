@@ -35,10 +35,10 @@ var (
 	builtImagesMutex sync.RWMutex
 
 	// cachedHelmValues stores Helm values loaded once in TestMain
-	cachedHelmValues   map[string]interface{}
-	cachedImageRef     string
-	cachedValuesMutex  sync.RWMutex
-	helmValuesLoaded   bool
+	cachedHelmValues  map[string]interface{}
+	cachedImageRef    string
+	cachedValuesMutex sync.RWMutex
+	helmValuesLoaded  bool
 )
 
 // TestContext bundles shared infrastructure needed by scenario tests.
@@ -81,7 +81,7 @@ func (tc *TestContext) ReconnectPortForward() error {
 	// Create new port-forward
 	serviceName := fmt.Sprintf("%s-spectre", tc.ReleaseName)
 
-	portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetKubeConfig(), tc.Namespace, serviceName, defaultServicePort)
+	portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetContext(), tc.Namespace, serviceName, defaultServicePort)
 	if err != nil {
 		return fmt.Errorf("failed to create new port-forward: %w", err)
 	}
@@ -96,20 +96,50 @@ func (tc *TestContext) ReconnectPortForward() error {
 	return nil
 }
 
+// SetupE2ETestWithValuesFile provisions test infrastructure using a custom Helm values file.
+// This is useful for tests that need specific configurations (e.g., minimal watcher config).
+func SetupE2ETestWithValuesFile(t *testing.T, valuesFilePath string) *TestContext {
+	t.Helper()
+	return setupE2ETestWithCustomValues(t, valuesFilePath, nil)
+}
+
 // SetupE2ETest provisions test infrastructure using the shared Kind cluster.
 // Each test gets its own unique namespace for isolation.
 func SetupE2ETest(t *testing.T) *TestContext {
 	t.Helper()
+	return setupE2ETestWithCustomValues(t, helmValuesFixturePath, nil)
+}
+
+// SetupE2ETestWithFlux provisions test infrastructure with Flux installed BEFORE Spectre.
+// This is required for tests that use Flux CRDs (HelmRelease, Kustomization, etc.)
+// because Spectre's watcher needs the CRDs to exist when it starts.
+func SetupE2ETestWithFlux(t *testing.T) *TestContext {
+	t.Helper()
+	preDeployFn := func(k8sClient *K8sClient, kubeContext string) error {
+		return EnsureFluxInstalled(t, k8sClient, kubeContext)
+	}
+	return setupE2ETestWithCustomValues(t, helmValuesFixturePath, preDeployFn)
+}
+
+// PreDeployFunc is a function that runs before Spectre is deployed.
+// It can be used to install dependencies like Flux CRDs.
+type PreDeployFunc func(k8sClient *K8sClient, kubeContext string) error
+
+// setupE2ETestWithCustomValues is the internal implementation that accepts a custom values file path.
+// The optional preDeployFn is called after the K8s client is created but before Spectre is deployed.
+func setupE2ETestWithCustomValues(t *testing.T, valuesFilePath string, preDeployFn PreDeployFunc) *TestContext {
+	t.Helper()
+	setupStartTime := time.Now()
 
 	// Get shared cluster from package-level variable
 	// This will be set by TestMain in shared_cluster.go
 	sharedCluster := getSharedCluster(t)
 
 	// Create unique namespace for this test
-	namespace := fmt.Sprintf("test-%s-%06d", 
-		sanitizeName(t.Name()), 
+	namespace := fmt.Sprintf("test-%s-%06d",
+		sanitizeName(t.Name()),
 		time.Now().UnixNano()%1_000_000)
-	
+
 	releaseName := buildReleaseName(namespace)
 
 	ctx := &TestContext{
@@ -138,7 +168,7 @@ func SetupE2ETest(t *testing.T) *TestContext {
 
 		if ctx.K8sClient != nil {
 			// Uninstall Helm release first
-			if err := uninstallHelmRelease(t, sharedCluster.GetKubeConfig(), namespace, releaseName); err != nil {
+			if err := uninstallHelmRelease(t, sharedCluster.GetContext(), namespace, releaseName); err != nil {
 				t.Logf("Warning: failed to uninstall Helm release: %v", err)
 			}
 
@@ -157,7 +187,7 @@ func SetupE2ETest(t *testing.T) *TestContext {
 	}
 
 	// Setup K8s client
-	k8sClient, err := NewK8sClient(t, sharedCluster.GetKubeConfig())
+	k8sClient, err := NewK8sClient(t, sharedCluster.GetContext())
 	if err != nil {
 		ctx.Cleanup()
 		t.Fatalf("failed to create Kubernetes client: %v", err)
@@ -174,23 +204,46 @@ func SetupE2ETest(t *testing.T) *TestContext {
 		t.Fatalf("failed to create namespace: %v", err)
 	}
 
-	// Get cached Helm values (loaded once in TestMain)
-	values, _, err := getCachedHelmValues()
-	if err != nil {
-		// Fallback to loading if not cached
-		values, _, err = loadHelmValues()
-		if err != nil {
+	// Load Helm values from the specified file
+	var values map[string]interface{}
+
+	// Use cached values only if using default path
+	if valuesFilePath == helmValuesFixturePath {
+		var loadErr error
+		values, _, loadErr = getCachedHelmValues()
+		if loadErr != nil {
+			// Fallback to loading if not cached
+			values, _, loadErr = loadHelmValues()
+			if loadErr != nil {
+				ctx.Cleanup()
+				t.Fatalf("failed to load Helm values: %v", loadErr)
+			}
+		}
+	} else {
+		// Load custom values file
+		var loadErr error
+		values, _, loadErr = loadHelmValuesFromFile(valuesFilePath)
+		if loadErr != nil {
 			ctx.Cleanup()
-			t.Fatalf("failed to load Helm values: %v", err)
+			t.Fatalf("failed to load custom Helm values from %s: %v", valuesFilePath, loadErr)
 		}
 	}
 
 	// Set the namespace in values to match the test namespace
 	values["namespace"] = namespace
 
+	// Run pre-deploy function if provided (e.g., install Flux CRDs)
+	if preDeployFn != nil {
+		t.Logf("Running pre-deploy function...")
+		if err := preDeployFn(k8sClient, sharedCluster.GetContext()); err != nil {
+			ctx.Cleanup()
+			t.Fatalf("pre-deploy function failed: %v", err)
+		}
+	}
+
 	// Deploy Helm release in test namespace
 	t.Logf("Deploying Helm release: %s in namespace %s", releaseName, namespace)
-	if err := ensureHelmRelease(t, sharedCluster.GetKubeConfig(), namespace, releaseName, values); err != nil {
+	if err := ensureHelmRelease(t, sharedCluster.GetContext(), namespace, releaseName, values); err != nil {
 		ctx.Cleanup()
 		t.Fatalf("failed to deploy: %v", err)
 	}
@@ -204,7 +257,7 @@ func SetupE2ETest(t *testing.T) *TestContext {
 
 	// Setup port forwarding
 	serviceName := fmt.Sprintf("%s-spectre", releaseName)
-	portForwarder, err := NewPortForwarder(t, sharedCluster.GetKubeConfig(), namespace, serviceName, defaultServicePort)
+	portForwarder, err := NewPortForwarder(t, sharedCluster.GetContext(), namespace, serviceName, defaultServicePort)
 	if err != nil {
 		ctx.Cleanup()
 		t.Fatalf("failed to create port-forward: %v", err)
@@ -218,7 +271,7 @@ func SetupE2ETest(t *testing.T) *TestContext {
 	ctx.APIClient = NewAPIClient(t, portForwarder.GetURL())
 
 	t.Cleanup(ctx.Cleanup)
-	t.Logf("✓ Test environment ready in namespace: %s", namespace)
+	t.Logf("✓ Test environment ready in namespace: %s (total setup took %v)", namespace, time.Since(setupStartTime))
 	return ctx
 }
 
@@ -228,11 +281,11 @@ func UpdateHelmRelease(tc *TestContext, overrides map[string]interface{}) error 
 		return fmt.Errorf("failed to load Helm values: %w", err)
 	}
 	values = mergeMaps(values, overrides)
-	
+
 	// Inject the namespace to match the test namespace
 	values["namespace"] = tc.Namespace
-	
-	if err := ensureHelmRelease(tc.t, tc.Cluster.GetKubeConfig(), tc.Namespace, tc.ReleaseName, values); err != nil {
+
+	if err := ensureHelmRelease(tc.t, tc.Cluster.GetContext(), tc.Namespace, tc.ReleaseName, values); err != nil {
 		return fmt.Errorf("failed to deploy: %w", err)
 	}
 	if err := WaitForAppReady(tc.t.Context(), tc.K8sClient, tc.Namespace, tc.ReleaseName); err != nil {
@@ -260,8 +313,8 @@ func ensureNamespace(ctx context.Context, client *K8sClient, name string) error 
 	return client.CreateNamespace(ctx, name)
 }
 
-func ensureHelmRelease(t *testing.T, kubeConfig, namespace, releaseName string, values map[string]interface{}) error {
-	helm, err := NewHelmDeployer(t, kubeConfig, namespace)
+func ensureHelmRelease(t *testing.T, context, namespace, releaseName string, values map[string]interface{}) error {
+	helm, err := NewHelmDeployer(t, context, namespace)
 	if err != nil {
 		return err
 	}
@@ -281,6 +334,27 @@ func LoadHelmValues() (map[string]interface{}, string, error) {
 
 func loadHelmValues() (map[string]interface{}, string, error) {
 	valuesPath, err := repoPath(helmValuesFixturePath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	data, err := os.ReadFile(valuesPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read Helm values file: %w", err)
+	}
+
+	var values map[string]interface{}
+	if err := yaml.Unmarshal(data, &values); err != nil {
+		return nil, "", fmt.Errorf("failed to unmarshal Helm values: %w", err)
+	}
+
+	imageRef := extractImageReference(values)
+	return values, imageRef, nil
+}
+
+// loadHelmValuesFromFile loads a Helm values file from a custom path
+func loadHelmValuesFromFile(relativePath string) (map[string]interface{}, string, error) {
+	valuesPath, err := repoPath(relativePath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -495,29 +569,29 @@ func SetCachedHelmValues(values map[string]interface{}, imageRef string) {
 func getCachedHelmValues() (map[string]interface{}, string, error) {
 	cachedValuesMutex.RLock()
 	defer cachedValuesMutex.RUnlock()
-	
+
 	if !helmValuesLoaded {
 		return nil, "", fmt.Errorf("helm values not cached")
 	}
-	
+
 	// Return a copy to avoid concurrent modifications
 	valuesCopy := make(map[string]interface{})
 	for k, v := range cachedHelmValues {
 		valuesCopy[k] = v
 	}
-	
+
 	return valuesCopy, cachedImageRef, nil
 }
 
 // getSharedCluster retrieves the shared cluster or fails the test
 func getSharedCluster(t *testing.T) *TestCluster {
 	t.Helper()
-	
+
 	if sharedClusterInstance == nil {
 		t.Fatal("Shared cluster not initialized. TestMain should have called SetSharedCluster(). " +
 			"Make sure you're running tests via 'go test' and not individually.")
 	}
-	
+
 	return sharedClusterInstance
 }
 
@@ -530,16 +604,16 @@ func SetSharedCluster(cluster *TestCluster) {
 }
 
 // uninstallHelmRelease removes a Helm release
-func uninstallHelmRelease(t *testing.T, kubeconfig, namespace, releaseName string) error {
+func uninstallHelmRelease(t *testing.T, context, namespace, releaseName string) error {
 	t.Helper()
-	
+
 	cmd := exec.Command("helm", "uninstall", releaseName,
-		"--kubeconfig", kubeconfig,
+		"--kube-context", context,
 		"--namespace", namespace,
 		"--wait",
 		"--timeout", "2m",
 	)
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Log but don't fail if release doesn't exist
@@ -547,6 +621,6 @@ func uninstallHelmRelease(t *testing.T, kubeconfig, namespace, releaseName strin
 			return fmt.Errorf("helm uninstall failed: %w\nOutput: %s", err, output)
 		}
 	}
-	
+
 	return nil
 }

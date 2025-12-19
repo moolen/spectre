@@ -289,7 +289,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     labels.append('text')
       .attr('data-element', 'label-kind-ns')
-      .text(d => `${d.kind} • ${d.namespace}`)
+      .text(d => `${d.kind} • ${d.namespace}${d.preExisting ? ' • Pre-existing' : ''}`)
       .attr('x', 0)
       .attr('y', kindY)
       .attr('fill', textMuted)
@@ -311,7 +311,6 @@ export const Timeline: React.FC<TimelineProps> = ({
         .append('g')
         .attr('class', 'resource-row')
         .attr('transform', d => `translate(0, ${yScale(d.id)})`);
-
     rows.append('line')
         .attr('class', 'row-guide')
         .attr('x1', -10000)
@@ -324,7 +323,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     // Segments
     rows.selectAll('.segment')
-        .data(d => d.statusSegments.map((s, i) => ({ ...s, resourceId: d.id, index: i })))
+        .data(d => d.statusSegments.map((s, i) => ({ ...s, resourceId: d.id, index: i, preExisting: d.preExisting })))
         .enter()
         .append('rect')
         .attr('class', 'segment')
@@ -334,6 +333,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('height', yScale.bandwidth())
         .attr('rx', 4)
         .attr('fill', s => STATUS_COLORS[s.status])
+        .attr('opacity', s => s.preExisting ? 0.5 : 1) // Lighter for pre-existing resources
         .attr('stroke', 'none')
         .attr('stroke-width', 0);
         // Note: stroke/selection is handled in separate effect

@@ -22,6 +22,14 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// pendingResource represents a resource that failed CRD discovery and needs retry
+type pendingResource struct {
+	Group     string
+	Version   string
+	Kind      string
+	Namespace string // Optional namespace filter
+}
+
 // Watcher monitors Kubernetes resources for changes
 type Watcher struct {
 	dynamicClient   dynamic.Interface
@@ -37,6 +45,10 @@ type Watcher struct {
 	// namespaceFilters maps GVR string to set of allowed namespaces (empty set means all namespaces)
 	namespaceFilters map[string]map[string]bool
 	namespaceMutex   sync.RWMutex
+
+	// Pending resources that failed CRD discovery (CRD not installed yet)
+	pendingResources []pendingResource
+	pendingMutex     sync.RWMutex
 
 	// Readiness tracking
 	readinessMutex      sync.RWMutex
@@ -107,6 +119,10 @@ func (w *Watcher) Start(ctx context.Context) error {
 	w.wg.Add(1)
 	go w.hotReloadLoop(ctx)
 
+	// Start the CRD discovery retry goroutine
+	w.wg.Add(1)
+	go w.crdDiscoveryRetryLoop(ctx)
+
 	// Initial load
 	if err := w.loadAndStartWatchers(ctx); err != nil {
 		return fmt.Errorf("failed to load initial watchers: %w", err)
@@ -173,6 +189,11 @@ func (w *Watcher) loadAndStartWatchers(ctx context.Context) error {
 	w.namespaceFilters = make(map[string]map[string]bool)
 	w.namespaceMutex.Unlock()
 
+	// Clear pending resources (will be repopulated if any fail)
+	w.pendingMutex.Lock()
+	w.pendingResources = nil
+	w.pendingMutex.Unlock()
+
 	// Group resources by GVR
 	type gvrKey struct {
 		group    string
@@ -197,7 +218,16 @@ func (w *Watcher) loadAndStartWatchers(ctx context.Context) error {
 			Kind:    resource.Kind,
 		})
 		if err != nil {
-			w.logger.Error("Failed to resolve GVR for %s/%s/%s: %v", resource.Group, resource.Version, resource.Kind, err)
+			w.logger.Warn("Failed to resolve GVR for %s/%s/%s: %v (will retry periodically)", resource.Group, resource.Version, resource.Kind, err)
+			// Add to pending resources for retry
+			w.pendingMutex.Lock()
+			w.pendingResources = append(w.pendingResources, pendingResource{
+				Group:     resource.Group,
+				Version:   resource.Version,
+				Kind:      resource.Kind,
+				Namespace: resource.Namespace,
+			})
+			w.pendingMutex.Unlock()
 			continue
 		}
 
@@ -328,7 +358,7 @@ func (w *Watcher) resolveGVR(gvk schema.GroupVersionKind) (schema.GroupVersionRe
 }
 
 // watchLoop performs a raw List/Watch loop for a resource without caching
-func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource, namespace, _ string, namespaced bool) error {
+func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource, namespace, kind string, namespaced bool) error {
 	// Get the resource interface
 	// For namespaced resources watching all namespaces, use empty namespace
 	// For cluster-scoped resources, namespace is already empty
@@ -337,6 +367,14 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 		resourceInterface = w.dynamicClient.Resource(gvr)
 	} else {
 		resourceInterface = w.dynamicClient.Resource(gvr).Namespace(namespace)
+	}
+
+	// Create GVK for setting on unstructured objects
+	// Unstructured objects from dynamic clients don't have GVK populated automatically
+	gvk := schema.GroupVersionKind{
+		Group:   gvr.Group,
+		Version: gvr.Version,
+		Kind:    kind,
 	}
 
 	// Get namespace filters for this GVR
@@ -396,6 +434,9 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 				continue
 			}
 
+			// Set GVK on the unstructured object (required for extractors to match resources)
+			items[i].SetGroupVersionKind(gvk)
+
 			if err := w.eventHandler.OnAdd(&items[i]); err != nil {
 				w.logger.Error("Error handling Add event: %v", err)
 			}
@@ -428,6 +469,9 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 				if !shouldProcess(objNamespace) {
 					continue
 				}
+
+				// Set GVK on the unstructured object (required for extractors to match resources)
+				items[i].SetGroupVersionKind(gvk)
 
 				if err := w.eventHandler.OnAdd(&items[i]); err != nil {
 					w.logger.Error("Error handling Add event: %v", err)
@@ -487,6 +531,9 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 					w.logger.Debug("Skipping event: %s %s/%s", event.Type, unstructuredObj.GetNamespace(), unstructuredObj.GetName())
 					continue
 				}
+
+				// Set GVK on the unstructured object (required for extractors to match resources)
+				unstructuredObj.SetGroupVersionKind(gvk)
 
 				switch event.Type {
 				case watch.Added:
@@ -558,6 +605,139 @@ func (w *Watcher) hotReloadLoop(ctx context.Context) {
 					w.logger.Info("Watchers reloaded successfully")
 				}
 			}
+		}
+	}
+}
+
+// crdDiscoveryRetryLoop periodically retries starting watchers for resources
+// whose CRDs were not available at startup. This allows Spectre to start
+// watching resources like HelmRelease even if Flux is installed after Spectre.
+func (w *Watcher) crdDiscoveryRetryLoop(ctx context.Context) {
+	defer w.wg.Done()
+
+	// Retry every 30 seconds
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-w.stopChan:
+			return
+		case <-ticker.C:
+			w.retryPendingResources(ctx)
+		}
+	}
+}
+
+// retryPendingResources attempts to resolve and start watchers for pending resources
+func (w *Watcher) retryPendingResources(ctx context.Context) {
+	w.pendingMutex.Lock()
+	if len(w.pendingResources) == 0 {
+		w.pendingMutex.Unlock()
+		return
+	}
+
+	// Copy pending resources and clear the list
+	pending := make([]pendingResource, len(w.pendingResources))
+	copy(pending, w.pendingResources)
+	w.pendingResources = nil
+	w.pendingMutex.Unlock()
+
+	w.logger.Info("Retrying CRD discovery for %d pending resources", len(pending))
+
+	// Group resources by GVR (same logic as loadAndStartWatchers)
+	type gvrKey struct {
+		group    string
+		version  string
+		kind     string
+		resource string
+	}
+	type gvrInfo struct {
+		gvr        schema.GroupVersionResource
+		namespaced bool
+		namespaces map[string]bool
+		kind       string
+	}
+
+	gvrMap := make(map[gvrKey]*gvrInfo)
+	stillPending := []pendingResource{}
+
+	for _, resource := range pending {
+		gvr, namespaced, err := w.resolveGVR(schema.GroupVersionKind{
+			Group:   resource.Group,
+			Version: resource.Version,
+			Kind:    resource.Kind,
+		})
+		if err != nil {
+			// Still not available, add back to pending
+			stillPending = append(stillPending, resource)
+			continue
+		}
+
+		w.logger.Info("CRD now available: %s/%s/%s", resource.Group, resource.Version, resource.Kind)
+
+		key := gvrKey{
+			group:    gvr.Group,
+			version:  gvr.Version,
+			kind:     resource.Kind,
+			resource: gvr.Resource,
+		}
+
+		info, exists := gvrMap[key]
+		if !exists {
+			info = &gvrInfo{
+				gvr:        gvr,
+				namespaced: namespaced,
+				namespaces: make(map[string]bool),
+				kind:       resource.Kind,
+			}
+			gvrMap[key] = info
+		}
+
+		// Add namespace filter if specified
+		if namespaced && resource.Namespace != "" {
+			info.namespaces[resource.Namespace] = true
+		}
+	}
+
+	// Re-add still-pending resources
+	if len(stillPending) > 0 {
+		w.pendingMutex.Lock()
+		w.pendingResources = append(w.pendingResources, stillPending...)
+		w.pendingMutex.Unlock()
+		w.logger.Debug("Still waiting for %d CRDs to become available", len(stillPending))
+	}
+
+	// Start watchers for newly available resources
+	for key, info := range gvrMap {
+		// Check if watcher already exists
+		watcherKey := fmt.Sprintf("%s/%s/%s", key.group, key.version, key.resource)
+		w.watchersMutex.RLock()
+		_, exists := w.watchers[watcherKey]
+		w.watchersMutex.RUnlock()
+
+		if exists {
+			w.logger.Debug("Watcher already exists for %s, skipping", watcherKey)
+			continue
+		}
+
+		// Store namespace filters
+		gvrString := fmt.Sprintf("%s/%s/%s", key.group, key.version, key.resource)
+		w.namespaceMutex.Lock()
+		if len(info.namespaces) > 0 {
+			w.namespaceFilters[gvrString] = info.namespaces
+		} else {
+			w.namespaceFilters[gvrString] = make(map[string]bool)
+		}
+		w.namespaceMutex.Unlock()
+
+		// Start watcher for this GVR
+		if err := w.startGVRWatcher(ctx, info.gvr, info.namespaced, info.kind); err != nil {
+			w.logger.Error("Failed to start watcher for %s: %v", gvrString, err)
+		} else {
+			w.logger.Info("Started watcher for newly available CRD: %s", gvrString)
 		}
 	}
 }

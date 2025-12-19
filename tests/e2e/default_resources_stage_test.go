@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -53,8 +55,10 @@ func (s *DefaultResourcesStage) two_test_namespaces() *DefaultResourcesStage {
 	s.require.NoError(err, "failed to get cluster version")
 	s.t.Logf("Kubernetes version: %s", version)
 
-	s.testNamespace1 = "test-default"
-	s.testNamespace2 = "test-alternate"
+	// Generate unique namespace names to avoid collisions with cluster reuse
+	suffix := rand.Intn(999999)
+	s.testNamespace1 = fmt.Sprintf("test-default-%d", suffix)
+	s.testNamespace2 = fmt.Sprintf("test-alternate-%d", suffix)
 
 	for _, ns := range []string{s.testNamespace1, s.testNamespace2} {
 		err := s.k8sClient.CreateNamespace(ctx, ns)

@@ -1,0 +1,20 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: frontend
+  namespace: default
+spec:
+  chart:
+    spec:
+      chart: nginx
+      version: "1.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: flux-system
+  valuesFrom:
+    - kind: Secret
+      name: frontend-values
+      valuesKey: values.yaml
+  interval: 5m
+  targetNamespace: default

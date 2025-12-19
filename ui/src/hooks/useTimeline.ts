@@ -191,6 +191,9 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
         batchTimeoutRef.current = null;
       }
       flushBatch();
+      
+      // Ensure loading is stopped even if no data was received
+      setLoading(false);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         // Request was cancelled, ignore

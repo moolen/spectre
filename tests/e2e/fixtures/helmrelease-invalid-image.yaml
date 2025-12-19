@@ -1,0 +1,17 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rca-test-app
+  namespace: rca-test
+spec:
+  interval: 1m
+  chart:
+    spec:
+      chart: oci://quay.io/jetstack/charts/cert-manager
+      version: "v1.16.2"
+  values:
+    crds:
+      enabled: true
+    image:
+      tag: "nonexistent"  # Non-existent tag to cause ImagePullBackOff
+    replicaCount: 1

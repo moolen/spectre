@@ -10,19 +10,31 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
-// Detect demo mode on app startup
-detectDemoMode().catch(error => {
-  console.warn('Failed to detect demo mode:', error);
-});
-
 const root = ReactDOM.createRoot(rootElement);
 const baseName = (import.meta.env.BASE_URL ?? '/') as string;
-root.render(
-  <React.StrictMode>
-    <BrowserRouter basename={baseName}>
-      <SettingsProvider>
-        <App />
-      </SettingsProvider>
-    </BrowserRouter>
-  </React.StrictMode>
-);
+
+// Detect demo mode before rendering the app
+// This ensures getDemoMode() returns the correct value on first render
+detectDemoMode().then((isDemoMode) => {
+  console.log('[Spectre] Demo mode detected:', isDemoMode);
+  root.render(
+    <React.StrictMode>
+      <BrowserRouter basename={baseName}>
+        <SettingsProvider>
+          <App />
+        </SettingsProvider>
+      </BrowserRouter>
+    </React.StrictMode>
+  );
+}).catch(error => {
+  console.warn('[Spectre] Failed to detect demo mode, rendering app anyway:', error);
+  root.render(
+    <React.StrictMode>
+      <BrowserRouter basename={baseName}>
+        <SettingsProvider>
+          <App />
+        </SettingsProvider>
+      </BrowserRouter>
+    </React.StrictMode>
+  );
+});

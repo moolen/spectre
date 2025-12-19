@@ -5,6 +5,7 @@ import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
 import { TimeInputWithCalendar } from './TimeInputWithCalendar';
 import { parseTimeExpression, validateTimeRange } from '../utils/timeParsing';
 import { apiClient } from '../services/api';
+import { toast } from '../utils/toast';
 
 interface ExportFormData {
   from: string; // Human-friendly date string (e.g., "2h ago", "2024-01-01 13:00")
@@ -111,8 +112,11 @@ export const SettingsMenu: React.FC = () => {
       URL.revokeObjectURL(url);
 
       setIsExportModalOpen(false);
+      toast.success('Data exported successfully', 'Your timeline data has been downloaded');
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Export failed');
+      const errorMessage = error instanceof Error ? error.message : 'Export failed';
+      setExportError(errorMessage);
+      toast.error('Export failed', errorMessage);
     } finally {
       setIsExporting(false);
     }
@@ -136,16 +140,20 @@ export const SettingsMenu: React.FC = () => {
         overwrite: true,
       });
 
+      const successMessage = `Successfully imported ${result.total_events || 0} events from ${result.imported_files || 0} file(s)`;
       setImportMessage({
         type: 'success',
-        text: `Successfully imported ${result.total_events || 0} events from ${result.imported_files || 0} file(s)`
+        text: successMessage
       });
+      toast.success('Data imported successfully', successMessage);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Import failed';
       setImportMessage({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Import failed'
+        text: errorMessage
       });
-    } finally {
+      toast.error('Import failed', errorMessage);
+    } finally{
       setIsImporting(false);
       // Reset file input
       if (event.target) {

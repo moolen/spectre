@@ -274,6 +274,7 @@ func TestStorageStop_CancelledContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create storage: %v", err)
 	}
+	defer storage.Close() // Ensure cleanup even if Stop fails
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -285,6 +286,10 @@ func TestStorageStop_CancelledContext(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
+
+	// Give the Stop() goroutine time to complete its cleanup
+	// This prevents race with test cleanup trying to remove temp directory
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestStorageName(t *testing.T) {

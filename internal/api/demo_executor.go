@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/moolen/spectre/internal/models"
@@ -107,9 +108,10 @@ func (d *DemoQueryExecutor) Execute(ctx context.Context, query *models.QueryRequ
 			continue
 		}
 
-		// Process events for this resource
-		for _, evt := range resource.Events {
-			eventTimeNs := (timeOffset + evt.TimestampOffsetSec) * int64(time.Second)
+		// Process events from statusSegments
+		// Each statusSegment represents a state change, so we create an event at its start time
+		for idx, segment := range resource.StatusSegments {
+			eventTimeNs := (timeOffset + segment.StartOffsetSec) * int64(time.Second)
 
 			// Check if event falls within query time window (convert to nanoseconds)
 			queryStartNs := query.StartTimestamp * int64(time.Second)
@@ -129,26 +131,31 @@ func (d *DemoQueryExecutor) Execute(ctx context.Context, query *models.QueryRequ
 				UID:       resource.ID,
 			}
 
-			// Convert event type from string (e.g., "Warning") to EventType enum
+			// Determine event type based on segment position
 			var eventType models.EventType
-			switch evt.Type {
-			case "CREATE":
+			if idx == 0 {
 				eventType = models.EventTypeCreate
-			case "UPDATE":
-				eventType = models.EventTypeUpdate
-			case "DELETE":
-				eventType = models.EventTypeDelete
-			default:
-				// Default to UPDATE for demo data
+			} else {
 				eventType = models.EventTypeUpdate
 			}
 
+			// Convert resourceData map to byte slice for storage
+			var dataBytes []byte
+			if segment.ResourceData != nil {
+				var err error
+				dataBytes, err = json.Marshal(segment.ResourceData)
+				if err != nil {
+					// Log error but continue processing
+					dataBytes = nil
+				}
+			}
+
 			event := models.Event{
-				ID:        evt.ID,
+				ID:        fmt.Sprintf("%s-segment-%d", resource.ID, idx),
 				Timestamp: eventTimeNs,
 				Type:      eventType,
 				Resource:  resourceMetadata,
-				Data:      nil,
+				Data:      dataBytes,
 			}
 			events = append(events, event)
 		}

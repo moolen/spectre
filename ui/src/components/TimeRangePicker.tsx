@@ -3,18 +3,12 @@ import { TimeRange } from '../types';
 import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
 import { TimeInputWithCalendar } from './TimeInputWithCalendar';
 import { validateTimeRange, formatDateTimeForInput } from '../utils/timeParsing';
+import { TIME_RANGE_PRESETS } from '../constants/timeRangePresets';
 
 interface TimeRangePickerProps {
   onConfirm: (range: TimeRange, rawStart?: string, rawEnd?: string) => void;
   initialRange?: TimeRange;
 }
-
-const PRESETS = [
-  { label: 'Last 15min', minutes: 15, relative: 'now-15m' },
-  { label: 'Last 30min', minutes: 30, relative: 'now-30m' },
-  { label: 'Last 60min', minutes: 60, relative: 'now-60m' },
-  { label: 'Last 3h', minutes: 180, relative: 'now-3h' },
-];
 
 export const TimeRangePicker: React.FC<TimeRangePickerProps> = ({ onConfirm, initialRange }) => {
   const [startInput, setStartInput] = useState<string>('');
@@ -103,7 +97,7 @@ export const TimeRangePicker: React.FC<TimeRangePickerProps> = ({ onConfirm, ini
             Quick Presets
           </label>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {PRESETS.map((preset) => {
+              {TIME_RANGE_PRESETS.map((preset) => {
                 const isSelected = selectedPreset === preset.minutes;
                 return (
                   <button

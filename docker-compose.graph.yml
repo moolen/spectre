@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: spectre-falkordb
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  spectre-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spectre-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - spectre-data:/data
+    environment:
+      - GRAPH_ENABLED=true
+      - GRAPH_HOST=falkordb
+      - GRAPH_PORT=6379
+      - GRAPH_NAME=spectre
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spectre-mcp
+    ports:
+      - "8082:8082"
+    environment:
+      - SPECTRE_URL=http://spectre-server:8080
+      - MCP_HTTP_ADDR=:8082
+      - GRAPH_ENABLED=true
+      - GRAPH_HOST=falkordb
+      - GRAPH_PORT=6379
+      - GRAPH_NAME=spectre
+    entrypoint: ["/app/spectre", "mcp"]
+    depends_on:
+      spectre-server:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  falkordb-data:
+    driver: local
+  spectre-data:
+    driver: local

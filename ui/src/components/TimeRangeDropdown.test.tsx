@@ -84,10 +84,10 @@ describe('TimeRangeDropdown', () => {
     await user.click(button);
 
     // Preset buttons should be visible
-    expect(screen.getByText('Last 15min')).toBeInTheDocument();
     expect(screen.getByText('Last 30min')).toBeInTheDocument();
-    expect(screen.getByText('Last 60min')).toBeInTheDocument();
-    expect(screen.getByText('Last 3h')).toBeInTheDocument();
+    expect(screen.getByText('Last 6h')).toBeInTheDocument();
+    expect(screen.getByText('Last 24h')).toBeInTheDocument();
+    expect(screen.getByText('Last 48h')).toBeInTheDocument();
   });
 
   it('should apply preset when preset button is clicked', async () => {
@@ -97,14 +97,14 @@ describe('TimeRangeDropdown', () => {
     const button = screen.getByRole('button');
     await user.click(button);
 
-    // Click on "Last 15min" preset
-    const presetButton = screen.getByText('Last 15min');
+    // Click on "Last 30min" preset
+    const presetButton = screen.getByText('Last 30min');
     await user.click(presetButton);
 
     // onConfirm should be called with the preset time range
     expect(mockOnConfirm).toHaveBeenCalled();
     const [range, rawStart, rawEnd] = mockOnConfirm.mock.calls[0];
-    expect(rawStart).toBe('now-15m');
+    expect(rawStart).toBe('now-30m');
     expect(rawEnd).toBe('now');
     expect(range.start).toBeInstanceOf(Date);
     expect(range.end).toBeInstanceOf(Date);

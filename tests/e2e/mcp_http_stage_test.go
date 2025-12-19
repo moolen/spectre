@@ -65,7 +65,7 @@ func (s *MCPHTTPStage) mcp_server_is_deployed() *MCPHTTPStage {
 func (s *MCPHTTPStage) mcp_client_is_connected() *MCPHTTPStage {
 	// Create port-forward for MCP server
 	serviceName := s.testCtx.ReleaseName + "-spectre"
-	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetKubeConfig(), s.testCtx.Namespace, serviceName, 8082)
+	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetContext(), s.testCtx.Namespace, serviceName, 8082)
 	s.require.NoError(err, "failed to create MCP port-forward")
 
 	err = mcpPortForward.WaitForReady(30 * time.Second)
@@ -157,28 +157,57 @@ func (s *MCPHTTPStage) tools_are_listed() *MCPHTTPStage {
 
 func (s *MCPHTTPStage) four_tools_are_available() *MCPHTTPStage {
 	s.require.NotNil(s.tools, "tools must be listed first")
-	s.assert.Len(s.tools, 4, "should have exactly 4 tools")
+	// Should have 6 tools with graph enabled (default in Helm)
+	// but allow 4 if graph is disabled
+	toolCount := len(s.tools)
+	s.assert.True(toolCount == 4 || toolCount == 6, 
+		"should have 4 tools (base) or 6 tools (with graph), got %d", toolCount)
+	s.t.Logf("Available tools count: %d", toolCount)
 	return s
 }
 
 func (s *MCPHTTPStage) expected_tools_are_present() *MCPHTTPStage {
 	s.require.NotNil(s.tools, "tools must be listed first")
 
-	expectedTools := map[string]bool{
+	// Base tools that should always be present
+	baseTools := map[string]bool{
 		"cluster_health":    false,
 		"resource_changes":  false,
 		"investigate":       false,
 		"resource_explorer": false,
 	}
 
+	// Graph tools are conditional (only present if graph.enabled=true)
+	graphTools := map[string]bool{
+		"find_root_cause":       false,
+		"calculate_blast_radius": false,
+	}
+
 	for _, tool := range s.tools {
-		if _, ok := expectedTools[tool.Name]; ok {
-			expectedTools[tool.Name] = true
+		if _, expected := baseTools[tool.Name]; expected {
+			baseTools[tool.Name] = true
+		}
+		if _, expected := graphTools[tool.Name]; expected {
+			graphTools[tool.Name] = true
 		}
 	}
 
-	for toolName, found := range expectedTools {
-		s.assert.True(found, "expected tool %s to be present", toolName)
+	// Assert all base tools are present
+	for toolName, found := range baseTools {
+		s.assert.True(found, "expected base tool %s to be present", toolName)
+	}
+
+	// Graph tools should be present with default Helm config, but are optional
+	hasGraphTools := false
+	for toolName, found := range graphTools {
+		if found {
+			hasGraphTools = true
+			s.t.Logf("✓ Graph tool %s is available", toolName)
+		}
+	}
+	
+	if !hasGraphTools {
+		s.t.Log("ℹ Graph tools not available (graph.enabled=false)")
 	}
 
 	return s

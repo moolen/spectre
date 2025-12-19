@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -21,19 +22,47 @@ type StorageWriter interface {
 	WriteEvent(event *models.Event) error
 }
 
-// EventCaptureHandler captures Kubernetes events and routes them to storage
-type EventCaptureHandler struct {
-	storage StorageWriter
-	logger  *logging.Logger
-	pruner  *ManagedFieldsPruner
+// GraphPipeline is the interface for processing events through the graph pipeline
+type GraphPipeline interface {
+	ProcessEvent(ctx context.Context, event models.Event) error
 }
 
-// NewEventCaptureHandler creates a new event capture handler
+// TimelineMode specifies where events are written
+type TimelineMode string
+
+const (
+	TimelineModeStorage TimelineMode = "storage"
+	TimelineModeGraph   TimelineMode = "graph"
+	TimelineModeBoth    TimelineMode = "both"
+)
+
+// EventCaptureHandler captures Kubernetes events and routes them to storage and/or graph
+type EventCaptureHandler struct {
+	storage       StorageWriter
+	graphPipeline GraphPipeline
+	mode          TimelineMode
+	logger        *logging.Logger
+	pruner        *ManagedFieldsPruner
+}
+
+// NewEventCaptureHandler creates a new event capture handler (storage-only mode)
 func NewEventCaptureHandler(storage StorageWriter) *EventCaptureHandler {
 	return &EventCaptureHandler{
 		storage: storage,
+		mode:    TimelineModeStorage,
 		logger:  logging.GetLogger("event_handler"),
 		pruner:  NewManagedFieldsPruner(),
+	}
+}
+
+// NewEventCaptureHandlerWithMode creates an event handler with specified mode
+func NewEventCaptureHandlerWithMode(storage StorageWriter, graphPipeline GraphPipeline, mode TimelineMode) *EventCaptureHandler {
+	return &EventCaptureHandler{
+		storage:       storage,
+		graphPipeline: graphPipeline,
+		mode:          mode,
+		logger:        logging.GetLogger("event_handler"),
+		pruner:        NewManagedFieldsPruner(),
 	}
 }
 
@@ -62,13 +91,8 @@ func (h *EventCaptureHandler) OnAdd(obj runtime.Object) error {
 		DataSize:  dataSize,
 	}
 
-	// Write to storage
-	if err := h.storage.WriteEvent(event); err != nil {
-		h.logger.Error("Failed to write CREATE event for %s/%s: %v", metadata.Kind, metadata.Name, err)
-		return err
-	}
-
-	return nil
+	// Write based on mode
+	return h.writeEvent(event)
 }
 
 // OnUpdate handles resource update events
@@ -96,13 +120,8 @@ func (h *EventCaptureHandler) OnUpdate(oldObj, newObj runtime.Object) error {
 		DataSize:  dataSize,
 	}
 
-	// Write to storage
-	if err := h.storage.WriteEvent(event); err != nil {
-		h.logger.Error("Failed to write UPDATE event for %s/%s: %v", metadata.Kind, metadata.Name, err)
-		return err
-	}
-
-	return nil
+	// Write based on mode
+	return h.writeEvent(event)
 }
 
 // OnDelete handles resource deletion events
@@ -130,13 +149,49 @@ func (h *EventCaptureHandler) OnDelete(obj runtime.Object) error {
 		DataSize:  dataSize,
 	}
 
-	// Write to storage
-	if err := h.storage.WriteEvent(event); err != nil {
-		h.logger.Error("Failed to write DELETE event for %s/%s: %v", metadata.Kind, metadata.Name, err)
-		return err
+	// Write based on mode
+	return h.writeEvent(event)
+}
+
+// writeEvent writes an event based on the configured mode
+func (h *EventCaptureHandler) writeEvent(event *models.Event) error {
+	ctx := context.Background() // Use background context for event processing
+
+	var storageErr, graphErr error
+
+	// Write to storage if needed
+	if h.mode == TimelineModeStorage || h.mode == TimelineModeBoth {
+		if h.storage != nil {
+			storageErr = h.storage.WriteEvent(event)
+			if storageErr != nil {
+				h.logger.Error("Failed to write event to storage: %v", storageErr)
+			}
+		}
 	}
 
-	return nil
+	// Write to graph if needed
+	if h.mode == TimelineModeGraph || h.mode == TimelineModeBoth {
+		if h.graphPipeline != nil {
+			graphErr = h.graphPipeline.ProcessEvent(ctx, *event)
+			if graphErr != nil {
+				h.logger.Error("Failed to write event to graph: %v", graphErr)
+			}
+		}
+	}
+
+	// In "both" mode, succeed if either write succeeds
+	if h.mode == TimelineModeBoth {
+		if storageErr != nil && graphErr != nil {
+			return fmt.Errorf("both writes failed - storage: %v, graph: %v", storageErr, graphErr)
+		}
+		return nil
+	}
+
+	// In single-mode, return the relevant error
+	if storageErr != nil {
+		return storageErr
+	}
+	return graphErr
 }
 
 // objectToJSON converts a Kubernetes object to JSON, pruning managedFields

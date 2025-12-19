@@ -64,4 +64,7 @@ ui/coverage/
 
 TODO.md
 benchmark-data/
-data/
+data/data-local/
+
+# Auto Claude data directory
+.auto-claude/

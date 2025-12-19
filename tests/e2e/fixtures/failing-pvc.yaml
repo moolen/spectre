@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: failing-pvc-test
+  labels:
+    app: pvc-test
+    test-scenario: pvc-failure
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: nonexistent-storage-class-xyz
+  resources:
+    requests:
+      storage: 1Gi

@@ -156,22 +156,31 @@ func TestStateSnapshot_ConsistentView(t *testing.T) {
 func TestStateSnapshot_DeletedResourceHidden(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Hour 1: Create pod1, then delete it
+	// Use fixed timestamps aligned to hour boundaries to avoid flakiness
+	// Current hour start (truncated to hour)
+	now := time.Now()
+	currentHourStart := now.Truncate(time.Hour)
+
+	// Hour N-2: Create pod1, then delete it (both events in same hour)
+	// Use timestamps 5 and 15 minutes into the hour to ensure they stay in the same hour
+	hour1Start := currentHourStart.Add(-2 * time.Hour)
+	createTime := hour1Start.Add(5 * time.Minute)
+	deleteTime := hour1Start.Add(15 * time.Minute)
+
 	storage, err := New(tmpDir, 1024*1024)
 	if err != nil {
 		t.Fatalf("failed to create storage: %v", err)
 	}
 
-	twoHoursAgo := time.Now().Add(-2 * time.Hour)
-	event1 := createTestEvent("pod1", "default", "Pod", twoHoursAgo.UnixNano())
+	event1 := createTestEvent("pod1", "default", "Pod", createTime.UnixNano())
 	if err := storage.WriteEvent(event1); err != nil {
 		t.Fatalf("failed to write creation event: %v", err)
 	}
 
-	// Delete the pod (still in hour 1)
+	// Delete the pod (still in hour 1 - 10 minutes after create)
 	deleteEvent := &models.Event{
 		ID:        "test-id-pod1-delete",
-		Timestamp: twoHoursAgo.Add(10 * time.Minute).UnixNano(),
+		Timestamp: deleteTime.UnixNano(),
 		Type:      models.EventTypeDelete,
 		Resource: models.ResourceMetadata{
 			Group:     "",
@@ -192,14 +201,15 @@ func TestStateSnapshot_DeletedResourceHidden(t *testing.T) {
 		t.Fatalf("failed to close storage: %v", err)
 	}
 
-	// Hour 2: Write a different pod
+	// Hour N-1: Write a different pod
 	storage, err = New(tmpDir, 1024*1024)
 	if err != nil {
 		t.Fatalf("failed to recreate storage: %v", err)
 	}
 
-	oneHourAgo := time.Now().Add(-1 * time.Hour)
-	event2 := createTestEvent("pod2", "default", "Pod", oneHourAgo.UnixNano())
+	hour2Start := currentHourStart.Add(-1 * time.Hour)
+	pod2Time := hour2Start.Add(5 * time.Minute)
+	event2 := createTestEvent("pod2", "default", "Pod", pod2Time.UnixNano())
 	if err := storage.WriteEvent(event2); err != nil {
 		t.Fatalf("failed to write event in hour 2: %v", err)
 	}
@@ -209,7 +219,8 @@ func TestStateSnapshot_DeletedResourceHidden(t *testing.T) {
 		t.Fatalf("failed to close storage: %v", err)
 	}
 
-	// Query hour 2 - deleted pod1 should NOT appear (it's in DELETE state in carried over snapshots)
+	// Query hour N-1 to N - deleted pod1 should NOT appear
+	// (it's in DELETE state in carried over snapshots from hour N-2)
 	storage, err = New(tmpDir, 1024*1024)
 	if err != nil {
 		t.Fatalf("failed to recreate storage for querying: %v", err)
@@ -218,11 +229,11 @@ func TestStateSnapshot_DeletedResourceHidden(t *testing.T) {
 
 	executor := NewQueryExecutor(storage, nil)
 
-	now := time.Now()
-	currentHour := now.Unix()
+	// Query from hour N-1 start to current time
+	// This should include pod2 but NOT pod1 (which was deleted in hour N-2)
 	query := &models.QueryRequest{
-		StartTimestamp: currentHour - 3600,
-		EndTimestamp:   currentHour,
+		StartTimestamp: hour2Start.Unix(),
+		EndTimestamp:   now.Unix(),
 		Filters:        models.QueryFilters{},
 	}
 
@@ -236,6 +247,18 @@ func TestStateSnapshot_DeletedResourceHidden(t *testing.T) {
 		if event.Resource.Name == "pod1" {
 			t.Errorf("deleted resource pod1 should not appear in consistent view, but got event type: %s", event.Type)
 		}
+	}
+
+	// Verify pod2 IS present
+	foundPod2 := false
+	for _, event := range result.Events {
+		if event.Resource.Name == "pod2" {
+			foundPod2 = true
+			break
+		}
+	}
+	if !foundPod2 {
+		t.Errorf("pod2 should appear in results but was not found")
 	}
 }
 

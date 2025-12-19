@@ -28,8 +28,10 @@ type PortForwarder struct {
 }
 
 // NewPortForwarder creates a new port forwarder.
-func NewPortForwarder(t *testing.T, kubeConfig, namespace, service string, remotePort uint16) (*PortForwarder, error) {
-	t.Logf("Setting up port-forward for %s/%s:%d", namespace, service, remotePort)
+// Forwards a single port that handles HTTP, gRPC, gRPC-Web, and Connect protocols.
+func NewPortForwarder(t *testing.T, context, namespace, service string, remotePort uint16) (*PortForwarder, error) {
+	startTime := time.Now()
+	t.Logf("Setting up port-forward for %s/%s:%d (supports HTTP, gRPC, gRPC-Web, and Connect)", namespace, service, remotePort)
 
 	// Find a free local port
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{
@@ -55,7 +57,7 @@ func NewPortForwarder(t *testing.T, kubeConfig, namespace, service string, remot
 
 	// Start port-forward in background
 	go func() {
-		if err := pf.run(kubeConfig); err != nil {
+		if err := pf.run(context); err != nil {
 			t.Logf("Port-forward error: %v", err)
 		}
 	}()
@@ -63,7 +65,9 @@ func NewPortForwarder(t *testing.T, kubeConfig, namespace, service string, remot
 	// Wait for port-forward to be ready
 	select {
 	case <-pf.readyCh:
-		t.Logf("✓ Port-forward established on localhost:%d -> %s/%s:%d", localPort, namespace, service, remotePort)
+		t.Logf("✓ Port-forward established on localhost:%d -> %s/%s:%d (took %v)",
+			pf.LocalPort, namespace, service, remotePort,
+			time.Since(startTime))
 		return pf, nil
 	case <-time.After(10 * time.Second):
 		return nil, fmt.Errorf("timeout waiting for port-forward to be ready")
@@ -85,9 +89,19 @@ func (pf *PortForwarder) Stop() error {
 }
 
 // run executes the port-forward.
-func (pf *PortForwarder) run(kubeConfigPath string) error {
-	// Load kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+func (pf *PortForwarder) run(contextName string) error {
+	// Load kubeconfig from default locations
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{}
+
+	// Override context if specified
+	if contextName != "" {
+		configOverrides.CurrentContext = contextName
+	}
+
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+
+	config, err := kubeConfig.ClientConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
@@ -98,7 +112,7 @@ func (pf *PortForwarder) run(kubeConfigPath string) error {
 	}
 
 	// Get pods in the namespace with service selector
-	pods, err := clientset.CoreV1().Pods(pf.Namespace).List(pf.t.Context(), metav1.ListOptions{})
+	pods, err := clientset.CoreV1().Pods(pf.Namespace).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
@@ -124,7 +138,10 @@ func (pf *PortForwarder) run(kubeConfigPath string) error {
 
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", req.URL())
 
-	ports := []string{fmt.Sprintf("%d:%d", pf.LocalPort, pf.RemotePort)}
+	// Forward single port (handles HTTP, gRPC, gRPC-Web, and Connect)
+	ports := []string{
+		fmt.Sprintf("%d:%d", pf.LocalPort, pf.RemotePort),
+	}
 	fw, err := portforward.New(dialer, ports, pf.stopCh, pf.readyCh, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create port forwarder: %w", err)
@@ -135,9 +152,10 @@ func (pf *PortForwarder) run(kubeConfigPath string) error {
 
 // WaitForReady waits until the port-forwarded service is responsive.
 func (pf *PortForwarder) WaitForReady(timeout time.Duration) error {
+	startTime := time.Now()
 	pf.t.Logf("Waiting for service to be ready at %s", pf.GetURL())
 
-	ctx, cancel := context.WithTimeout(pf.t.Context(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -152,7 +170,7 @@ func (pf *PortForwarder) WaitForReady(timeout time.Duration) error {
 			if err == nil {
 				resp.Body.Close()
 				if resp.StatusCode == http.StatusOK {
-					pf.t.Logf("✓ Service is ready")
+					pf.t.Logf("✓ Service is ready (took %v)", time.Since(startTime))
 					return nil
 				}
 			}

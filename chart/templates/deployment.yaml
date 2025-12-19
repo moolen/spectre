@@ -99,6 +99,20 @@ spec:
         - --tracing-enabled=true
         - --tracing-endpoint={{ .Values.tracing.endpoint }}
         {{- end }}
+        {{- if .Values.graph.enabled }}
+        - --graph-enabled=true
+        - --graph-host=127.0.0.1
+        - --graph-port={{ .Values.graph.falkordb.port }}
+        - --graph-name={{ .Values.graph.falkordb.graphName }}
+        - --graph-retention-hours={{ .Values.graph.sync.retentionHours }}
+        - --graph-rebuild-on-start={{ .Values.graph.sync.rebuildOnStart }}
+        - --graph-rebuild-if-empty={{ .Values.graph.sync.rebuildIfEmptyOnly }}
+        - --graph-rebuild-window-hours={{ .Values.graph.sync.rebuildWindowHours }}
+        {{- if .Values.graph.timeline }}
+        - --timeline-query-source={{ .Values.graph.timeline.querySource }}
+        - --timeline-mode={{ .Values.graph.timeline.mode }}
+        {{- end }}
+        {{- end }}
         {{- range .Values.extraArgs }}
         - {{ . }}
         {{- end }}
@@ -154,11 +168,22 @@ spec:
         command:
         - /app/spectre
         - mcp
+        - --log-level=debug
         env:
         - name: SPECTRE_URL
           value: {{ .Values.mcp.spectreURL | quote }}
         - name: MCP_HTTP_ADDR
           value: {{ .Values.mcp.httpAddr | quote }}
+        {{- if .Values.graph.enabled }}
+        - name: GRAPH_ENABLED
+          value: "true"
+        - name: GRAPH_HOST
+          value: "localhost"
+        - name: GRAPH_PORT
+          value: {{ .Values.graph.falkordb.port | quote }}
+        - name: GRAPH_NAME
+          value: {{ .Values.graph.falkordb.graphName | quote }}
+        {{- end }}
         {{- if .Values.mcp.livenessProbe.enabled }}
         livenessProbe:
           {{- omit .Values.mcp.livenessProbe "enabled" | toYaml | nindent 10 }}
@@ -170,6 +195,37 @@ spec:
         resources:
           {{- toYaml .Values.mcp.resources | nindent 12 }}
       {{- end }}
+      {{- if and .Values.graph.enabled .Values.graph.falkordb.sidecar }}
+      - name: falkordb
+        image: "{{ .Values.graph.falkordb.image.repository }}:{{ .Values.graph.falkordb.image.tag }}"
+        imagePullPolicy: {{ .Values.graph.falkordb.image.pullPolicy }}
+        {{- with .Values.graph.falkordb.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 12 }}
+        {{- end }}
+        ports:
+        - name: redis
+          containerPort: {{ .Values.graph.falkordb.port }}
+          protocol: TCP
+        - name: browser
+          containerPort: 3000
+          protocol: TCP
+        volumeMounts:
+        {{- if .Values.graph.falkordb.persistence.enabled }}
+        - name: graph-data
+          mountPath: {{ .Values.graph.falkordb.persistence.mountPath }}
+        {{- end }}
+        {{- if .Values.graph.falkordb.livenessProbe.enabled }}
+        livenessProbe:
+          {{- omit .Values.graph.falkordb.livenessProbe "enabled" | toYaml | nindent 10 }}
+        {{- end }}
+        {{- if .Values.graph.falkordb.readinessProbe.enabled }}
+        readinessProbe:
+          {{- omit .Values.graph.falkordb.readinessProbe "enabled" | toYaml | nindent 10 }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.graph.falkordb.resources | nindent 12 }}
+      {{- end }}
       volumes:
         {{- if .Values.persistence.enabled }}
       - name: data
@@ -179,6 +235,11 @@ spec:
       - name: watcher-config
         configMap:
           name: {{ include "spectre.fullname" . }}
+      {{- if and .Values.graph.enabled .Values.graph.falkordb.sidecar .Values.graph.falkordb.persistence.enabled }}
+      - name: graph-data
+        persistentVolumeClaim:
+          claimName: {{ include "spectre.fullname" . }}-graph
+      {{- end }}
       {{- with .Values.extraVolumes }}
       {{- toYaml . | nindent 6 }}
       {{- end }}

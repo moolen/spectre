@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// Logger interface for retry logging (avoids circular imports with logging package)
+type Logger interface {
+	Info(msg string, args ...interface{})
+}
+
 // SpectreClient handles communication with the Spectre API
 type SpectreClient struct {
 	baseURL    string
@@ -105,4 +110,40 @@ func (c *SpectreClient) Ping() error {
 	}
 
 	return nil
+}
+
+// PingWithRetry pings the Spectre API with exponential backoff retry logic.
+// This is useful when starting up alongside the Spectre server container.
+// Uses hardcoded defaults: 20 retries, 500ms initial backoff, 10s max backoff.
+func (c *SpectreClient) PingWithRetry(logger Logger) error {
+	const maxRetries = 20
+	const maxBackoff = 10 * time.Second
+	initialBackoff := 500 * time.Millisecond
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := initialBackoff * time.Duration(1<<uint(attempt-1))
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			if logger != nil {
+				logger.Info("Retrying connection to Spectre API in %v (attempt %d/%d)", backoff, attempt+1, maxRetries)
+			}
+			time.Sleep(backoff)
+		}
+
+		if err := c.Ping(); err != nil {
+			lastErr = err
+			if attempt == 0 && logger != nil {
+				logger.Info("Initial connection to Spectre API failed (server may still be starting): %v", err)
+			}
+			continue
+		}
+
+		// Connection successful
+		return nil
+	}
+
+	return fmt.Errorf("failed to connect to Spectre API after %d attempts: %w", maxRetries, lastErr)
 }

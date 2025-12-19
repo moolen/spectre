@@ -14,9 +14,12 @@ import (
 
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/config"
+	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/graphservice"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/models"
 	"github.com/moolen/spectre/internal/storage"
 	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
@@ -43,6 +46,18 @@ var (
 	tracingEndpoint       string
 	tracingTLSCAPath      string
 	tracingTLSInsecure    bool
+	// Graph reasoning layer flags
+	graphEnabled            bool
+	graphHost               string
+	graphPort               int
+	graphName               string
+	graphRetentionHours     int
+	graphRebuildOnStart     bool
+	graphRebuildIfEmpty     bool
+	graphRebuildWindowHours int
+	// Timeline mode flags
+	timelineMode        string // storage, graph, or both
+	timelineQuerySource string // storage or graph
 )
 
 var serverCmd = &cobra.Command{
@@ -73,6 +88,20 @@ func init() {
 	serverCmd.Flags().StringVar(&tracingEndpoint, "tracing-endpoint", "", "OTLP gRPC endpoint for traces (e.g., victorialogs:4317)")
 	serverCmd.Flags().StringVar(&tracingTLSCAPath, "tracing-tls-ca", "", "Path to CA certificate for TLS verification (optional)")
 	serverCmd.Flags().BoolVar(&tracingTLSInsecure, "tracing-tls-insecure", false, "Skip TLS certificate verification (insecure, use only for testing)")
+
+	// Graph reasoning layer flags
+	serverCmd.Flags().BoolVar(&graphEnabled, "graph-enabled", false, "Enable graph-based reasoning layer (default: false)")
+	serverCmd.Flags().StringVar(&graphHost, "graph-host", "localhost", "FalkorDB host (default: localhost)")
+	serverCmd.Flags().IntVar(&graphPort, "graph-port", 6379, "FalkorDB port (default: 6379)")
+	serverCmd.Flags().StringVar(&graphName, "graph-name", "spectre", "FalkorDB graph name (default: spectre)")
+	serverCmd.Flags().IntVar(&graphRetentionHours, "graph-retention-hours", 168, "Graph data retention window in hours (default: 168 = 7 days)")
+	serverCmd.Flags().BoolVar(&graphRebuildOnStart, "graph-rebuild-on-start", true, "Rebuild graph from storage on startup (default: true)")
+	serverCmd.Flags().BoolVar(&graphRebuildIfEmpty, "graph-rebuild-if-empty", true, "Only rebuild if graph is empty (default: true)")
+	serverCmd.Flags().IntVar(&graphRebuildWindowHours, "graph-rebuild-window-hours", 168, "Time window for graph rebuild in hours (default: 168 = 7 days)")
+
+	// Timeline migration flags
+	serverCmd.Flags().StringVar(&timelineMode, "timeline-mode", "both", "Timeline write mode: storage, graph, or both")
+	serverCmd.Flags().StringVar(&timelineQuerySource, "timeline-query-source", "graph", "Timeline query source: storage or graph")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -263,6 +292,102 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// Initialize graph service if enabled
+	var graphServiceComponent *graphservice.Service
+	var graphQueryExecutor api.QueryExecutor
+	if graphEnabled && !demo {
+		logger.Info("Graph reasoning layer enabled - initializing graph service")
+
+		graphConfig := graph.ClientConfig{
+			Host:         graphHost,
+			Port:         graphPort,
+			GraphName:    graphName,
+			MaxRetries:   10,             // Increased to wait for FalkorDB sidecar to be ready
+			DialTimeout:  10 * time.Second, // Increased to allow sidecar startup time
+			ReadTimeout:  30 * time.Second, // Increased for complex root cause queries
+			WriteTimeout: 3 * time.Second,
+			PoolSize:     10,
+		}
+
+		serviceConfig := graphservice.ServiceConfig{
+			GraphConfig:        graphConfig,
+			PipelineConfig:     graphservice.DefaultServiceConfig().PipelineConfig,
+			RebuildOnStart:     graphRebuildOnStart,
+			RebuildWindow:      time.Duration(graphRebuildWindowHours) * time.Hour,
+			RebuildIfEmptyOnly: graphRebuildIfEmpty,
+			AutoStartPipeline:  true,
+		}
+
+		// Set retention window from flag
+		serviceConfig.PipelineConfig.RetentionWindow = time.Duration(graphRetentionHours) * time.Hour
+
+		graphServiceComponent = graphservice.NewService(serviceConfig)
+
+		// Create storage adapter for graph service
+		storageAdapter := &graphStorageAdapter{
+			executor: storage.NewQueryExecutor(storageComponent, tracingProvider),
+		}
+
+		// Initialize graph service with storage backend
+		if err := graphServiceComponent.InitializeWithStorage(context.Background(), storageAdapter); err != nil {
+			logger.Error("Failed to initialize graph service: %v", err)
+			logger.Warn("Graph reasoning layer will be disabled - continuing without graph support")
+			graphServiceComponent = nil
+		} else {
+			logger.Info("Graph service initialized successfully")
+
+			// Create graph query executor
+			graphClient := graphServiceComponent.GetClient()
+			graphQueryExecutor = graph.NewQueryExecutor(graphClient)
+			logger.Info("Graph query executor created")
+
+			// Determine timeline mode
+			var mode watcher.TimelineMode
+			switch timelineMode {
+			case "graph":
+				mode = watcher.TimelineModeGraph
+				logger.Info("Timeline mode: GRAPH (direct writes to graph, bypassing storage)")
+			case "both":
+				mode = watcher.TimelineModeBoth
+				logger.Info("Timeline mode: BOTH (writes to both storage and graph for validation)")
+			default:
+				mode = watcher.TimelineModeStorage
+				logger.Info("Timeline mode: STORAGE (default, writes to storage only)")
+			}
+
+			// Update watcher handler if watcher is enabled
+			if watcherEnabled && watcherComponent != nil {
+				logger.Info("Updating watcher with dual-mode handler (mode: %s)", timelineMode)
+
+				// Get the graph pipeline from the service
+				pipeline := graphServiceComponent.GetPipeline()
+
+				// Create new handler with mode
+				eventHandler := watcher.NewEventCaptureHandlerWithMode(storageComponent, pipeline, mode)
+
+				// Recreate watcher with new handler
+				watcherComponent, err = watcher.New(eventHandler, cfg.WatcherConfigPath)
+				if err != nil {
+					logger.Error("Failed to recreate watcher with dual-mode handler: %v", err)
+					HandleError(err, "Watcher reinitialization error")
+				}
+				logger.Info("Watcher updated with dual-mode handler")
+			}
+
+			// Only register storage callback if mode is "storage" (not "both" or "graph")
+			// When mode is "both", the watcher handler directly writes to the graph pipeline,
+			// so we don't need the storage callback to also forward events (which would cause double processing)
+			// When mode is "graph", no storage writes happen, so the callback wouldn't fire anyway
+			if mode == watcher.TimelineModeStorage {
+				storageComponent.RegisterCallback(func(event models.Event) error {
+					logger.Debug("Storage callback: forwarding event %s to graph service", event.ID)
+					return graphServiceComponent.OnEvent(event)
+				})
+				logger.Info("Registered graph service callback with storage")
+			}
+		}
+	}
+
 	// Set up readiness checker: use watcher if available, otherwise use no-op
 	var readinessChecker api.ReadinessChecker
 	if watcherComponent != nil {
@@ -271,8 +396,40 @@ func runServer(cmd *cobra.Command, args []string) {
 		readinessChecker = &api.NoOpReadinessChecker{}
 	}
 
-	apiComponent := api.NewWithStorage(cfg.APIPort, queryExecutor, storageComponent, readinessChecker, demo, tracingProvider)
-	logger.Info("API server component created")
+	// Get graph client if graph service is available
+	var graphClient graph.Client
+	if graphServiceComponent != nil {
+		graphClient = graphServiceComponent.GetClient()
+	}
+
+	// Determine timeline query source
+	var querySource api.TimelineQuerySource
+	switch timelineQuerySource {
+	case "graph":
+		if graphQueryExecutor != nil {
+			querySource = api.TimelineQuerySourceGraph
+			logger.Info("Timeline query source: GRAPH")
+		} else {
+			querySource = api.TimelineQuerySourceStorage
+			logger.Warn("Graph query source requested but not available, using storage")
+		}
+	default:
+		querySource = api.TimelineQuerySourceStorage
+		logger.Info("Timeline query source: STORAGE (default)")
+	}
+
+	apiComponent := api.NewWithStorageAndGraph(
+		cfg.APIPort,
+		queryExecutor,
+		graphQueryExecutor,
+		querySource,
+		storageComponent,
+		graphClient,
+		readinessChecker,
+		demo,
+		tracingProvider,
+	)
+	logger.Info("API server component created (query source: %s)", timelineQuerySource)
 
 	// Register components based on demo mode
 	if !demo {
@@ -286,6 +443,14 @@ func runServer(cmd *cobra.Command, args []string) {
 			if err := manager.Register(watcherComponent, storageComponent); err != nil {
 				logger.Error("Failed to register watcher component: %v", err)
 				HandleError(err, "Watcher registration error")
+			}
+		}
+
+		// Register graph service if initialized (depends on storage)
+		if graphServiceComponent != nil {
+			if err := manager.Register(graphServiceComponent, storageComponent); err != nil {
+				logger.Error("Failed to register graph service component: %v", err)
+				HandleError(err, "Graph service registration error")
 			}
 		}
 
@@ -326,4 +491,13 @@ func runServer(cmd *cobra.Command, args []string) {
 		logger.Error("Error during shutdown: %v", err)
 	}
 	logger.Info("Shutdown complete")
+}
+
+// graphStorageAdapter adapts Spectre's QueryExecutor to the graph sync StorageQuerier interface
+type graphStorageAdapter struct {
+	executor api.QueryExecutor
+}
+
+func (a *graphStorageAdapter) Query(ctx context.Context, request models.QueryRequest) (*models.QueryResult, error) {
+	return a.executor.Execute(ctx, &request)
 }

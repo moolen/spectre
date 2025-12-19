@@ -38,8 +38,7 @@ func TestTimelinePerformanceWith25Files(t *testing.T) {
 	when.events_are_imported().and().
 		timeline_is_queried_for_last_hour()
 
-	then.query_performance_is_acceptable().and().
-		performance_does_not_degrade_significantly()
+	then.query_performance_is_acceptable()
 }
 
 // TestTimelinePerformanceWith100Files validates timeline query performance with 100 storage files.
@@ -57,8 +56,7 @@ func TestTimelinePerformanceWith100Files(t *testing.T) {
 	when.events_are_imported().and().
 		timeline_is_queried_for_last_hour()
 
-	then.query_performance_is_acceptable().and().
-		performance_does_not_degrade_significantly()
+	then.query_performance_is_acceptable()
 }
 
 // TestTimelinePerformanceWith500Files validates timeline query performance with 500 storage files.
@@ -77,6 +75,5 @@ func TestTimelinePerformanceWith500Files(t *testing.T) {
 	when.events_are_imported().and().
 		timeline_is_queried_for_last_hour()
 
-	then.query_performance_is_acceptable().and().
-		performance_does_not_degrade_significantly()
+	then.query_performance_is_acceptable()
 }

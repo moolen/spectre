@@ -318,6 +318,9 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 	// Regular events must be within query time range
 	regularEvents = qe.filterEngine.FilterByTimeRange(regularEvents, startTimeNs, endTimeNs)
 
+	qe.logger.Debug("After time range filtering: %d regular events, %d state snapshots", 
+		len(regularEvents), len(stateSnapshots))
+
 	// Track which resources have regular events and their first event time
 	// State snapshots for these resources should be excluded to avoid duplicates
 	// UNLESS there's a gap between query start and first event
@@ -331,12 +334,14 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 			event.Resource.Namespace,
 			event.Resource.Name)
 		resourcesWithRegularEvents[resourceKey] = true
-		
+
 		// Track first event time
 		if existingTime, exists := firstRegularEventTime[resourceKey]; !exists || event.Timestamp < existingTime {
 			firstRegularEventTime[resourceKey] = event.Timestamp
 		}
 	}
+
+	qe.logger.Debug("Tracked %d resources with regular events", len(resourcesWithRegularEvents))
 
 	// State snapshots represent resources that existed before the query window
 	// Include them only if:
@@ -346,6 +351,8 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 	// Note: state snapshots are only generated from files that overlap with the query range,
 	// so we don't need additional timestamp filtering here
 	var filteredSnapshots []models.Event
+	keptSnapshotsCount := 0
+	skippedSnapshotsCount := 0
 	for _, event := range stateSnapshots {
 		// Only include state snapshots from at or before the query start time
 		// This ensures we only show truly "pre-existing" resources
@@ -364,16 +371,26 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 				firstEventTime, hasFirstEvent := firstRegularEventTime[resourceKey]
 				// Keep state snapshot if first event is after query start (gap exists)
 				if !hasFirstEvent || firstEventTime <= startTimeNs {
+					skippedSnapshotsCount++
+					qe.logger.Debug("Skipping state snapshot for %s: has event at query start or before (%d vs %d)",
+						resourceKey, startTimeNs/1e9, firstEventTime/1e9)
 					continue
 				}
 				// Gap exists - keep the state snapshot for leading segment creation
-				qe.logger.Info("Keeping state snapshot for %s: gap between query start and first event (%d vs %d)",
+				qe.logger.Info("Keeping state snapshot for %s: gap between query start (%d) and first event (%d)",
 					resourceKey, startTimeNs/1e9, firstEventTime/1e9)
+				keptSnapshotsCount++
+			} else {
+				qe.logger.Debug("Keeping state snapshot for %s: no regular events in query range",
+					resourceKey)
+				keptSnapshotsCount++
 			}
 
 			filteredSnapshots = append(filteredSnapshots, event)
 		}
 	}
+	
+	qe.logger.Debug("State snapshot filtering: kept %d, skipped %d", keptSnapshotsCount, skippedSnapshotsCount)
 
 	// Deduplicate state snapshots (same resource may appear in multiple files due to carryover)
 	// Keep only the most recent state snapshot per resource
@@ -392,9 +409,15 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 		}
 	}
 
-	// Convert map back to slice
+	// Convert map back to slice, filtering out DELETE snapshots
 	deduplicatedSnapshots := make([]models.Event, 0, len(snapshotMap))
 	for _, event := range snapshotMap {
+		// Skip DELETE state snapshots - deleted resources shouldn't appear
+		if event.Type == models.EventTypeDelete {
+			qe.logger.Debug("Filtering out DELETE state snapshot for %s/%s/%s/%s",
+				event.Resource.Kind, event.Resource.Namespace, event.Resource.Name, event.Resource.UID)
+			continue
+		}
 		deduplicatedSnapshots = append(deduplicatedSnapshots, event)
 	}
 
@@ -538,7 +561,7 @@ func (qe *QueryExecutor) queryFileWithSnapshotsWithDeleted(ctx context.Context, 
 		}
 	}
 
-	qe.logger.Debug("File %s: has %d blocks (shared cache hit: %v, metadata cache hit: %v)", 
+	qe.logger.Debug("File %s: has %d blocks (shared cache hit: %v, metadata cache hit: %v)",
 		filePath, len(fileData.IndexSection.BlockMetadata), sharedCacheHit, cacheHit)
 
 	span.SetAttributes(
@@ -631,7 +654,7 @@ func (qe *QueryExecutor) queryFileWithSnapshotsWithDeleted(ctx context.Context, 
 			// This prevents creating duplicate state snapshots for resources with real events
 			resourceKey := qe.getResourceKey(event.Resource)
 			resourcesWithEvents[resourceKey] = true
-			
+
 			// Track first event timestamp for each resource
 			if existingTime, exists := resourceFirstEventTime[resourceKey]; !exists || event.Timestamp < existingTime {
 				resourceFirstEventTime[resourceKey] = event.Timestamp
@@ -843,30 +866,33 @@ func (qe *QueryExecutor) getStateSnapshotEventsWithDeleted(finalStates map[strin
 	stateEvents := make([]models.Event, 0, len(finalStates))
 
 	for resourceKey, state := range finalStates {
-		// Skip deleted resources - they shouldn't appear in the consistent view
-		if state.EventType == string(models.EventTypeDelete) {
+		// CRITICAL: Skip resources that were deleted in ANY file (check first for safety)
+		// This catches cases where the state might have wrong EventType but resource was actually deleted
+		if deletedResources[resourceKey] {
+			qe.logger.Debug("Skipping state snapshot for %s: resource was deleted (found in deletedResources map)", resourceKey)
 			continue
 		}
-		
+
+		// Skip deleted resources - they shouldn't appear in the consistent view
+		if state.EventType == string(models.EventTypeDelete) {
+			qe.logger.Debug("Skipping state snapshot for %s: state EventType is DELETE", resourceKey)
+			continue
+		}
+
 		// Skip if this resource already has events in the query results
 		// UNLESS the first event is after query start (for gap filling)
 		queryStartNs := query.StartTimestamp * 1e9
 		hasEvents := resourcesWithEvents[resourceKey]
 		firstEventTime, hasFirstEventTime := resourceFirstEventTime[resourceKey]
 		firstEventAfterQueryStart := hasFirstEventTime && firstEventTime > queryStartNs
-		
+
 		if hasEvents && !firstEventAfterQueryStart {
 			qe.logger.Info("Skipping state snapshot for %s: hasEvents=%v, firstEventAfterQueryStart=%v", resourceKey, hasEvents, firstEventAfterQueryStart)
 			continue
 		}
 		if hasEvents && firstEventAfterQueryStart {
-			qe.logger.Info("Creating state snapshot for %s: first event (%d) is after query start (%d)", 
+			qe.logger.Info("Creating state snapshot for %s: first event (%d) is after query start (%d)",
 				resourceKey, firstEventTime/1e9, queryStartNs/1e9)
-		}
-
-		// Skip resources that were deleted in ANY file
-		if deletedResources[resourceKey] {
-			continue
 		}
 
 		// Create synthetic event from state snapshot

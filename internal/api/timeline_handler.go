@@ -17,22 +17,45 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// TimelineQuerySource specifies which executor to use for queries
+type TimelineQuerySource string
+
+const (
+	TimelineQuerySourceStorage TimelineQuerySource = "storage"
+	TimelineQuerySourceGraph   TimelineQuerySource = "graph"
+)
+
 // TimelineHandler handles /v1/timeline requests
 // Returns full resource data with statusSegments and events for timeline visualization
 type TimelineHandler struct {
-	queryExecutor QueryExecutor
-	logger        *logging.Logger
-	validator     *Validator
-	tracer        trace.Tracer
+	storageExecutor QueryExecutor       // Storage-based query executor
+	graphExecutor   QueryExecutor       // Graph-based query executor (optional)
+	querySource     TimelineQuerySource // Which executor to use
+	logger          *logging.Logger
+	validator       *Validator
+	tracer          trace.Tracer
 }
 
-// NewTimelineHandler creates a new timeline handler
+// NewTimelineHandler creates a new timeline handler with storage executor only
 func NewTimelineHandler(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
 	return &TimelineHandler{
-		queryExecutor: queryExecutor,
-		logger:        logger,
-		validator:     NewValidator(),
-		tracer:        tracer,
+		storageExecutor: queryExecutor,
+		querySource:     TimelineQuerySourceStorage,
+		logger:          logger,
+		validator:       NewValidator(),
+		tracer:          tracer,
+	}
+}
+
+// NewTimelineHandlerWithMode creates a timeline handler with dual executors
+func NewTimelineHandlerWithMode(storageExecutor, graphExecutor QueryExecutor, source TimelineQuerySource, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
+	return &TimelineHandler{
+		storageExecutor: storageExecutor,
+		graphExecutor:   graphExecutor,
+		querySource:     source,
+		logger:          logger,
+		validator:       NewValidator(),
+		tracer:          tracer,
 	}
 }
 
@@ -114,6 +137,14 @@ func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *
 	ctx, span := th.tracer.Start(ctx, "timeline.executeConcurrentQueries")
 	defer span.End()
 
+	// Select which executor to use
+	executor := th.getActiveExecutor()
+	if executor == nil {
+		return nil, nil, fmt.Errorf("no query executor available")
+	}
+
+	span.SetAttributes(attribute.String("query.source", string(th.querySource)))
+
 	var (
 		resourceResult *models.QueryResult
 		eventResult    *models.QueryResult
@@ -124,13 +155,16 @@ func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *
 
 	// Create shared cache for coordinating file reads between concurrent queries
 	// This ensures each file is only read once even though both queries may need it
-	sharedCache := storage.NewSharedFileDataCache()
-	th.queryExecutor.SetSharedCache(sharedCache)
-	defer func() {
-		// Clear shared cache after queries complete
-		th.queryExecutor.SetSharedCache(nil)
-		th.logger.Debug("Shared cache coordinated %d files across concurrent queries", sharedCache.Size())
-	}()
+	// Note: Only applies to storage executor
+	if th.querySource == TimelineQuerySourceStorage {
+		sharedCache := storage.NewSharedFileDataCache()
+		executor.SetSharedCache(sharedCache)
+		defer func() {
+			// Clear shared cache after queries complete
+			executor.SetSharedCache(nil)
+			th.logger.Debug("Shared cache coordinated %d files across concurrent queries", sharedCache.Size())
+		}()
+	}
 
 	// Build Event query upfront
 	eventQuery := &models.QueryRequest{
@@ -151,7 +185,7 @@ func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *
 		_, resourceSpan := th.tracer.Start(ctx, "timeline.resourceQuery")
 		defer resourceSpan.End()
 
-		resourceResult, resourceErr = th.queryExecutor.Execute(ctx, query)
+		resourceResult, resourceErr = executor.Execute(ctx, query)
 		if resourceErr != nil {
 			resourceSpan.RecordError(resourceErr)
 			resourceSpan.SetStatus(codes.Error, "Resource query failed")
@@ -164,7 +198,7 @@ func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *
 		_, eventSpan := th.tracer.Start(ctx, "timeline.eventQuery")
 		defer eventSpan.End()
 
-		eventResult, eventErr = th.queryExecutor.Execute(ctx, eventQuery)
+		eventResult, eventErr = executor.Execute(ctx, eventQuery)
 		if eventErr != nil {
 			eventSpan.RecordError(eventErr)
 			eventSpan.SetStatus(codes.Error, "Event query failed")
@@ -345,5 +379,21 @@ func (th *TimelineHandler) writeJSONResponse(w http.ResponseWriter, r *http.Requ
 		if err := writeJSON(w, data); err != nil {
 			th.logger.Error("Failed to write JSON: %v", err)
 		}
+	}
+}
+
+// getActiveExecutor returns the appropriate query executor based on configuration
+func (th *TimelineHandler) getActiveExecutor() QueryExecutor {
+	switch th.querySource {
+	case TimelineQuerySourceGraph:
+		if th.graphExecutor != nil {
+			return th.graphExecutor
+		}
+		th.logger.Warn("Graph executor requested but not available, falling back to storage")
+		return th.storageExecutor
+	case TimelineQuerySourceStorage:
+		fallthrough
+	default:
+		return th.storageExecutor
 	}
 }

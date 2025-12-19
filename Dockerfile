@@ -21,9 +21,9 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /build/spectre .
 COPY --from=ui-builder /ui-build/dist ./ui
-RUN mkdir -p /data
+RUN mkdir -p /data && apk add --no-cache wget
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/app/spectre", "--health-check"] || exit 1
+  CMD wget --spider -q http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["/app/spectre", "server"]

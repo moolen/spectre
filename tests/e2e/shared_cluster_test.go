@@ -31,11 +31,13 @@ func TestMain(m *testing.M) {
 
 func runWithSharedCluster(m *testing.M) int {
 	log.Println("Setting up shared Kind cluster for e2e tests...")
+	startTime := time.Now()
 
-	// Create shared cluster
-	cluster, err := helpers.CreateKindCluster(&testing.T{}, "spectre-e2e-shared")
+	// Get or create shared cluster (reuses existing healthy clusters)
+	clusterStartTime := time.Now()
+	cluster, err := helpers.GetOrCreateKindCluster(&testing.T{}, "spectre-e2e-shared")
 	if err != nil {
-		log.Printf("❌ Failed to create shared cluster: %v", err)
+		log.Printf("❌ Failed to get/create shared cluster: %v", err)
 		return 1
 	}
 	sharedCluster = cluster
@@ -44,21 +46,16 @@ func runWithSharedCluster(m *testing.M) int {
 	// Set the shared cluster in helpers so tests can access it
 	helpers.SetSharedCluster(cluster)
 
-	log.Printf("✓ Shared cluster created: %s", cluster.Name)
-	log.Printf("✓ Shared cluster set in helpers (kubeconfig: %s)", cluster.KubeConfig)
+	log.Printf("✓ Shared cluster ready: %s (took %v)", cluster.Name, time.Since(clusterStartTime))
+	log.Printf("✓ Cluster context: %s", cluster.Context)
 
-	// Ensure cluster is cleaned up
-	defer func() {
-		log.Println("Cleaning up shared Kind cluster...")
-		if err := cluster.Delete(); err != nil {
-			log.Printf("⚠️  Warning: failed to delete shared cluster: %v", err)
-		} else {
-			log.Println("✓ Shared cluster deleted")
-		}
-	}()
+	// Note: Cluster is NOT deleted after tests to allow reuse across test invocations.
+	// To manually clean up, run: kind delete cluster --name spectre-e2e-shared
+	// Or use: make clean-test-clusters
 
 	// Build and load Docker image once
 	log.Println("Building test Docker image (once for all tests)...")
+	imageStartTime := time.Now()
 	values, imageRef, err := helpers.LoadHelmValues()
 	if err != nil {
 		log.Printf("❌ Failed to load Helm values: %v", err)
@@ -74,16 +71,19 @@ func runWithSharedCluster(m *testing.M) int {
 	// Store values for reuse
 	helpers.SetCachedHelmValues(values, imageRef)
 
-	log.Println("✓ Test image built and loaded")
+	log.Printf("✓ Test image built and loaded (took %v)", time.Since(imageStartTime))
+	log.Printf("📊 Total setup time: %v", time.Since(startTime))
 	log.Println("================================================")
 	log.Println("Running e2e tests with shared cluster...")
 	log.Println("================================================")
 
 	// Run all tests
+	testStartTime := time.Now()
 	exitCode := m.Run()
+	testDuration := time.Since(testStartTime)
 
 	log.Println("================================================")
-	log.Printf("Tests completed with exit code: %d", exitCode)
+	log.Printf("Tests completed with exit code: %d (execution took %v)", exitCode, testDuration)
 	log.Println("================================================")
 
 	return exitCode
@@ -116,7 +116,7 @@ func IsImageBuilt() bool {
 func CleanupTestNamespace(t *testing.T, cluster *helpers.TestCluster, namespace string) error {
 	t.Helper()
 
-	k8sClient, err := helpers.NewK8sClient(t, cluster.GetKubeConfig())
+	k8sClient, err := helpers.NewK8sClient(t, cluster.GetContext())
 	if err != nil {
 		return fmt.Errorf("failed to create k8s client: %w", err)
 	}

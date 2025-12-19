@@ -4,6 +4,7 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -21,12 +22,27 @@ type K8sClient struct {
 	t         *testing.T
 }
 
-// NewK8sClient creates a new Kubernetes client from kubeconfig.
-func NewK8sClient(t *testing.T, kubeConfigPath string) (*K8sClient, error) {
-	t.Logf("Creating Kubernetes client from kubeconfig: %s", kubeConfigPath)
+// NewK8sClient creates a new Kubernetes client using the specified context.
+// If context is empty, uses the current context from kubeconfig.
+func NewK8sClient(t *testing.T, context string) (*K8sClient, error) {
+	if context != "" {
+		t.Logf("Creating Kubernetes client for context: %s", context)
+	} else {
+		t.Logf("Creating Kubernetes client using current context")
+	}
 
-	// Load kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	// Load kubeconfig from default locations
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{}
+
+	// Override context if specified
+	if context != "" {
+		configOverrides.CurrentContext = context
+	}
+
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+
+	config, err := kubeConfig.ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build kube config: %w", err)
 	}
@@ -50,6 +66,7 @@ func NewK8sClient(t *testing.T, kubeConfigPath string) (*K8sClient, error) {
 
 // CreateNamespace creates a new namespace.
 func (k *K8sClient) CreateNamespace(ctx context.Context, name string) error {
+	startTime := time.Now()
 	k.t.Logf("Creating namespace: %s", name)
 
 	namespace := &corev1.Namespace{
@@ -63,12 +80,13 @@ func (k *K8sClient) CreateNamespace(ctx context.Context, name string) error {
 		return fmt.Errorf("failed to create namespace %s: %w", name, err)
 	}
 
-	k.t.Logf("✓ Namespace created: %s", name)
+	k.t.Logf("✓ Namespace created: %s (took %v)", name, time.Since(startTime))
 	return nil
 }
 
 // DeleteNamespace deletes a namespace.
 func (k *K8sClient) DeleteNamespace(ctx context.Context, name string) error {
+	startTime := time.Now()
 	k.t.Logf("Deleting namespace: %s", name)
 
 	err := k.Clientset.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{})
@@ -76,7 +94,7 @@ func (k *K8sClient) DeleteNamespace(ctx context.Context, name string) error {
 		return fmt.Errorf("failed to delete namespace %s: %w", name, err)
 	}
 
-	k.t.Logf("✓ Namespace deleted: %s", name)
+	k.t.Logf("✓ Namespace deleted: %s (took %v)", name, time.Since(startTime))
 	return nil
 }
 
@@ -245,6 +263,13 @@ func (k *K8sClient) GetClusterVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return version.GitVersion, nil
+}
+
+// RunCommand executes a shell command and returns the output
+func RunCommand(command string) (string, error) {
+	cmd := exec.Command("sh", "-c", command)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 // WaitForStorageClass waits for a storage class and its provisioner to be available.
