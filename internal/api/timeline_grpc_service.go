@@ -15,19 +15,34 @@ import (
 // TimelineGRPCService implements the gRPC TimelineService
 type TimelineGRPCService struct {
 	pb.UnimplementedTimelineServiceServer
-	queryExecutor QueryExecutor
-	logger        *logging.Logger
-	tracer        trace.Tracer
-	validator     *Validator
+	storageExecutor QueryExecutor
+	graphExecutor   QueryExecutor
+	querySource     TimelineQuerySource
+	logger          *logging.Logger
+	tracer          trace.Tracer
+	validator       *Validator
 }
 
-// NewTimelineGRPCService creates a new timeline gRPC service
+// NewTimelineGRPCService creates a new timeline gRPC service with storage executor only
 func NewTimelineGRPCService(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *TimelineGRPCService {
 	return &TimelineGRPCService{
-		queryExecutor: queryExecutor,
-		logger:        logger,
-		validator:     NewValidator(),
-		tracer:        tracer,
+		storageExecutor: queryExecutor,
+		querySource:     TimelineQuerySourceStorage,
+		logger:          logger,
+		validator:       NewValidator(),
+		tracer:          tracer,
+	}
+}
+
+// NewTimelineGRPCServiceWithMode creates a new timeline gRPC service with both executors
+func NewTimelineGRPCServiceWithMode(storageExecutor, graphExecutor QueryExecutor, querySource TimelineQuerySource, logger *logging.Logger, tracer trace.Tracer) *TimelineGRPCService {
+	return &TimelineGRPCService{
+		storageExecutor: storageExecutor,
+		graphExecutor:   graphExecutor,
+		querySource:     querySource,
+		logger:          logger,
+		validator:       NewValidator(),
+		tracer:          tracer,
 	}
 }
 
@@ -60,10 +75,12 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 
 	// Execute concurrent queries (reuse existing logic from TimelineHandler)
 	timelineHandler := &TimelineHandler{
-		queryExecutor: s.queryExecutor,
-		logger:        s.logger,
-		validator:     s.validator,
-		tracer:        s.tracer,
+		storageExecutor: s.storageExecutor,
+		graphExecutor:   s.graphExecutor,
+		querySource:     s.querySource,
+		logger:          s.logger,
+		validator:       s.validator,
+		tracer:          s.tracer,
 	}
 
 	resourceResult, eventResult, err := timelineHandler.executeConcurrentQueries(ctx, query)

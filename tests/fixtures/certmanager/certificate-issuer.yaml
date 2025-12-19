@@ -1,0 +1,80 @@
+---
+# Issuer for Let's Encrypt
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-staging
+  namespace: default
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@example.com
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+
+---
+# ClusterIssuer for production certificates
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+
+---
+# Certificate using Issuer
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example-com-cert
+  namespace: default
+spec:
+  secretName: example-com-tls
+  issuerRef:
+    name: letsencrypt-staging
+    kind: Issuer
+  dnsNames:
+  - example.com
+  - www.example.com
+
+---
+# Certificate using ClusterIssuer
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-example-com-cert
+  namespace: default
+spec:
+  secretName: api-example-com-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - api.example.com
+
+---
+# The Secret will be created by cert-manager
+# This is just for reference - cert-manager creates it automatically
+apiVersion: v1
+kind: Secret
+metadata:
+  name: example-com-tls
+  namespace: default
+  labels:
+    cert-manager.io/certificate-name: example-com-cert
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTi... # base64 encoded certificate
+  tls.key: LS0tLS1CRUdJTi... # base64 encoded key

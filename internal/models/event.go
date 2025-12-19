@@ -40,6 +40,10 @@ type Event struct {
 
 	// CompressedSize is the compressed size in bytes
 	CompressedSize int32 `json:"compressedSize,omitempty"`
+
+	// PreExisting indicates this event occurred before the query time window
+	// and is included to provide context about the resource state at window start
+	PreExisting bool `json:"preExisting,omitempty"`
 }
 
 // Validate checks that the event has all required fields and is well-formed

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unschedulable-test-pod
+  labels:
+    app: unschedulable-test
+    test-scenario: scheduling-failure
+spec:
+  restartPolicy: Always
+  containers:
+  - name: app
+    image: nginx:latest
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "1000"  # Requesting 1000 CPU cores - impossible to schedule
+      limits:
+        memory: "64Mi"
+        cpu: "1000"

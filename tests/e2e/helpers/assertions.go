@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moolen/spectre/internal/analysis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -176,4 +177,108 @@ func AssertNamespaceInMetadata(t *testing.T, metadata *MetadataResponse, namespa
 func AssertKindInMetadata(t *testing.T, metadata *MetadataResponse, kind string) {
 	require.NotNil(t, metadata)
 	assert.Contains(t, metadata.Kinds, kind, "Kind %s not found in metadata", kind)
+}
+
+// ==================== Root Cause Analysis Assertions ====================
+
+// RequireGraphHasKinds verifies that the root cause graph contains nodes of all specified kinds.
+func RequireGraphHasKinds(t *testing.T, rca *analysis.RootCauseAnalysisV2, expectedKinds []string) {
+	require.NotNil(t, rca, "Root cause analysis should not be nil")
+	require.NotNil(t, rca.Incident, "Incident should not be nil")
+	require.NotNil(t, rca.Incident.Graph, "Graph should not be nil")
+
+	kindSet := make(map[string]bool)
+	for _, node := range rca.Incident.Graph.Nodes {
+		kindSet[node.Resource.Kind] = true
+	}
+
+	for _, expectedKind := range expectedKinds {
+		require.True(t, kindSet[expectedKind], "Graph should contain node of kind %s. Found kinds: %v", expectedKind, getKeys(kindSet))
+	}
+}
+
+// FindNodeByKind finds a node in the graph by its resource kind.
+// Returns nil if not found.
+func FindNodeByKind(rca *analysis.RootCauseAnalysisV2, kind string) *analysis.GraphNode {
+	if rca == nil || rca.Incident.Graph.Nodes == nil {
+		return nil
+	}
+
+	for i := range rca.Incident.Graph.Nodes {
+		if rca.Incident.Graph.Nodes[i].Resource.Kind == kind {
+			return &rca.Incident.Graph.Nodes[i]
+		}
+	}
+	return nil
+}
+
+// RequireGraphHasEdgeBetweenKinds verifies that the graph contains an edge of the specified
+// relationship type between nodes of the given kinds.
+func RequireGraphHasEdgeBetweenKinds(t *testing.T, rca *analysis.RootCauseAnalysisV2, fromKind, relType, toKind string) {
+	require.NotNil(t, rca, "Root cause analysis should not be nil")
+	require.NotNil(t, rca.Incident, "Incident should not be nil")
+	require.NotNil(t, rca.Incident.Graph, "Graph should not be nil")
+
+	fromNode := FindNodeByKind(rca, fromKind)
+	require.NotNil(t, fromNode, "Graph should contain node of kind %s", fromKind)
+
+	toNode := FindNodeByKind(rca, toKind)
+	require.NotNil(t, toNode, "Graph should contain node of kind %s", toKind)
+
+	found := false
+	for _, edge := range rca.Incident.Graph.Edges {
+		if edge.From == fromNode.ID && edge.To == toNode.ID && edge.RelationshipType == relType {
+			found = true
+			break
+		}
+	}
+
+	require.True(t, found, "Graph should contain edge %s -[%s]-> %s", fromKind, relType, toKind)
+}
+
+// RequireNodeHasEventTypes verifies that a node has events of the specified types.
+func RequireNodeHasEventTypes(t *testing.T, node *analysis.GraphNode, expectedTypes []string) {
+	require.NotNil(t, node, "Node should not be nil")
+
+	typeSet := make(map[string]bool)
+	for _, event := range node.AllEvents {
+		typeSet[event.EventType] = true
+	}
+
+	for _, expectedType := range expectedTypes {
+		require.True(t, typeSet[expectedType], "Node should have event of type %s. Found types: %v", expectedType, getKeys(typeSet))
+	}
+}
+
+// RequireUpdateConfigChanged verifies that a node has at least one UPDATE event with configChanged=true.
+func RequireUpdateConfigChanged(t *testing.T, node *analysis.GraphNode) {
+	require.NotNil(t, node, "Node should not be nil")
+
+	found := false
+	for _, event := range node.AllEvents {
+		if event.EventType == "UPDATE" && event.ConfigChanged {
+			found = true
+			break
+		}
+	}
+
+	require.True(t, found, "Node should have at least one UPDATE event with configChanged=true")
+}
+
+// RequireGraphNonEmpty verifies that the graph has nodes and edges.
+func RequireGraphNonEmpty(t *testing.T, rca *analysis.RootCauseAnalysisV2) {
+	require.NotNil(t, rca, "Root cause analysis should not be nil")
+	require.NotNil(t, rca.Incident, "Incident should not be nil")
+	require.NotNil(t, rca.Incident.Graph, "Graph should not be nil")
+	require.Greater(t, len(rca.Incident.Graph.Nodes), 0, "Graph should have at least one node")
+	require.Greater(t, len(rca.Incident.Graph.Edges), 0, "Graph should have at least one edge")
+}
+
+// Helper function to get keys from a map
+func getKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

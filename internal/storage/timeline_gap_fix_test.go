@@ -52,7 +52,7 @@ func TestTimelineGapFix(t *testing.T) {
 					Data: json.RawMessage(`{"status":{"phase":"Running"}}`),
 				},
 			},
-			expectedSegmentCnt: 3, // Leading segment + 2 events
+			expectedSegmentCnt: 1, // Merged into 1 segment (all have same status)
 			expectedFirstStart: 1000,
 			expectedLeadingMsg: "Resource existed before query window",
 		},

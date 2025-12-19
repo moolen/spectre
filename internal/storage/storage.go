@@ -14,6 +14,9 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
+// EventCallback is called when an event is written to storage
+type EventCallback func(event models.Event) error
+
 // Storage manages persistent event storage
 type Storage struct {
 	dataDir     string
@@ -24,10 +27,17 @@ type Storage struct {
 	fileIndex   *FileIndex                  // Index for fast file selection
 	hourFiles   map[int64]*BlockStorageFile // Cache of open hourly files
 
+	// Event callbacks
+	callbacks []EventCallback
+	callbackMutex sync.RWMutex
+
 	// Background task management
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// Lifecycle management
+	closed bool
 }
 
 // New creates a new Storage instance
@@ -61,6 +71,27 @@ func New(dataDir string, blockSize int64) (*Storage, error) {
 
 	logger.Info("Storage initialized with directory: %s", dataDir)
 	return s, nil
+}
+
+// RegisterCallback registers a callback to be called when events are written
+func (s *Storage) RegisterCallback(callback EventCallback) {
+	s.callbackMutex.Lock()
+	defer s.callbackMutex.Unlock()
+	s.callbacks = append(s.callbacks, callback)
+	s.logger.Info("Registered event callback (total callbacks: %d)", len(s.callbacks))
+}
+
+// notifyCallbacks calls all registered callbacks with the event
+func (s *Storage) notifyCallbacks(event models.Event) {
+	s.callbackMutex.RLock()
+	callbacks := s.callbacks
+	s.callbackMutex.RUnlock()
+
+	for _, callback := range callbacks {
+		if err := callback(event); err != nil {
+			s.logger.Warn("Event callback failed: %v", err)
+		}
+	}
 }
 
 // WriteEvent writes an event to storage
@@ -102,6 +133,9 @@ func (s *Storage) WriteEvent(event *models.Event) error {
 	if eventHourTimestamp == currentHour.Unix() {
 		s.currentFile = hourFile
 	}
+
+	// Notify callbacks about the new event
+	s.notifyCallbacks(*event)
 
 	return nil
 }
@@ -204,9 +238,20 @@ func (s *Storage) getOrCreateHourFile(hourTimestamp int64) (*BlockStorageFile, e
 	}
 
 	// Carry over state snapshots from previous hour
+	// Filter out deleted resources - they should not be carried forward
 	if len(carryoverStates) > 0 {
-		newFile.finalResourceStates = carryoverStates
-		s.logger.Info("Carried over %d resource states to new file", len(carryoverStates))
+		filteredStates := make(map[string]*ResourceLastState)
+		deletedCount := 0
+		for key, state := range carryoverStates {
+			if state.EventType != string(models.EventTypeDelete) {
+				filteredStates[key] = state
+			} else {
+				deletedCount++
+			}
+		}
+		newFile.finalResourceStates = filteredStates
+		s.logger.Info("Carried over %d resource states to new file (%d deleted resources excluded)",
+			len(filteredStates), deletedCount)
 	}
 
 	s.hourFiles[hourTimestamp] = newFile
@@ -233,6 +278,12 @@ func (s *Storage) getOrCreateHourFile(hourTimestamp int64) (*BlockStorageFile, e
 func (s *Storage) Close() error {
 	s.fileMutex.Lock()
 	defer s.fileMutex.Unlock()
+
+	// Check if already closed to make this method idempotent
+	if s.closed {
+		return nil
+	}
+	s.closed = true
 
 	// Close all open hour files
 	for hourTimestamp, file := range s.hourFiles {

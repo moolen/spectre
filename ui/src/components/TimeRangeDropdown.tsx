@@ -4,6 +4,7 @@ import { useSettings } from '../hooks/useSettings';
 import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
 import { TimeInputWithCalendar } from './TimeInputWithCalendar';
 import { validateTimeRange, formatDateTimeForInput } from '../utils/timeParsing';
+import { TIME_RANGE_PRESETS } from '../constants/timeRangePresets';
 
 interface TimeRangeDropdownProps {
   currentRange: TimeRange;
@@ -11,13 +12,6 @@ interface TimeRangeDropdownProps {
   rawStart?: string;
   rawEnd?: string;
 }
-
-const PRESETS = [
-  { label: 'Last 15min', minutes: 15, relative: 'now-15m' },
-  { label: 'Last 30min', minutes: 30, relative: 'now-30m' },
-  { label: 'Last 60min', minutes: 60, relative: 'now-60m' },
-  { label: 'Last 3h', minutes: 180, relative: 'now-3h' },
-];
 
 export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRange, onConfirm, rawStart, rawEnd }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -67,7 +61,7 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
     } else {
       const now = new Date();
       const rangeDuration = now.getTime() - currentRange.start.getTime();
-      const matchingPreset = PRESETS.find(p => {
+      const matchingPreset = TIME_RANGE_PRESETS.find(p => {
         const presetDuration = p.minutes * 60 * 1000;
         // Allow 1 second tolerance for matching
         return Math.abs(rangeDuration - presetDuration) < 1000;
@@ -157,7 +151,7 @@ export const TimeRangeDropdown: React.FC<TimeRangeDropdownProps> = ({ currentRan
               Quick Presets
             </label>
             <div className="grid grid-cols-2 gap-2">
-              {PRESETS.map((preset) => {
+              {TIME_RANGE_PRESETS.map((preset) => {
                 const isSelected = selectedPreset === preset.minutes;
                 return (
                   <button

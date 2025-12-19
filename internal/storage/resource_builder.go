@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -11,6 +12,11 @@ import (
 	"github.com/moolen/spectre/internal/models"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// bytesEqual compares two byte slices for equality
+func bytesEqual(a, b json.RawMessage) bool {
+	return bytes.Equal(a, b)
+}
 
 // ResourceBuilder aggregates events into resources with status segments and related Kubernetes events
 type ResourceBuilder struct {
@@ -152,7 +158,7 @@ func (rb *ResourceBuilder) BuildStatusSegmentsFromEventsWithQueryTime(resourceEv
 				leadingSegmentStatus = analyzer.InferStatusFromResource(firstEvent.Resource.Kind, firstEvent.Data, string(firstEvent.Type))
 			}
 			leadingSegmentMessage = "Resource existed before query window"
-			
+
 			// Debug logging to verify the fix is working
 			logging.GetLogger("resource_builder").Debug(
 				"Creating leading segment: resource=%s/%s, queryStart=%d, firstEvent=%d, gap=%ds",
@@ -213,12 +219,12 @@ func (rb *ResourceBuilder) BuildStatusSegmentsFromEventsWithQueryTime(resourceEv
 	}
 
 	// Merge consecutive segments with the same status
-	//return rb.mergeConsecutiveSegments(segments)
-	return segments
+	return rb.mergeConsecutiveSegments(segments)
 }
 
-// mergeConsecutiveSegments combines adjacent segments with identical status
+// mergeConsecutiveSegments combines adjacent segments with identical status AND data
 // This prevents visual clutter in the timeline when multiple events don't change the resource status
+// However, we should NOT merge segments if the resource data has changed (e.g., ConfigMap data updates)
 func (rb *ResourceBuilder) mergeConsecutiveSegments(segments []models.StatusSegment) []models.StatusSegment {
 	if len(segments) <= 1 {
 		return segments
@@ -230,8 +236,12 @@ func (rb *ResourceBuilder) mergeConsecutiveSegments(segments []models.StatusSegm
 	for i := 1; i < len(segments); i++ {
 		next := segments[i]
 
-		// If status is the same, extend the current segment
-		if current.Status == next.Status {
+		// Check if resource data has changed
+		dataChanged := !bytesEqual(current.ResourceData, next.ResourceData)
+
+		// If status is the same AND data hasn't changed, extend the current segment
+		// If data changed, we should create a new segment even if status is the same
+		if current.Status == next.Status && !dataChanged {
 			// Keep the first segment's start time and resource data
 			// Update the end time to encompass the next segment
 			current.EndTime = next.EndTime
@@ -240,7 +250,7 @@ func (rb *ResourceBuilder) mergeConsecutiveSegments(segments []models.StatusSegm
 				current.Message = next.Message
 			}
 		} else {
-			// Status changed, save current segment and start a new one
+			// Status changed OR data changed, save current segment and start a new one
 			merged = append(merged, current)
 			current = next
 		}

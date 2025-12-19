@@ -3,9 +3,6 @@ name: Deploy Documentation to GitHub Pages
 on:
   push:
     branches: [master]
-    paths:
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
@@ -48,5 +45,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs/build
+          destination_dir: .
           keep_files: true
           commit_message: 'chore: deploy documentation'

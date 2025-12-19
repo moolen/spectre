@@ -1,0 +1,19 @@
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: rca-test-app
+  namespace: rca-test
+spec:
+  interval: 1m
+  chart:
+    spec:
+      chart: nginx
+      version: "15.14.0"
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: rca-test
+  values:
+    image:
+      tag: "does-not-exist-v999"  # Non-existent tag
+    replicaCount: 1

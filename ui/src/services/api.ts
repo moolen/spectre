@@ -155,6 +155,7 @@ class ApiClient {
   ): Promise<K8sResource[]> {
     // In demo mode, use demo data directly
     if (getDemoMode()) {
+      console.log('[Demo Mode] getTimeline called with:', { startTime, endTime, filters });
       // Handle human-friendly expressions in demo mode
       let startSeconds: number;
       if (typeof startTime === 'string' && isHumanFriendlyExpression(startTime)) {
@@ -167,7 +168,10 @@ class ApiClient {
         startSeconds = normalizeToSeconds(startTime);
       }
       const response = buildDemoTimelineResponse(startSeconds, filters);
-      return transformSearchResponse(response);
+      console.log('[Demo Mode] buildDemoTimelineResponse returned:', { count: response.count, resourceCount: response.resources.length });
+      const transformed = transformSearchResponse(response);
+      console.log('[Demo Mode] transformSearchResponse returned:', { count: transformed.length });
+      return transformed;
     }
 
     const params = new URLSearchParams();
@@ -230,7 +234,22 @@ class ApiClient {
   ): Promise<K8sResource[]> {
     // Demo mode not supported for gRPC yet - fall back to REST
     if (getDemoMode()) {
-      return this.getTimeline(startTime, endTime, filters);
+      console.log('[Demo Mode] getTimelineGrpc falling back to REST API');
+      const resources = await this.getTimeline(startTime, endTime, filters);
+      
+      // If a chunk callback was provided, call it with all resources at once
+      if (onChunk) {
+        console.log('[Demo Mode] Calling onChunk with', resources.length, 'resources');
+        onChunk({
+          resources,
+          isComplete: true,
+          metadata: {
+            totalCount: resources.length,
+          },
+        });
+      }
+      
+      return resources;
     }
 
     // Normalize timestamps to seconds
@@ -292,6 +311,10 @@ class ApiClient {
       group: groupVersion,
       version: version || groupVersion,
       namespace: grpcResource.namespace,
+      preExisting: grpcResource.preExisting,
+      deletedAt: grpcResource.deletedAt && grpcResource.deletedAt > 0
+        ? new Date(grpcResource.deletedAt * 1000)
+        : undefined,
       statusSegments: grpcResource.statusSegments.map(seg => ({
         start: new Date(seg.startTime * 1000),
         end: new Date(seg.endTime * 1000),

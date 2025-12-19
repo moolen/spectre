@@ -1,0 +1,111 @@
+---
+# GatewayClass (cluster-scoped)
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: shared-gateway-class
+spec:
+  controllerName: example.com/shared-gateway-controller
+
+---
+# Gateway in gateway-system namespace
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: shared-gateway
+  namespace: gateway-system
+  labels:
+    app: shared-gateway
+spec:
+  gatewayClassName: shared-gateway-class
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: All  # Allow routes from any namespace
+
+---
+# HTTPRoute in app-namespace referencing Gateway in gateway-system
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: cross-ns-route
+  namespace: app-namespace
+  labels:
+    app: cross-ns-app
+spec:
+  parentRefs:
+  - name: shared-gateway
+    namespace: gateway-system  # Cross-namespace reference
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: app-service
+      namespace: backend-namespace  # Cross-namespace backend
+      port: 8080
+
+---
+# Service in backend-namespace
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-service
+  namespace: backend-namespace
+  labels:
+    app: backend-app
+spec:
+  selector:
+    app: backend-app
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Supporting namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway-system
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-namespace
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backend-namespace
+
+---
+# Backend deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-app
+  namespace: backend-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend-app
+  template:
+    metadata:
+      labels:
+        app: backend-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:alpine
+        ports:
+        - containerPort: 8080

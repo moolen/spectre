@@ -181,25 +181,53 @@ func (s *UIStage) namespace_filter_is_set(namespace string) *UIStage {
 }
 
 func (s *UIStage) kind_dropdown_is_opened() *UIStage {
-	kindDropdown := s.browserTest.Page.GetByRole("button", playwright.PageGetByRoleOptions{Name: "All Kinds"})
+	// Wait for metadata to be loaded
+	time.Sleep(3 * time.Second)
 
-	// Wait for dropdown to be visible with polling
+	// The kind dropdown is the second filter button (after namespace dropdown)
+	// It might show "All Kinds" or the selected kinds like "Deployment, Pod"
+	allButtons := s.browserTest.Page.Locator("button")
+	
+	// Wait for buttons to be available
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		visible, err := kindDropdown.IsVisible()
+		count, _ := allButtons.Count()
+		if count >= 2 {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// The kind dropdown is typically button index 1 (0 is namespace dropdown)
+	kindDropdown := allButtons.Nth(1)
+	
+	err := kindDropdown.WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateVisible,
+		Timeout: playwright.Float(10000),
+	})
+	s.require.NoError(err, "kind dropdown not visible")
+
+	err = kindDropdown.Click()
+	s.require.NoError(err, "failed to click kind dropdown")
+	return s
+}
+
+func (s *UIStage) kind_option_is_selected(kind string) *UIStage {
+	option := s.browserTest.Page.GetByRole("option", playwright.PageGetByRoleOptions{Name: kind})
+
+	// Wait for option to be visible with polling
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		visible, err := option.IsVisible()
 		if err == nil && visible {
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	s.require.NoError(kindDropdown.Click())
-	return s
-}
+	err := option.Click()
+	s.require.NoError(err, "failed to click kind option '%s'", kind)
 
-func (s *UIStage) kind_option_is_selected(kind string) *UIStage {
-	err := s.browserTest.Page.GetByRole("option", playwright.PageGetByRoleOptions{Name: kind}).Click()
-	s.require.NoError(err)
 	s.require.NoError(s.browserTest.Page.Keyboard().Press("Escape"))
 	time.Sleep(500 * time.Millisecond)
 	return s
