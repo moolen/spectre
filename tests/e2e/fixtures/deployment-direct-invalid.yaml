@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: direct-deployment
+  namespace: rca-test-direct
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: direct-test
+  template:
+    metadata:
+      labels:
+        app: direct-test
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:nonexistent-tag-v999
+        ports:
+        - containerPort: 80

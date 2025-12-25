@@ -100,6 +100,7 @@ func (tc *TestContext) ReconnectPortForward() error {
 // Each test gets its own unique namespace for isolation.
 func SetupE2ETest(t *testing.T) *TestContext {
 	t.Helper()
+	setupStartTime := time.Now()
 
 	// Get shared cluster from package-level variable
 	// This will be set by TestMain in shared_cluster.go
@@ -218,7 +219,7 @@ func SetupE2ETest(t *testing.T) *TestContext {
 	ctx.APIClient = NewAPIClient(t, portForwarder.GetURL())
 
 	t.Cleanup(ctx.Cleanup)
-	t.Logf("✓ Test environment ready in namespace: %s", namespace)
+	t.Logf("✓ Test environment ready in namespace: %s (total setup took %v)", namespace, time.Since(setupStartTime))
 	return ctx
 }
 

@@ -54,6 +54,7 @@ func NewHelmDeployer(t *testing.T, kubeConfig, namespace string) (*HelmDeployer,
 
 // InstallOrUpgrade installs/upgrades a Helm chart.
 func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values map[string]interface{}) error {
+	startTime := time.Now()
 	chart, err := loader.Load(chartPath)
 	if err != nil {
 		return fmt.Errorf("failed to load chart: %w", err)
@@ -74,7 +75,7 @@ func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values m
 			hd.debugDeploymentFailure(releaseName)
 			return fmt.Errorf("failed to upgrade chart: %w", err)
 		}
-		hd.t.Logf("✓ Chart upgraded: %s", releaseName)
+		hd.t.Logf("✓ Chart upgraded: %s (took %v)", releaseName, time.Since(startTime))
 	} else {
 		hd.t.Logf("Installing new Helm chart %s as %s", chartPath, releaseName)
 		install := action.NewInstall(hd.Config)
@@ -87,7 +88,7 @@ func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values m
 			hd.debugDeploymentFailure(releaseName)
 			return fmt.Errorf("failed to install chart: %w", err)
 		}
-		hd.t.Logf("✓ Chart installed: %s", releaseName)
+		hd.t.Logf("✓ Chart installed: %s (took %v)", releaseName, time.Since(startTime))
 	}
 	return nil
 }

@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
+
+	"github.com/moolen/spectre/internal/analysis"
 )
 
 type APIClient struct {
@@ -277,6 +280,45 @@ func (a *APIClient) Health(ctx context.Context) error {
 	}
 	resp.Body.Close()
 	return nil
+}
+
+// RootCause queries the /v1/root-cause endpoint.
+func (a *APIClient) RootCause(ctx context.Context, resourceUID string, failureTimestamp int64, lookback time.Duration, maxDepth int, minConfidence float64) (*analysis.RootCauseAnalysisV2, error) {
+	baseURL := fmt.Sprintf("%s/v1/root-cause", a.BaseURL)
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base URL: %w", err)
+	}
+
+	q := u.Query()
+	q.Set("resourceUID", resourceUID)
+	q.Set("failureTimestamp", fmt.Sprintf("%d", failureTimestamp))
+
+	if lookback > 0 {
+		q.Set("lookback", lookback.String())
+	}
+	if maxDepth > 0 {
+		q.Set("maxDepth", fmt.Sprintf("%d", maxDepth))
+	}
+	if minConfidence > 0 {
+		q.Set("minConfidence", fmt.Sprintf("%.2f", minConfidence))
+	}
+
+	u.RawQuery = q.Encode()
+	urlStr := u.String()
+
+	resp, err := a.doRequest(ctx, "GET", urlStr, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result analysis.RootCauseAnalysisV2
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode root cause response: %w", err)
+	}
+
+	return &result, nil
 }
 
 // Close cleans up API client resources.

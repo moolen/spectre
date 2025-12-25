@@ -11,6 +11,7 @@ import (
 
 	"github.com/improbable-eng/grpc-web/go/grpcweb"
 	"github.com/moolen/spectre/internal/api/pb"
+	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
 	"go.opentelemetry.io/otel"
@@ -34,17 +35,20 @@ func (n *NoOpReadinessChecker) IsReady() bool {
 
 // Server handles HTTP API requests and gRPC requests
 type Server struct {
-	port             int
-	server           *http.Server
-	grpcServer       *grpc.Server
-	grpcListener     net.Listener
-	logger           *logging.Logger
-	queryExecutor    QueryExecutor
-	storage          *storage.Storage
-	router           *http.ServeMux
-	readinessChecker ReadinessChecker
-	demoMode         bool
-	tracingProvider  interface {
+	port              int
+	server            *http.Server
+	grpcServer        *grpc.Server
+	grpcListener      net.Listener
+	logger            *logging.Logger
+	queryExecutor     QueryExecutor
+	graphQueryExecutor QueryExecutor       // Graph-based query executor (optional)
+	querySource       TimelineQuerySource // Which executor to use for timeline queries
+	storage           *storage.Storage
+	graphClient       graph.Client
+	router            *http.ServeMux
+	readinessChecker  ReadinessChecker
+	demoMode          bool
+	tracingProvider   interface {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	}
@@ -55,23 +59,44 @@ func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecke
 	GetTracer(string) trace.Tracer
 	IsEnabled() bool
 }) *Server {
-	return NewWithStorage(port, queryExecutor, nil, readinessChecker, false, tracingProvider)
+	return NewWithStorage(port, queryExecutor, nil, nil, readinessChecker, false, tracingProvider)
 }
 
 // NewWithStorage creates a new API server with storage export/import capabilities
-func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker, demoMode bool, tracingProvider interface {
+func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, graphClient graph.Client, readinessChecker ReadinessChecker, demoMode bool, tracingProvider interface {
 	GetTracer(string) trace.Tracer
 	IsEnabled() bool
 }) *Server {
+	return NewWithStorageAndGraph(port, queryExecutor, nil, TimelineQuerySourceStorage, storage, graphClient, readinessChecker, demoMode, tracingProvider)
+}
+
+// NewWithStorageAndGraph creates a new API server with dual query executor support
+func NewWithStorageAndGraph(
+	port int,
+	storageExecutor QueryExecutor,
+	graphExecutor QueryExecutor,
+	querySource TimelineQuerySource,
+	storage *storage.Storage,
+	graphClient graph.Client,
+	readinessChecker ReadinessChecker,
+	demoMode bool,
+	tracingProvider interface {
+		GetTracer(string) trace.Tracer
+		IsEnabled() bool
+	},
+) *Server {
 	s := &Server{
-		port:             port,
-		logger:           logging.GetLogger("api"),
-		queryExecutor:    queryExecutor,
-		storage:          storage,
-		router:           http.NewServeMux(),
-		readinessChecker: readinessChecker,
-		demoMode:         demoMode,
-		tracingProvider:  tracingProvider,
+		port:               port,
+		logger:             logging.GetLogger("api"),
+		queryExecutor:      storageExecutor,
+		graphQueryExecutor: graphExecutor,
+		querySource:        querySource,
+		storage:            storage,
+		graphClient:        graphClient,
+		router:             http.NewServeMux(),
+		readinessChecker:   readinessChecker,
+		demoMode:           demoMode,
+		tracingProvider:    tracingProvider,
 	}
 
 	// Create gRPC server first (needed for gRPC-Web wrapper)
@@ -85,8 +110,18 @@ func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Stor
 		tracer = otel.GetTracerProvider().Tracer("spectre.api.grpc")
 	}
 
-	// Register gRPC services
-	timelineGRPCService := NewTimelineGRPCService(queryExecutor, s.logger, tracer)
+	// Register gRPC services with appropriate executors
+	var timelineGRPCService *TimelineGRPCService
+	if s.graphQueryExecutor != nil && s.querySource == TimelineQuerySourceGraph {
+		s.logger.Info("gRPC Timeline service using GRAPH query executor")
+		timelineGRPCService = NewTimelineGRPCServiceWithMode(s.queryExecutor, s.graphQueryExecutor, s.querySource, s.logger, tracer)
+	} else if s.graphQueryExecutor != nil {
+		s.logger.Info("gRPC Timeline service using STORAGE query executor (graph available)")
+		timelineGRPCService = NewTimelineGRPCServiceWithMode(s.queryExecutor, s.graphQueryExecutor, TimelineQuerySourceStorage, s.logger, tracer)
+	} else {
+		s.logger.Info("gRPC Timeline service using STORAGE query executor only")
+		timelineGRPCService = NewTimelineGRPCService(s.queryExecutor, s.logger, tracer)
+	}
 	pb.RegisterTimelineServiceServer(s.grpcServer, timelineGRPCService)
 
 	// Wrap gRPC server with gRPC-Web support
@@ -135,7 +170,23 @@ func (s *Server) registerHandlers() {
 	}
 
 	searchHandler := NewSearchHandler(s.queryExecutor, s.logger, tracer)
-	timelineHandler := NewTimelineHandler(s.queryExecutor, s.logger, tracer)
+	
+	// Create timeline handler with appropriate executor(s)
+	var timelineHandler *TimelineHandler
+	if s.graphQueryExecutor != nil && s.querySource == TimelineQuerySourceGraph {
+		// Use dual-executor mode with graph as primary
+		s.logger.Info("Timeline handler using GRAPH query executor")
+		timelineHandler = NewTimelineHandlerWithMode(s.queryExecutor, s.graphQueryExecutor, s.querySource, s.logger, tracer)
+	} else if s.graphQueryExecutor != nil {
+		// Graph available but using storage - enable both for A/B testing
+		s.logger.Info("Timeline handler using STORAGE query executor (graph available for comparison)")
+		timelineHandler = NewTimelineHandlerWithMode(s.queryExecutor, s.graphQueryExecutor, TimelineQuerySourceStorage, s.logger, tracer)
+	} else {
+		// Storage only
+		s.logger.Info("Timeline handler using STORAGE query executor only")
+		timelineHandler = NewTimelineHandler(s.queryExecutor, s.logger, tracer)
+	}
+	
 	metadataHandler := NewMetadataHandler(s.queryExecutor, s.logger, tracer)
 
 	s.router.HandleFunc("/v1/search", s.withMethod(http.MethodGet, searchHandler.Handle))
@@ -144,12 +195,25 @@ func (s *Server) registerHandlers() {
 	s.router.HandleFunc("/health", s.handleHealth)
 	s.router.HandleFunc("/ready", s.handleReady)
 
+	// Register A/B test comparison endpoint if both executors are available
+	if s.queryExecutor != nil && s.graphQueryExecutor != nil {
+		compareHandler := NewTimelineCompareHandler(s.queryExecutor, s.graphQueryExecutor, s.logger)
+		s.router.HandleFunc("/v1/timeline/compare", s.withMethod(http.MethodGet, compareHandler.Handle))
+		s.logger.Info("Registered /v1/timeline/compare endpoint for A/B testing")
+	}
+
 	// Register export/import handlers if storage is available
 	if s.storage != nil {
 		exportHandler := NewExportHandler(s.storage, s.logger)
 		importHandler := NewImportHandler(s.storage, s.logger)
 		s.router.HandleFunc("/v1/storage/export", s.withMethod(http.MethodGet, exportHandler.Handle))
 		s.router.HandleFunc("/v1/storage/import", s.withMethod(http.MethodPost, importHandler.Handle))
+	}
+
+	// Register root cause handler if graph client is available
+	if s.graphClient != nil {
+		rootCauseHandler := NewRootCauseHandler(s.graphClient, s.logger, tracer)
+		s.router.HandleFunc("/v1/root-cause", s.withMethod(http.MethodGet, rootCauseHandler.Handle))
 	}
 
 	// Serve static UI files and handle SPA routing

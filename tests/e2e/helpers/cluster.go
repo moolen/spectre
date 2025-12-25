@@ -22,11 +22,37 @@ type TestCluster struct {
 }
 
 // CreateKindCluster creates a new Kind cluster with a unique name.
+// If a cluster with the same name already exists, it will be deleted first.
 func CreateKindCluster(t *testing.T, clusterName string) (*TestCluster, error) {
 	t.Logf("Creating Kind cluster: %s", clusterName)
 
 	// Create Kind provider
 	provider := cluster.NewProvider()
+
+	// Check if cluster already exists and delete it if so
+	clusters, err := provider.List()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing clusters: %w", err)
+	}
+
+	for _, existingCluster := range clusters {
+		if existingCluster == clusterName {
+			t.Logf("Found existing cluster %s, deleting it first...", clusterName)
+			// Get kubeconfig path for deletion
+			kubeConfigPath := filepath.Join(os.TempDir(), fmt.Sprintf("kubeconfig-%s", clusterName))
+			if err := provider.Delete(clusterName, kubeConfigPath); err != nil {
+				// Log but continue - cluster might be partially deleted
+				if !strings.Contains(err.Error(), "does not exist") {
+					t.Logf("Warning: failed to delete existing cluster: %v", err)
+				}
+			} else {
+				t.Logf("✓ Deleted existing cluster: %s", clusterName)
+			}
+			// Give it a moment to fully clean up
+			// Note: We can't import time here easily, but the deletion should be quick
+			break
+		}
+	}
 
 	// Define cluster configuration
 	cfg := &v1alpha4.Cluster{

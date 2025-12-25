@@ -8,24 +8,34 @@ export interface PersistedFilters {
   namespaces: string[];
 }
 
+const DEFAULT_RUNTIME_KINDS = [
+  'Deployment',
+  'StatefulSet',
+  'ReplicaSet',
+  'Pod',
+  'Job',
+  'CronJob',
+  'Service'
+];
+
 const loadFilters = (): PersistedFilters => {
   if (typeof window === 'undefined') {
-    return { kinds: [], namespaces: [] };
+    return { kinds: DEFAULT_RUNTIME_KINDS, namespaces: [] };
   }
 
   try {
     const kindsStr = window.localStorage.getItem(STORAGE_KEY_KINDS);
     const namespacesStr = window.localStorage.getItem(STORAGE_KEY_NAMESPACES);
 
-    const kinds = kindsStr ? JSON.parse(kindsStr) : [];
+    const kinds = kindsStr ? JSON.parse(kindsStr) : DEFAULT_RUNTIME_KINDS;
     const namespaces = namespacesStr ? JSON.parse(namespacesStr) : [];
 
     return {
-      kinds: Array.isArray(kinds) ? kinds : [],
+      kinds: Array.isArray(kinds) ? kinds : DEFAULT_RUNTIME_KINDS,
       namespaces: Array.isArray(namespaces) ? namespaces : []
     };
   } catch {
-    return { kinds: [], namespaces: [] };
+    return { kinds: DEFAULT_RUNTIME_KINDS, namespaces: [] };
   }
 };
 

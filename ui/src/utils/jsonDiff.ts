@@ -5,6 +5,15 @@ export interface DiffLine {
   content: string;
 }
 
+export type ChangeCategory = 'spec' | 'status' | 'metadata' | 'other';
+
+export interface ChangeCategories {
+  spec: boolean;
+  status: boolean;
+  metadata: boolean;
+  other: boolean;
+}
+
 type RawDiff = { type: 'equal' | 'add' | 'remove'; line: string };
 
 const CONTEXT_LINES_DEFAULT = 3;
@@ -122,5 +131,66 @@ export const diffJsonWithContext = (
   });
 
   return result;
+};
+
+/**
+ * Detect which categories of changes occurred between two Kubernetes resource states
+ */
+export const detectChangeCategories = (
+  previous: Record<string, any> | undefined,
+  current: Record<string, any> | undefined
+): ChangeCategories => {
+  const categories: ChangeCategories = {
+    spec: false,
+    status: false,
+    metadata: false,
+    other: false,
+  };
+
+  if (!previous || !current) {
+    return categories;
+  }
+
+  // Check spec changes
+  if (JSON.stringify(previous.spec) !== JSON.stringify(current.spec)) {
+    categories.spec = true;
+  }
+
+  // Check status changes
+  if (JSON.stringify(previous.status) !== JSON.stringify(current.status)) {
+    categories.status = true;
+  }
+
+  // Check metadata changes (excluding managedFields and resourceVersion which change frequently)
+  const prevMeta = { ...previous.metadata };
+  const currMeta = { ...current.metadata };
+  
+  // Ignore noisy fields
+  delete prevMeta.managedFields;
+  delete currMeta.managedFields;
+  delete prevMeta.resourceVersion;
+  delete currMeta.resourceVersion;
+  delete prevMeta.generation;
+  delete currMeta.generation;
+  
+  if (JSON.stringify(prevMeta) !== JSON.stringify(currMeta)) {
+    categories.metadata = true;
+  }
+
+  // Check for other top-level changes
+  const prevKeys = new Set(Object.keys(previous));
+  const currKeys = new Set(Object.keys(current));
+  const allKeys = new Set([...prevKeys, ...currKeys]);
+  
+  for (const key of allKeys) {
+    if (key !== 'spec' && key !== 'status' && key !== 'metadata') {
+      if (JSON.stringify(previous[key]) !== JSON.stringify(current[key])) {
+        categories.other = true;
+        break;
+      }
+    }
+  }
+
+  return categories;
 };
 

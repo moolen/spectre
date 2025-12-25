@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: imagepull-test-pod
+  labels:
+    app: imagepull-test
+    test-scenario: imagepull
+spec:
+  restartPolicy: Always
+  containers:
+  - name: missing-image
+    image: nginx:nonexistent-tag-xyz-12345
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+      limits:
+        memory: "64Mi"
+        cpu: "100m"

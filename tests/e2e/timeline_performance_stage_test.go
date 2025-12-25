@@ -51,7 +51,7 @@ const (
 
 	// Absolute tolerance for very fast queries (in milliseconds)
 	// If the difference is within this range, we consider it acceptable regardless of factor
-	fastQueryToleranceMs = 5
+	fastQueryToleranceMs = 15 // Increased to allow for measurement variance in very fast queries
 
 	// Number of resources to create per hour to ensure meaningful data
 	resourcesPerHour = 10

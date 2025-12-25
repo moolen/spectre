@@ -31,8 +31,10 @@ func TestMain(m *testing.M) {
 
 func runWithSharedCluster(m *testing.M) int {
 	log.Println("Setting up shared Kind cluster for e2e tests...")
+	startTime := time.Now()
 
 	// Create shared cluster
+	clusterStartTime := time.Now()
 	cluster, err := helpers.CreateKindCluster(&testing.T{}, "spectre-e2e-shared")
 	if err != nil {
 		log.Printf("❌ Failed to create shared cluster: %v", err)
@@ -44,7 +46,7 @@ func runWithSharedCluster(m *testing.M) int {
 	// Set the shared cluster in helpers so tests can access it
 	helpers.SetSharedCluster(cluster)
 
-	log.Printf("✓ Shared cluster created: %s", cluster.Name)
+	log.Printf("✓ Shared cluster created: %s (took %v)", cluster.Name, time.Since(clusterStartTime))
 	log.Printf("✓ Shared cluster set in helpers (kubeconfig: %s)", cluster.KubeConfig)
 
 	// Ensure cluster is cleaned up
@@ -59,6 +61,7 @@ func runWithSharedCluster(m *testing.M) int {
 
 	// Build and load Docker image once
 	log.Println("Building test Docker image (once for all tests)...")
+	imageStartTime := time.Now()
 	values, imageRef, err := helpers.LoadHelmValues()
 	if err != nil {
 		log.Printf("❌ Failed to load Helm values: %v", err)
@@ -74,16 +77,19 @@ func runWithSharedCluster(m *testing.M) int {
 	// Store values for reuse
 	helpers.SetCachedHelmValues(values, imageRef)
 
-	log.Println("✓ Test image built and loaded")
+	log.Printf("✓ Test image built and loaded (took %v)", time.Since(imageStartTime))
+	log.Printf("📊 Total setup time: %v", time.Since(startTime))
 	log.Println("================================================")
 	log.Println("Running e2e tests with shared cluster...")
 	log.Println("================================================")
 
 	// Run all tests
+	testStartTime := time.Now()
 	exitCode := m.Run()
+	testDuration := time.Since(testStartTime)
 
 	log.Println("================================================")
-	log.Printf("Tests completed with exit code: %d", exitCode)
+	log.Printf("Tests completed with exit code: %d (execution took %v)", exitCode, testDuration)
 	log.Println("================================================")
 
 	return exitCode
