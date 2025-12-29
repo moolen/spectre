@@ -42,6 +42,9 @@ type Client interface {
 
 	// InitializeSchema creates indexes and constraints
 	InitializeSchema(ctx context.Context) error
+
+	// DeleteGraph completely removes the graph (for testing purposes)
+	DeleteGraph(ctx context.Context) error
 }
 
 // ClientConfig holds configuration for the FalkorDB client
@@ -480,6 +483,31 @@ func (c *falkorClient) InitializeSchema(ctx context.Context) error {
 	}
 
 	c.logger.Info("Schema initialization complete")
+	return nil
+}
+
+// DeleteGraph completely removes the graph (for testing purposes)
+func (c *falkorClient) DeleteGraph(ctx context.Context) error {
+	if c.graph == nil {
+		return fmt.Errorf("client not connected")
+	}
+
+	// Use GRAPH.DELETE command to completely remove the graph
+	err := c.graph.Delete()
+	if err != nil {
+		// Ignore "empty key" error which means graph doesn't exist yet
+		if strings.Contains(err.Error(), "empty key") {
+			c.logger.Debug("Graph '%s' does not exist, nothing to delete", c.config.GraphName)
+		} else {
+			return fmt.Errorf("failed to delete graph: %w", err)
+		}
+	} else {
+		c.logger.Info("Graph '%s' deleted", c.config.GraphName)
+	}
+
+	// Re-select the graph (it will be recreated on next operation)
+	c.graph = c.db.SelectGraph(c.config.GraphName)
+
 	return nil
 }
 

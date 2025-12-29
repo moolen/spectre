@@ -220,6 +220,10 @@ func (m *mockGraphClient) InitializeSchema(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockGraphClient) DeleteGraph(ctx context.Context) error {
+	return nil
+}
+
 // Helper functions
 
 func createHelmReleaseResource() *unstructured.Unstructured {

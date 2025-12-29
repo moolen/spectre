@@ -101,6 +101,13 @@ func (c *CachedClient) InitializeSchema(ctx context.Context) error {
 	return c.underlying.InitializeSchema(ctx)
 }
 
+// DeleteGraph completely removes the graph (delegates to underlying client)
+func (c *CachedClient) DeleteGraph(ctx context.Context) error {
+	// Clear cache when graph is deleted
+	c.cache.Clear()
+	return c.underlying.DeleteGraph(ctx)
+}
+
 // CacheStats returns cache statistics
 func (c *CachedClient) CacheStats() QueryCacheStats {
 	return c.cache.Stats()

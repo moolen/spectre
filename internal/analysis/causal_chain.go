@@ -102,11 +102,10 @@ func (a *RootCauseAnalyzer) buildCausalGraph(
 		if err != nil {
 			return CausalGraph{}, fmt.Errorf("failed to get manager events: %w", err)
 		}
-		// Merge manager events into managers
+		// Merge manager events into the main changeEvents map
 		for uid, events := range managerEvents {
-			// Store as additional data (we'll use it later)
-			_ = uid
-			_ = events
+			changeEvents[uid] = events
+			a.logger.Debug("buildCausalGraph: merged %d events for manager %s", len(events), uid)
 		}
 	}
 

@@ -518,9 +518,8 @@ func TestCausalChainIntegration(t *testing.T) {
 
 func cleanupGraph(t *testing.T, client graph.Client) {
 	ctx := context.Background()
-	_, err := client.ExecuteQuery(ctx, graph.GraphQuery{
-		Query: "MATCH (n) DETACH DELETE n",
-	})
+	// Use DeleteGraph for reliable cleanup (completely removes the graph)
+	err := client.DeleteGraph(ctx)
 	require.NoError(t, err)
 }
 

@@ -35,10 +35,8 @@ func TestFalkorDBIntegration(t *testing.T) {
 	err = client.Ping(ctx)
 	require.NoError(t, err)
 
-	// Clean up any existing graph data
-	_, err = client.ExecuteQuery(ctx, GraphQuery{
-		Query: "MATCH (n) DETACH DELETE n",
-	})
+	// Clean up any existing graph data using DeleteGraph for reliable cleanup
+	err = client.DeleteGraph(ctx)
 	require.NoError(t, err)
 
 	t.Run("Create and query ResourceIdentity", func(t *testing.T) {
@@ -248,10 +246,8 @@ func TestFalkorDBIntegration(t *testing.T) {
 		_ = err // Ignore error as indexes may already exist
 	})
 
-	// Clean up
-	_, err = client.ExecuteQuery(ctx, GraphQuery{
-		Query: "MATCH (n) DETACH DELETE n",
-	})
+	// Clean up using DeleteGraph for reliable cleanup
+	err = client.DeleteGraph(ctx)
 	require.NoError(t, err)
 }
 
