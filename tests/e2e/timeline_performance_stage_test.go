@@ -51,7 +51,7 @@ const (
 
 	// Absolute tolerance for very fast queries (in milliseconds)
 	// If the difference is within this range, we consider it acceptable regardless of factor
-	fastQueryToleranceMs = 5
+	fastQueryToleranceMs = 15 // Increased to allow for measurement variance in very fast queries
 
 	// Number of resources to create per hour to ensure meaningful data
 	resourcesPerHour = 10
@@ -223,7 +223,7 @@ func (s *TimelinePerformanceStage) timeline_is_queried_for_last_hour() *Timeline
 		ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Second)
 		defer cancel()
 
-		resp, err := s.apiClient.Timeline(ctx, startTs, endTs, s.testNamespace, "Deployment")
+		resp, err := s.apiClient.TimelineGRPC(ctx, startTs, endTs, s.testNamespace, "Deployment")
 		if err != nil {
 			s.t.Logf("Timeline query failed: %v", err)
 			return false

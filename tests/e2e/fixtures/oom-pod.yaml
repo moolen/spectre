@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oom-test-pod
+  labels:
+    app: oom-test
+    test-scenario: oom
+spec:
+  restartPolicy: Always
+  containers:
+  - name: memory-hog
+    image: polinux/stress:latest
+    command: ["stress", "--vm", "1", "--vm-bytes", "50M", "--vm-hang", "0"]
+    resources:
+      requests:
+        memory: "20Mi"
+        cpu: "50m"
+      limits:
+        memory: "20Mi"
+        cpu: "100m"

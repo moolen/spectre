@@ -3,19 +3,17 @@ package api
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/improbable-eng/grpc-web/go/grpcweb"
-	"github.com/moolen/spectre/internal/api/pb"
+	"github.com/moolen/spectre/internal/api/pb/pbconnect"
+	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/storage"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
 )
 
 // ReadinessChecker is an interface for checking component readiness
@@ -32,19 +30,20 @@ func (n *NoOpReadinessChecker) IsReady() bool {
 	return true
 }
 
-// Server handles HTTP API requests and gRPC requests
+// Server handles HTTP API requests and Connect RPC requests
 type Server struct {
-	port             int
-	server           *http.Server
-	grpcServer       *grpc.Server
-	grpcListener     net.Listener
-	logger           *logging.Logger
-	queryExecutor    QueryExecutor
-	storage          *storage.Storage
-	router           *http.ServeMux
-	readinessChecker ReadinessChecker
-	demoMode         bool
-	tracingProvider  interface {
+	port               int
+	server             *http.Server
+	logger             *logging.Logger
+	queryExecutor      QueryExecutor
+	graphQueryExecutor QueryExecutor       // Graph-based query executor (optional)
+	querySource        TimelineQuerySource // Which executor to use for timeline queries
+	storage            *storage.Storage
+	graphClient        graph.Client
+	router             *http.ServeMux
+	readinessChecker   ReadinessChecker
+	demoMode           bool
+	tracingProvider   interface {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	}
@@ -55,63 +54,76 @@ func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecke
 	GetTracer(string) trace.Tracer
 	IsEnabled() bool
 }) *Server {
-	return NewWithStorage(port, queryExecutor, nil, readinessChecker, false, tracingProvider)
+	return NewWithStorage(port, queryExecutor, nil, nil, readinessChecker, false, tracingProvider)
 }
 
 // NewWithStorage creates a new API server with storage export/import capabilities
-func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, readinessChecker ReadinessChecker, demoMode bool, tracingProvider interface {
+func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, graphClient graph.Client, readinessChecker ReadinessChecker, demoMode bool, tracingProvider interface {
 	GetTracer(string) trace.Tracer
 	IsEnabled() bool
 }) *Server {
+	return NewWithStorageAndGraph(port, queryExecutor, nil, TimelineQuerySourceStorage, storage, graphClient, readinessChecker, demoMode, tracingProvider)
+}
+
+// NewWithStorageAndGraph creates a new API server with dual query executor support
+func NewWithStorageAndGraph(
+	port int,
+	storageExecutor QueryExecutor,
+	graphExecutor QueryExecutor,
+	querySource TimelineQuerySource,
+	storage *storage.Storage,
+	graphClient graph.Client,
+	readinessChecker ReadinessChecker,
+	demoMode bool,
+	tracingProvider interface {
+		GetTracer(string) trace.Tracer
+		IsEnabled() bool
+	},
+) *Server {
 	s := &Server{
-		port:             port,
-		logger:           logging.GetLogger("api"),
-		queryExecutor:    queryExecutor,
-		storage:          storage,
-		router:           http.NewServeMux(),
-		readinessChecker: readinessChecker,
-		demoMode:         demoMode,
-		tracingProvider:  tracingProvider,
+		port:               port,
+		logger:             logging.GetLogger("api"),
+		queryExecutor:      storageExecutor,
+		graphQueryExecutor: graphExecutor,
+		querySource:        querySource,
+		storage:            storage,
+		graphClient:        graphClient,
+		router:             http.NewServeMux(),
+		readinessChecker:   readinessChecker,
+		demoMode:           demoMode,
+		tracingProvider:    tracingProvider,
 	}
 
-	// Create gRPC server first (needed for gRPC-Web wrapper)
-	s.grpcServer = grpc.NewServer()
-
-	// Get tracer for gRPC service
+	// Get tracer for Connect service
 	var tracer trace.Tracer
 	if tracingProvider != nil && tracingProvider.IsEnabled() {
-		tracer = tracingProvider.GetTracer("spectre.api.grpc")
+		tracer = tracingProvider.GetTracer("spectre.api.connect")
 	} else {
-		tracer = otel.GetTracerProvider().Tracer("spectre.api.grpc")
+		tracer = otel.GetTracerProvider().Tracer("spectre.api.connect")
 	}
 
-	// Register gRPC services
-	timelineGRPCService := NewTimelineGRPCService(queryExecutor, s.logger, tracer)
-	pb.RegisterTimelineServiceServer(s.grpcServer, timelineGRPCService)
+	// Create Connect Timeline service with appropriate executors
+	var timelineConnectService *TimelineConnectService
+	if s.graphQueryExecutor != nil && s.querySource == TimelineQuerySourceGraph {
+		s.logger.Info("Connect Timeline service using GRAPH query executor")
+		timelineConnectService = NewTimelineConnectServiceWithMode(s.queryExecutor, s.graphQueryExecutor, s.querySource, s.logger, tracer)
+	} else if s.graphQueryExecutor != nil {
+		s.logger.Info("Connect Timeline service using STORAGE query executor (graph available)")
+		timelineConnectService = NewTimelineConnectServiceWithMode(s.queryExecutor, s.graphQueryExecutor, TimelineQuerySourceStorage, s.logger, tracer)
+	} else {
+		s.logger.Info("Connect Timeline service using STORAGE query executor only")
+		timelineConnectService = NewTimelineConnectService(s.queryExecutor, s.logger, tracer)
+	}
 
-	// Wrap gRPC server with gRPC-Web support
-	grpcWebWrapper := grpcweb.WrapServer(s.grpcServer,
-		grpcweb.WithCorsForRegisteredEndpointsOnly(false),
-		grpcweb.WithOriginFunc(func(origin string) bool {
-			// Allow all origins for development
-			return true
-		}),
-	)
+	// Register Connect handler (supports gRPC, gRPC-Web, and Connect protocols)
+	timelinePath, timelineHandler := pbconnect.NewTimelineServiceHandler(timelineConnectService)
+	s.router.Handle(timelinePath, timelineHandler)
 
-	// Register handlers
+	// Register other HTTP handlers
 	s.registerHandlers()
 
-	// Create HTTP handler that routes gRPC-Web requests to gRPC server, others to router
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if this is a gRPC-Web request
-		if grpcWebWrapper.IsGrpcWebRequest(r) || grpcWebWrapper.IsAcceptableGrpcCorsRequest(r) {
-			grpcWebWrapper.ServeHTTP(w, r)
-			return
-		}
-
-		// Otherwise, use the regular router with CORS middleware
-		s.corsMiddleware(s.router).ServeHTTP(w, r)
-	})
+	// Use router with CORS middleware as the main handler
+	handler := s.corsMiddleware(s.router)
 
 	// Create HTTP server
 	s.server = &http.Server{
@@ -135,7 +147,23 @@ func (s *Server) registerHandlers() {
 	}
 
 	searchHandler := NewSearchHandler(s.queryExecutor, s.logger, tracer)
-	timelineHandler := NewTimelineHandler(s.queryExecutor, s.logger, tracer)
+	
+	// Create timeline handler with appropriate executor(s)
+	var timelineHandler *TimelineHandler
+	if s.graphQueryExecutor != nil && s.querySource == TimelineQuerySourceGraph {
+		// Use dual-executor mode with graph as primary
+		s.logger.Info("Timeline handler using GRAPH query executor")
+		timelineHandler = NewTimelineHandlerWithMode(s.queryExecutor, s.graphQueryExecutor, s.querySource, s.logger, tracer)
+	} else if s.graphQueryExecutor != nil {
+		// Graph available but using storage - enable both for A/B testing
+		s.logger.Info("Timeline handler using STORAGE query executor (graph available for comparison)")
+		timelineHandler = NewTimelineHandlerWithMode(s.queryExecutor, s.graphQueryExecutor, TimelineQuerySourceStorage, s.logger, tracer)
+	} else {
+		// Storage only
+		s.logger.Info("Timeline handler using STORAGE query executor only")
+		timelineHandler = NewTimelineHandler(s.queryExecutor, s.logger, tracer)
+	}
+	
 	metadataHandler := NewMetadataHandler(s.queryExecutor, s.logger, tracer)
 
 	s.router.HandleFunc("/v1/search", s.withMethod(http.MethodGet, searchHandler.Handle))
@@ -144,12 +172,25 @@ func (s *Server) registerHandlers() {
 	s.router.HandleFunc("/health", s.handleHealth)
 	s.router.HandleFunc("/ready", s.handleReady)
 
+	// Register A/B test comparison endpoint if both executors are available
+	if s.queryExecutor != nil && s.graphQueryExecutor != nil {
+		compareHandler := NewTimelineCompareHandler(s.queryExecutor, s.graphQueryExecutor, s.logger)
+		s.router.HandleFunc("/v1/timeline/compare", s.withMethod(http.MethodGet, compareHandler.Handle))
+		s.logger.Info("Registered /v1/timeline/compare endpoint for A/B testing")
+	}
+
 	// Register export/import handlers if storage is available
 	if s.storage != nil {
 		exportHandler := NewExportHandler(s.storage, s.logger)
 		importHandler := NewImportHandler(s.storage, s.logger)
 		s.router.HandleFunc("/v1/storage/export", s.withMethod(http.MethodGet, exportHandler.Handle))
 		s.router.HandleFunc("/v1/storage/import", s.withMethod(http.MethodPost, importHandler.Handle))
+	}
+
+	// Register root cause handler if graph client is available
+	if s.graphClient != nil {
+		rootCauseHandler := NewRootCauseHandler(s.graphClient, s.logger, tracer)
+		s.router.HandleFunc("/v1/root-cause", s.withMethod(http.MethodGet, rootCauseHandler.Handle))
 	}
 
 	// Serve static UI files and handle SPA routing
@@ -252,9 +293,9 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 }
 
 // Start implements the lifecycle.Component interface
-// Starts the HTTP server and gRPC server, and begins listening for requests
+// Starts the HTTP server with Connect RPC support and begins listening for requests
 func (s *Server) Start(ctx context.Context) error {
-	s.logger.Info("Starting API servers on ports %d (HTTP) and %d (gRPC)", s.port, s.port+1)
+	s.logger.Info("Starting API server on port %d (HTTP with Connect RPC)", s.port)
 
 	// Check context isn't already cancelled
 	select {
@@ -270,39 +311,14 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
-	s.logger.Info("HTTP API server started and listening on port %d", s.port)
-
-	// Start gRPC server on different port
-	grpcPort := s.port + 1
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
-	if err != nil {
-		return fmt.Errorf("failed to listen on gRPC port: %w", err)
-	}
-	s.grpcListener = lis
-
-	// Start gRPC server in a goroutine
-	go func() {
-		s.logger.Info("Starting gRPC server on port %d", grpcPort)
-		if err := s.grpcServer.Serve(lis); err != nil {
-			s.logger.Error("gRPC server error: %v", err)
-		}
-	}()
-
-	s.logger.Info("gRPC API server started and listening on port %d", grpcPort)
+	s.logger.Info("API server started and listening on port %d (supports HTTP, gRPC, gRPC-Web, and Connect)", s.port)
 	return nil
 }
 
 // Stop implements the lifecycle.Component interface
-// Gracefully stops the HTTP server and gRPC server
+// Gracefully stops the HTTP server
 func (s *Server) Stop(ctx context.Context) error {
-	s.logger.Info("Stopping API servers...")
-
-	// Stop gRPC server
-	if s.grpcServer != nil {
-		s.logger.Info("Stopping gRPC server...")
-		s.grpcServer.GracefulStop()
-		s.logger.Info("gRPC server stopped")
-	}
+	s.logger.Info("Stopping API server...")
 
 	// Stop HTTP server
 	done := make(chan error, 1)
@@ -319,10 +335,10 @@ func (s *Server) Stop(ctx context.Context) error {
 			s.logger.Error("HTTP server shutdown error: %v", err)
 			return err
 		}
-		s.logger.Info("HTTP server stopped")
+		s.logger.Info("API server stopped")
 		return nil
 	case <-ctx.Done():
-		s.logger.Warn("HTTP server shutdown timeout")
+		s.logger.Warn("API server shutdown timeout")
 		return ctx.Err()
 	}
 }

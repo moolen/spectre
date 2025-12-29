@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 )
@@ -13,8 +15,10 @@ func TestUIFilterByNamespace(t *testing.T) {
 
 	given, when, then := NewUIStage(t)
 
-	namespace1 := "test-ns-1"
-	namespace2 := "test-ns-2"
+	// Generate unique namespace names to avoid collisions with cluster reuse
+	suffix := rand.Intn(999999)
+	namespace1 := fmt.Sprintf("test-ns-1-%d", suffix)
+	namespace2 := fmt.Sprintf("test-ns-2-%d", suffix)
 
 	given.a_test_environment().and().
 		browser_is_initialized().and().

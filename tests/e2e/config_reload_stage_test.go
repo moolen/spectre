@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -43,7 +44,8 @@ func (s *ConfigReloadStage) and() *ConfigReloadStage {
 }
 
 func (s *ConfigReloadStage) a_test_environment() *ConfigReloadStage {
-	s.testCtx = helpers.SetupE2ETest(s.t)
+	// Use custom minimal watcher config for this test
+	s.testCtx = helpers.SetupE2ETestWithValuesFile(s.t, "tests/e2e/fixtures/helm-values-minimal-watcher.yaml")
 	s.k8sClient = s.testCtx.K8sClient
 	s.apiClient = s.testCtx.APIClient
 	return s
@@ -53,7 +55,9 @@ func (s *ConfigReloadStage) a_test_namespace() *ConfigReloadStage {
 	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
-	s.testNamespace = "test-config"
+	// Generate unique namespace name to avoid collisions with cluster reuse
+	suffix := rand.Intn(999999)
+	s.testNamespace = fmt.Sprintf("test-config-%d", suffix)
 	err := s.k8sClient.CreateNamespace(ctx, s.testNamespace)
 	s.require.NoError(err, "failed to create namespace")
 	s.t.Cleanup(func() {

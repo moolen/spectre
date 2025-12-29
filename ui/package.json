@@ -15,14 +15,17 @@
   "dependencies": {
     "@bufbuild/protobuf": "^2.10.2",
     "@google/genai": "^1.30.0",
+    "@types/dagre": "^0.7.53",
     "d3": "^7.9.0",
+    "dagre": "^0.8.5",
     "google-protobuf": "^4.0.1",
     "grpc-web": "^2.0.2",
     "playwright": "^1.57.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^6.28.0",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "sonner": "^2.0.7"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

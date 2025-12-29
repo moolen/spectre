@@ -7,6 +7,7 @@ interface DetailPanelProps {
   resource: K8sResource | null;
   selectedIndex?: number;
   onClose: () => void;
+  onAnalyzeRootCause?: () => void; // New prop
 }
 
 const DiffLineView = ({ line }: { line: DiffLine }) => {
@@ -130,7 +131,7 @@ const ConfigDiff = ({
   );
 };
 
-export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedIndex = 0, onClose }) => {
+export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedIndex = 0, onClose, onAnalyzeRootCause }) => {
   const { formatTime } = useSettings();
   const [showFullDiff, setShowFullDiff] = useState(false);
   const [width, setWidth] = useState(384); // Default w-96 = 24rem = 384px
@@ -212,6 +213,23 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedInde
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>
+
+        <hr className="my-4 border-[var(--color-border-soft)]" />
+
+        {/* Analyze Root Cause Button */}
+        {onAnalyzeRootCause && (
+          <div className="mb-6">
+            <button
+              onClick={onAnalyzeRootCause}
+              className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+              </svg>
+              Analyze Root Cause
+            </button>
+          </div>
+        )}
 
         {/* Selected Segment Details */}
         <div className="mb-6">

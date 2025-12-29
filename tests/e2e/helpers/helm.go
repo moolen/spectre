@@ -19,20 +19,19 @@ import (
 
 // HelmDeployer manages Helm chart deployments.
 type HelmDeployer struct {
-	Config     *action.Configuration
-	Namespace  string
-	KubeConfig string
-	t          *testing.T
+	Config      *action.Configuration
+	Namespace   string
+	KubeContext string
+	t           *testing.T
 }
 
 // NewHelmDeployer creates a new Helm deployer.
-func NewHelmDeployer(t *testing.T, kubeConfig, namespace string) (*HelmDeployer, error) {
+func NewHelmDeployer(t *testing.T, context, namespace string) (*HelmDeployer, error) {
 	t.Logf("Creating Helm deployer for namespace %s", namespace)
 
 	// Create Helm settings
 	settings := cli.New()
-	settings.KubeConfig = kubeConfig
-	settings.KubeContext = ""
+	settings.KubeContext = context
 	settings.KubeAsUser = ""
 	settings.KubeAPIServer = ""
 
@@ -45,15 +44,16 @@ func NewHelmDeployer(t *testing.T, kubeConfig, namespace string) (*HelmDeployer,
 	t.Logf("✓ Helm deployer created")
 
 	return &HelmDeployer{
-		Config:     cfg,
-		Namespace:  namespace,
-		KubeConfig: kubeConfig,
-		t:          t,
+		Config:      cfg,
+		Namespace:   namespace,
+		KubeContext: context,
+		t:           t,
 	}, nil
 }
 
 // InstallOrUpgrade installs/upgrades a Helm chart.
 func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values map[string]interface{}) error {
+	startTime := time.Now()
 	chart, err := loader.Load(chartPath)
 	if err != nil {
 		return fmt.Errorf("failed to load chart: %w", err)
@@ -74,7 +74,7 @@ func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values m
 			hd.debugDeploymentFailure(releaseName)
 			return fmt.Errorf("failed to upgrade chart: %w", err)
 		}
-		hd.t.Logf("✓ Chart upgraded: %s", releaseName)
+		hd.t.Logf("✓ Chart upgraded: %s (took %v)", releaseName, time.Since(startTime))
 	} else {
 		hd.t.Logf("Installing new Helm chart %s as %s", chartPath, releaseName)
 		install := action.NewInstall(hd.Config)
@@ -87,7 +87,7 @@ func (hd *HelmDeployer) InstallOrUpgrade(releaseName, chartPath string, values m
 			hd.debugDeploymentFailure(releaseName)
 			return fmt.Errorf("failed to install chart: %w", err)
 		}
-		hd.t.Logf("✓ Chart installed: %s", releaseName)
+		hd.t.Logf("✓ Chart installed: %s (took %v)", releaseName, time.Since(startTime))
 	}
 	return nil
 }
@@ -211,7 +211,7 @@ func (hd *HelmDeployer) debugDeploymentFailure(releaseName string) {
 	hd.runKubectl(ctx, "get", "pvc", "-n", hd.Namespace)
 
 	// Describe PVCs
-	pvcListCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", hd.KubeConfig, "get", "pvc", "-n", hd.Namespace, "-o", "name")
+	pvcListCmd := exec.CommandContext(ctx, "kubectl", "--context", hd.KubeContext, "get", "pvc", "-n", hd.Namespace, "-o", "name")
 	if pvcOutput, err := pvcListCmd.Output(); err == nil {
 		pvcs := strings.Split(strings.TrimSpace(string(pvcOutput)), "\n")
 		for _, pvc := range pvcs {
@@ -229,7 +229,7 @@ func (hd *HelmDeployer) debugDeploymentFailure(releaseName string) {
 	hd.runKubectl(ctx, "get", "pods", "-n", hd.Namespace, "-o", "wide")
 
 	// Describe pods
-	podListCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", hd.KubeConfig, "get", "pods", "-n", hd.Namespace, "-o", "name")
+	podListCmd := exec.CommandContext(ctx, "kubectl", "--context", hd.KubeContext, "get", "pods", "-n", hd.Namespace, "-o", "name")
 	if podOutput, err := podListCmd.Output(); err == nil {
 		pods := strings.Split(strings.TrimSpace(string(podOutput)), "\n")
 		for _, pod := range pods {
@@ -248,7 +248,7 @@ func (hd *HelmDeployer) debugDeploymentFailure(releaseName string) {
 	hd.runKubectl(ctx, "get", "deployments", "-n", hd.Namespace)
 
 	// Describe deployments
-	deployListCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", hd.KubeConfig, "get", "deployments", "-n", hd.Namespace, "-o", "name")
+	deployListCmd := exec.CommandContext(ctx, "kubectl", "--context", hd.KubeContext, "get", "deployments", "-n", hd.Namespace, "-o", "name")
 	if deployOutput, err := deployListCmd.Output(); err == nil {
 		deploys := strings.Split(strings.TrimSpace(string(deployOutput)), "\n")
 		for _, deploy := range deploys {
@@ -268,7 +268,7 @@ func (hd *HelmDeployer) debugDeploymentFailure(releaseName string) {
 
 // runKubectl runs a kubectl command and logs the output.
 func (hd *HelmDeployer) runKubectl(ctx context.Context, args ...string) {
-	fullArgs := append([]string{"--kubeconfig", hd.KubeConfig}, args...)
+	fullArgs := append([]string{"--context", hd.KubeContext}, args...)
 	cmd := exec.CommandContext(ctx, "kubectl", fullArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

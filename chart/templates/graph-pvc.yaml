@@ -1,0 +1,29 @@
+{{- if and .Values.graph.enabled .Values.graph.falkordb.sidecar .Values.graph.falkordb.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "spectre.fullname" . }}-graph
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "spectre.labels" . | nindent 4 }}
+    app.kubernetes.io/component: graph
+  {{- with .Values.graph.falkordb.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- range .Values.graph.falkordb.persistence.accessModes }}
+    - {{ . }}
+    {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.graph.falkordb.persistence.size }}
+  {{- if .Values.graph.falkordb.persistence.storageClassName }}
+  storageClassName: {{ .Values.graph.falkordb.persistence.storageClassName }}
+  {{- end }}
+  {{- with .Values.graph.falkordb.persistence.selector }}
+  selector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

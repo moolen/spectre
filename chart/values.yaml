@@ -3,7 +3,7 @@ fullnameOverride: ""
 namespace: monitoring
 
 image:
-  repository: spectre
+  repository: ghcr.io/moolen/spectre
   tag: latest
   pullPolicy: IfNotPresent
   pullSecrets: []
@@ -97,6 +97,113 @@ mcp:
     failureThreshold: 3
     successThreshold: 1
 
+# Graph reasoning layer configuration
+graph:
+  # Enable graph-based reasoning features
+  enabled: true
+
+  # Timeline query configuration
+  # Determines which backend to use for timeline queries
+  timeline:
+    # Query source: "storage" or "graph" (default: "storage")
+    # Use "graph" for better performance when graph is fully synced
+    # Use "storage" for guaranteed consistency with all historical data
+    querySource: "storage"
+
+    # Write mode: "storage", "graph", or "both" (default: "both")
+    # Determines where timeline data is written
+    mode: "both"
+
+  # FalkorDB configuration (graph database)
+  falkordb:
+    # Deploy FalkorDB as a sidecar container
+    sidecar: true
+
+    # FalkorDB image
+    image:
+      repository: falkordb/falkordb
+      tag: "v4.14.10-alpine"
+      pullPolicy: IfNotPresent
+
+    # Graph database name
+    graphName: "spectre"
+
+    # Redis port (FalkorDB uses Redis protocol)
+    port: 6379
+
+    # Resources for FalkorDB container
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+
+    # Security context
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      readOnlyRootFilesystem: false
+      runAsNonRoot: true
+      runAsUser: 999  # FalkorDB user
+
+    # Persistence for graph data
+    persistence:
+      enabled: true
+      size: 5Gi
+      mountPath: /var/lib/falkordb/data
+      # storageClassName: ""  # Use default storage class
+      accessModes:
+        - ReadWriteOnce
+
+    # Health check configuration
+    livenessProbe:
+      enabled: true
+      exec:
+        command:
+          - redis-cli
+          - ping
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+      successThreshold: 1
+
+    readinessProbe:
+      enabled: true
+      exec:
+        command:
+          - redis-cli
+          - ping
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+      successThreshold: 1
+
+  # Graph sync pipeline configuration
+  sync:
+    # Retention window for graph data (in hours)
+    retentionHours: 24
+
+    # Rebuild graph on startup
+    rebuildOnStart: true
+
+    # Only rebuild if graph is empty
+    rebuildIfEmptyOnly: true
+
+    # Time window for rebuild (in hours)
+    rebuildWindowHours: 24
+
+    # Batch size for event processing
+    batchSize: 100
+
+    # Batch timeout (in seconds)
+    batchTimeoutSeconds: 5
+
 # Persistent storage configuration
 persistence:
   enabled: true
@@ -110,7 +217,7 @@ persistence:
   existingClaim: ""
 
 config:
-  logLevel: "info"
+  logLevel: "debug"
   segmentSize: 10485760  # 10MB in bytes
   maxConcurrentRequests: 100
   # Watcher configuration - resources to watch
@@ -120,6 +227,9 @@ config:
       - group: ""
         version: "v1"
         kind: "Pod"
+      - group: "apps"
+        version: "v1"
+        kind: "ReplicaSet"
       - group: "apps"
         version: "v1"
         kind: "Deployment"
@@ -138,6 +248,24 @@ config:
       - group: ""
         version: "v1"
         kind: "ConfigMap"
+      - group: "networking.k8s.io"
+        version: "v1"
+        kind: "NetworkPolicy"
+      - group: "networking.k8s.io"
+        version: "v1"
+        kind: "Ingress"
+      - group: "helm.toolkit.fluxcd.io"
+        version: "v2"
+        kind: "HelmRelease"
+      - group: "kustomize.toolkit.fluxcd.io"
+        version: "v1"
+        kind: "Kustomization"
+      - group: "source.toolkit.fluxcd.io"
+        version: "v1"
+        kind: "HelmRepository"
+      - group: "source.toolkit.fluxcd.io"
+        version: "v1"
+        kind: "GitRepository"
 
 podSecurityContext:
   runAsNonRoot: true

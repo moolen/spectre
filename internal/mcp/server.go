@@ -7,6 +7,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/mcp/client"
 	"github.com/moolen/spectre/internal/mcp/tools"
 )
 
@@ -19,31 +21,62 @@ type Tool interface {
 type SpectreServer struct {
 	mcpServer     *server.MCPServer
 	spectreClient *SpectreClient
+	graphClient   graph.Client // Optional graph client for graph-based tools
 	tools         map[string]Tool
 	version       string
 }
 
+// ServerOptions configures the Spectre MCP server
+type ServerOptions struct {
+	SpectreURL  string
+	Version     string
+	GraphConfig *graph.ClientConfig // Optional graph database config
+	Logger      client.Logger       // Optional logger for retry messages
+}
+
 // NewSpectreServer creates a new Spectre MCP server
 func NewSpectreServer(spectreURL, version string) (*SpectreServer, error) {
-	// Test connection to Spectre
-	client := NewSpectreClient(spectreURL)
-	if err := client.Ping(); err != nil {
+	return NewSpectreServerWithOptions(ServerOptions{
+		SpectreURL: spectreURL,
+		Version:    version,
+	})
+}
+
+// NewSpectreServerWithOptions creates a new Spectre MCP server with optional graph support
+func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
+	// Test connection to Spectre with retry logic for container startup
+	spectreClient := NewSpectreClient(opts.SpectreURL)
+	if err := spectreClient.PingWithRetry(opts.Logger); err != nil {
 		return nil, fmt.Errorf("failed to connect to Spectre API: %w", err)
 	}
 
 	// Create mcp-go server with capabilities
 	mcpServer := server.NewMCPServer(
 		"Spectre MCP Server",
-		version,
+		opts.Version,
 		server.WithToolCapabilities(false), // No tool subscription for now
 		server.WithLogging(),               // Enable logging capability
 	)
 
 	s := &SpectreServer{
 		mcpServer:     mcpServer,
-		spectreClient: client,
+		spectreClient: spectreClient,
 		tools:         make(map[string]Tool),
-		version:       version,
+		version:       opts.Version,
+	}
+
+	// Optionally initialize graph client
+	if opts.GraphConfig != nil {
+		graphClient := graph.NewClient(*opts.GraphConfig)
+		// Test connection
+		ctx := context.Background()
+		if err := graphClient.Connect(ctx); err != nil {
+			return nil, fmt.Errorf("failed to connect to graph database: %w", err)
+		}
+		if err := graphClient.Ping(ctx); err != nil {
+			return nil, fmt.Errorf("failed to ping graph database: %w", err)
+		}
+		s.graphClient = graphClient
 	}
 
 	// Register tools
@@ -191,6 +224,68 @@ func (s *SpectreServer) registerTools() {
 			"required": []string{},
 		},
 	)
+
+	// Register graph-based tools if graph client is available
+	if s.graphClient != nil {
+		// Register find_root_cause tool
+		s.registerTool(
+			"find_root_cause",
+			"Trace backward from a failing resource to identify likely root cause using graph-based causality analysis",
+			tools.NewGraphFindRootCauseTool(s.graphClient),
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"resourceUID": map[string]interface{}{
+						"type":        "string",
+						"description": "The UID of the resource that failed",
+					},
+					"failureTimestamp": map[string]interface{}{
+						"type":        "integer",
+						"description": "Unix timestamp (seconds or nanoseconds) when the failure occurred",
+					},
+					"maxDepth": map[string]interface{}{
+						"type":        "integer",
+						"description": "Optional: maximum depth to traverse causality chain (default: 5)",
+					},
+					"minConfidence": map[string]interface{}{
+						"type":        "number",
+						"description": "Optional: minimum confidence score 0.0-1.0 for causality links (default: 0.6)",
+					},
+				},
+				"required": []string{"resourceUID", "failureTimestamp"},
+			},
+		)
+
+		// Register calculate_blast_radius tool
+		s.registerTool(
+			"calculate_blast_radius",
+			"Determine which resources are affected by a change to a given resource using graph relationship traversal",
+			tools.NewGraphBlastRadiusTool(s.graphClient),
+			map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"resourceUID": map[string]interface{}{
+						"type":        "string",
+						"description": "The UID of the resource that changed",
+					},
+					"changeTimestamp": map[string]interface{}{
+						"type":        "integer",
+						"description": "Unix timestamp (seconds or nanoseconds) when the change occurred",
+					},
+					"timeWindowMs": map[string]interface{}{
+						"type":        "integer",
+						"description": "Optional: time window in milliseconds to look for impacts (default: 300000 = 5 minutes)",
+					},
+					"relationshipTypes": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Optional: relationship types to traverse (default: [\"OWNS\", \"SELECTS\", \"SCHEDULED_ON\"])",
+					},
+				},
+				"required": []string{"resourceUID", "changeTimestamp"},
+			},
+		)
+	}
 }
 
 func (s *SpectreServer) registerTool(name, description string, tool Tool, inputSchema map[string]interface{}) {

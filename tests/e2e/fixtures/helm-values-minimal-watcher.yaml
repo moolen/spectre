@@ -1,0 +1,62 @@
+# Minimal watcher config for testing dynamic config reload
+# This config intentionally excludes StatefulSet to test hot-reload functionality
+
+config:
+  logLevel: debug
+
+  watcher:
+    resources:
+      - group: ""
+        version: "v1"
+        kind: "Pod"
+      - group: "apps"
+        version: "v1"
+        kind: "ReplicaSet"
+      - group: "apps"
+        version: "v1"
+        kind: "Deployment"
+      - group: ""
+        version: "v1"
+        kind: "Event"
+
+image:
+  repository: spectre
+  tag: test-build
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "500m"
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+storage:
+  type: memory
+  retention:
+    maxAge: 1h
+    maxSize: 100Mi
+
+persistence:
+  storageClassName: standard
+
+podAnnotations:
+  test: "true"
+
+env:
+  - name: LOG_LEVEL
+    value: "debug"
+
+# Enable graph for root cause analysis tests
+graph:
+  enabled: true
+  falkordb:
+    sidecar: true

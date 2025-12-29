@@ -93,9 +93,25 @@ func openExistingBlockStorageFile(path string, fileData *StorageFileData, hourTi
 	}
 
 	// Restore final resource states from index section
+	// Filter out deleted resources - they should not persist across file reopens
 	finalResourceStates := indexSection.FinalResourceStates
 	if finalResourceStates == nil {
 		finalResourceStates = make(map[string]*ResourceLastState)
+	} else {
+		// Filter out deleted resources
+		filteredStates := make(map[string]*ResourceLastState)
+		deletedCount := 0
+		for key, state := range finalResourceStates {
+			if state.EventType != string(models.EventTypeDelete) {
+				filteredStates[key] = state
+			} else {
+				deletedCount++
+			}
+		}
+		finalResourceStates = filteredStates
+		if deletedCount > 0 {
+			logger.Debug("Filtered out %d deleted resources when reopening file %s", deletedCount, path)
+		}
 	}
 
 	bsf := &BlockStorageFile{

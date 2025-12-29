@@ -7,8 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
+
+	"connectrpc.com/connect"
+	"github.com/moolen/spectre/internal/analysis"
+	pb "github.com/moolen/spectre/internal/api/pb"
+	"github.com/moolen/spectre/internal/api/pb/pbconnect"
 )
 
 type APIClient struct {
@@ -88,9 +94,9 @@ type EventsResponse struct {
 }
 
 // NewAPIClient creates a new API client.
-// baseURL is the HTTP REST API endpoint with gRPC-Web support
+// baseURL is the HTTP REST API endpoint (supports HTTP, Connect, gRPC, and gRPC-Web)
 func NewAPIClient(t *testing.T, baseURL string) *APIClient {
-	t.Logf("Creating API client for: %s", baseURL)
+	t.Logf("Creating API client for: %s (supports HTTP, Connect, gRPC, and gRPC-Web)", baseURL)
 
 	return &APIClient{
 		BaseURL: baseURL,
@@ -279,8 +285,159 @@ func (a *APIClient) Health(ctx context.Context) error {
 	return nil
 }
 
+// RootCause queries the /v1/root-cause endpoint.
+func (a *APIClient) RootCause(ctx context.Context, resourceUID string, failureTimestamp int64, lookback time.Duration, maxDepth int, minConfidence float64) (*analysis.RootCauseAnalysisV2, error) {
+	baseURL := fmt.Sprintf("%s/v1/root-cause", a.BaseURL)
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base URL: %w", err)
+	}
+
+	q := u.Query()
+	q.Set("resourceUID", resourceUID)
+	q.Set("failureTimestamp", fmt.Sprintf("%d", failureTimestamp))
+
+	if lookback > 0 {
+		q.Set("lookback", lookback.String())
+	}
+	if maxDepth > 0 {
+		q.Set("maxDepth", fmt.Sprintf("%d", maxDepth))
+	}
+	if minConfidence > 0 {
+		q.Set("minConfidence", fmt.Sprintf("%.2f", minConfidence))
+	}
+
+	u.RawQuery = q.Encode()
+	urlStr := u.String()
+
+	resp, err := a.doRequest(ctx, "GET", urlStr, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read the full response body for better error reporting
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var result analysis.RootCauseAnalysisV2
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		// Include first 500 chars of response in error for debugging
+		preview := string(bodyBytes)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		return nil, fmt.Errorf("failed to decode root cause response: %w. Response body: %s", err, preview)
+	}
+
+	return &result, nil
+}
+
+// TimelineGRPC queries the timeline using the Connect streaming API.
+// Supports Connect, gRPC, and gRPC-Web protocols on the same HTTP port.
+func (a *APIClient) TimelineGRPC(ctx context.Context, startTime, endTime int64, namespace, kind string) (*SearchResponse, error) {
+	// Create Connect Timeline service client
+	// Using connect.WithGRPCWeb() to use gRPC-Web protocol over HTTP
+	client := pbconnect.NewTimelineServiceClient(
+		a.Client,
+		a.BaseURL,
+		connect.WithGRPCWeb(), // Use gRPC-Web protocol over HTTP
+	)
+
+	// Prepare request
+	req := connect.NewRequest(&pb.TimelineRequest{
+		StartTimestamp: startTime,
+		EndTimestamp:   endTime,
+		Namespace:      namespace,
+		Kind:           kind,
+	})
+
+	// Call the streaming endpoint
+	stream, err := client.GetTimeline(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call GetTimeline: %w", err)
+	}
+
+	// Collect results
+	var resources []Resource
+	var executionTimeMs int64
+	var totalCount int
+
+	for stream.Receive() {
+		chunk := stream.Msg()
+
+		// Check chunk type
+		if metadata := chunk.GetMetadata(); metadata != nil {
+			// First chunk contains metadata
+			totalCount = int(metadata.TotalCount)
+			executionTimeMs = metadata.QueryExecutionTimeMs
+			a.t.Logf("Timeline metadata: count=%d, execution_time=%dms", totalCount, executionTimeMs)
+		} else if batch := chunk.GetBatch(); batch != nil {
+			// Subsequent chunks contain resource batches
+			a.t.Logf("Received batch of %d resources (kind=%s)", len(batch.Resources), batch.Kind)
+
+			// Convert protobuf resources to API response format
+			for _, pbResource := range batch.Resources {
+				resource := convertTimelineResource(pbResource)
+				resources = append(resources, resource)
+			}
+		}
+	}
+
+	// Check for errors after stream completes
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("stream error: %w", err)
+	}
+
+	return &SearchResponse{
+		Resources:       resources,
+		Count:           totalCount,
+		ExecutionTimeMs: int(executionTimeMs),
+	}, nil
+}
+
+// convertTimelineResource converts a protobuf TimelineResource to the API Resource format
+func convertTimelineResource(pbResource *pb.TimelineResource) Resource {
+	resource := Resource{
+		ID:             pbResource.Id,
+		Name:           pbResource.Name,
+		Kind:           pbResource.Kind,
+		APIVersion:     pbResource.ApiVersion,
+		Namespace:      pbResource.Namespace,
+		StatusSegments: []StatusSegment{},
+		Events:         []K8sEvent{},
+	}
+
+	// Convert status segments
+	for _, pbSegment := range pbResource.StatusSegments {
+		segment := StatusSegment{
+			Status:    pbSegment.Status,
+			StartTime: pbSegment.StartTime,
+			EndTime:   pbSegment.EndTime,
+			Message:   pbSegment.Message,
+		}
+		resource.StatusSegments = append(resource.StatusSegments, segment)
+	}
+
+	// Convert events
+	for _, pbEvent := range pbResource.Events {
+		event := K8sEvent{
+			ID:        pbEvent.Uid,
+			Timestamp: pbEvent.Timestamp,
+			Reason:    pbEvent.Reason,
+			Message:   pbEvent.Message,
+			Type:      pbEvent.Type,
+		}
+		resource.Events = append(resource.Events, event)
+	}
+
+	return resource
+}
+
 // Close cleans up API client resources.
 func (a *APIClient) Close() error {
-	// No cleanup needed for HTTP-only client
+	// No cleanup needed for ConnectRPC client (uses standard http.Client)
 	return nil
 }

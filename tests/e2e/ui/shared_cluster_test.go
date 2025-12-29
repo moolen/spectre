@@ -29,10 +29,10 @@ func TestMain(m *testing.M) {
 func runWithSharedCluster(m *testing.M) int {
 	log.Println("Setting up shared Kind cluster for UI e2e tests...")
 
-	// Create shared cluster
-	cluster, err := helpers.CreateKindCluster(&testing.T{}, "spectre-ui-e2e-shared")
+	// Get or create shared cluster (reuses existing healthy clusters)
+	cluster, err := helpers.GetOrCreateKindCluster(&testing.T{}, "spectre-ui-e2e-shared")
 	if err != nil {
-		log.Printf("❌ Failed to create shared cluster: %v", err)
+		log.Printf("❌ Failed to get/create shared cluster: %v", err)
 		return 1
 	}
 	sharedCluster = cluster
@@ -41,17 +41,11 @@ func runWithSharedCluster(m *testing.M) int {
 	// Set the shared cluster in helpers so tests can access it
 	helpers.SetSharedCluster(cluster)
 
-	log.Printf("✓ Shared cluster created: %s", cluster.Name)
+	log.Printf("✓ Shared cluster ready: %s", cluster.Name)
 
-	// Ensure cluster is cleaned up
-	defer func() {
-		log.Println("Cleaning up shared Kind cluster...")
-		if err := cluster.Delete(); err != nil {
-			log.Printf("⚠️  Warning: failed to delete shared cluster: %v", err)
-		} else {
-			log.Println("✓ Shared cluster deleted")
-		}
-	}()
+	// Note: Cluster is NOT deleted after tests to allow reuse across test invocations.
+	// To manually clean up, run: kind delete cluster --name spectre-ui-e2e-shared
+	// Or use: make clean-test-clusters
 
 	// Build and load Docker image once
 	log.Println("Building test Docker image (once for all UI tests)...")
@@ -112,7 +106,7 @@ func IsImageBuilt() bool {
 func CleanupTestNamespace(t *testing.T, cluster *helpers.TestCluster, namespace string) error {
 	t.Helper()
 
-	k8sClient, err := helpers.NewK8sClient(t, cluster.GetKubeConfig())
+	k8sClient, err := helpers.NewK8sClient(t, cluster.GetContext())
 	if err != nil {
 		return fmt.Errorf("failed to create k8s client: %w", err)
 	}

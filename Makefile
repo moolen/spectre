@@ -1,4 +1,4 @@
-.PHONY: help build build-ui build-mcp run test test-go test-ui test-e2e test-e2e-ui test-e2e-all clean docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto
+.PHONY: help build build-ui build-mcp run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down graph-logs test-graph test-graph-integration
 
 # Default target
 help:
@@ -20,9 +20,22 @@ help:
 	@echo "  test-e2e       - Run e2e tests"
 	@echo "  test-e2e-ui    - Run UI e2e tests"
 	@echo "  test-e2e-all   - Run all e2e tests"
+	@echo "  clean-test-clusters - Delete persistent test Kind clusters"
 	@echo "  test-unit      - Run unit tests only"
 	@echo "  test-integration - Run integration tests only"
 	@echo "  test-coverage  - Run tests with coverage report"
+	@echo "  test-graph     - Run graph layer unit tests"
+	@echo "  test-graph-integration - Run graph integration tests (starts FalkorDB)"
+	@echo ""
+	@echo "Graph Layer:"
+	@echo "  graph-up       - Start FalkorDB for development"
+	@echo "  graph-down     - Stop FalkorDB"
+	@echo "  graph-logs     - View FalkorDB logs"
+	@echo ""
+	@echo "Development:"
+	@echo "  dev-iterate    - Quick iteration: clean, build, restart all services locally"
+	@echo "  dev-stop       - Stop all development services"
+	@echo "  dev-logs       - Tail all development logs"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  lint           - Run linter (golangci-lint if available)"
@@ -55,6 +68,7 @@ DOCKER_IMAGE=$(IMAGE_NAME):$(IMAGE_TAG)
 CHART_PATH=./chart
 NAMESPACE=monitoring
 DATA_DIR=./data
+DATA_LOCAL_DIR=./data-local
 
 # Build the application
 build:
@@ -80,7 +94,7 @@ run: build build-ui
 # Run Go tests only
 test-go:
 	@echo "Running Go tests..."
-	@go test -v -cover -count 1 -timeout 30m ./...
+	@go test -v -cover -count 1 -timeout 60m ./...
 
 # Run UI tests only
 test-ui:
@@ -88,13 +102,20 @@ test-ui:
 	@cd ui && npm ci --prefer-offline --no-audit --no-fund 2>/dev/null && npm run test
 
 # Run all tests (Go + UI)
-test: test-go test-ui
+test: test-go test-graph-integration test-ui
 	@echo "All tests completed successfully!"
 
 # Run e2e tests
 test-e2e:
 	@echo "Running e2e tests..."
 	@go test -v -timeout 60m ./tests/e2e/...
+
+# Clean up test Kind clusters
+clean-test-clusters:
+	@echo "Cleaning up test Kind clusters..."
+	@kind delete cluster --name spectre-e2e-shared 2>/dev/null || true
+	@kind delete cluster --name spectre-ui-e2e-shared 2>/dev/null || true
+	@echo "✓ Test clusters cleaned up"
 
 # Run UI e2e tests
 test-e2e-ui:
@@ -181,6 +202,7 @@ proto:
 	@protoc --go_out=. --go_opt=module=github.com/moolen/spectre internal/models/event.proto
 	@protoc --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		--connect-go_out=. --connect-go_opt=paths=source_relative \
 		internal/api/proto/timeline.proto
 	@echo "Protobuf code generated successfully"
 
@@ -201,6 +223,141 @@ helm-unittest: helm-unittest-install
 	@echo "Running Helm unit tests..."
 	@helm unittest $(CHART_PATH) --color --output-type JUnit --output-file test-results.xml
 	@echo "Helm unit tests complete!"
+
+# Stop development services
+dev-stop:
+	@echo "==> Stopping all development services..."
+	@-pkill -f "$(BINARY_PATH) server" || true
+	@-pkill -f "$(BINARY_PATH) mcp" || true
+	@docker compose -f docker-compose.graph.yml down || true
+	@echo "All services stopped"
+
+# ============================================================================
+# Graph Layer Targets
+# ============================================================================
+
+# Start FalkorDB for development
+graph-up:
+	@echo "Starting FalkorDB..."
+	@docker compose -f docker-compose.graph.yml up -d falkordb
+	@echo "Waiting for FalkorDB to be ready..."
+	@sleep 3
+	@echo "FalkorDB is running on localhost:6379"
+
+# Stop FalkorDB
+graph-down:
+	@echo "Stopping FalkorDB..."
+	@docker compose -f docker-compose.graph.yml down falkordb
+	@echo "FalkorDB stopped"
+
+# View FalkorDB logs
+graph-logs:
+	@docker compose -f docker-compose.graph.yml logs -f
+
+# Run graph layer unit tests
+test-graph:
+	@echo "Running graph layer unit tests..."
+	@go test -v -cover ./internal/graph/...
+	@echo "Graph unit tests complete!"
+
+# Run graph integration tests (starts FalkorDB automatically)
+test-graph-integration: graph-up
+	@echo "Running graph integration tests..."
+	@go test -v -tags=integration ./internal/graph/... ./internal/analysis/... -run Integration || (make graph-down && exit 1)
+	@make graph-down
+	@echo "Graph integration tests complete!"
+
+# ============================================================================
+
+# Tail development logs
+dev-logs:
+	@echo "==> Tailing development logs (Ctrl+C to exit)..."
+	@tail -f $(DATA_LOCAL_DIR)/logs/*.log
+
+# Quick iteration for MCP/Spectre/FalkorDB development
+dev-iterate: build
+	@echo "==> Stopping all services..."
+	-pkill -f "$(BINARY_PATH) server" || true
+	-pkill -f "$(BINARY_PATH) mcp" || true
+	docker compose -f docker-compose.graph.yml down falkordb || true
+	sleep 2
+	@echo ""
+	@echo "==> Cleaning local state..."
+	@echo ""
+	@echo "==> Building spectre binary..."
+	mkdir -p bin
+	go build -o $(BINARY_PATH) ./cmd/spectre
+	@echo ""
+	@echo "==> Starting FalkorDB..."
+	docker compose -f docker-compose.graph.yml up -d falkordb
+	@echo "Waiting for FalkorDB to be ready..."
+	sleep 3
+	@echo ""
+	@echo "==> Starting Spectre server..."
+	mkdir -p $(DATA_LOCAL_DIR)/logs
+	KUBECONFIG=$(KUBECONFIG) \
+		$(BINARY_PATH) server \
+		--data-dir=$(DATA_LOCAL_DIR) \
+		--log-level=debug \
+		--graph-enabled=true \
+		--graph-host=localhost \
+		--graph-port=6379 \
+		--watcher-config=hack/watcher.yaml \
+		> $(DATA_LOCAL_DIR)/logs/spectre.log 2>&1 &
+	@echo "Spectre server PID: $$!"
+	@echo "Waiting for Spectre server to be ready..."
+	@timeout=60; \
+	while [ $$timeout -gt 0 ]; do \
+		if nc -z localhost 8080 2>/dev/null; then \
+			if curl -sf http://localhost:8080/ready >/dev/null 2>&1; then \
+				echo "Spectre server is ready!"; \
+				break; \
+			fi; \
+		fi; \
+		sleep 1; \
+		timeout=$$((timeout - 1)); \
+	done; \
+	if [ $$timeout -eq 0 ]; then \
+		echo "ERROR: Spectre server did not become ready within 60 seconds"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "==> Starting MCP server..."
+	$(BINARY_PATH) mcp \
+		--spectre-url=http://localhost:8080 \
+		--graph-enabled=true \
+		--log-level=debug \
+		--graph-host=localhost \
+		--graph-port=6379 \
+		--http-addr=:8082 \
+		> $(DATA_LOCAL_DIR)/logs/mcp.log 2>&1 &
+	@echo "MCP server PID: $$!"
+	@echo ""
+	@echo "==> All services started!"
+	@echo ""
+	@echo "Service URLs:"
+	@echo "  - Spectre UI:     http://localhost:8080"
+	@echo "  - Spectre API:    http://localhost:8080/api"
+	@echo "  - MCP Server:     http://localhost:8082"
+	@echo "  - FalkorDB:       localhost:6379"
+	@echo ""
+	@echo "Logs:"
+	@echo "  - Spectre:        $(DATA_LOCAL_DIR)/logs/spectre.log"
+	@echo "  - MCP:            $(DATA_LOCAL_DIR)/logs/mcp.log"
+	@echo "  - FalkorDB:       docker compose -f docker-compose.graph.yml logs -f"
+	@echo ""
+	@echo "To stop services:"
+	@echo "  pkill -f '$(BINARY_PATH)' && docker compose -f docker-compose.graph.yml down"
+	@echo ""
+	@echo "To view logs:"
+	@echo "  tail -f $(DATA_LOCAL_DIR)/logs/spectre.log"
+	@echo "  tail -f $(DATA_LOCAL_DIR)/logs/mcp.log"
+
+.PHONY: dev-clean
+dev-clean:
+	@echo "==> Cleaning local state..."
+	rm -rf $(DATA_LOCAL_DIR)
+	mkdir -p $(DATA_LOCAL_DIR)
 
 # Default target
 .DEFAULT_GOAL := help

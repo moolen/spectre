@@ -37,6 +37,10 @@ export interface K8sResource {
   statusSegments: ResourceStatusSegment[];
   // Discrete audit events associated with this resource
   events: K8sEvent[];
+  // True if resource existed before the query time window
+  preExisting?: boolean;
+  // Timestamp when resource was deleted (if deleted)
+  deletedAt?: Date;
 }
 
 export interface FilterState {
