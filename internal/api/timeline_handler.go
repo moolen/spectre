@@ -87,8 +87,8 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(
 		attribute.Int64("query.start_timestamp", query.StartTimestamp),
 		attribute.Int64("query.end_timestamp", query.EndTimestamp),
-		attribute.String("query.namespace", query.Filters.Namespace),
-		attribute.String("query.kind", query.Filters.Kind),
+		attribute.StringSlice("query.namespaces", query.Filters.GetNamespaces()),
+		attribute.StringSlice("query.kinds", query.Filters.GetKinds()),
 	)
 
 	// Execute both queries concurrently
@@ -167,13 +167,14 @@ func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *
 	}
 
 	// Build Event query upfront
+	// Use same namespaces filter as the resource query
 	eventQuery := &models.QueryRequest{
 		StartTimestamp: query.StartTimestamp,
 		EndTimestamp:   query.EndTimestamp,
 		Filters: models.QueryFilters{
-			Kind:      "Event",
-			Version:   "v1",
-			Namespace: query.Filters.Namespace,
+			Kinds:      []string{"Event"},
+			Version:    "v1",
+			Namespaces: query.Filters.GetNamespaces(),
 		},
 	}
 
@@ -278,11 +279,16 @@ func (th *TimelineHandler) parseQuery(r *http.Request) (*models.QueryRequest, er
 		return nil, NewValidationError("start timestamp must be less than or equal to end timestamp")
 	}
 
+	// Parse multi-value filters
+	// Support both ?kind=Pod&kind=Deployment and ?kinds=Pod,Deployment
+	kinds := parseMultiValueParam(query, "kind", "kinds")
+	namespaces := parseMultiValueParam(query, "namespace", "namespaces")
+
 	filters := models.QueryFilters{
-		Group:     query.Get("group"),
-		Version:   query.Get("version"),
-		Kind:      query.Get("kind"),
-		Namespace: query.Get("namespace"),
+		Group:      query.Get("group"),
+		Version:    query.Get("version"),
+		Kinds:      kinds,
+		Namespaces: namespaces,
 	}
 
 	if err := th.validator.ValidateFilters(filters); err != nil {
@@ -300,6 +306,60 @@ func (th *TimelineHandler) parseQuery(r *http.Request) (*models.QueryRequest, er
 	}
 
 	return queryRequest, nil
+}
+
+// parseQueryWithPagination parses query parameters including pagination
+func (th *TimelineHandler) parseQueryWithPagination(r *http.Request) (*models.QueryRequest, *models.PaginationRequest, error) {
+	queryRequest, err := th.parseQuery(r)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pagination := th.parsePagination(r)
+	return queryRequest, pagination, nil
+}
+
+// parsePagination parses pagination query parameters
+func (th *TimelineHandler) parsePagination(r *http.Request) *models.PaginationRequest {
+	query := r.URL.Query()
+
+	pageSize := parseIntOrDefault(query.Get("page_size"), models.DefaultPageSize)
+	cursor := query.Get("cursor")
+
+	return &models.PaginationRequest{
+		PageSize: pageSize,
+		Cursor:   cursor,
+	}
+}
+
+// parseMultiValueParam parses a query parameter that can be specified multiple times
+// or as a comma-separated list in an alternate parameter name
+// e.g., ?kind=Pod&kind=Deployment or ?kinds=Pod,Deployment
+func parseMultiValueParam(query map[string][]string, singularName, pluralName string) []string {
+	// First, try the repeated singular param (e.g., ?kind=Pod&kind=Deployment)
+	values := query[singularName]
+	if len(values) > 0 {
+		return values
+	}
+
+	// Then, try the plural param with comma-separated values (e.g., ?kinds=Pod,Deployment)
+	if pluralCSV, ok := query[pluralName]; ok && len(pluralCSV) > 0 && pluralCSV[0] != "" {
+		return strings.Split(pluralCSV[0], ",")
+	}
+
+	return nil
+}
+
+// parseIntOrDefault parses an integer from string, returning default on error
+func parseIntOrDefault(s string, defaultVal int) int {
+	if s == "" {
+		return defaultVal
+	}
+	var val int
+	if _, err := fmt.Sscanf(s, "%d", &val); err != nil {
+		return defaultVal
+	}
+	return val
 }
 
 func (th *TimelineHandler) respondWithError(w http.ResponseWriter, statusCode int, errorCode, message string) {

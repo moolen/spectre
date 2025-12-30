@@ -195,8 +195,6 @@ func (s *TimelineGRPCService) streamResourceBatches(stream pb.TimelineService_Ge
 	return nil
 }
 
-
-
 // protoToQueryRequest converts protobuf request to internal QueryRequest
 func (s *TimelineGRPCService) protoToQueryRequest(req *pb.TimelineRequest) (*models.QueryRequest, error) {
 	filters := models.QueryFilters{

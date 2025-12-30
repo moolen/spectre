@@ -318,7 +318,7 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 	// Regular events must be within query time range
 	regularEvents = qe.filterEngine.FilterByTimeRange(regularEvents, startTimeNs, endTimeNs)
 
-	qe.logger.Debug("After time range filtering: %d regular events, %d state snapshots", 
+	qe.logger.Debug("After time range filtering: %d regular events, %d state snapshots",
 		len(regularEvents), len(stateSnapshots))
 
 	// Track which resources have regular events and their first event time
@@ -389,7 +389,7 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 			filteredSnapshots = append(filteredSnapshots, event)
 		}
 	}
-	
+
 	qe.logger.Debug("State snapshot filtering: kept %d, skipped %d", keptSnapshotsCount, skippedSnapshotsCount)
 
 	// Deduplicate state snapshots (same resource may appear in multiple files due to carryover)
@@ -978,4 +978,61 @@ func (qe *QueryExecutor) loadFileData(filePath string) (*StorageFileData, error)
 	}
 
 	return fileData, nil
+}
+
+// QueryDistinctMetadata queries for distinct namespaces and kinds in a time range
+// without any pagination limits. This is specifically for the metadata endpoint.
+func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) (namespaces []string, kinds []string, minTime int64, maxTime int64, err error) {
+	// Use a query without limits to get all events in the time range
+	query := &models.QueryRequest{
+		StartTimestamp: startTimeNs / 1e9,
+		EndTimestamp:   endTimeNs / 1e9,
+		Filters:        models.QueryFilters{},
+	}
+
+	result, queryErr := qe.Execute(ctx, query)
+	if queryErr != nil {
+		return nil, nil, 0, 0, fmt.Errorf("failed to execute metadata query: %w", queryErr)
+	}
+
+	// Extract unique namespaces and kinds
+	namespacesMap := make(map[string]bool)
+	kindsMap := make(map[string]bool)
+	minTime = -1
+	maxTime = -1
+
+	for _, event := range result.Events {
+		namespacesMap[event.Resource.Namespace] = true
+		kindsMap[event.Resource.Kind] = true
+
+		if minTime < 0 || event.Timestamp < minTime {
+			minTime = event.Timestamp
+		}
+		if maxTime < 0 || event.Timestamp > maxTime {
+			maxTime = event.Timestamp
+		}
+	}
+
+	// Convert maps to sorted slices
+	namespaces = make([]string, 0, len(namespacesMap))
+	for ns := range namespacesMap {
+		namespaces = append(namespaces, ns)
+	}
+	sort.Strings(namespaces)
+
+	kinds = make([]string, 0, len(kindsMap))
+	for kind := range kindsMap {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+
+	// Convert to nanoseconds if we have valid times
+	if minTime < 0 {
+		minTime = 0
+	}
+	if maxTime < 0 {
+		maxTime = 0
+	}
+
+	return namespaces, kinds, minTime, maxTime, nil
 }

@@ -769,10 +769,10 @@ func (s *ImportExportStage) timeline_shows_status_segments() *ImportExportStage 
 	// Timeline endpoint has known issues when tests run in sequence
 	timelineSuccess := false
 	deadline := time.Now().Add(60 * time.Second)
-	
+
 	for time.Now().Before(deadline) && !timelineSuccess {
 		timelineCtx, timelineCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
-		
+
 		timelineURL := fmt.Sprintf("%s/v1/timeline?start=%d&end=%d&namespace=%s&kind=Service",
 			s.apiClient.BaseURL, startTime, endTime, s.testNamespaces[0])
 
@@ -834,7 +834,7 @@ func (s *ImportExportStage) timeline_shows_status_segments() *ImportExportStage 
 			StatusSegments: []helpers.StatusSegment{},
 		}
 	}
-	
+
 	return s
 }
 
@@ -844,7 +844,7 @@ func (s *ImportExportStage) status_segments_are_ordered() *ImportExportStage {
 		s.t.Log("⚠ Skipping status segments ordering check (timeline endpoint issue)")
 		return s
 	}
-	
+
 	s.assert.Greater(len(s.timelineResource.StatusSegments), 0, "Should have status segments")
 	for i := 1; i < len(s.timelineResource.StatusSegments); i++ {
 		s.assert.LessOrEqual(s.timelineResource.StatusSegments[i-1].StartTime, s.timelineResource.StatusSegments[i].StartTime,
@@ -872,10 +872,7 @@ func (s *ImportExportStage) kubernetes_event_kind_is_present() *ImportExportStag
 		for _, kind := range metadata.Kinds {
 			if kind == "Event" {
 				s.t.Logf("✓ Event kind found in metadata")
-				// Also check resource count
-				if count, ok := metadata.ResourceCounts["Event"]; ok && count > 0 {
-					s.t.Logf("✓ Event resource count: %d", count)
-				}
+				// ResourceCounts field removed from MetadataResponse
 				return true
 			}
 		}
@@ -931,10 +928,10 @@ func (s *ImportExportStage) specific_kubernetes_event_is_present() *ImportExport
 		// Try timeline endpoint with manual checking (not using EventuallyCondition which fails the test)
 		timelineSuccess := false
 		deadline := time.Now().Add(30 * time.Second)
-		
+
 		for time.Now().Before(deadline) && !timelineSuccess {
 			timelineCtx, timelineCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
-			
+
 			// Use timeline API to get resources with their attached events
 			timelineURL := fmt.Sprintf("%s/v1/timeline?start=%d&end=%d&namespace=%s&kind=Pod",
 				s.apiClient.BaseURL, startTime, endTime, ns)

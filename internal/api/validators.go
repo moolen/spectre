@@ -43,12 +43,19 @@ func (v *Validator) ValidateFilters(filters models.QueryFilters) error {
 		return NewValidationError("version filter is too long (max 255 characters)")
 	}
 
-	// Validate kind
+	// Validate kind (single value, deprecated)
 	if filters.Kind != "" && len(filters.Kind) > 255 {
 		return NewValidationError("kind filter is too long (max 255 characters)")
 	}
 
-	// Validate namespace
+	// Validate kinds (multi-value)
+	for _, kind := range filters.Kinds {
+		if len(kind) > 255 {
+			return NewValidationError("kind filter is too long (max 255 characters)")
+		}
+	}
+
+	// Validate namespace (single value, deprecated)
 	if filters.Namespace != "" {
 		if len(filters.Namespace) > 63 {
 			return NewValidationError("namespace must be 63 characters or less")
@@ -56,6 +63,16 @@ func (v *Validator) ValidateFilters(filters models.QueryFilters) error {
 		// Kubernetes namespace naming rules - allow empty string (means all namespaces)
 		// Only validate format if namespace is non-empty
 		if !isValidNamespace(filters.Namespace) {
+			return NewValidationError("invalid namespace format")
+		}
+	}
+
+	// Validate namespaces (multi-value)
+	for _, namespace := range filters.Namespaces {
+		if len(namespace) > 63 {
+			return NewValidationError("namespace must be 63 characters or less")
+		}
+		if namespace != "" && !isValidNamespace(namespace) {
 			return NewValidationError("invalid namespace format")
 		}
 	}

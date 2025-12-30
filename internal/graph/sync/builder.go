@@ -440,16 +440,18 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 		return configChanged, statusChanged, replicasChanged
 	}
 
-	// Query for the previous event for this resource
+	// Query for the previous event for this resource, including its data
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	b.logger.Debug("Querying for previous event: resourceUID=%s, timestamp=%d", event.Resource.UID, event.Timestamp)
 
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity {uid: $resourceUID})-[:CHANGED]->(ce:ChangeEvent)
 			WHERE ce.timestamp < $currentTimestamp
 			  AND ce.eventType IN ["CREATE", "UPDATE"]
-			RETURN ce.timestamp
+			RETURN ce.data, ce.timestamp
 			ORDER BY ce.timestamp DESC
 			LIMIT 1
 		`,
@@ -460,8 +462,8 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 	}
 
 	result, err := b.client.ExecuteQuery(ctx, query)
-	if err != nil || len(result.Rows) == 0 {
-		// No previous event found or query failed
+	if err != nil {
+		b.logger.Debug("Failed to query previous event for resource %s: %v", event.Resource.UID, err)
 		// For first event (CREATE), or if we can't determine, assume nothing changed from previous
 		if currentData != nil {
 			statusChanged = true // Conservative: assume status might have changed
@@ -469,9 +471,21 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 		return configChanged, statusChanged, replicasChanged
 	}
 
+	if len(result.Rows) == 0 {
+		b.logger.Debug("No previous event found for resource %s (this is likely the first event)", event.Resource.UID)
+		// For first event (CREATE), or if we can't determine, assume nothing changed from previous
+		if currentData != nil {
+			statusChanged = true // Conservative: assume status might have changed
+		}
+		return configChanged, statusChanged, replicasChanged
+	}
+
+	b.logger.Debug("Previous event found for resource %s", event.Resource.UID)
+
 	// Previous event exists - now we need to compare spec vs status
 	// Parse current event data
 	if len(event.Data) == 0 {
+		b.logger.Debug("Current event has no data for resource %s, skipping change detection", event.Resource.UID)
 		return configChanged, statusChanged, replicasChanged
 	}
 
@@ -482,43 +496,66 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 		return configChanged, statusChanged, replicasChanged
 	}
 
-	// For config change detection, we check if spec changed
-	// This is a simplified approach - we compare the spec field if it exists
-	currentSpec, hasCurrentSpec := currentResource["spec"]
-	currentStatus, hasCurrentStatus := currentResource["status"]
+	// Parse previous event data with null/empty checks
+	var previousResource map[string]interface{}
 
-	// Since we don't have the previous event's data readily available in the query result,
-	// we use a heuristic: if the resource has both spec and status fields,
-	// we can detect changes by looking at metadata
-
-	// Check metadata.generation - this increments when spec changes
-	if metadata, ok := currentResource["metadata"].(map[string]interface{}); ok {
-		if generation, ok := metadata["generation"].(float64); ok && generation > 1 {
-			// Generation > 1 means spec has changed at least once
-			// If we have generation and it's different from observedGeneration in status,
-			// spec has changed but status hasn't been reconciled yet
-			if hasCurrentStatus {
-				if statusMap, ok := currentStatus.(map[string]interface{}); ok {
-					if observedGen, ok := statusMap["observedGeneration"].(float64); ok {
-						if generation != observedGen {
-							// Spec changed but not yet reconciled
-							configChanged = true
-						}
-					}
+	// Check if result row exists and has at least one element
+	if len(result.Rows) > 0 && len(result.Rows[0]) > 0 {
+		// First column is the data (ce.data)
+		if dataValue := result.Rows[0][0]; dataValue != nil {
+			if dataStr, ok := dataValue.(string); ok && dataStr != "" {
+				if err := json.Unmarshal([]byte(dataStr), &previousResource); err != nil {
+					b.logger.Debug("Failed to parse previous event data for resource %s: %v", event.Resource.UID, err)
+					// Continue with empty previousResource - we'll handle this gracefully
+				} else {
+					b.logger.Debug("Successfully parsed previous event data for resource %s", event.Resource.UID)
 				}
+			} else {
+				b.logger.Debug("Previous event data is empty or not a string for resource %s", event.Resource.UID)
+			}
+		} else {
+			b.logger.Debug("Previous event data is nil for resource %s", event.Resource.UID)
+		}
+	}
+
+	// Extract generations from both current and previous events
+	var currentGeneration float64 = 0
+	var previousGeneration float64 = 0
+
+	if metadata, ok := currentResource["metadata"].(map[string]interface{}); ok {
+		if gen, ok := metadata["generation"].(float64); ok {
+			currentGeneration = gen
+		}
+	}
+
+	if len(previousResource) > 0 {
+		if metadata, ok := previousResource["metadata"].(map[string]interface{}); ok {
+			if gen, ok := metadata["generation"].(float64); ok {
+				previousGeneration = gen
 			}
 		}
+	}
+
+	b.logger.Debug("Generation comparison for resource %s: current=%v, previous=%v", event.Resource.UID, currentGeneration, previousGeneration)
+
+	// Config change detection: compare generations
+	// Generation increments when spec changes, so if current > previous, config changed
+	if currentGeneration > previousGeneration {
+		configChanged = true
+		b.logger.Debug("Config change detected for resource %s: generation increased from %v to %v", event.Resource.UID, previousGeneration, currentGeneration)
+	} else {
+		b.logger.Debug("No config change detected for resource %s: current generation %v is not greater than previous %v", event.Resource.UID, currentGeneration, previousGeneration)
 	}
 
 	// Detect status changes
 	// If status field exists and has changed, statusChanged = true
 	// For now, we use a conservative approach: if status exists, assume it might have changed
-	if hasCurrentStatus {
+	if currentResource["status"] != nil {
 		statusChanged = true
 	}
 
 	// Detect replica changes (for Deployments, StatefulSets, etc.)
-	if hasCurrentSpec {
+	if currentSpec, hasCurrentSpec := currentResource["spec"]; hasCurrentSpec {
 		if specMap, ok := currentSpec.(map[string]interface{}); ok {
 			if replicas, ok := specMap["replicas"].(float64); ok && replicas >= 0 {
 				// We have replicas field, but need previous value to compare

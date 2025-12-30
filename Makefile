@@ -301,6 +301,7 @@ dev-iterate: build
 		--log-level=debug \
 		--graph-enabled=true \
 		--graph-host=localhost \
+		--graph-rebuild-on-start=false \
 		--graph-port=6379 \
 		--watcher-config=hack/watcher.yaml \
 		> $(DATA_LOCAL_DIR)/logs/spectre.log 2>&1 &

@@ -15,10 +15,18 @@ export const protobufPackage = "api";
 export interface TimelineRequest {
   startTimestamp: number;
   endTimestamp: number;
+  /** Single namespace filter (deprecated, use namespaces) */
   namespace: string;
+  /** Single kind filter (deprecated, use kinds) */
   kind: string;
   name: string;
   labelSelector: string;
+  /** Multi-value filters (take precedence over single-value if both set) */
+  namespaces: string[];
+  kinds: string[];
+  /** Pagination parameters */
+  pageSize: number;
+  cursor: string;
 }
 
 /** TimelineMetadata sent first in stream */
@@ -28,6 +36,10 @@ export interface TimelineMetadata {
   segmentsScanned: number;
   segmentsSkipped: number;
   queryExecutionTimeMs: number;
+  /** Pagination response fields */
+  nextCursor: string;
+  hasMore: boolean;
+  pageSize: number;
 }
 
 /** StatusSegment represents resource status over time */
@@ -90,7 +102,7 @@ export interface ResourceBatch {
 }
 
 function createBaseTimelineRequest(): TimelineRequest {
-  return { startTimestamp: 0, endTimestamp: 0, namespace: "", kind: "", name: "", labelSelector: "" };
+  return { startTimestamp: 0, endTimestamp: 0, namespace: "", kind: "", name: "", labelSelector: "", namespaces: [], kinds: [], pageSize: 0, cursor: "" };
 }
 
 export const TimelineRequest: MessageFns<TimelineRequest> = {
@@ -112,6 +124,18 @@ export const TimelineRequest: MessageFns<TimelineRequest> = {
     }
     if (message.labelSelector !== "") {
       writer.uint32(50).string(message.labelSelector);
+    }
+    for (const v of message.namespaces) {
+      writer.uint32(58).string(v);
+    }
+    for (const v of message.kinds) {
+      writer.uint32(66).string(v);
+    }
+    if (message.pageSize !== 0) {
+      writer.uint32(72).int32(message.pageSize);
+    }
+    if (message.cursor !== "") {
+      writer.uint32(82).string(message.cursor);
     }
     return writer;
   },
@@ -171,6 +195,38 @@ export const TimelineRequest: MessageFns<TimelineRequest> = {
           message.labelSelector = reader.string();
           continue;
         }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.namespaces.push(reader.string());
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.kinds.push(reader.string());
+          continue;
+        }
+        case 9: {
+          if (tag !== 72) {
+            break;
+          }
+
+          message.pageSize = reader.int32();
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.cursor = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -188,6 +244,10 @@ export const TimelineRequest: MessageFns<TimelineRequest> = {
       kind: isSet(object.kind) ? globalThis.String(object.kind) : "",
       name: isSet(object.name) ? globalThis.String(object.name) : "",
       labelSelector: isSet(object.labelSelector) ? globalThis.String(object.labelSelector) : "",
+      namespaces: globalThis.Array.isArray(object?.namespaces) ? object.namespaces.map((e: any) => globalThis.String(e)) : [],
+      kinds: globalThis.Array.isArray(object?.kinds) ? object.kinds.map((e: any) => globalThis.String(e)) : [],
+      pageSize: isSet(object.pageSize) ? globalThis.Number(object.pageSize) : 0,
+      cursor: isSet(object.cursor) ? globalThis.String(object.cursor) : "",
     };
   },
 
@@ -211,6 +271,18 @@ export const TimelineRequest: MessageFns<TimelineRequest> = {
     if (message.labelSelector !== "") {
       obj.labelSelector = message.labelSelector;
     }
+    if (message.namespaces?.length) {
+      obj.namespaces = message.namespaces;
+    }
+    if (message.kinds?.length) {
+      obj.kinds = message.kinds;
+    }
+    if (message.pageSize !== 0) {
+      obj.pageSize = Math.round(message.pageSize);
+    }
+    if (message.cursor !== "") {
+      obj.cursor = message.cursor;
+    }
     return obj;
   },
 
@@ -225,12 +297,16 @@ export const TimelineRequest: MessageFns<TimelineRequest> = {
     message.kind = object.kind ?? "";
     message.name = object.name ?? "";
     message.labelSelector = object.labelSelector ?? "";
+    message.namespaces = object.namespaces?.map((e) => e) || [];
+    message.kinds = object.kinds?.map((e) => e) || [];
+    message.pageSize = object.pageSize ?? 0;
+    message.cursor = object.cursor ?? "";
     return message;
   },
 };
 
 function createBaseTimelineMetadata(): TimelineMetadata {
-  return { totalCount: 0, filesSearched: 0, segmentsScanned: 0, segmentsSkipped: 0, queryExecutionTimeMs: 0 };
+  return { totalCount: 0, filesSearched: 0, segmentsScanned: 0, segmentsSkipped: 0, queryExecutionTimeMs: 0, nextCursor: "", hasMore: false, pageSize: 0 };
 }
 
 export const TimelineMetadata: MessageFns<TimelineMetadata> = {
@@ -249,6 +325,15 @@ export const TimelineMetadata: MessageFns<TimelineMetadata> = {
     }
     if (message.queryExecutionTimeMs !== 0) {
       writer.uint32(40).int64(message.queryExecutionTimeMs);
+    }
+    if (message.nextCursor !== "") {
+      writer.uint32(50).string(message.nextCursor);
+    }
+    if (message.hasMore !== false) {
+      writer.uint32(56).bool(message.hasMore);
+    }
+    if (message.pageSize !== 0) {
+      writer.uint32(64).int32(message.pageSize);
     }
     return writer;
   },
@@ -300,6 +385,30 @@ export const TimelineMetadata: MessageFns<TimelineMetadata> = {
           message.queryExecutionTimeMs = longToNumber(reader.int64());
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.nextCursor = reader.string();
+          continue;
+        }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.hasMore = reader.bool();
+          continue;
+        }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.pageSize = reader.int32();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -316,6 +425,9 @@ export const TimelineMetadata: MessageFns<TimelineMetadata> = {
       segmentsScanned: isSet(object.segmentsScanned) ? globalThis.Number(object.segmentsScanned) : 0,
       segmentsSkipped: isSet(object.segmentsSkipped) ? globalThis.Number(object.segmentsSkipped) : 0,
       queryExecutionTimeMs: isSet(object.queryExecutionTimeMs) ? globalThis.Number(object.queryExecutionTimeMs) : 0,
+      nextCursor: isSet(object.nextCursor) ? globalThis.String(object.nextCursor) : "",
+      hasMore: isSet(object.hasMore) ? globalThis.Boolean(object.hasMore) : false,
+      pageSize: isSet(object.pageSize) ? globalThis.Number(object.pageSize) : 0,
     };
   },
 
@@ -336,6 +448,15 @@ export const TimelineMetadata: MessageFns<TimelineMetadata> = {
     if (message.queryExecutionTimeMs !== 0) {
       obj.queryExecutionTimeMs = Math.round(message.queryExecutionTimeMs);
     }
+    if (message.nextCursor !== "") {
+      obj.nextCursor = message.nextCursor;
+    }
+    if (message.hasMore !== false) {
+      obj.hasMore = message.hasMore;
+    }
+    if (message.pageSize !== 0) {
+      obj.pageSize = Math.round(message.pageSize);
+    }
     return obj;
   },
 
@@ -349,6 +470,9 @@ export const TimelineMetadata: MessageFns<TimelineMetadata> = {
     message.segmentsScanned = object.segmentsScanned ?? 0;
     message.segmentsSkipped = object.segmentsSkipped ?? 0;
     message.queryExecutionTimeMs = object.queryExecutionTimeMs ?? 0;
+    message.nextCursor = object.nextCursor ?? "";
+    message.hasMore = object.hasMore ?? false;
+    message.pageSize = object.pageSize ?? 0;
     return message;
   },
 };

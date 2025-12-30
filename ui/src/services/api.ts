@@ -236,7 +236,7 @@ class ApiClient {
     if (getDemoMode()) {
       console.log('[Demo Mode] getTimelineGrpc falling back to REST API');
       const resources = await this.getTimeline(startTime, endTime, filters);
-      
+
       // If a chunk callback was provided, call it with all resources at once
       if (onChunk) {
         console.log('[Demo Mode] Calling onChunk with', resources.length, 'resources');
@@ -248,7 +248,7 @@ class ApiClient {
           },
         });
       }
-      
+
       return resources;
     }
 
@@ -266,8 +266,12 @@ class ApiClient {
       endTimestamp: endSeconds,
       namespace: filters?.namespace ?? '',
       kind: filters?.kind ?? '',
+      namespaces: filters?.namespaces ?? [],
+      kinds: filters?.kinds ?? [],
       name: '',
       labelSelector: '',
+      pageSize: filters?.pageSize ?? 0,
+      cursor: filters?.cursor ?? '',
     };
 
     const allResources: K8sResource[] = [];
@@ -278,6 +282,7 @@ class ApiClient {
         // Transform gRPC resources to K8sResource format
         const transformed = result.resources.map(r => this.transformGrpcResource(r));
         allResources.push(...transformed);
+        console.log(result, transformed)
 
         // Forward to caller with transformed data
         onChunk({

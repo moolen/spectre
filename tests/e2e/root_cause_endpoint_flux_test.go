@@ -35,7 +35,45 @@ func TestRootCause_FluxHelmRelease_Endpoint_E2E(t *testing.T) {
 
 	// Strict assertions
 	then.assert_graph_has_required_kinds().and().
-		assert_graph_has_required_edges()
+		assert_graph_has_required_edges().and().
+		assert_helmrelease_has_change_events()
+}
+
+// TestRootCause_FluxHelmRelease_LongLookback_E2E validates that config change events
+// are included in root cause analysis even with a longer lookback window.
+//
+// Scenario: A HelmRelease is deployed, then an intermediate config change is made
+// (which we want to verify is captured), followed by waiting and then a breaking change.
+// This test ensures that older configChanged events are NOT truncated by the limit
+// on recent events when using a longer lookback window.
+func TestRootCause_FluxHelmRelease_LongLookback_E2E(t *testing.T) {
+	given, when, then := NewRootCauseScenarioStage(t)
+	defer given.cleanup()
+
+	// Setup: Install Flux BEFORE Spectre so that Spectre can watch Flux CRDs
+	given.a_test_environment_with_flux().and().
+		spectre_is_deployed()
+
+	// Deploy HelmRelease from external chart repository (podinfo)
+	when.flux_external_helmrelease_is_deployed("podinfo", "6.5.4", "https://stefanprodan.github.io/podinfo")
+
+	// Record timestamp of initial deployment
+	initialConfigTime := when.record_current_timestamp()
+
+	// Update HelmRelease with invalid image tag to cause pod failure
+	when.flux_helmrelease_image_is_updated("does-not-exist-v999").and().
+		wait_for_pod_failure("ImagePullBackOff", 120*time.Second)
+
+	// Call root cause endpoint with longer lookback (30 minutes)
+	when.failed_pod_is_identified().and().
+		create_rbac_resources_for_testing().and().
+		root_cause_endpoint_is_called_with_lookback(30 * time.Minute)
+
+	// Assertions: verify config change events are included including ones from initial config
+	then.assert_graph_has_required_kinds().and().
+		assert_graph_has_required_edges().and().
+		assert_helmrelease_has_change_events().and().
+		assert_helmrelease_has_config_change_before(initialConfigTime.Add(30 * time.Second))
 }
 
 // TestRootCause_FluxHelmReleaseValuesFrom_Endpoint_E2E validates root cause analysis

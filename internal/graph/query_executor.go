@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
@@ -26,10 +27,18 @@ func NewQueryExecutor(client Client) *QueryExecutor {
 // Execute executes a timeline query against the graph database
 // This implements the same interface as storage.QueryExecutor
 func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, error) {
+	// Use ExecutePaginated with nil pagination for backward compatibility
+	result, _, err := qe.ExecutePaginated(ctx, query, nil)
+	return result, err
+}
+
+// ExecutePaginated executes a paginated timeline query against the graph database
+// Returns the query result and pagination response (cursor, hasMore)
+func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.QueryRequest, pagination *models.PaginationRequest) (*models.QueryResult, *models.PaginationResponse, error) {
 	start := time.Now()
 
 	if err := query.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid query: %w", err)
+		return nil, nil, fmt.Errorf("invalid query: %w", err)
 	}
 
 	qe.logger.DebugWithFields("Executing graph query",
@@ -41,30 +50,138 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 	startTimeNs := query.StartTimestamp * 1e9
 	endTimeNs := query.EndTimestamp * 1e9
 
-	// Build Cypher query
-	cypherQuery := qe.buildTimelineQuery(startTimeNs, endTimeNs, query.Filters)
+	// Determine page size
+	pageSize := models.DefaultPageSize
+	if pagination != nil {
+		pageSize = pagination.GetPageSize()
+	}
+
+	// Build Cypher query with pagination
+	cypherQuery := qe.buildTimelineQuery(startTimeNs, endTimeNs, query.Filters, pagination)
 
 	// Execute query
 	result, err := qe.client.ExecuteQuery(ctx, cypherQuery)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute graph query: %w", err)
+		return nil, nil, fmt.Errorf("failed to execute graph query: %w", err)
 	}
 
 	// Convert graph results to events
-	events, err := qe.parseTimelineResults(result)
+	allEvents, err := qe.parseTimelineResults(result)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse graph results: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse graph results: %w", err)
 	}
+
+	// Group events by resource UID to get actual resource count
+	// This is what BuildResourcesFromEventsWithQueryTime does, but we need to do it here
+	// to count resources, not events, for proper pagination
+	resourceUIDs := make(map[string]bool)
+	eventsByResource := make(map[string][]models.Event)
+
+	for _, event := range allEvents {
+		uid := event.Resource.UID
+		if uid == "" {
+			continue
+		}
+		resourceUIDs[uid] = true
+		eventsByResource[uid] = append(eventsByResource[uid], event)
+	}
+
+	actualResourceCount := len(resourceUIDs)
+	qe.logger.Debug("Resource-based pagination: %d events from %d ResourceIdentity nodes grouped into %d unique resources (pageSize=%d)",
+		len(allEvents), actualResourceCount, actualResourceCount, pageSize)
+
+	// Determine if there are more resources
+	// We fetched (pageSize * 2) + 1 ResourceIdentity nodes
+	// If we got that many or more unique resources, there are more pages
+	hasMore := actualResourceCount > (pageSize * 2)
+
+	// Apply resource-level pagination: limit to pageSize unique resources
+	// Maintain sort order (kind, namespace, name) from the query
+	var limitedEvents []models.Event
+	var seenResources int
+	seenUIDs := make(map[string]bool)
+
+	// Sort resource UIDs by (kind, namespace, name) to maintain order
+	// We'll use the first event of each resource to determine sort order
+	type resourceInfo struct {
+		uid    string
+		kind   string
+		ns     string
+		name   string
+		events []models.Event
+	}
+
+	resources := make([]resourceInfo, 0, actualResourceCount)
+	for uid, events := range eventsByResource {
+		if len(events) == 0 {
+			continue
+		}
+		firstEvent := events[0]
+		resources = append(resources, resourceInfo{
+			uid:    uid,
+			kind:   firstEvent.Resource.Kind,
+			ns:     firstEvent.Resource.Namespace,
+			name:   firstEvent.Resource.Name,
+			events: events,
+		})
+	}
+
+	// Sort by (kind, namespace, name) to match query ORDER BY
+	// The query already applies cursor filtering, so all resources here are after the cursor
+	sort.Slice(resources, func(i, j int) bool {
+		if resources[i].kind != resources[j].kind {
+			return resources[i].kind < resources[j].kind
+		}
+		if resources[i].ns != resources[j].ns {
+			return resources[i].ns < resources[j].ns
+		}
+		return resources[i].name < resources[j].name
+	})
+
+	// Take first pageSize resources (cursor filtering already done in query)
+	var lastResourceIdx int = -1
+	for i := 0; i < len(resources) && seenResources < pageSize; i++ {
+		res := resources[i]
+		limitedEvents = append(limitedEvents, res.events...)
+		seenResources++
+		seenUIDs[res.uid] = true
+		lastResourceIdx = i // Track the index of the last resource we're including
+	}
+
+	// Check if there are more resources after the page
+	// We fetched (pageSize * 2) + 1 resources, so if we have more than pageSize, there are more
+	hasMore = len(resources) > pageSize
+
+	// Build next cursor from last resource in the page
+	var nextCursor string
+	if hasMore && lastResourceIdx >= 0 && lastResourceIdx < len(resources) {
+		lastRes := resources[lastResourceIdx]
+		cursor := models.NewResourceCursor(lastRes.kind, lastRes.ns, lastRes.name)
+		nextCursor = cursor.Encode()
+		qe.logger.Debug("Generated nextCursor from last resource: kind=%s, ns=%s, name=%s",
+			lastRes.kind, lastRes.ns, lastRes.name)
+	}
+
+	qe.logger.Debug("Resource pagination result: %d events from %d resources, hasMore=%v, nextCursor=%q",
+		len(limitedEvents), seenResources, hasMore, nextCursor)
 
 	executionTime := time.Since(start)
 
-	return &models.QueryResult{
-		Events:          events,
-		Count:           int32(len(events)),
+	queryResult := &models.QueryResult{
+		Events:          limitedEvents,
+		Count:           int32(len(limitedEvents)),
 		ExecutionTimeMs: int32(executionTime.Milliseconds()),
 		QueryStartTime:  startTimeNs,
 		QueryEndTime:    endTimeNs,
-	}, nil
+	}
+
+	paginationResp := &models.PaginationResponse{
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+		PageSize:   pageSize,
+	}
+
+	return queryResult, paginationResp, nil
 }
 
 // SetSharedCache is a no-op for graph executor (storage-only feature)
@@ -75,7 +192,8 @@ func (qe *QueryExecutor) SetSharedCache(cache interface{}) {
 }
 
 // buildTimelineQuery constructs a Cypher query for timeline data
-func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models.QueryFilters) GraphQuery {
+// Supports multi-value filters and cursor-based pagination
+func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models.QueryFilters, pagination *models.PaginationRequest) GraphQuery {
 	// Base query structure:
 	// 1. Match resources with filters
 	// 2. Optionally match change events in time range
@@ -96,20 +214,42 @@ func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models
 
 	qe.logger.Debug("Timeline query filter: deleted resources outside window [%d, %d]", startNs, endNs)
 
-	// Add filter conditions
-	if filters.Kind != "" {
-		whereConditions = append(whereConditions, "r.kind = $kind")
-		params["kind"] = filters.Kind
+	// Add multi-value filter conditions (use IN operator for arrays)
+	kinds := filters.GetKinds()
+	if len(kinds) > 0 {
+		whereConditions = append(whereConditions, "r.kind IN $kinds")
+		params["kinds"] = kinds
 	}
 
-	if filters.Namespace != "" {
-		whereConditions = append(whereConditions, "r.namespace = $namespace")
-		params["namespace"] = filters.Namespace
+	namespaces := filters.GetNamespaces()
+	if len(namespaces) > 0 {
+		whereConditions = append(whereConditions, "r.namespace IN $namespaces")
+		params["namespaces"] = namespaces
 	}
 
 	if filters.Group != "" {
 		whereConditions = append(whereConditions, "r.apiGroup = $apiGroup")
 		params["apiGroup"] = filters.Group
+	}
+
+	// Add cursor-based pagination condition
+	// The cursor encodes the last seen (kind, namespace, name)
+	// We fetch resources AFTER this position in sort order
+	if pagination != nil && pagination.Cursor != "" {
+		cursor, err := models.DecodeCursor(pagination.Cursor)
+		if err == nil && cursor != nil {
+			// Composite comparison for stable cursor pagination
+			// Resources must be "after" cursor in (kind, namespace, name) order
+			cursorCondition := `(
+				r.kind > $cursorKind OR
+				(r.kind = $cursorKind AND r.namespace > $cursorNamespace) OR
+				(r.kind = $cursorKind AND r.namespace = $cursorNamespace AND r.name > $cursorName)
+			)`
+			whereConditions = append(whereConditions, cursorCondition)
+			params["cursorKind"] = cursor.Kind
+			params["cursorNamespace"] = cursor.Namespace
+			params["cursorName"] = cursor.Name
+		}
 	}
 
 	// Build WHERE clause
@@ -121,32 +261,40 @@ func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models
 		}
 	}
 
+	// Determine page size and add LIMIT clause
+	// Fetch more resources than requested to account for:
+	// 1. Resources that might be filtered out during event-to-resource conversion
+	// 2. Multiple events per resource (we need enough resources, not events)
+	// Use a multiplier of 2-3x to ensure we get enough resources after conversion
+	// The +1 is for hasMore detection
+	pageSize := models.DefaultPageSize
+	if pagination != nil {
+		pageSize = pagination.GetPageSize()
+	}
+	// Fetch 4x more ResourceIdentity nodes to account for filtering during conversion
+	// This ensures we get enough resources after grouping events by resource UID
+	resourceLimit := (pageSize * 4) + 1
+	params["limit"] = resourceLimit
+
 	// Fetch events in time range PLUS one event before the start time for context
 	// This helps show the resource state at the beginning of the time window
 	// IMPORTANT: Only return resources that have at least one event in the time range
 	//            OR have a previous event (to show resource state at window start)
+	// Simplified query structure for better FalkorDB compatibility
+	// The previous query with CALL subqueries and ORDER BY/LIMIT was causing timeouts
+	// This version avoids complex subqueries and uses simple collect/head patterns
 	query := fmt.Sprintf(`
 		MATCH (r:ResourceIdentity)
 		%s
-		CALL {
-			WITH r
-			OPTIONAL MATCH (r)-[:CHANGED]->(e:ChangeEvent)
-			WHERE e.timestamp >= $startNs AND e.timestamp <= $endNs
-			RETURN collect(e) as inRangeEvents
-		}
-		CALL {
-			WITH r
-			OPTIONAL MATCH (r)-[:CHANGED]->(prev:ChangeEvent)
-			WHERE prev.timestamp < $startNs
-			RETURN prev
-			ORDER BY prev.timestamp DESC
-			LIMIT 1
-		}
+		OPTIONAL MATCH (r)-[:CHANGED]->(e:ChangeEvent)
+		WHERE e.timestamp >= $startNs AND e.timestamp <= $endNs
+		WITH r, collect(e) as inRangeEvents
+		OPTIONAL MATCH (r)-[:CHANGED]->(prev:ChangeEvent)
+		WHERE prev.timestamp < $startNs
+		WITH r, inRangeEvents, head(collect(prev)) as prev
 		OPTIONAL MATCH (r)-[:EMITTED_EVENT]->(k:K8sEvent)
 		WHERE k.timestamp >= $startNs AND k.timestamp <= $endNs
 		WITH r, inRangeEvents, prev, collect(DISTINCT k) as k8sEvents
-		// Only include resources that have events in the time range OR a pre-existing event
-		// BUT exclude resources where the ONLY event is a deletion outside the window
 		WHERE size(inRangeEvents) > 0
 		   OR (prev IS NOT NULL AND (NOT r.deleted OR r.deletedAt >= $startNs))
 		RETURN r,
@@ -154,14 +302,17 @@ func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models
 		       k8sEvents,
 		       prev IS NOT NULL as hasPreExisting
 		ORDER BY r.kind, r.namespace, r.name
+		LIMIT $limit
 	`, whereClause)
 
 	qe.logger.Debug("Timeline Cypher query: %s", query)
-	qe.logger.Debug("Timeline query params: startNs=%d, endNs=%d, kind=%v", startNs, endNs, filters.Kind)
+	qe.logger.Debug("Timeline query params: startNs=%d, endNs=%d, kinds=%v, namespaces=%v, pageSize=%d, resourceLimit=%d",
+		startNs, endNs, kinds, namespaces, pageSize, resourceLimit)
 
 	return GraphQuery{
 		Query:      query,
 		Parameters: params,
+		Timeout:    15000, // 15 seconds - timeline queries can be complex with many resources
 	}
 }
 
@@ -316,4 +467,81 @@ func getBoolField(node map[string]interface{}, key string) bool {
 		}
 	}
 	return false
+}
+
+// QueryDistinctMetadata queries for distinct namespaces and kinds in a time range
+// without any pagination limits. This is specifically for the metadata endpoint.
+func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) (namespaces []string, kinds []string, minTime int64, maxTime int64, err error) {
+	// Build query to get distinct values
+	query := `
+		MATCH (r:ResourceIdentity)
+		WHERE (NOT r.deleted OR (r.deletedAt >= $startNs AND r.deletedAt <= $endNs))
+		OPTIONAL MATCH (r)-[:CHANGED]->(e:ChangeEvent)
+		WHERE e.timestamp >= $startNs AND e.timestamp <= $endNs
+		WITH DISTINCT r.namespace as namespace, r.kind as kind, e.timestamp as timestamp
+		RETURN collect(DISTINCT namespace) as namespaces,
+		       collect(DISTINCT kind) as kinds,
+		       min(timestamp) as minTime,
+		       max(timestamp) as maxTime
+	`
+
+	params := map[string]interface{}{
+		"startNs": startTimeNs,
+		"endNs":   endTimeNs,
+	}
+
+	graphQuery := GraphQuery{
+		Query:      query,
+		Parameters: params,
+		Timeout:    10000, // 10 seconds
+	}
+
+	result, err := qe.client.ExecuteQuery(ctx, graphQuery)
+	if err != nil {
+		return nil, nil, 0, 0, fmt.Errorf("failed to execute metadata query: %w", err)
+	}
+
+	// Parse results
+	if len(result.Rows) == 0 {
+		return []string{}, []string{}, 0, 0, nil
+	}
+
+	row := result.Rows[0]
+	if len(row) < 4 {
+		return nil, nil, 0, 0, fmt.Errorf("unexpected result format: got %d columns, expected 4", len(row))
+	}
+
+	// Parse namespaces
+	if nsList, ok := row[0].([]interface{}); ok {
+		namespaces = make([]string, 0, len(nsList))
+		for _, ns := range nsList {
+			if nsStr, ok := ns.(string); ok {
+				namespaces = append(namespaces, nsStr)
+			}
+		}
+	}
+
+	// Parse kinds
+	if kindsList, ok := row[1].([]interface{}); ok {
+		kinds = make([]string, 0, len(kindsList))
+		for _, k := range kindsList {
+			if kStr, ok := k.(string); ok {
+				kinds = append(kinds, kStr)
+			}
+		}
+	}
+
+	// Parse min/max times
+	if row[2] != nil {
+		if mt, ok := row[2].(int64); ok {
+			minTime = mt
+		}
+	}
+	if row[3] != nil {
+		if mt, ok := row[3].(int64); ok {
+			maxTime = mt
+		}
+	}
+
+	return namespaces, kinds, minTime, maxTime, nil
 }

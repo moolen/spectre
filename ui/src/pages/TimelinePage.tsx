@@ -313,9 +313,11 @@ function TimelinePage() {
     }
   }, [persistedKinds, persistedNamespaces, search, hasProblematicStatus, setKinds, setNamespaces]);
 
-  // Don't filter at the API level - filter client-side instead
-  // This allows selecting multiple kinds/namespaces
-  const apiFilters = undefined;
+  // Pass filter arrays to API for server-side filtering with pagination
+  const apiFilters = useMemo(() => ({
+    namespaces: filters.namespaces,
+    kinds: filters.kinds,
+  }), [filters.namespaces, filters.kinds]);
 
   const [refreshToken, setRefreshToken] = useState(0);
   const { autoRefresh } = useSettings();
@@ -332,25 +334,57 @@ function TimelinePage() {
     return () => window.clearInterval(id);
   }, [autoRefresh, timeRange]);
 
-  // Fetch timeline data from backend API
-  const { resources, loading, error, totalCount, loadedCount } = useTimeline({
+  // Fetch timeline data from backend API with pagination support
+  const { resources, loading, loadingMore, error, totalCount, loadedCount, hasMore, loadMore } = useTimeline({
     startTime: timeRange?.start,
     endTime: timeRange?.end,
     rawStart: rawTimeExpressions.start,
     rawEnd: rawTimeExpressions.end,
     filters: apiFilters,
+    pageSize: 100, // Load 100 resources per page
     refreshToken
   });
 
-  // Filter Logic
+  // Track when we're loading all resources for the problematic filter
+  const [loadingAllForProblematic, setLoadingAllForProblematic] = useState(false);
+
+  // Show loading indicator when "Problematic Only" filter is enabled
+  // Keep it visible during initial load, loading more, or while there are more resources to load
+  useEffect(() => {
+    if (hasProblematicStatus && timeRange) {
+      // Show loading indicator if:
+      // 1. Initial load is in progress
+      // 2. Loading more pages
+      // 3. There are more resources to load
+      if (loading || loadingMore || hasMore) {
+        setLoadingAllForProblematic(true);
+      } else {
+        // All resources loaded, hide loading indicator
+        setLoadingAllForProblematic(false);
+      }
+    } else if (!hasProblematicStatus) {
+      // Filter disabled, hide loading indicator
+      setLoadingAllForProblematic(false);
+    }
+  }, [hasProblematicStatus, timeRange, loading, loadingMore, hasMore]);
+
+  // When "Problematic Only" filter is enabled, automatically load all remaining resources
+  // This ensures we have all data available for client-side filtering
+  useEffect(() => {
+    if (hasProblematicStatus && hasMore && !loading && !loadingMore && timeRange) {
+      // Load more resources when problematic filter is enabled and more are available
+      loadMore();
+    }
+  }, [hasProblematicStatus, hasMore, loading, loadingMore, loadMore, timeRange]);
+
+  // Filter Logic - now only for client-side filters (search and problematic status)
+  // Kinds and namespaces are filtered server-side via API
   const filteredResources = useMemo(() => {
     return resources.filter(r => {
       const matchesSearch = r.name.toLowerCase().includes(filters.search.toLowerCase());
-      const matchesNs = filters.namespaces.length === 0 || filters.namespaces.includes(r.namespace);
-      const matchesKind = filters.kinds.length === 0 || filters.kinds.includes(r.kind);
       const matchesStatus = !filters.hasProblematicStatus ||
         r.statusSegments.some(s => s.status !== ResourceStatus.Ready);
-      
+
       // Exclude resources that were deleted before the current time window
       // A resource is excluded if it has a deletedAt timestamp before the window start
       if (timeRange && r.deletedAt) {
@@ -360,10 +394,10 @@ function TimelinePage() {
           return false;
         }
       }
-      
-      return matchesSearch && matchesNs && matchesKind && matchesStatus;
+
+      return matchesSearch && matchesStatus;
     });
-  }, [resources, filters, timeRange]);
+  }, [resources, filters.search, filters.hasProblematicStatus, timeRange]);
 
   // Derived selected resource object
   const selectedResource = useMemo(() => {
@@ -522,7 +556,48 @@ function TimelinePage() {
       />
 
       <div className="flex-1 flex overflow-hidden relative">
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-hidden flex flex-col relative">
+          {/* Loading indicator overlay when loading all resources for problematic filter */}
+          {loadingAllForProblematic && (
+            <div className="absolute inset-0 bg-[var(--color-surface-elevated)]/80 backdrop-blur-sm flex items-center justify-center z-50">
+              <div className="flex flex-col items-center gap-4 text-[var(--color-text-primary)]">
+                <div className="animate-spin">
+                  <svg className="w-12 h-12 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+                  </svg>
+                </div>
+                <div className="flex flex-col items-center gap-2">
+                  <p className="text-lg font-medium">Loading all resources...</p>
+                  <p className="text-sm text-[var(--color-text-muted)]">
+                    Fetching remaining resources for problematic filter
+                  </p>
+                  <div className="flex flex-col items-center gap-2 mt-2">
+                    {hasMore ? (
+                      <>
+                        <div className="w-64 h-2 bg-gray-700 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-brand-500 transition-all duration-300 animate-pulse"
+                            style={{ width: '90%' }}
+                          />
+                        </div>
+                        <p className="text-sm text-[var(--color-text-muted)]">{loadedCount} resources loaded</p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-64 h-2 bg-gray-700 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-brand-500 transition-all duration-300"
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+                        <p className="text-sm text-[var(--color-text-muted)]">{loadedCount} resources loaded</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {error ? (
             <div className="flex-1 flex items-center justify-center text-red-400 flex-col gap-4">
               <svg className="w-16 h-16 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -570,6 +645,9 @@ function TimelinePage() {
                 timeRange={timeRange}
                 onVisibleTimeRangeChange={handleVisibleTimeRangeChange}
                 onZoomDetected={handleZoomDetected}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={loadMore}
               />
             </>
           ) : (

@@ -357,6 +357,8 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 }
 
 // getChangeEvents retrieves change events for resources within the time window
+// The query ensures ALL configChanged events are included (important for root cause)
+// plus the most recent events for context, avoiding truncation of important config changes.
 func (a *RootCauseAnalyzer) getChangeEvents(
 	ctx context.Context,
 	resourceUIDs []string,
@@ -367,6 +369,11 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 		return make(map[string][]ChangeEventInfo), nil
 	}
 
+	// Query that combines:
+	// 1. ALL events with configChanged=true (critical for root cause analysis)
+	// 2. Up to 10 most recent events (for status context)
+	// This ensures we never miss the important config change that triggered a failure,
+	// even if there are many subsequent status-only events.
 	query := graph.GraphQuery{
 		Timeout: 5000,
 		Query: `
@@ -377,8 +384,16 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 			  AND event.timestamp >= $failureTimestamp - $lookback
 			WITH resource.uid as resourceUID, event
 			ORDER BY event.timestamp DESC
-			WITH resourceUID, collect(event)[0..10] as events
-			RETURN resourceUID, events
+			WITH resourceUID, collect(event) as allEvents
+			WITH resourceUID,
+			     [e IN allEvents WHERE e.configChanged = true] as configEvents,
+			     allEvents[0..10] as recentEvents
+			WITH resourceUID,
+			     configEvents + [e IN recentEvents WHERE NOT e IN configEvents] as combinedEvents
+			UNWIND combinedEvents as event
+			WITH resourceUID, event
+			ORDER BY event.timestamp DESC
+			RETURN resourceUID, collect(event) as events
 		`,
 		Parameters: map[string]interface{}{
 			"resourceUIDs":     resourceUIDs,
@@ -387,7 +402,8 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 		},
 	}
 
-	a.logger.Debug("getChangeEvents: executing query for %d resources", len(resourceUIDs))
+	a.logger.Debug("getChangeEvents: executing query for %d resources with lookback %d ns (%.1f minutes)",
+		len(resourceUIDs), lookbackNs, float64(lookbackNs)/float64(time.Minute.Nanoseconds()))
 	result, err := a.graphClient.ExecuteQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query change events: %w", err)
@@ -447,6 +463,16 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 		}
 	}
 
+	// Log event counts for debugging
+	for uid, evts := range events {
+		configCount := 0
+		for _, e := range evts {
+			if e.ConfigChanged {
+				configCount++
+			}
+		}
+		a.logger.Debug("getChangeEvents: resource %s has %d events (%d with configChanged=true)", uid, len(evts), configCount)
+	}
 	a.logger.Debug("getChangeEvents: found events for %d resources", len(events))
 	return events, nil
 }

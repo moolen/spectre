@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/moolen/spectre/internal/models"
@@ -176,4 +177,59 @@ func (d *DemoQueryExecutor) Execute(ctx context.Context, query *models.QueryRequ
 // SetSharedCache is a no-op for demo executor (implements QueryExecutor interface)
 func (d *DemoQueryExecutor) SetSharedCache(cache interface{}) {
 	// Demo executor doesn't use caching
+}
+
+// QueryDistinctMetadata returns distinct namespaces and kinds from demo data
+func (d *DemoQueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) (namespaces []string, kinds []string, minTime int64, maxTime int64, err error) {
+	// Use the Execute method to get events
+	query := &models.QueryRequest{
+		StartTimestamp: startTimeNs / 1e9,
+		EndTimestamp:   endTimeNs / 1e9,
+		Filters:        models.QueryFilters{},
+	}
+
+	result, queryErr := d.Execute(ctx, query)
+	if queryErr != nil {
+		return nil, nil, 0, 0, queryErr
+	}
+
+	// Extract unique namespaces and kinds
+	namespacesMap := make(map[string]bool)
+	kindsMap := make(map[string]bool)
+	minTime = -1
+	maxTime = -1
+
+	for _, event := range result.Events {
+		namespacesMap[event.Resource.Namespace] = true
+		kindsMap[event.Resource.Kind] = true
+
+		if minTime < 0 || event.Timestamp < minTime {
+			minTime = event.Timestamp
+		}
+		if maxTime < 0 || event.Timestamp > maxTime {
+			maxTime = event.Timestamp
+		}
+	}
+
+	// Convert maps to sorted slices
+	namespaces = make([]string, 0, len(namespacesMap))
+	for ns := range namespacesMap {
+		namespaces = append(namespaces, ns)
+	}
+	sort.Strings(namespaces)
+
+	kinds = make([]string, 0, len(kindsMap))
+	for kind := range kindsMap {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+
+	if minTime < 0 {
+		minTime = 0
+	}
+	if maxTime < 0 {
+		maxTime = 0
+	}
+
+	return namespaces, kinds, minTime, maxTime, nil
 }

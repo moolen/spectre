@@ -100,7 +100,7 @@ func init() {
 	serverCmd.Flags().IntVar(&graphRebuildWindowHours, "graph-rebuild-window-hours", 168, "Time window for graph rebuild in hours (default: 168 = 7 days)")
 
 	// Timeline migration flags
-	serverCmd.Flags().StringVar(&timelineMode, "timeline-mode", "both", "Timeline write mode: storage, graph, or both")
+	serverCmd.Flags().StringVar(&timelineMode, "timeline-mode", "graph", "Timeline write mode: storage, graph, or both")
 	serverCmd.Flags().StringVar(&timelineQuerySource, "timeline-query-source", "graph", "Timeline query source: storage or graph")
 }
 
@@ -302,7 +302,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			Host:         graphHost,
 			Port:         graphPort,
 			GraphName:    graphName,
-			MaxRetries:   10,             // Increased to wait for FalkorDB sidecar to be ready
+			MaxRetries:   10,               // Increased to wait for FalkorDB sidecar to be ready
 			DialTimeout:  10 * time.Second, // Increased to allow sidecar startup time
 			ReadTimeout:  30 * time.Second, // Increased for complex root cause queries
 			WriteTimeout: 3 * time.Second,

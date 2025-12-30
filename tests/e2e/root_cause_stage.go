@@ -1399,7 +1399,15 @@ subjects:
 	return s
 }
 
+func (s *RootCauseScenarioStage) record_current_timestamp() time.Time {
+	return time.Now()
+}
+
 func (s *RootCauseScenarioStage) root_cause_endpoint_is_called() *RootCauseScenarioStage {
+	return s.root_cause_endpoint_is_called_with_lookback(10 * time.Minute)
+}
+
+func (s *RootCauseScenarioStage) root_cause_endpoint_is_called_with_lookback(lookback time.Duration) *RootCauseScenarioStage {
 	startTime := time.Now()
 
 	// Check Spectre logs for graph initialization status
@@ -1419,15 +1427,14 @@ func (s *RootCauseScenarioStage) root_cause_endpoint_is_called() *RootCauseScena
 	}
 
 	// Call HTTP endpoint
-	s.t.Logf("Calling /v1/root-cause with resourceUID=%s, timestamp=%d",
-		s.failedPodUID, s.failureTimestamp)
+	s.t.Logf("Calling /v1/root-cause with resourceUID=%s, timestamp=%d, lookback=%v",
+		s.failedPodUID, s.failureTimestamp, lookback)
 
 	callStart := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Use default lookback of 10 minutes, maxDepth 5, minConfidence 0.6
-	lookback := 10 * time.Minute
+	// Use provided lookback, maxDepth 5, minConfidence 0.6
 	maxDepth := 5
 	minConfidence := 0.6
 
@@ -1715,6 +1722,54 @@ func (s *RootCauseScenarioStage) assert_graph_has_helmrelease_manages_deployment
 	helpers.RequireGraphHasEdgeBetweenKinds(s.t, s.rcaResponse, "Deployment", "OWNS", "ReplicaSet")
 	helpers.RequireGraphHasEdgeBetweenKinds(s.t, s.rcaResponse, "ReplicaSet", "OWNS", "Pod")
 	s.t.Logf("✓ Found ownership chain: HelmRelease -> Deployment -> ReplicaSet -> Pod")
+	return s
+}
+
+func (s *RootCauseScenarioStage) assert_helmrelease_has_change_events() *RootCauseScenarioStage {
+	helpers.RequireGraphNonEmpty(s.t, s.rcaResponse)
+
+	// Find HelmRelease node
+	helmReleaseNode := helpers.FindNodeByKind(s.rcaResponse, "HelmRelease")
+	s.require.NotNil(helmReleaseNode, "Graph should contain HelmRelease node")
+
+	// Verify node has events
+	s.require.NotEmpty(helmReleaseNode.AllEvents, "HelmRelease node should have change events")
+	s.t.Logf("✓ HelmRelease node has %d change event(s)", len(helmReleaseNode.AllEvents))
+
+	// Log event details for debugging
+	for i, event := range helmReleaseNode.AllEvents {
+		s.t.Logf("  Event %d: type=%s, timestamp=%v, configChanged=%v, statusChanged=%v",
+			i+1, event.EventType, event.Timestamp, event.ConfigChanged, event.StatusChanged)
+	}
+
+	// Verify at least one UPDATE event with configChanged=true
+	helpers.RequireUpdateConfigChanged(s.t, helmReleaseNode)
+	s.t.Logf("✓ HelmRelease has UPDATE event with configChanged=true")
+
+	return s
+}
+
+func (s *RootCauseScenarioStage) assert_helmrelease_has_config_change_before(beforeTime time.Time) *RootCauseScenarioStage {
+	helpers.RequireGraphNonEmpty(s.t, s.rcaResponse)
+
+	// Find HelmRelease node
+	helmReleaseNode := helpers.FindNodeByKind(s.rcaResponse, "HelmRelease")
+	s.require.NotNil(helmReleaseNode, "Graph should contain HelmRelease node")
+
+	// Verify there's a config change event before the specified time
+	found := false
+	for _, event := range helmReleaseNode.AllEvents {
+		if event.ConfigChanged && event.Timestamp.Before(beforeTime) {
+			found = true
+			s.t.Logf("✓ Found config change event at %v (before %v)", event.Timestamp, beforeTime)
+			break
+		}
+	}
+
+	s.require.True(found, "HelmRelease should have a configChanged=true event before %v. "+
+		"This ensures older config changes are not truncated by the recent events limit. "+
+		"Total events: %d", beforeTime, len(helmReleaseNode.AllEvents))
+
 	return s
 }
 

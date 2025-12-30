@@ -164,7 +164,16 @@ func (s *Server) registerHandlers() {
 		timelineHandler = NewTimelineHandler(s.queryExecutor, s.logger, tracer)
 	}
 	
-	metadataHandler := NewMetadataHandler(s.queryExecutor, s.logger, tracer)
+	// Select appropriate executor for metadata handler (same as timeline)
+	var metadataExecutor QueryExecutor
+	if s.graphQueryExecutor != nil && s.querySource == TimelineQuerySourceGraph {
+		s.logger.Info("Metadata handler using GRAPH query executor")
+		metadataExecutor = s.graphQueryExecutor
+	} else {
+		s.logger.Info("Metadata handler using STORAGE query executor")
+		metadataExecutor = s.queryExecutor
+	}
+	metadataHandler := NewMetadataHandler(metadataExecutor, s.logger, tracer)
 
 	s.router.HandleFunc("/v1/search", s.withMethod(http.MethodGet, searchHandler.Handle))
 	s.router.HandleFunc("/v1/timeline", s.withMethod(http.MethodGet, timelineHandler.Handle))

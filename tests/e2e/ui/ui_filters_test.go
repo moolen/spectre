@@ -9,10 +9,6 @@ import (
 
 // TestUIFilterByNamespace tests namespace filtering functionality
 func TestUIFilterByNamespace(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping e2e test in short mode")
-	}
-
 	given, when, then := NewUIStage(t)
 
 	// Generate unique namespace names to avoid collisions with cluster reuse
@@ -40,10 +36,6 @@ func TestUIFilterByNamespace(t *testing.T) {
 
 // TestUIFilterByKind tests resource kind filtering functionality
 func TestUIFilterByKind(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping e2e test in short mode")
-	}
-
 	given, when, then := NewUIStage(t)
 
 	given.a_test_environment().and().

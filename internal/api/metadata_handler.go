@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"time"
@@ -26,6 +27,11 @@ func NewMetadataHandler(queryExecutor QueryExecutor, logger *logging.Logger, tra
 	}
 }
 
+// MetadataQueryExecutor interface for executors that support efficient metadata queries
+type MetadataQueryExecutor interface {
+	QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) (namespaces []string, kinds []string, minTime int64, maxTime int64, err error)
+}
+
 // Handle handles metadata requests
 func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -45,58 +51,67 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := &models.QueryRequest{
-		StartTimestamp: startTime,
-		EndTimestamp:   endTime,
-		Filters:        models.QueryFilters{},
-	}
+	startTimeNs := startTime * 1e9
+	endTimeNs := endTime * 1e9
 
-	queryResult, err := mh.queryExecutor.Execute(ctx, query)
-	if err != nil {
-		mh.logger.Error("Failed to query events: %v", err)
-		mh.respondWithError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to fetch metadata")
-		return
-	}
+	// Try to use efficient metadata query if available
+	var namespacesList, kindsList []string
+	var minTime, maxTime int64
 
-	// Extract unique namespaces, kinds, and groups
-	namespaces := make(map[string]bool)
-	kinds := make(map[string]bool)
-	groups := make(map[string]bool)
-	resourceCounts := make(map[string]int)
-	var minTime, maxTime int64 = -1, -1
-
-	for _, event := range queryResult.Events {
-		namespaces[event.Resource.Namespace] = true
-		kinds[event.Resource.Kind] = true
-		groups[event.Resource.Group] = true
-		resourceCounts[event.Resource.Kind]++
-
-		if minTime < 0 || event.Timestamp < minTime {
-			minTime = event.Timestamp
+	if metadataExecutor, ok := mh.queryExecutor.(MetadataQueryExecutor); ok {
+		namespacesList, kindsList, minTime, maxTime, err = metadataExecutor.QueryDistinctMetadata(ctx, startTimeNs, endTimeNs)
+		if err != nil {
+			mh.logger.Error("Failed to query metadata: %v", err)
+			mh.respondWithError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to fetch metadata")
+			return
 		}
-		if maxTime < 0 || event.Timestamp > maxTime {
-			maxTime = event.Timestamp
+	} else {
+		// Fallback to old method (shouldn't happen with current implementations)
+		mh.logger.Warn("Query executor does not support QueryDistinctMetadata, using fallback")
+		query := &models.QueryRequest{
+			StartTimestamp: startTime,
+			EndTimestamp:   endTime,
+			Filters:        models.QueryFilters{},
 		}
-	}
 
-	// Convert maps to sorted slices
-	namespacesList := make([]string, 0, len(namespaces))
-	for ns := range namespaces {
-		namespacesList = append(namespacesList, ns)
-	}
-	sort.Strings(namespacesList)
+		queryResult, queryErr := mh.queryExecutor.Execute(ctx, query)
+		if queryErr != nil {
+			mh.logger.Error("Failed to query events: %v", queryErr)
+			mh.respondWithError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to fetch metadata")
+			return
+		}
 
-	kindsList := make([]string, 0, len(kinds))
-	for kind := range kinds {
-		kindsList = append(kindsList, kind)
-	}
-	sort.Strings(kindsList)
+		// Extract unique namespaces and kinds
+		namespaces := make(map[string]bool)
+		kinds := make(map[string]bool)
+		minTime = -1
+		maxTime = -1
 
-	groupsList := make([]string, 0, len(groups))
-	for group := range groups {
-		groupsList = append(groupsList, group)
+		for _, event := range queryResult.Events {
+			namespaces[event.Resource.Namespace] = true
+			kinds[event.Resource.Kind] = true
+
+			if minTime < 0 || event.Timestamp < minTime {
+				minTime = event.Timestamp
+			}
+			if maxTime < 0 || event.Timestamp > maxTime {
+				maxTime = event.Timestamp
+			}
+		}
+
+		// Convert maps to sorted slices
+		namespacesList = make([]string, 0, len(namespaces))
+		for ns := range namespaces {
+			namespacesList = append(namespacesList, ns)
+		}
+		sort.Strings(namespacesList)
+
+		kindsList = make([]string, 0, len(kinds))
+		for kind := range kinds {
+			kindsList = append(kindsList, kind)
+		}
+		sort.Strings(kindsList)
 	}
-	sort.Strings(groupsList)
 
 	// Convert nanoseconds to seconds for API
 	if minTime < 0 {
@@ -107,11 +122,8 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := models.MetadataResponse{
-		Namespaces:     namespacesList,
-		Kinds:          kindsList,
-		Groups:         groupsList,
-		ResourceCounts: resourceCounts,
-		TotalEvents:    len(queryResult.Events),
+		Namespaces: namespacesList,
+		Kinds:      kindsList,
 		TimeRange: models.TimeRangeInfo{
 			Earliest: minTime / 1e9,
 			Latest:   maxTime / 1e9,

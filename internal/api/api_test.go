@@ -555,12 +555,6 @@ func TestMetadataHandler_Handle(t *testing.T) {
 				if len(resp.Kinds) != 2 {
 					t.Errorf("expected 2 kinds, got %d", len(resp.Kinds))
 				}
-				if len(resp.Groups) != 2 {
-					t.Errorf("expected 2 groups, got %d", len(resp.Groups))
-				}
-				if resp.TotalEvents != 2 {
-					t.Errorf("expected TotalEvents=2, got %d", resp.TotalEvents)
-				}
 			},
 		},
 		{
@@ -601,9 +595,6 @@ func TestMetadataHandler_Handle(t *testing.T) {
 				}
 				if len(resp.Namespaces) != 0 {
 					t.Errorf("expected empty namespaces, got %v", resp.Namespaces)
-				}
-				if resp.TotalEvents != 0 {
-					t.Errorf("expected TotalEvents=0, got %d", resp.TotalEvents)
 				}
 				if resp.TimeRange.Earliest != 0 || resp.TimeRange.Latest != 0 {
 					t.Errorf("expected zero time range, got earliest=%d, latest=%d", resp.TimeRange.Earliest, resp.TimeRange.Latest)
