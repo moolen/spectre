@@ -1,6 +1,10 @@
 package analysis
 
-import "time"
+import (
+	"time"
+
+	"github.com/moolen/spectre/internal/graph"
+)
 
 // ============================================================================
 // NEW CAUSALITY-FIRST SCHEMA
@@ -137,4 +141,30 @@ type QueryMetadata struct {
 	GraphNodesVisited int       `json:"graphNodesVisited,omitempty"`
 	AlgorithmVersion  string    `json:"algorithmVersion"` // For reproducibility
 	ExecutedAt        time.Time `json:"executedAt"`
+}
+
+// ============================================================================
+// GRAPH QUERY TYPES
+// ============================================================================
+// These types represent intermediate data structures used during graph queries
+// to build the causal chain.
+
+// ResourceWithDistance represents a resource in the ownership chain with its distance from the symptom
+type ResourceWithDistance struct {
+	Resource graph.ResourceIdentity
+	Distance int
+}
+
+// ManagerData contains manager information for a resource
+type ManagerData struct {
+	Manager     graph.ResourceIdentity
+	ManagesEdge graph.ManagesEdge
+}
+
+// RelatedResourceData contains information about a related resource
+type RelatedResourceData struct {
+	Resource           graph.ResourceIdentity
+	RelationshipType   string
+	Events             []ChangeEventInfo
+	ReferenceTargetUID string // For INGRESS_REF, the UID of the Service that the Ingress references
 }
