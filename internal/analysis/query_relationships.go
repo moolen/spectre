@@ -9,23 +9,24 @@ import (
 
 // getManagers retrieves manager relationships for the given resources.
 // Managers are resources connected via MANAGES edges (e.g., HelmRelease -> Deployment).
-// Only managers with confidence >= 0.5 are included.
+// Only managers with confidence >= MinManagerConfidence are included.
 func (a *RootCauseAnalyzer) getManagers(ctx context.Context, resourceUIDs []string) (map[string]*ManagerData, error) {
 	if len(resourceUIDs) == 0 {
 		return make(map[string]*ManagerData), nil
 	}
 
 	query := graph.GraphQuery{
-		Timeout: 5000,
+		Timeout: DefaultQueryTimeoutMs,
 		Query: `
 			UNWIND $resourceUIDs as uid
 			MATCH (resource:ResourceIdentity {uid: uid})
 			OPTIONAL MATCH (manager:ResourceIdentity)-[manages:MANAGES]->(resource)
-			WHERE manages.confidence >= 0.5
+			WHERE manages.confidence >= $minConfidence
 			RETURN resource.uid as resourceUID, manager, manages
 		`,
 		Parameters: map[string]interface{}{
-			"resourceUIDs": resourceUIDs,
+			"resourceUIDs":  resourceUIDs,
+			"minConfidence": MinManagerConfidence,
 		},
 	}
 
@@ -92,7 +93,7 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 	}
 
 	query := graph.GraphQuery{
-		Timeout: 5000,
+		Timeout: DefaultQueryTimeoutMs,
 		Query: `
 			// Direct relationships from resources
 			UNWIND $resourceUIDs as uid

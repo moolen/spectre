@@ -32,58 +32,138 @@ type AnalyzeInput struct {
 	MinConfidence    float64
 }
 
-// Analyze performs root cause analysis using the causality-first approach
+// Analyze performs root cause analysis using the causality-first approach.
+//
+// This function implements a fault-tolerant analysis pipeline that degrades gracefully:
+// - If the causal graph cannot be built, returns symptom-only result
+// - If root cause cannot be identified, uses symptom as root cause
+// - Tracks all degradation reasons and warnings in ResultQuality
+//
+// The ResultQuality field in QueryMetadata should be checked to determine if the
+// result is degraded or contains partial data.
 func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*RootCauseAnalysisV2, error) {
 	startTime := time.Now()
 
+	// Initialize result quality tracking
+	quality := ResultQuality{
+		IsDegraded:         false,
+		DegradationReasons: []string{},
+		IsSymptomOnly:      false,
+		HasPartialData:     false,
+		Warnings:           []string{},
+	}
+
+	// Initialize performance metrics
+	perfMetrics := &PerformanceMetrics{
+		SlowOperations: []SlowOperation{},
+	}
+
 	// 1. Extract observed symptom (facts only, no inference)
 	a.logger.Debug("Extracting observed symptom for resource %s", input.ResourceUID)
+	symptomStart := time.Now()
 	symptom, err := a.extractObservedSymptom(ctx, input.ResourceUID, input.FailureTimestamp)
 	if err != nil {
+		a.logger.Error("Failed to extract symptom for resource %s: %v", input.ResourceUID, err)
 		return nil, fmt.Errorf("failed to extract symptom: %w", err)
 	}
+	a.logger.Debug("Symptom extraction completed in %v", time.Since(symptomStart))
 
 	// 2. Build causal chain
 	a.logger.Debug("Building causal chain from symptom")
 	lookbackNs := input.LookbackNs
 	if lookbackNs == 0 {
-		lookbackNs = int64(600_000_000_000) // Default: 10 minutes
+		lookbackNs = DefaultLookbackNs
 	}
-	graph, err := a.buildCausalGraph(ctx, symptom, input.FailureTimestamp, lookbackNs)
-	if err != nil {
-		a.logger.Debug("Failed to build causal graph: %v, using symptom-only response", err)
+	a.logger.Debug("Using lookback window: %v (%d ns)", time.Duration(lookbackNs), lookbackNs)
+
+	graphStart := time.Now()
+	graph, graphErr := a.buildCausalGraph(ctx, symptom, input.FailureTimestamp, lookbackNs)
+	graphDuration := time.Since(graphStart)
+	perfMetrics.GraphBuildDurationMs = graphDuration.Milliseconds()
+
+	if graphErr != nil {
+		// Graph building failed - this is a degraded result
+		a.logger.Warn("Failed to build causal graph: %v - using symptom-only response", graphErr)
+		quality.IsDegraded = true
+		quality.IsSymptomOnly = true
+		quality.DegradationReasons = append(quality.DegradationReasons, "graph_build_failed")
+		quality.Warnings = append(quality.Warnings, fmt.Sprintf("Could not build causal graph: %v", graphErr))
 		// Fallback: create minimal graph with just the symptom
 		graph = createSymptomOnlyGraph(symptom)
-	}
+	} else {
+		a.logger.Debug("Causal graph built successfully in %v with %d nodes and %d edges",
+			graphDuration, len(graph.Nodes), len(graph.Edges))
 
-	// If graph is empty, create symptom-only graph
-	if isGraphEmpty(graph) {
-		a.logger.Debug("Empty causal graph, using symptom-only response")
-		graph = createSymptomOnlyGraph(symptom)
+		// Check for slow graph building
+		if graphDuration.Milliseconds() > SlowGraphBuildThresholdMs {
+			a.logger.Warn("Slow graph building: %v (threshold: %dms)", graphDuration, SlowGraphBuildThresholdMs)
+			perfMetrics.SlowOperations = append(perfMetrics.SlowOperations, SlowOperation{
+				Operation:   "graph_build",
+				DurationMs:  graphDuration.Milliseconds(),
+				ThresholdMs: SlowGraphBuildThresholdMs,
+			})
+		}
+
+		// Check if graph is empty
+		if isGraphEmpty(graph) {
+			a.logger.Warn("Empty causal graph returned - using symptom-only response")
+			quality.IsDegraded = true
+			quality.IsSymptomOnly = true
+			quality.DegradationReasons = append(quality.DegradationReasons, "empty_graph")
+			quality.Warnings = append(quality.Warnings, "No causal chain found for symptom")
+			graph = createSymptomOnlyGraph(symptom)
+		}
 	}
 
 	// 3. Identify root cause
 	a.logger.Debug("Identifying root cause from graph with %d nodes", len(graph.Nodes))
-	rootCause, err := a.identifyRootCause(graph, input.FailureTimestamp)
-	if err != nil {
-		a.logger.Debug("Failed to identify root cause: %v, using symptom as root", err)
+	rootCauseStart := time.Now()
+	rootCause, rootErr := a.identifyRootCause(graph, input.FailureTimestamp)
+	rootCauseDuration := time.Since(rootCauseStart)
+
+	if rootErr != nil {
+		// Root cause identification failed - use symptom as fallback
+		a.logger.Warn("Failed to identify root cause: %v - using symptom as root cause", rootErr)
+		quality.IsDegraded = true
+		quality.DegradationReasons = append(quality.DegradationReasons, "root_cause_identification_failed")
+		quality.Warnings = append(quality.Warnings, fmt.Sprintf("Could not identify root cause: %v", rootErr))
 		// Fallback: use symptom itself as root cause
 		rootCause = createSymptomOnlyRootCause(symptom)
+	} else {
+		a.logger.Debug("Root cause identified in %v: %s/%s", rootCauseDuration,
+			rootCause.Resource.Kind, rootCause.Resource.Name)
 	}
 
 	// 4. Calculate confidence score
 	a.logger.Debug("Calculating confidence score")
 	confidence := a.calculateConfidence(symptom, graph, rootCause)
+	a.logger.Debug("Confidence score: %.2f", confidence.Score)
 
 	// 5. Collect supporting evidence
 	a.logger.Debug("Collecting supporting evidence")
 	evidence := a.collectSupportingEvidence(graph, rootCause)
+	a.logger.Debug("Collected %d evidence items", len(evidence))
 
 	// 6. Detect excluded alternatives
 	a.logger.Debug("Detecting excluded alternatives")
 	excluded := a.detectExcludedAlternatives(ctx, symptom, rootCause, input.FailureTimestamp)
+	a.logger.Debug("Found %d excluded alternatives", len(excluded))
 
-	executionMs := time.Since(startTime).Milliseconds()
+	totalDuration := time.Since(startTime)
+	perfMetrics.TotalDurationMs = totalDuration.Milliseconds()
+
+	// Check for slow overall analysis
+	if totalDuration.Milliseconds() > SlowAnalysisThresholdMs {
+		a.logger.Warn("Slow analysis: %v (threshold: %dms)", totalDuration, SlowAnalysisThresholdMs)
+		perfMetrics.SlowOperations = append(perfMetrics.SlowOperations, SlowOperation{
+			Operation:   "full_analysis",
+			DurationMs:  totalDuration.Milliseconds(),
+			ThresholdMs: SlowAnalysisThresholdMs,
+		})
+	}
+
+	a.logger.Info("Analysis completed in %v - degraded=%v, symptom_only=%v, confidence=%.2f",
+		totalDuration, quality.IsDegraded, quality.IsSymptomOnly, confidence.Score)
 
 	return &RootCauseAnalysisV2{
 		Incident: IncidentAnalysis{
@@ -95,9 +175,11 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 		SupportingEvidence:   evidence,
 		ExcludedAlternatives: excluded,
 		QueryMetadata: QueryMetadata{
-			QueryExecutionMs: executionMs,
-			AlgorithmVersion: "v2.0-graph",
-			ExecutedAt:       time.Now(),
+			QueryExecutionMs:   totalDuration.Milliseconds(),
+			AlgorithmVersion:   "v2.0-graph",
+			ExecutedAt:         time.Now(),
+			ResultQuality:      quality,
+			PerformanceMetrics: perfMetrics,
 		},
 	}, nil
 }

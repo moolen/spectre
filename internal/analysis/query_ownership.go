@@ -13,7 +13,7 @@ import (
 func (a *RootCauseAnalyzer) getOwnershipChain(ctx context.Context, symptomUID string) ([]ResourceWithDistance, error) {
 	// First, get the symptom resource
 	symptomQuery := graph.GraphQuery{
-		Timeout: 5000,
+		Timeout: DefaultQueryTimeoutMs,
 		Query: `
 			MATCH (symptom:ResourceIdentity {uid: $symptomUID})
 			RETURN symptom as resource, 0 as distance
@@ -51,9 +51,9 @@ func (a *RootCauseAnalyzer) getOwnershipChain(ctx context.Context, symptomUID st
 		return nil, fmt.Errorf("symptom resource not found: %s", symptomUID)
 	}
 
-	// Now get owners (traverse up to 3 levels)
+	// Now get owners (traverse up to MaxOwnershipDepth levels)
 	ownersQuery := graph.GraphQuery{
-		Timeout: 5000,
+		Timeout: DefaultQueryTimeoutMs,
 		Query: `
 			MATCH (symptom:ResourceIdentity {uid: $symptomUID})
 			MATCH path = (symptom)<-[:OWNS*1..3]-(owner:ResourceIdentity)

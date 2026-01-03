@@ -28,11 +28,11 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 
 	// Query that combines:
 	// 1. ALL events with configChanged=true (critical for root cause analysis)
-	// 2. Up to 10 most recent events (for status context)
+	// 2. Up to MaxRecentEvents most recent events (for status context)
 	// This ensures we never miss the important config change that triggered a failure,
 	// even if there are many subsequent status-only events.
 	query := graph.GraphQuery{
-		Timeout: 5000,
+		Timeout: DefaultQueryTimeoutMs,
 		Query: `
 			UNWIND $resourceUIDs as uid
 			MATCH (resource:ResourceIdentity {uid: uid})
@@ -44,7 +44,7 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 			WITH resourceUID, collect(event) as allEvents
 			WITH resourceUID,
 			     [e IN allEvents WHERE e.configChanged = true] as configEvents,
-			     allEvents[0..10] as recentEvents
+			     allEvents[0..$maxEvents] as recentEvents
 			WITH resourceUID,
 			     configEvents + [e IN recentEvents WHERE NOT e.id IN [ce IN configEvents | ce.id]] as combinedEvents
 			UNWIND combinedEvents as event
@@ -56,6 +56,7 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 			"resourceUIDs":     resourceUIDs,
 			"failureTimestamp": failureTimestamp,
 			"lookback":         lookbackNs,
+			"maxEvents":        MaxRecentEvents,
 		},
 	}
 
@@ -158,7 +159,7 @@ func (a *RootCauseAnalyzer) getK8sEvents(
 	}
 
 	query := graph.GraphQuery{
-		Timeout: 5000,
+		Timeout: DefaultQueryTimeoutMs,
 		Query: `
 			UNWIND $resourceUIDs as uid
 			MATCH (resource:ResourceIdentity {uid: uid})
@@ -167,13 +168,14 @@ func (a *RootCauseAnalyzer) getK8sEvents(
 			  AND k8sEvent.timestamp >= $failureTimestamp - $lookback
 			WITH resource.uid as resourceUID, k8sEvent
 			ORDER BY k8sEvent.timestamp DESC
-			WITH resourceUID, collect(k8sEvent)[0..20] as events
+			WITH resourceUID, collect(k8sEvent)[0..$maxEvents] as events
 			RETURN resourceUID, events
 		`,
 		Parameters: map[string]interface{}{
 			"resourceUIDs":     resourceUIDs,
 			"failureTimestamp": failureTimestamp,
 			"lookback":         lookbackNs,
+			"maxEvents":        MaxK8sEvents,
 		},
 	}
 

@@ -9,8 +9,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// buildCausalGraph constructs the causal graph from symptom to root cause
-// Uses split queries for better performance and maintainability
+// buildCausalGraph constructs the causal graph from symptom to root cause.
+// Uses split queries for better performance and maintainability.
+//
+// Error Handling:
+// - If ownership chain query fails, returns error (cannot proceed without chain)
+// - If any parallel query fails, returns error (fail-fast approach)
+// - Individual query timeouts are handled by the query functions
+//
+// Performance: Executes 5 graph queries total:
+// 1. Ownership chain (sequential)
+// 2. Managers, Related resources, Change events, K8s events (parallel)
+// 3. Manager events, Related events (sequential)
 func (a *RootCauseAnalyzer) buildCausalGraph(
 	ctx context.Context,
 	symptom *ObservedSymptom,
@@ -21,9 +31,19 @@ func (a *RootCauseAnalyzer) buildCausalGraph(
 
 	// Step 1: Get ownership chain (must succeed first)
 	a.logger.Debug("buildCausalGraph: getting ownership chain for symptom %s", symptom.Resource.UID)
+	chainStart := time.Now()
 	chain, err := a.getOwnershipChain(ctx, symptom.Resource.UID)
+	chainDuration := time.Since(chainStart)
+
 	if err != nil {
+		a.logger.Error("buildCausalGraph: ownership chain query failed after %v: %v", chainDuration, err)
 		return CausalGraph{}, fmt.Errorf("failed to get ownership chain: %w", err)
+	}
+
+	a.logger.Debug("buildCausalGraph: ownership chain query completed in %v", chainDuration)
+	if chainDuration.Milliseconds() > SlowQueryThresholdMs {
+		a.logger.Warn("buildCausalGraph: slow ownership chain query: %v (threshold: %dms)",
+			chainDuration, SlowQueryThresholdMs)
 	}
 
 	// Collect all resource UIDs for batch queries
@@ -63,33 +83,60 @@ func (a *RootCauseAnalyzer) buildCausalGraph(
 	a.logger.Debug("buildCausalGraph: querying for related resources of %d resources (chain + managers): %v", len(allUIDs), allUIDs)
 
 	// Now run the remaining queries in parallel
+	a.logger.Debug("buildCausalGraph: executing parallel queries (related resources, change events, k8s events)")
+	parallelStart := time.Now()
 	g, gctx := errgroup.WithContext(ctx)
 	var related map[string][]RelatedResourceData
 	var changeEvents map[string][]ChangeEventInfo
 	var k8sEvents map[string][]K8sEventInfo
 
 	g.Go(func() error {
+		start := time.Now()
 		var err error
 		related, err = a.getRelatedResources(gctx, allUIDs)
+		duration := time.Since(start)
+		if err != nil {
+			a.logger.Error("buildCausalGraph: related resources query failed after %v: %v", duration, err)
+		} else {
+			a.logger.Debug("buildCausalGraph: related resources query completed in %v (%d resources)", duration, len(related))
+		}
 		return err
 	})
 
 	g.Go(func() error {
+		start := time.Now()
 		var err error
 		changeEvents, err = a.getChangeEvents(gctx, resourceUIDs, failureTimestamp, lookbackNs)
+		duration := time.Since(start)
+		if err != nil {
+			a.logger.Error("buildCausalGraph: change events query failed after %v: %v", duration, err)
+		} else {
+			a.logger.Debug("buildCausalGraph: change events query completed in %v (%d resources)", duration, len(changeEvents))
+		}
 		return err
 	})
 
 	g.Go(func() error {
+		start := time.Now()
 		var err error
 		k8sEvents, err = a.getK8sEvents(gctx, resourceUIDs, failureTimestamp, lookbackNs)
+		duration := time.Since(start)
+		if err != nil {
+			a.logger.Error("buildCausalGraph: k8s events query failed after %v: %v", duration, err)
+		} else {
+			a.logger.Debug("buildCausalGraph: k8s events query completed in %v (%d resources)", duration, len(k8sEvents))
+		}
 		return err
 	})
 
 	// Fail fast: if any query fails, return immediately
 	if err := g.Wait(); err != nil {
+		a.logger.Error("buildCausalGraph: parallel queries failed after %v: %v", time.Since(parallelStart), err)
 		return CausalGraph{}, fmt.Errorf("failed to build causal graph: %w", err)
 	}
+
+	parallelDuration := time.Since(parallelStart)
+	a.logger.Debug("buildCausalGraph: all parallel queries completed in %v", parallelDuration)
 
 	// Step 5b: Get events for related resources (managers and related)
 	// Collect manager UIDs

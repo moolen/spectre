@@ -135,12 +135,62 @@ type ExcludedHypothesis struct {
 	ReasonExcluded string          `json:"reasonExcluded"` // Why it was rejected
 }
 
-// QueryMetadata provides execution information
+// QueryMetadata provides execution information and result quality indicators
 type QueryMetadata struct {
-	QueryExecutionMs  int64     `json:"queryExecutionMs"`
-	GraphNodesVisited int       `json:"graphNodesVisited,omitempty"`
-	AlgorithmVersion  string    `json:"algorithmVersion"` // For reproducibility
-	ExecutedAt        time.Time `json:"executedAt"`
+	QueryExecutionMs  int64           `json:"queryExecutionMs"`
+	GraphNodesVisited int             `json:"graphNodesVisited,omitempty"`
+	AlgorithmVersion  string          `json:"algorithmVersion"` // For reproducibility
+	ExecutedAt        time.Time       `json:"executedAt"`
+	ResultQuality     ResultQuality   `json:"resultQuality"`           // Quality indicators for this result
+	PerformanceMetrics *PerformanceMetrics `json:"performanceMetrics,omitempty"` // Detailed timing breakdown
+}
+
+// ResultQuality indicates the quality and completeness of the analysis result
+type ResultQuality struct {
+	// IsDegraded indicates if this is a degraded result due to errors or missing data.
+	// Degraded results should be treated with caution and may not include full causality.
+	IsDegraded bool `json:"isDegraded"`
+
+	// DegradationReasons lists specific reasons why the result was degraded.
+	// Examples: "ownership_chain_query_failed", "no_events_found", "empty_graph"
+	DegradationReasons []string `json:"degradationReasons,omitempty"`
+
+	// IsSymptomOnly indicates if the result only contains the symptom resource
+	// without any causal chain. This typically means no ownership chain was found.
+	IsSymptomOnly bool `json:"isSymptomOnly"`
+
+	// HasPartialData indicates if some optional data is missing but core analysis succeeded.
+	// For example, missing K8s events or related resources.
+	HasPartialData bool `json:"hasPartialData,omitempty"`
+
+	// Warnings contains non-fatal issues encountered during analysis.
+	// The result is still valid but these issues should be noted.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// PerformanceMetrics provides detailed timing breakdown for performance monitoring
+type PerformanceMetrics struct {
+	// TotalDurationMs is the total time for the entire analysis
+	TotalDurationMs int64 `json:"totalDurationMs"`
+
+	// GraphQueryDurationMs is the time spent executing all graph queries
+	GraphQueryDurationMs int64 `json:"graphQueryDurationMs,omitempty"`
+
+	// GraphBuildDurationMs is the time spent building the causal graph structure
+	GraphBuildDurationMs int64 `json:"graphBuildDurationMs,omitempty"`
+
+	// OwnershipChainDurationMs is the time spent querying the ownership chain
+	OwnershipChainDurationMs int64 `json:"ownershipChainDurationMs,omitempty"`
+
+	// SlowOperations lists operations that exceeded performance thresholds
+	SlowOperations []SlowOperation `json:"slowOperations,omitempty"`
+}
+
+// SlowOperation records an operation that exceeded its performance threshold
+type SlowOperation struct {
+	Operation   string `json:"operation"`   // Name of the operation (e.g., "ownership_chain_query")
+	DurationMs  int64  `json:"durationMs"`  // Actual duration
+	ThresholdMs int64  `json:"thresholdMs"` // Expected threshold
 }
 
 // ============================================================================

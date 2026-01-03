@@ -114,9 +114,9 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Parse JSON request using shared utility
+	// Parse JSON request using new Import API
 	h.logger.Debug("Starting to parse JSON events from request body")
-	events, err := importexport.ParseJSONEvents(decompressedBody)
+	eventValues, err := importexport.Import(importexport.FromReader(decompressedBody), importexport.WithLogger(h.logger))
 	if err != nil {
 		h.logger.Error("Failed to parse JSON: %v", err)
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
@@ -125,11 +125,8 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 
 	parseDuration := time.Since(startTime)
 	h.logger.InfoWithFields("Parsed JSON import request",
-		logging.Field("event_count", len(events)),
+		logging.Field("event_count", len(eventValues)),
 		logging.Field("parse_duration", parseDuration))
-
-	// Convert []*models.Event to []models.Event for pipeline using shared utility
-	eventValues := importexport.ConvertEventsToValues(events)
 
 	// Process events through graph pipeline
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
@@ -160,13 +157,13 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	duration := time.Since(startTime)
 
 	h.logger.InfoWithFields("JSON event batch import completed",
-		logging.Field("total_events", len(events)),
+		logging.Field("total_events", len(eventValues)),
 		logging.Field("duration", duration))
 
 	// Calculate approximate "files created" based on unique hours
 	// This is for compatibility with existing tests that expect this field
 	hourSet := make(map[int64]bool)
-	for _, event := range events {
+	for _, event := range eventValues {
 		hour := time.Unix(0, event.Timestamp).Truncate(time.Hour).Unix()
 		hourSet[hour] = true
 	}
@@ -176,9 +173,9 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":         "success",
-		"total_events":   len(events),
+		"total_events":   len(eventValues),
 		"merged_hours":   filesCreated, // Number of unique hours
 		"files_created":  filesCreated, // For compatibility with tests
 		"imported_files": 0,            // Not applicable in graph mode
@@ -190,7 +187,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.ErrorWithFields("Failed to write import response",
 			logging.Field("error", err),
-			logging.Field("total_events", len(events)))
+			logging.Field("total_events", len(eventValues)))
 		// Response already sent, can't send error response
 		return
 	}

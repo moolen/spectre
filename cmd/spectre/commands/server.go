@@ -257,7 +257,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		logger.Info("Importing events from path: %s", importPath)
 		importStartTime := time.Now()
 
-		eventValues, err := importexport.ImportPathAsValues(importPath)
+		eventValues, err := importexport.Import(importexport.FromPath(importPath), importexport.WithLogger(logger))
 		if err != nil {
 			logger.Error("Failed to import events from path: %v", err)
 			HandleError(err, "Import error")
