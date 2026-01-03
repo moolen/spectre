@@ -121,37 +121,29 @@ func (a *RootCauseAnalyzer) buildCausalGraph(
 	return a.mergeIntoCausalGraph(symptom, chain, managers, related, changeEvents, k8sEvents, failureTimestamp)
 }
 
-// mergeIntoCausalGraph combines the split query results into a CausalGraph
-func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
+// spineNodeBuildResult contains the output of building SPINE nodes
+type spineNodeBuildResult struct {
+	nodes          []GraphNode
+	nodeMap        map[string]string // resource.UID -> node.ID
+	seenResources  map[string]bool
+	nextStepNumber int
+}
+
+// buildSpineNodes creates all SPINE nodes (resources in the ownership chain and their managers)
+// This is STEP 1 of graph building: establishing the main causal chain
+func (a *RootCauseAnalyzer) buildSpineNodes(
 	symptom *ObservedSymptom,
-	chain []ResourceWithDistance,
+	sortedChain []ResourceWithDistance,
 	managers map[string]*ManagerData,
-	related map[string][]RelatedResourceData,
 	changeEvents map[string][]ChangeEventInfo,
 	k8sEvents map[string][]K8sEventInfo,
 	failureTimestamp int64,
-) (CausalGraph, error) {
-	// Build graph structure: nodes and edges
+) spineNodeBuildResult {
 	nodes := []GraphNode{}
-	edges := []GraphEdge{}
-	nodeMap := make(map[string]string) // resource.UID -> node.ID
-	edgeSet := make(map[string]bool)   // Deduplicate edges
-
+	nodeMap := make(map[string]string)
 	seenResources := make(map[string]bool)
 	stepNumber := 1
 
-	// Sort chain by distance DESC (furthest from symptom = root cause side)
-	sortedChain := make([]ResourceWithDistance, len(chain))
-	copy(sortedChain, chain)
-	for i := 0; i < len(sortedChain); i++ {
-		for j := i + 1; j < len(sortedChain); j++ {
-			if sortedChain[j].Distance > sortedChain[i].Distance {
-				sortedChain[i], sortedChain[j] = sortedChain[j], sortedChain[i]
-			}
-		}
-	}
-
-	// STEP 1: Create all SPINE nodes
 	for _, rwd := range sortedChain {
 		resource := rwd.Resource
 
@@ -238,8 +230,26 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 		}
 	}
 
-	// STEP 2: Create SPINE edges (main chain relationships)
-	// Build a map of which resources are owned
+	return spineNodeBuildResult{
+		nodes:          nodes,
+		nodeMap:        nodeMap,
+		seenResources:  seenResources,
+		nextStepNumber: stepNumber,
+	}
+}
+
+// buildSpineEdges creates SPINE edges (OWNS and MANAGES relationships in the main chain)
+// This is STEP 2 of graph building: connecting the causal chain nodes
+func (a *RootCauseAnalyzer) buildSpineEdges(
+	symptom *ObservedSymptom,
+	sortedChain []ResourceWithDistance,
+	managers map[string]*ManagerData,
+	nodeMap map[string]string,
+) []GraphEdge {
+	edges := []GraphEdge{}
+	edgeSet := make(map[string]bool) // Deduplicate edges
+
+	// Build a map of which resources are owned (to avoid duplicate MANAGES edges)
 	ownedResources := make(map[string]bool)
 	for idx, rwd := range sortedChain {
 		if rwd.Resource.UID != symptom.Resource.UID {
@@ -253,6 +263,7 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 		}
 	}
 
+	// Create edges for each resource in the chain
 	for idx, rwd := range sortedChain {
 		resource := rwd.Resource
 		fromNodeID := nodeMap[resource.UID]
@@ -260,7 +271,7 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 			continue
 		}
 
-		// OWNS edge to next resource in chain
+		// OWNS edge to next resource in chain (parent -> child)
 		if resource.UID != symptom.Resource.UID {
 			targetDistance := rwd.Distance - 1
 			for nextIdx := idx + 1; nextIdx < len(sortedChain); nextIdx++ {
@@ -285,7 +296,7 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 			}
 		}
 
-		// MANAGES edge from manager to resource
+		// MANAGES edge from manager to resource (only if not already owned)
 		mgrData := managers[resource.UID]
 		if mgrData != nil && !ownedResources[resource.UID] {
 			managerNodeID := nodeMap[mgrData.Manager.UID]
@@ -305,12 +316,33 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 		}
 	}
 
-	// STEP 3: Create RELATED nodes and ATTACHMENT edges
-	// Process related resources for both chain resources AND managers
+	return edges
+}
+
+// relatedGraphBuildResult contains the output of building RELATED nodes and edges
+type relatedGraphBuildResult struct {
+	nodes []GraphNode
+	edges []GraphEdge
+}
+
+// buildRelatedGraph creates RELATED nodes and ATTACHMENT edges for supporting resources
+// This is STEP 3 of graph building: adding context nodes like Nodes, ServiceAccounts, etc.
+func (a *RootCauseAnalyzer) buildRelatedGraph(
+	sortedChain []ResourceWithDistance,
+	managers map[string]*ManagerData,
+	related map[string][]RelatedResourceData,
+	nodeMap map[string]string, // Will be modified to add new nodes
+) relatedGraphBuildResult {
+	nodes := []GraphNode{}
+	edges := []GraphEdge{}
+	edgeSet := make(map[string]bool) // Deduplicate edges
+
+	// Collect all resource UIDs that may have related resources
 	resourcesWithRelated := []string{}
 	for _, rwd := range sortedChain {
 		resourcesWithRelated = append(resourcesWithRelated, rwd.Resource.UID)
 	}
+
 	// Also add manager UIDs (note: managers map is keyed by managed resource UID)
 	for _, mgrData := range managers {
 		managerUID := mgrData.Manager.UID
@@ -322,37 +354,41 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 			}
 		}
 		if !found {
-			a.logger.Debug("mergeIntoCausalGraph: adding manager %s/%s (UID: %s) to resources with related",
+			a.logger.Debug("buildRelatedGraph: adding manager %s/%s (UID: %s) to resources with related",
 				mgrData.Manager.Kind, mgrData.Manager.Name, managerUID)
 			resourcesWithRelated = append(resourcesWithRelated, managerUID)
 		}
 	}
 
+	// Process each resource's related resources
 	for _, resourceUID := range resourcesWithRelated {
 		parentNodeID := nodeMap[resourceUID]
 		if parentNodeID == "" {
-			a.logger.Debug("mergeIntoCausalGraph: skipping related resources for %s - no node in map", resourceUID)
+			a.logger.Debug("buildRelatedGraph: skipping related resources for %s - no node in map", resourceUID)
 			continue
 		}
 
 		relatedList := related[resourceUID]
-		a.logger.Debug("mergeIntoCausalGraph: processing %d related resources for %s", len(relatedList), resourceUID)
+		a.logger.Debug("buildRelatedGraph: processing %d related resources for %s", len(relatedList), resourceUID)
+
 		for _, relData := range relatedList {
 			hasChanges := len(relData.Events) > 0
-			// Always include SCHEDULED_ON, GRANTS_TO, REFERENCES_SPEC, and INGRESS_REF even without recent changes
-			// REFERENCES_SPEC and INGRESS_REF are important for understanding configuration dependencies
-			// (e.g., HelmRelease -> ConfigMap, Ingress -> Service)
+
+			// Filter: only include certain relationship types without changes
+			// Always include SCHEDULED_ON, GRANTS_TO, REFERENCES_SPEC, and INGRESS_REF
+			// These are important for understanding configuration dependencies
 			if relData.RelationshipType != "SCHEDULED_ON" &&
 				relData.RelationshipType != "GRANTS_TO" &&
 				relData.RelationshipType != "REFERENCES_SPEC" &&
 				relData.RelationshipType != "INGRESS_REF" &&
 				!hasChanges {
-				a.logger.Debug("mergeIntoCausalGraph: skipping %s (type=%s) - no changes", relData.Resource.Name, relData.RelationshipType)
+				a.logger.Debug("buildRelatedGraph: skipping %s (type=%s) - no changes", relData.Resource.Name, relData.RelationshipType)
 				continue
 			}
 
 			if relData.RelationshipType == "REFERENCES_SPEC" || relData.RelationshipType == "INGRESS_REF" {
-				a.logger.Debug("mergeIntoCausalGraph: including %s %s/%s (hasChanges=%v)", relData.RelationshipType, relData.Resource.Kind, relData.Resource.Name, hasChanges)
+				a.logger.Debug("buildRelatedGraph: including %s %s/%s (hasChanges=%v)",
+					relData.RelationshipType, relData.Resource.Kind, relData.Resource.Name, hasChanges)
 			}
 
 			relatedUID := relData.Resource.UID
@@ -371,8 +407,9 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 				))
 			}
 
-			// Create attachment edge
+			// Create attachment edge based on relationship type
 			if relData.RelationshipType == "GRANTS_TO" {
+				// Special case: GRANTS_TO connects RoleBinding to ServiceAccount
 				// Find the ServiceAccount node
 				var serviceAccountNodeID string
 				for _, otherRelData := range relatedList {
@@ -396,32 +433,29 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 					}
 				}
 			} else {
-				// For SELECTS relationships, the edge direction is FROM the selector TO the resource
-				// Determine edge direction based on relationship type:
-				// - SELECTS: Service/NetworkPolicy -> Pod (reversed)
-				// - INGRESS_REF: Ingress -> Service (uses ReferenceTargetUID, not parentNodeID)
-				// - Others (SCHEDULED_ON, USES_SERVICE_ACCOUNT, REFERENCES_SPEC): resource -> related (normal)
+				// Determine edge direction based on relationship type
 				var fromNode, toNode string
+
 				if relData.RelationshipType == "SELECTS" {
-					// Reverse direction: selector -> resource
+					// Reverse direction: selector (Service/NetworkPolicy) -> resource (Pod)
 					fromNode = relatedNodeID
 					toNode = parentNodeID
 				} else if relData.RelationshipType == "INGRESS_REF" {
 					// Ingress -> Service: use the ReferenceTargetUID
 					fromNode = relatedNodeID // Ingress
-					// Find the Service node by UID
 					if relData.ReferenceTargetUID != "" {
 						toNode = nodeMap[relData.ReferenceTargetUID]
 						if toNode == "" {
-							a.logger.Debug("mergeIntoCausalGraph: skipping INGRESS_REF edge - Service node not found for UID %s", relData.ReferenceTargetUID)
+							a.logger.Debug("buildRelatedGraph: skipping INGRESS_REF edge - Service node not found for UID %s",
+								relData.ReferenceTargetUID)
 							continue
 						}
 					} else {
-						a.logger.Debug("mergeIntoCausalGraph: skipping INGRESS_REF edge - no ReferenceTargetUID")
+						a.logger.Debug("buildRelatedGraph: skipping INGRESS_REF edge - no ReferenceTargetUID")
 						continue
 					}
 				} else {
-					// Normal direction: resource -> related
+					// Normal direction: resource -> related (SCHEDULED_ON, USES_SERVICE_ACCOUNT, REFERENCES_SPEC)
 					fromNode = parentNodeID
 					toNode = relatedNodeID
 				}
@@ -446,6 +480,50 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 			}
 		}
 	}
+
+	return relatedGraphBuildResult{
+		nodes: nodes,
+		edges: edges,
+	}
+}
+
+// mergeIntoCausalGraph combines the split query results into a CausalGraph
+func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
+	symptom *ObservedSymptom,
+	chain []ResourceWithDistance,
+	managers map[string]*ManagerData,
+	related map[string][]RelatedResourceData,
+	changeEvents map[string][]ChangeEventInfo,
+	k8sEvents map[string][]K8sEventInfo,
+	failureTimestamp int64,
+) (CausalGraph, error) {
+	// Build graph structure: edges will be built in separate steps
+	edges := []GraphEdge{}
+
+	// Sort chain by distance DESC (furthest from symptom = root cause side)
+	sortedChain := make([]ResourceWithDistance, len(chain))
+	copy(sortedChain, chain)
+	for i := 0; i < len(sortedChain); i++ {
+		for j := i + 1; j < len(sortedChain); j++ {
+			if sortedChain[j].Distance > sortedChain[i].Distance {
+				sortedChain[i], sortedChain[j] = sortedChain[j], sortedChain[i]
+			}
+		}
+	}
+
+	// STEP 1: Create all SPINE nodes
+	spineResult := a.buildSpineNodes(symptom, sortedChain, managers, changeEvents, k8sEvents, failureTimestamp)
+	nodes := spineResult.nodes
+	nodeMap := spineResult.nodeMap
+
+	// STEP 2: Create SPINE edges (main chain relationships)
+	spineEdges := a.buildSpineEdges(symptom, sortedChain, managers, nodeMap)
+	edges = append(edges, spineEdges...)
+
+	// STEP 3: Create RELATED nodes and ATTACHMENT edges
+	relatedResult := a.buildRelatedGraph(sortedChain, managers, related, nodeMap)
+	nodes = append(nodes, relatedResult.nodes...)
+	edges = append(edges, relatedResult.edges...)
 
 	a.logger.Debug("Built causal graph with %d nodes and %d edges", len(nodes), len(edges))
 	return CausalGraph{
