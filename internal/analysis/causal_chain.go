@@ -192,25 +192,19 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 		reasoning := generateStepReasoning(resource, manager, managesEdge, primaryEvent, relationshipType)
 
 		// Create node ID and add to map
-		nodeID := fmt.Sprintf("node-%s", resource.UID)
+		nodeID := createNodeID(resource.UID)
 		nodeMap[resource.UID] = nodeID
 
-		// Create SPINE node
-		nodes = append(nodes, GraphNode{
-			ID: nodeID,
-			Resource: SymptomResource{
-				UID:       resource.UID,
-				Kind:      resource.Kind,
-				Namespace: resource.Namespace,
-				Name:      resource.Name,
-			},
-			ChangeEvent: primaryEvent,
-			AllEvents:   events,
-			K8sEvents:   k8sEvts,
-			NodeType:    "SPINE",
-			StepNumber:  stepNumber,
-			Reasoning:   reasoning,
-		})
+		// Create SPINE node using factory function
+		nodes = append(nodes, createSpineNode(
+			nodeID,
+			resourceIdentityToSymptomResource(resource),
+			primaryEvent,
+			events,
+			k8sEvts,
+			stepNumber,
+			reasoning,
+		))
 		stepNumber++
 
 		// If this resource has a manager, add the manager as a separate node
@@ -221,7 +215,7 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 			managerEvents := changeEvents[manager.UID]
 			managerPrimaryEvent := selectPrimaryEvent(managerEvents, failureTimestamp)
 
-			managerNodeID := fmt.Sprintf("node-%s", manager.UID)
+			managerNodeID := createNodeID(manager.UID)
 			nodeMap[manager.UID] = managerNodeID
 
 			confidence := 0.0
@@ -229,21 +223,17 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 				confidence = managesEdge.Confidence
 			}
 
-			nodes = append(nodes, GraphNode{
-				ID: managerNodeID,
-				Resource: SymptomResource{
-					UID:       manager.UID,
-					Kind:      manager.Kind,
-					Namespace: manager.Namespace,
-					Name:      manager.Name,
-				},
-				ChangeEvent: managerPrimaryEvent,
-				AllEvents:   managerEvents,
-				NodeType:    "SPINE",
-				StepNumber:  stepNumber,
-				Reasoning: fmt.Sprintf("%s manages %s lifecycle (confidence: %.0f%%)",
+			// Create manager SPINE node using factory function
+			nodes = append(nodes, createSpineNode(
+				managerNodeID,
+				resourceIdentityToSymptomResource(*manager),
+				managerPrimaryEvent,
+				managerEvents,
+				nil, // No K8s events for managers
+				stepNumber,
+				fmt.Sprintf("%s manages %s lifecycle (confidence: %.0f%%)",
 					manager.Kind, resource.Kind, confidence*100),
-			})
+			))
 			stepNumber++
 		}
 	}
@@ -278,7 +268,7 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 					nextUID := sortedChain[nextIdx].Resource.UID
 					toNodeID := nodeMap[nextUID]
 					if toNodeID != "" {
-						edgeID := fmt.Sprintf("edge-spine-%s-%s", resource.UID, nextUID)
+						edgeID := createSpineEdgeID(resource.UID, nextUID)
 						if !edgeSet[edgeID] {
 							edges = append(edges, GraphEdge{
 								ID:               edgeID,
@@ -300,7 +290,7 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 		if mgrData != nil && !ownedResources[resource.UID] {
 			managerNodeID := nodeMap[mgrData.Manager.UID]
 			if managerNodeID != "" {
-				edgeID := fmt.Sprintf("edge-spine-%s-%s", mgrData.Manager.UID, resource.UID)
+				edgeID := createSpineEdgeID(mgrData.Manager.UID, resource.UID)
 				if !edgeSet[edgeID] {
 					edges = append(edges, GraphEdge{
 						ID:               edgeID,
@@ -370,20 +360,15 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 			// Create or get node for related resource
 			relatedNodeID := nodeMap[relatedUID]
 			if relatedNodeID == "" {
-				relatedNodeID = fmt.Sprintf("node-%s", relatedUID)
+				relatedNodeID = createNodeID(relatedUID)
 				nodeMap[relatedUID] = relatedNodeID
 
-				nodes = append(nodes, GraphNode{
-					ID: relatedNodeID,
-					Resource: SymptomResource{
-						UID:       relData.Resource.UID,
-						Kind:      relData.Resource.Kind,
-						Namespace: relData.Resource.Namespace,
-						Name:      relData.Resource.Name,
-					},
-					AllEvents: relData.Events,
-					NodeType:  "RELATED",
-				})
+				// Create RELATED node using factory function
+				nodes = append(nodes, createRelatedNode(
+					relatedNodeID,
+					resourceIdentityToSymptomResource(relData.Resource),
+					relData.Events,
+				))
 			}
 
 			// Create attachment edge
@@ -398,7 +383,7 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 				}
 
 				if serviceAccountNodeID != "" {
-					edgeID := fmt.Sprintf("edge-attach-%s-%s", relatedUID, serviceAccountNodeID)
+					edgeID := createAttachmentEdgeID(relatedNodeID, serviceAccountNodeID)
 					if !edgeSet[edgeID] {
 						edges = append(edges, GraphEdge{
 							ID:               edgeID,
@@ -441,7 +426,7 @@ func (a *RootCauseAnalyzer) mergeIntoCausalGraph(
 					toNode = relatedNodeID
 				}
 
-				edgeID := fmt.Sprintf("edge-attach-%s-%s", fromNode, toNode)
+				edgeID := createAttachmentEdgeID(fromNode, toNode)
 				if !edgeSet[edgeID] {
 					// Map internal relationship types to canonical ones
 					relType := relData.RelationshipType

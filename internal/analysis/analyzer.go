@@ -53,51 +53,13 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 	if err != nil {
 		a.logger.Debug("Failed to build causal graph: %v, using symptom-only response", err)
 		// Fallback: create minimal graph with just the symptom
-		graph = CausalGraph{
-			Nodes: []GraphNode{
-				{
-					ID: fmt.Sprintf("node-%s", symptom.Resource.UID),
-					Resource: symptom.Resource,
-					ChangeEvent: &ChangeEventInfo{
-						EventID:       "",
-						Timestamp:     symptom.ObservedAt,
-						EventType:     "OBSERVED",
-						ConfigChanged: false,
-						StatusChanged: true,
-						Description:   "Observed failure",
-					},
-					NodeType:   "SPINE",
-					StepNumber: 1,
-					Reasoning:  fmt.Sprintf("Direct observation of %s", symptom.SymptomType),
-				},
-			},
-			Edges: []GraphEdge{},
-		}
+		graph = createSymptomOnlyGraph(symptom)
 	}
 
 	// If graph is empty, create symptom-only graph
-	if len(graph.Nodes) == 0 {
+	if isGraphEmpty(graph) {
 		a.logger.Debug("Empty causal graph, using symptom-only response")
-		graph = CausalGraph{
-			Nodes: []GraphNode{
-				{
-					ID: fmt.Sprintf("node-%s", symptom.Resource.UID),
-					Resource: symptom.Resource,
-					ChangeEvent: &ChangeEventInfo{
-						EventID:       "",
-						Timestamp:     symptom.ObservedAt,
-						EventType:     "OBSERVED",
-						ConfigChanged: false,
-						StatusChanged: true,
-						Description:   "Observed failure",
-					},
-					NodeType:   "SPINE",
-					StepNumber: 1,
-					Reasoning:  fmt.Sprintf("Direct observation of %s", symptom.SymptomType),
-				},
-			},
-			Edges: []GraphEdge{},
-		}
+		graph = createSymptomOnlyGraph(symptom)
 	}
 
 	// 3. Identify root cause
@@ -106,21 +68,7 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 	if err != nil {
 		a.logger.Debug("Failed to identify root cause: %v, using symptom as root", err)
 		// Fallback: use symptom itself as root cause
-		rootCause = &RootCauseHypothesis{
-			Resource: symptom.Resource,
-			ChangeEvent: ChangeEventInfo{
-				EventID:       "",
-				Timestamp:     symptom.ObservedAt,
-				EventType:     "OBSERVED",
-				ConfigChanged: false,
-				StatusChanged: true,
-				Description:   "Observed failure",
-			},
-			CausationType: "DirectObservation",
-			Explanation: fmt.Sprintf("%s '%s' failed with %s. No causal chain found in graph data.",
-				symptom.Resource.Kind, symptom.Resource.Name, symptom.SymptomType),
-			TimeLagMs: 0,
-		}
+		rootCause = createSymptomOnlyRootCause(symptom)
 	}
 
 	// 4. Calculate confidence score
