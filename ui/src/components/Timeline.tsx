@@ -663,7 +663,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .filter((d: any) => highlightedEventIds.includes(d.id))
         .raise();
 
-  }, [selectedPoint, highlightedEventIds, themeColors, theme]);
+  }, [selectedPoint, highlightedEventIds, themeColors, theme, sortedResources]);
 
   // Track previous sidebar width to detect panel closing
   const prevSidebarWidth = useRef(0);

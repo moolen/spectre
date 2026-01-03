@@ -162,6 +162,39 @@ func setupE2ETestWithCustomValues(t *testing.T, valuesFilePath string, preDeploy
 			}
 		}
 
+		// Extract audit log before cleanup
+		if ctx.K8sClient != nil {
+			extractCtx, extractCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer extractCancel()
+
+			// Find the Spectre pod
+			pods, err := ctx.K8sClient.ListPods(extractCtx, namespace, fmt.Sprintf("app.kubernetes.io/instance=%s", releaseName))
+			if err == nil && len(pods.Items) > 0 {
+				// Use the first pod (typically there's only one)
+				pod := pods.Items[0]
+				auditLogPath := "/tmp/audit-logs/audit.jsonl"
+				containerName := "spectre"
+
+				// Create test name for file (sanitize test name)
+				testName := sanitizeName(t.Name())
+
+				// Get repo root to ensure we write to .tests/ at repo root
+				repoRoot, repoErr := detectRepoRoot()
+				var localPath string
+				if repoErr != nil {
+					t.Logf("Warning: failed to detect repo root, using relative path: %v", repoErr)
+					localPath = filepath.Join(".tests", fmt.Sprintf("%s.jsonl", testName))
+				} else {
+					localPath = filepath.Join(repoRoot, ".tests", fmt.Sprintf("%s.jsonl", testName))
+				}
+
+				// Extract audit log
+				if err := ctx.K8sClient.ExtractAuditLog(extractCtx, sharedCluster.GetContext(), namespace, pod.Name, containerName, auditLogPath, localPath); err != nil {
+					t.Logf("Warning: failed to extract audit log: %v", err)
+				}
+			}
+		}
+
 		// Delete namespace (cascading delete of all resources)
 		deleteCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -231,6 +264,47 @@ func setupE2ETestWithCustomValues(t *testing.T, valuesFilePath string, preDeploy
 
 	// Set the namespace in values to match the test namespace
 	values["namespace"] = namespace
+
+	// Enable audit log for e2e tests
+	// Create an emptyDir volume for audit logs
+	auditLogPath := "/tmp/audit-logs/audit.jsonl"
+	if extraVolumes, ok := values["extraVolumes"].([]interface{}); ok {
+		values["extraVolumes"] = append(extraVolumes, map[string]interface{}{
+			"name":     "audit-logs",
+			"emptyDir": map[string]interface{}{},
+		})
+	} else {
+		values["extraVolumes"] = []interface{}{
+			map[string]interface{}{
+				"name":     "audit-logs",
+				"emptyDir": map[string]interface{}{},
+			},
+		}
+	}
+
+	// Add volume mount for audit logs
+	if extraVolumeMounts, ok := values["extraVolumeMounts"].([]interface{}); ok {
+		values["extraVolumeMounts"] = append(extraVolumeMounts, map[string]interface{}{
+			"name":      "audit-logs",
+			"mountPath": "/tmp/audit-logs",
+		})
+	} else {
+		values["extraVolumeMounts"] = []interface{}{
+			map[string]interface{}{
+				"name":      "audit-logs",
+				"mountPath": "/tmp/audit-logs",
+			},
+		}
+	}
+
+	// Add audit log flag to extraArgs
+	if extraArgs, ok := values["extraArgs"].([]interface{}); ok {
+		values["extraArgs"] = append(extraArgs, fmt.Sprintf("--audit-log=%s", auditLogPath))
+	} else {
+		values["extraArgs"] = []interface{}{
+			fmt.Sprintf("--audit-log=%s", auditLogPath),
+		}
+	}
 
 	// Run pre-deploy function if provided (e.g., install Flux CRDs)
 	if preDeployFn != nil {

@@ -372,6 +372,11 @@ func (qe *QueryExecutor) parseTimelineResults(result *QueryResult) ([]models.Eve
 				if i == 0 && hasPreExisting {
 					event.PreExisting = true
 				}
+				// Debug: log if event data is missing for pods
+				if resourceMeta.Kind == "Pod" && len(event.Data) == 0 {
+					qe.logger.Debug("Pod ChangeEvent missing data field: resource=%s/%s, eventID=%s", 
+						resourceMeta.Namespace, resourceMeta.Name, event.ID)
+				}
 				events = append(events, *event)
 			}
 		}
@@ -420,10 +425,15 @@ func (qe *QueryExecutor) parseChangeEvent(node map[string]interface{}, resourceM
 	}
 
 	// Get resource data from ChangeEvent node
+	// The data field is stored as a string in the graph
 	dataStr := getStringField(node, "data")
 	var data []byte
 	if dataStr != "" {
 		data = []byte(dataStr)
+	} else {
+		// Debug: data field is empty or missing
+		// This could happen if the ChangeEvent node wasn't created with data
+		// or if the data field wasn't stored properly in the graph
 	}
 
 	return &models.Event{

@@ -116,8 +116,15 @@ func (s *TimelinePerformanceStage) events_are_imported() *TimelinePerformanceSta
 	importReq, err := http.NewRequestWithContext(ctx, "POST", importURL, bytes.NewReader(payloadJSON))
 	s.require.NoError(err, "failed to create import request")
 	importReq.Header.Set("Content-Type", "application/vnd.spectre.events.v1+json")
+	importReq.ContentLength = int64(len(payloadJSON))
 
-	importResp, err := http.DefaultClient.Do(importReq)
+	// Use a client with longer timeout for large imports
+	httpClient := &http.Client{
+		Timeout: 5 * time.Minute, // Allow up to 5 minutes for large imports
+	}
+
+	s.t.Logf("Sending import request (payload size: %.2f MB, timeout: 10m)", float64(len(payloadJSON))/(1024*1024))
+	importResp, err := httpClient.Do(importReq)
 	s.require.NoError(err, "failed to execute import request")
 	defer importResp.Body.Close()
 
@@ -301,7 +308,7 @@ func (s *TimelinePerformanceStage) performance_does_not_degrade_significantly() 
 		if s.hoursToSpan > 10 {
 			fileGrowthFactor := float64(s.hoursToSpan) / 10.0
 			maxExpectedMs := int(float64(linearExpectedMs) * maxDegradationFactor)
-			
+
 			// For very fast queries (< minBaselineMs), allow absolute tolerance
 			// to avoid flakiness from measurement variance
 			absoluteDiff := s.queryDurationMs - linearExpectedMs

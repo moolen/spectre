@@ -71,6 +71,10 @@ func (m *MockGraphClient) Close() error {
 	return nil
 }
 
+func (m *MockGraphClient) DeleteGraph(ctx context.Context) error {
+	return nil
+}
+
 func TestEdgeRevalidator_DefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 	

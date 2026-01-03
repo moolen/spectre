@@ -152,7 +152,7 @@ export const TimelineRequest: MessageFns<TimelineRequest> = {
             break;
           }
 
-          message.startTimestamp = longToNumber(reader.int64());
+          message.startTimestamp = longToTimestampMs(reader.int64());
           continue;
         }
         case 2: {
@@ -160,7 +160,7 @@ export const TimelineRequest: MessageFns<TimelineRequest> = {
             break;
           }
 
-          message.endTimestamp = longToNumber(reader.int64());
+          message.endTimestamp = longToTimestampMs(reader.int64());
           continue;
         }
         case 3: {
@@ -575,7 +575,7 @@ export const StatusSegment: MessageFns<StatusSegment> = {
             break;
           }
 
-          message.startTime = longToNumber(reader.int64());
+          message.startTime = longToTimestampMs(reader.int64());
           continue;
         }
         case 7: {
@@ -583,7 +583,7 @@ export const StatusSegment: MessageFns<StatusSegment> = {
             break;
           }
 
-          message.endTime = longToNumber(reader.int64());
+          message.endTime = longToTimestampMs(reader.int64());
           continue;
         }
         case 8: {
@@ -746,7 +746,7 @@ export const K8sEvent: MessageFns<K8sEvent> = {
             break;
           }
 
-          message.timestamp = longToNumber(reader.int64());
+          message.timestamp = longToTimestampMs(reader.int64());
           continue;
         }
         case 6: {
@@ -921,7 +921,7 @@ export const TimelineResource: MessageFns<TimelineResource> = {
             break;
           }
 
-          message.createdAt = longToNumber(reader.int64());
+          message.createdAt = longToTimestampMs(reader.int64());
           continue;
         }
         case 7: {
@@ -929,7 +929,7 @@ export const TimelineResource: MessageFns<TimelineResource> = {
             break;
           }
 
-          message.deletedAt = longToNumber(reader.int64());
+          message.deletedAt = longToTimestampMs(reader.int64());
           continue;
         }
         case 8: {
@@ -1369,6 +1369,26 @@ function longToNumber(int64: { toString(): string }): number {
     throw new globalThis.Error("Value is smaller than Number.MIN_SAFE_INTEGER");
   }
   return num;
+}
+
+// longToTimestampMs converts a nanosecond timestamp to seconds (Unix timestamp)
+// This is needed because backend sends timestamps in nanoseconds (UnixNano),
+// which exceed JavaScript's MAX_SAFE_INTEGER when converted directly
+// The UI code expects seconds and multiplies by 1000 to get milliseconds for Date objects
+function longToTimestampMs(int64: { toString(): string }): number {
+  const numStr = int64.toString();
+  // Use BigInt for safe conversion of large numbers
+  const numBigInt = globalThis.BigInt(numStr);
+  // Nanoseconds to seconds: divide by 1,000,000,000
+  // Use BigInt division to avoid precision loss
+  const secBigInt = numBigInt / globalThis.BigInt(1000000000);
+  // Convert back to number (should be safe now as Unix timestamps in seconds are much smaller)
+  const sec = globalThis.Number(secBigInt);
+  if (sec > globalThis.Number.MAX_SAFE_INTEGER) {
+    // This shouldn't happen for second timestamps, but handle it just in case
+    throw new globalThis.Error("Timestamp in seconds still exceeds MAX_SAFE_INTEGER");
+  }
+  return Math.floor(sec);
 }
 
 function isObject(value: any): boolean {

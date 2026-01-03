@@ -440,13 +440,11 @@ class ApiClient {
 
   /**
    * Export storage data
-   * Returns a Blob that can be downloaded
+   * Returns a Blob that can be downloaded (gzipped JSON)
    */
   async exportData(options: {
     from: string;
     to: string;
-    includeOpenHour?: boolean;
-    compression?: boolean;
     clusterId?: string;
     instanceId?: string;
   }): Promise<Blob> {
@@ -454,11 +452,21 @@ class ApiClient {
     if (getDemoMode()) {
       throw new Error('Export is not available in demo mode');
     }
+    
+    // Convert human-readable time strings to Unix timestamps (seconds)
+    const fromDate = parseTimeExpression(options.from);
+    const toDate = parseTimeExpression(options.to);
+    
+    if (!fromDate || !toDate) {
+      throw new Error('Invalid time range: could not parse start or end time');
+    }
+    
+    const fromTimestamp = Math.floor(fromDate.getTime() / 1000);
+    const toTimestamp = Math.floor(toDate.getTime() / 1000);
+    
     const params = new URLSearchParams();
-    params.append('from', options.from);
-    params.append('to', options.to);
-    params.append('include_open_hour', (options.includeOpenHour ?? true).toString());
-    params.append('compression', (options.compression ?? true).toString());
+    params.append('from', fromTimestamp.toString());
+    params.append('to', toTimestamp.toString());
     if (options.clusterId) params.append('cluster_id', options.clusterId);
     if (options.instanceId) params.append('instance_id', options.instanceId);
 

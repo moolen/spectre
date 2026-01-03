@@ -9,9 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
-	"github.com/moolen/spectre/internal/storage"
 )
 
 // ProgressCallback is called during import to report progress
@@ -32,125 +30,6 @@ type ImportReport struct {
 	TotalEvents   int64
 	Errors        []string
 	Duration      time.Duration
-}
-
-// WalkAndImportJSON recursively walks a directory tree and imports all JSON files
-// containing event arrays. It calls the progress callback for each file processed.
-func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportOptions, progress ProgressCallback) (*ImportReport, error) {
-	logger := logging.GetLogger("importexport")
-
-	// Verify directory exists
-	info, err := os.Stat(dirPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to access import directory: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("import path is not a directory: %s", dirPath)
-	}
-
-	// Collect all JSON files
-	var jsonFiles []string
-	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			logger.Warn("Error accessing path %s: %v", path, err)
-			return nil // Continue walking
-		}
-
-		// Skip directories
-		if info.IsDir() {
-			return nil
-		}
-
-		// Only process .json files
-		if strings.HasSuffix(strings.ToLower(info.Name()), ".json") {
-			jsonFiles = append(jsonFiles, path)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to walk directory tree: %w", err)
-	}
-
-	if len(jsonFiles) == 0 {
-		logger.Warn("No JSON files found in directory: %s", dirPath)
-		return &ImportReport{
-			TotalFiles:    0,
-			ImportedFiles: 0,
-			MergedHours:   0,
-			SkippedFiles:  0,
-			FailedFiles:   0,
-			TotalEvents:   0,
-			Errors:        []string{},
-		}, nil
-	}
-
-	logger.Info("Found %d JSON files to import", len(jsonFiles))
-
-	// Aggregate all events from all files
-	var allEvents []*models.Event
-	filesProcessed := 0
-
-	for _, filePath := range jsonFiles {
-		events, err := ImportJSONFile(filePath)
-		if err != nil {
-			logger.Error("Failed to parse %s: %v", filePath, err)
-			return nil, fmt.Errorf("failed to parse %s: %w", filePath, err)
-		}
-
-		if len(events) == 0 {
-			logger.Warn("No events in file: %s", filePath)
-			continue
-		}
-
-		allEvents = append(allEvents, events...)
-		filesProcessed++
-
-		// Call progress callback
-		if progress != nil {
-			progress(filePath, len(events))
-		}
-
-		logger.Debug("Loaded %d events from %s", len(events), filePath)
-	}
-
-	if len(allEvents) == 0 {
-		logger.Warn("No events found in any JSON files")
-		return &ImportReport{
-			TotalFiles:    filesProcessed,
-			ImportedFiles: 0,
-			MergedHours:   0,
-			SkippedFiles:  0,
-			FailedFiles:   0,
-			TotalEvents:   0,
-			Errors:        []string{},
-		}, nil
-	}
-
-	logger.Info("Importing %d total events from %d files", len(allEvents), filesProcessed)
-
-	// Use storage's batch import functionality
-	storageReport, err := st.AddEventsBatch(allEvents, opts)
-	if err != nil {
-		return nil, fmt.Errorf("batch import failed: %w", err)
-	}
-
-	logger.Info("Import completed: %d events, %d hours merged", storageReport.TotalEvents, storageReport.MergedHours)
-
-	// Convert storage report to our import report
-	report := &ImportReport{
-		TotalFiles:    filesProcessed,
-		ImportedFiles: storageReport.ImportedFiles,
-		MergedHours:   storageReport.MergedHours,
-		SkippedFiles:  storageReport.SkippedFiles,
-		FailedFiles:   storageReport.FailedFiles,
-		TotalEvents:   storageReport.TotalEvents,
-		Errors:        storageReport.Errors,
-		Duration:      storageReport.Duration,
-	}
-
-	return report, nil
 }
 
 // ImportJSONFile reads and parses a single JSON file containing an events array
@@ -230,4 +109,76 @@ func enrichEventsWithInvolvedObjectUID(events []*models.Event) {
 		// Populate the InvolvedObjectUID field
 		event.Resource.InvolvedObjectUID = uid
 	}
+}
+
+// ConvertEventsToValues converts a slice of event pointers to a slice of event values.
+// This is needed because pipeline.ProcessBatch() expects []models.Event, not []*models.Event.
+func ConvertEventsToValues(events []*models.Event) []models.Event {
+	eventValues := make([]models.Event, len(events))
+	for i, event := range events {
+		eventValues[i] = *event
+	}
+	return eventValues
+}
+
+// ImportJSONFileAsValues reads and parses a JSON file and returns events as values (not pointers).
+// This is a convenience function for code that needs []models.Event for pipeline processing.
+func ImportJSONFileAsValues(filePath string) ([]models.Event, error) {
+	events, err := ImportJSONFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return ConvertEventsToValues(events), nil
+}
+
+// ImportPathAsValues reads and parses events from a file or directory and returns events as values.
+// If the path is a file, it imports that file. If it's a directory, it walks recursively
+// and imports all JSON files found. Returns all events combined from all files.
+func ImportPathAsValues(path string) ([]models.Event, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat path: %w", err)
+	}
+
+	if !info.IsDir() {
+		// Single file import
+		return ImportJSONFileAsValues(path)
+	}
+
+	// Directory import - walk recursively
+	var allEvents []*models.Event
+	err = filepath.Walk(path, func(filePath string, fileInfo os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("error walking path %s: %w", filePath, err)
+		}
+
+		// Skip directories
+		if fileInfo.IsDir() {
+			return nil
+		}
+
+		// Only process JSON files
+		if !strings.HasSuffix(strings.ToLower(filePath), ".json") {
+			return nil
+		}
+
+		// Import the file
+		events, err := ImportJSONFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to import file %s: %w", filePath, err)
+		}
+
+		allEvents = append(allEvents, events...)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(allEvents) == 0 {
+		return nil, fmt.Errorf("no events found in path %s", path)
+	}
+
+	return ConvertEventsToValues(allEvents), nil
 }

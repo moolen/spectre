@@ -183,6 +183,10 @@ func (m *mockGraphClient) InitializeSchema(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockGraphClient) DeleteGraph(ctx context.Context) error {
+	return nil
+}
+
 // setQueryResult allows tests to set predefined results for specific queries
 func (m *mockGraphClient) setQueryResult(query string, result *graph.QueryResult) {
 	m.mu.Lock()

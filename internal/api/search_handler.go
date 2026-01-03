@@ -1,11 +1,11 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
-	"github.com/moolen/spectre/internal/storage"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -53,22 +53,28 @@ func (sh *SearchHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	sh.logger.Debug("Search completed: resources=%d, executionTime=%dms", searchResponse.Count, searchResponse.ExecutionTimeMs)
 }
 
-// buildSearchResponse transforms QueryResult into SearchResponse with ResourceBuilder
+// buildSearchResponse transforms QueryResult into SearchResponse
+// TODO: Reimplement ResourceBuilder functionality for graph-based queries
 func (sh *SearchHandler) buildSearchResponse(queryResult *models.QueryResult) *models.SearchResponse {
-	resourceBuilder := storage.NewResourceBuilder()
-	resourceMap := resourceBuilder.BuildResourcesFromEvents(queryResult.Events)
+	// Build resources directly from events (simplified version)
+	resourceMap := make(map[string]*models.Resource)
+	for _, event := range queryResult.Events {
+		resourceID := fmt.Sprintf("%s/%s/%s/%s", event.Resource.Group, event.Resource.Version, event.Resource.Kind, event.Resource.UID)
+		if _, exists := resourceMap[resourceID]; !exists {
+			resourceMap[resourceID] = &models.Resource{
+				ID:        resourceID,
+				Group:     event.Resource.Group,
+				Version:   event.Resource.Version,
+				Kind:      event.Resource.Kind,
+				Namespace: event.Resource.Namespace,
+				Name:      event.Resource.Name,
+			}
+		}
+	}
 
 	resources := make([]models.Resource, 0, len(resourceMap))
 	for _, resource := range resourceMap {
-		minimalResource := models.Resource{
-			ID:        resource.ID,
-			Group:     resource.Group,
-			Version:   resource.Version,
-			Kind:      resource.Kind,
-			Namespace: resource.Namespace,
-			Name:      resource.Name,
-		}
-		resources = append(resources, minimalResource)
+		resources = append(resources, *resource)
 	}
 
 	return &models.SearchResponse{

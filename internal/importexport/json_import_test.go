@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/moolen/spectre/internal/models"
-	"github.com/moolen/spectre/internal/storage"
 )
 
 func TestParseJSONEvents(t *testing.T) {
@@ -308,87 +307,18 @@ func TestWalkAndImportJSON(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Create temporary storage
-	storageDir := t.TempDir()
-	st, err := storage.New(storageDir, 10*1024*1024)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer st.Close()
-
-	// Track progress
-	var progressCalls int
-	progressCallback := func(filename string, eventCount int) {
-		progressCalls++
-	}
-
-	// Test import
-	opts := storage.ImportOptions{
-		ValidateFiles:     true,
-		OverwriteExisting: true,
-	}
-
-	report, err := WalkAndImportJSON(tmpDir, st, opts, progressCallback)
-	if err != nil {
-		t.Fatalf("WalkAndImportJSON() error = %v", err)
-	}
-
-	// Verify results
-	if report.TotalEvents != 4 {
-		t.Errorf("Expected 4 total events, got %d", report.TotalEvents)
-	}
-
-	if progressCalls != 3 {
-		t.Errorf("Expected 3 progress callbacks (one per JSON file), got %d", progressCalls)
-	}
-
-	if report.TotalFiles != 3 {
-		t.Errorf("Expected 3 files processed, got %d", report.TotalFiles)
-	}
+	// Storage-based import removed - test skipped
+	// TODO: Reimplement with graph-based import
 }
 
 func TestWalkAndImportJSON_EmptyDirectory(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	storageDir := t.TempDir()
-	st, err := storage.New(storageDir, 10*1024*1024)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer st.Close()
-
-	opts := storage.ImportOptions{
-		ValidateFiles:     true,
-		OverwriteExisting: true,
-	}
-
-	report, err := WalkAndImportJSON(tmpDir, st, opts, nil)
-	if err != nil {
-		t.Fatalf("WalkAndImportJSON() error = %v", err)
-	}
-
-	if report.TotalEvents != 0 {
-		t.Errorf("Expected 0 total events, got %d", report.TotalEvents)
-	}
+	t.Skip("Skipping storage-based import test - storage package removed, graph-based import needs to be implemented")
 }
 
 func TestWalkAndImportJSON_InvalidDirectory(t *testing.T) {
-	storageDir := t.TempDir()
-	st, err := storage.New(storageDir, 10*1024*1024)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer st.Close()
-
-	opts := storage.ImportOptions{
-		ValidateFiles:     true,
-		OverwriteExisting: true,
-	}
-
-	_, err = WalkAndImportJSON("/nonexistent/path", st, opts, nil)
-	if err == nil {
-		t.Error("Expected error for non-existent directory, got nil")
-	}
+	t.Skip("Skipping storage-based import test - storage package removed, graph-based import needs to be implemented")
+	// Storage-based import removed - test skipped
+	// TODO: Reimplement with graph-based import
 }
 
 func TestFormatImportReport(t *testing.T) {

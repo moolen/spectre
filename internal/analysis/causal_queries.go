@@ -24,9 +24,9 @@ type ManagerData struct {
 
 // RelatedResourceData contains information about a related resource
 type RelatedResourceData struct {
-	Resource          graph.ResourceIdentity
-	RelationshipType  string
-	Events            []ChangeEventInfo
+	Resource           graph.ResourceIdentity
+	RelationshipType   string
+	Events             []ChangeEventInfo
 	ReferenceTargetUID string // For INGRESS_REF, the UID of the Service that the Ingress references
 }
 
@@ -299,11 +299,11 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 		}
 
 		// Parse each relationship type
-		addRelated(1, "REFERENCES_SPEC")  // referencedResource (outgoing from resource)
-		addRelated(3, "SCHEDULED_ON")     // node
+		addRelated(1, "REFERENCES_SPEC")      // referencedResource (outgoing from resource)
+		addRelated(3, "SCHEDULED_ON")         // node
 		addRelated(5, "USES_SERVICE_ACCOUNT") // sa
-		addRelated(7, "SELECTS")          // selector (incoming to resource, reversed in causal_chain.go)
-		addRelated(9, "GRANTS_TO")        // rb
+		addRelated(7, "SELECTS")              // selector (incoming to resource, reversed in causal_chain.go)
+		addRelated(9, "GRANTS_TO")            // rb
 
 		// Special handling for INGRESS_REF to also capture the Service UID
 		if row[11] != nil {
@@ -389,11 +389,11 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 			     [e IN allEvents WHERE e.configChanged = true] as configEvents,
 			     allEvents[0..10] as recentEvents
 			WITH resourceUID,
-			     configEvents + [e IN recentEvents WHERE NOT e IN configEvents] as combinedEvents
+			     configEvents + [e IN recentEvents WHERE NOT e.id IN [ce IN configEvents | ce.id]] as combinedEvents
 			UNWIND combinedEvents as event
 			WITH resourceUID, event
 			ORDER BY event.timestamp DESC
-			RETURN resourceUID, collect(event) as events
+			RETURN resourceUID, collect(DISTINCT event) as events
 		`,
 		Parameters: map[string]interface{}{
 			"resourceUIDs":     resourceUIDs,
@@ -433,6 +433,9 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 			continue
 		}
 
+		// Track seen event IDs to deduplicate (safety check)
+		seenEventIDs := make(map[string]bool)
+
 		for _, eventNode := range eventList {
 			if eventNode == nil {
 				continue
@@ -444,6 +447,13 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 			}
 
 			event := graph.ParseChangeEventFromNode(eventProps)
+
+			// Deduplicate by event ID (safety check)
+			if seenEventIDs[event.ID] {
+				a.logger.Debug("getChangeEvents: skipping duplicate event %s for resource %s", event.ID, resourceUID)
+				continue
+			}
+			seenEventIDs[event.ID] = true
 
 			// Get kind for status inference (we don't have it here, use empty)
 			status := analyzer.InferStatusFromResource("", json.RawMessage(event.Data), event.EventType)

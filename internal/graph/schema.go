@@ -90,7 +90,9 @@ func UpsertResourceIdentityQuery(resource ResourceIdentity) GraphQuery {
 }
 
 // CreateChangeEventQuery creates a query to insert a ChangeEvent node
-// Uses CREATE to ensure uniqueness by event ID
+// Uses MERGE to ensure uniqueness by event ID
+// Note: ON CREATE SET means data is only set when node is first created
+// If the node already exists, data won't be updated (which is correct - events are immutable)
 func CreateChangeEventQuery(event ChangeEvent) GraphQuery {
 	return GraphQuery{
 		Query: `

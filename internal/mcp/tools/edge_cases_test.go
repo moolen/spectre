@@ -7,7 +7,6 @@ import (
 
 	"github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/mcp/client"
-	"github.com/moolen/spectre/internal/storage"
 )
 
 // TestClusterHealth_InvalidTimeRanges tests cluster_health with invalid time ranges
@@ -337,7 +336,7 @@ func TestResourceChanges_ZeroImpactScore(t *testing.T) {
 		EventCount:        1, // Low count
 		StatusTransitions: []StatusTransition{},
 		ContainerIssues:   []analyzer.ContainerIssue{},
-		EventPatterns:     []storage.EventPattern{},
+		EventPatterns:     []EventPattern{},
 	}
 
 	score := calculateImpactScore(&summary)

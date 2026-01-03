@@ -256,12 +256,26 @@ func (s *MCPFailureScenarioStage) investigate_tool_is_called_for_resource(kind, 
 }
 
 func (s *MCPFailureScenarioStage) resource_changes_tool_is_called() *MCPFailureScenarioStage {
+	// Filter by namespace to ensure we get resources from the test namespace
+	// This helps avoid hitting the resource limit with cluster-wide resources
+	return s.resource_changes_tool_is_called_with_filters(map[string]interface{}{
+		"namespace": s.testCtx.Namespace,
+	})
+}
+
+func (s *MCPFailureScenarioStage) resource_changes_tool_is_called_with_filters(filters map[string]interface{}) *MCPFailureScenarioStage {
 	ctx, cancel := context.WithTimeout(s.t.Context(), 30*time.Second)
 	defer cancel()
 
 	args := map[string]interface{}{
-		"start_time": s.queryStartTime,
-		"end_time":   s.queryEndTime,
+		"start_time":    s.queryStartTime,
+		"end_time":      s.queryEndTime,
+		"max_resources": 500, // Increase limit to ensure we get Pod resources
+	}
+
+	// Merge in any additional filters (e.g., namespace, kinds)
+	for k, v := range filters {
+		args[k] = v
 	}
 
 	result, err := s.mcpClient.CallTool(ctx, "resource_changes", args)
@@ -442,6 +456,31 @@ func (s *MCPFailureScenarioStage) resource_changes_has_container_issue(issueType
 
 	changes, ok := changesData["changes"].([]interface{})
 	s.require.True(ok && len(changes) > 0, "changes should be present and non-empty")
+
+	// Debug: log all resources and their container issues
+	s.t.Logf("Debug: resource_changes returned %d resources", len(changes))
+	for i, change := range changes {
+		changeMap := change.(map[string]interface{})
+		resourceID, _ := changeMap["resource_id"].(string)
+		kind, _ := changeMap["kind"].(string)
+		namespace, _ := changeMap["namespace"].(string)
+		name, _ := changeMap["name"].(string)
+		impactScore, _ := changeMap["impact_score"].(float64)
+		s.t.Logf("  Resource %d: %s/%s/%s (ID: %s, impact: %.2f)", i+1, kind, namespace, name, resourceID, impactScore)
+		
+		containerIssues, ok := changeMap["container_issues"].([]interface{})
+		if !ok || len(containerIssues) == 0 {
+			s.t.Logf("    No container_issues found")
+			continue
+		}
+		
+		s.t.Logf("    Container issues (%d):", len(containerIssues))
+		for _, issue := range containerIssues {
+			issueMap := issue.(map[string]interface{})
+			issueTypeFound, _ := issueMap["issue_type"].(string)
+			s.t.Logf("      - %s", issueTypeFound)
+		}
+	}
 
 	found := false
 	for _, change := range changes {

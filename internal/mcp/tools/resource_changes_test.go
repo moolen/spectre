@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/moolen/spectre/internal/analyzer"
-	"github.com/moolen/spectre/internal/storage"
 )
 
 func TestCalculateImpactScore_SingleErrorEvent(t *testing.T) {
@@ -268,7 +267,7 @@ func TestCalculateImpactScore_SchedulingIssue(t *testing.T) {
 	summary := ResourceChangeSummary{
 		ErrorEvents:   0,
 		WarningEvents: 0,
-		EventPatterns: []storage.EventPattern{
+		EventPatterns: []EventPattern{
 			{
 				PatternType: "FailedScheduling",
 				Reason:      "FailedScheduling",
@@ -288,7 +287,7 @@ func TestCalculateImpactScore_EvictionEvent(t *testing.T) {
 	summary := ResourceChangeSummary{
 		ErrorEvents:   0,
 		WarningEvents: 0,
-		EventPatterns: []storage.EventPattern{
+		EventPatterns: []EventPattern{
 			{
 				PatternType: "Evicted",
 				Reason:      "Evicted",
@@ -308,7 +307,7 @@ func TestCalculateImpactScore_PreemptionEvent(t *testing.T) {
 	summary := ResourceChangeSummary{
 		ErrorEvents:   0,
 		WarningEvents: 0,
-		EventPatterns: []storage.EventPattern{
+		EventPatterns: []EventPattern{
 			{
 				PatternType: "Preempted",
 				Reason:      "Preempted",
@@ -328,7 +327,7 @@ func TestCalculateImpactScore_ProbeFailures(t *testing.T) {
 	summary := ResourceChangeSummary{
 		ErrorEvents:   0,
 		WarningEvents: 0,
-		EventPatterns: []storage.EventPattern{
+		EventPatterns: []EventPattern{
 			{
 				PatternType: "ProbeFailure",
 				Reason:      "Unhealthy",

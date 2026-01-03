@@ -172,8 +172,10 @@ func (s *ImportExportStage) generated_service_with_timeline_events() *ImportExpo
 		s.events = append(s.events, updateEvent)
 	}
 
-	s.resourceID = serviceUID
-	s.t.Logf("Generated %d events (1 CREATE + 10 UPDATE) for Service %s/%s", len(s.events), s.testNamespaces[0], serviceName)
+	// Construct resource ID in the same format as Search API: group/version/kind/uid
+	// For Service: Group="", Version="v1", Kind="Service"
+	s.resourceID = fmt.Sprintf("%s/%s/%s/%s", "", "v1", "Service", serviceUID)
+	s.t.Logf("Generated %d events (1 CREATE + 10 UPDATE) for Service %s/%s with resourceID %s", len(s.events), s.testNamespaces[0], serviceName, s.resourceID)
 	return s
 }
 
@@ -309,11 +311,11 @@ func (s *ImportExportStage) wait_for_data_indexing() *ImportExportStage {
 // Export/Import methods
 
 func (s *ImportExportStage) data_is_exported_to_file() *ImportExportStage {
-	s.exportPath = filepath.Join(s.t.TempDir(), "export.tar.gz")
+	s.exportPath = filepath.Join(s.t.TempDir(), "export.json.gz")
 
 	now := time.Now().Unix()
 	s.exportTimestamp = now
-	exportURL := fmt.Sprintf("%s/v1/storage/export?from=%d&to=%d&include_open_hour=true&compression=true",
+	exportURL := fmt.Sprintf("%s/v1/storage/export?from=%d&to=%d",
 		s.apiClient.BaseURL, now-900, now+60)
 
 	exportResp, err := http.Get(exportURL)
@@ -337,14 +339,40 @@ func (s *ImportExportStage) data_is_imported_from_binary_file() *ImportExportSta
 	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Minute)
 	defer cancel()
 
+	// The export returns gzipped JSON with Content-Encoding: gzip header.
+	// The HTTP client automatically decompresses responses with Content-Encoding: gzip,
+	// so the saved file is already plain JSON (not gzipped).
+	// We need to:
+	// 1. Read the JSON file (already decompressed by HTTP client)
+	// 2. Parse the JSON to extract events
+	// 3. Import as JSON using the JSON import endpoint
+
 	exportFile, err := os.Open(s.exportPath)
 	s.require.NoError(err, "failed to open export file")
 	defer exportFile.Close()
 
+	// Parse JSON to extract events (file is already decompressed by HTTP client)
+	var exportData map[string]interface{}
+	err = json.NewDecoder(exportFile).Decode(&exportData)
+	s.require.NoError(err, "failed to decode exported JSON")
+
+	events, ok := exportData["events"].([]interface{})
+	s.require.True(ok, "exported data should contain events array")
+	s.require.Greater(len(events), 0, "exported data should contain events")
+	s.t.Logf("Exported %d events", len(events))
+
+	// Re-marshal to JSON for import (matching the JSON import format)
+	importPayload := map[string]interface{}{
+		"events": events,
+	}
+	payloadJSON, err := json.Marshal(importPayload)
+	s.require.NoError(err, "failed to marshal import payload")
+
+	// Import as JSON
 	importURL := fmt.Sprintf("%s/v1/storage/import?validate=true&overwrite=true", s.apiClient.BaseURL)
-	importReq, err := http.NewRequestWithContext(ctx, "POST", importURL, exportFile)
+	importReq, err := http.NewRequestWithContext(ctx, "POST", importURL, bytes.NewReader(payloadJSON))
 	s.require.NoError(err, "failed to create import request")
-	importReq.Header.Set("Content-Type", "application/vnd.spectre.events.v1+bin")
+	importReq.Header.Set("Content-Type", "application/vnd.spectre.events.v1+json")
 
 	importResp, err := http.DefaultClient.Do(importReq)
 	s.require.NoError(err, "failed to execute import request")
@@ -747,14 +775,16 @@ func (s *ImportExportStage) service_is_found_via_search() *ImportExportStage {
 			return false
 		}
 
+		s.t.Logf("Search returned %d resources", len(resp.Resources))
 		for _, r := range resp.Resources {
+			s.t.Logf("  Resource ID: %s (looking for: %s)", r.ID, s.resourceID)
 			if r.ID == s.resourceID {
 				s.t.Logf("✓ Found Service with ID %s", s.resourceID)
 				return true
 			}
 		}
 
-		s.t.Logf("Service not yet found in search results")
+		s.t.Logf("Service not yet found in search results (expected ID: %s)", s.resourceID)
 		return false
 	}, helpers.SlowEventuallyOption)
 
@@ -1077,7 +1107,7 @@ func (s *ImportExportStage) spectre_is_deployed_with_import_on_startup() *Import
 	}
 
 	values["extraArgs"] = []string{
-		fmt.Sprintf("--import=%s", importMountPath),
+		fmt.Sprintf("--import-path=%s", importMountPath),
 	}
 
 	helmDeployer, err := helpers.NewHelmDeployer(s.t, s.testCluster.GetContext(), s.spectreNamespace)

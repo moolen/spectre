@@ -85,7 +85,8 @@ func TestExecuteConcurrentQueries_BothQueriesSucceed(t *testing.T) {
 		queryDuration: 50 * time.Millisecond,
 		executeFunc: func(q *models.QueryRequest) (*models.QueryResult, error) {
 			// Return different results based on query kind
-			if q.Filters.Kind == kindEvent {
+			kinds := q.Filters.GetKinds()
+			if len(kinds) == 1 && kinds[0] == "Event" {
 				return &models.QueryResult{
 					Events: []models.Event{
 						createTestEvent("event-1", "Event", "default", "test-event", time.Now().UnixNano()),
@@ -163,7 +164,9 @@ func TestExecuteConcurrentQueries_ResourceQueryFails(t *testing.T) {
 	resourceErr := errors.New("resource query failed")
 	mockExecutor := &mockConcurrentQueryExecutor{
 		executeFunc: func(q *models.QueryRequest) (*models.QueryResult, error) {
-			if q.Filters.Kind == kindEvent {
+			// Check if this is an Event query (uses Kinds slice)
+			kinds := q.Filters.GetKinds()
+			if len(kinds) == 1 && kinds[0] == "Event" {
 				return &models.QueryResult{
 					Events:          []models.Event{},
 					Count:           0,
@@ -208,7 +211,9 @@ func TestExecuteConcurrentQueries_EventQueryFails(t *testing.T) {
 	eventErr := errors.New("event query failed")
 	mockExecutor := &mockConcurrentQueryExecutor{
 		executeFunc: func(q *models.QueryRequest) (*models.QueryResult, error) {
-			if q.Filters.Kind == kindEvent {
+			// Check if this is an Event query (uses Kinds slice)
+			kinds := q.Filters.GetKinds()
+			if len(kinds) == 1 && kinds[0] == "Event" {
 				return nil, eventErr
 			}
 			return &models.QueryResult{
@@ -249,6 +254,10 @@ func TestExecuteConcurrentQueries_EventQueryFails(t *testing.T) {
 
 	if eventResult == nil {
 		t.Fatal("Expected empty event result, got nil")
+	}
+
+	if eventResult.Count != 0 {
+		t.Errorf("Expected event count 0 on failure, got %d", eventResult.Count)
 	}
 
 	if len(eventResult.Events) != 0 {

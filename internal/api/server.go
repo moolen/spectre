@@ -10,8 +10,8 @@ import (
 
 	"github.com/moolen/spectre/internal/api/pb/pbconnect"
 	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/logging"
-	"github.com/moolen/spectre/internal/storage"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -36,45 +36,47 @@ type Server struct {
 	server             *http.Server
 	logger             *logging.Logger
 	queryExecutor      QueryExecutor
-	graphQueryExecutor QueryExecutor       // Graph-based query executor (optional)
+	graphQueryExecutor QueryExecutor       // Graph-based query executor
 	querySource        TimelineQuerySource // Which executor to use for timeline queries
-	storage            *storage.Storage
 	graphClient        graph.Client
+	graphPipeline      sync.Pipeline // Graph sync pipeline for imports
 	router             *http.ServeMux
 	readinessChecker   ReadinessChecker
-	demoMode           bool
-	tracingProvider   interface {
+	tracingProvider    interface {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	}
 }
 
-// New creates a new API server
-func New(port int, queryExecutor QueryExecutor, readinessChecker ReadinessChecker, tracingProvider interface {
-	GetTracer(string) trace.Tracer
-	IsEnabled() bool
-}) *Server {
-	return NewWithStorage(port, queryExecutor, nil, nil, readinessChecker, false, tracingProvider)
-}
-
-// NewWithStorage creates a new API server with storage export/import capabilities
-func NewWithStorage(port int, queryExecutor QueryExecutor, storage *storage.Storage, graphClient graph.Client, readinessChecker ReadinessChecker, demoMode bool, tracingProvider interface {
-	GetTracer(string) trace.Tracer
-	IsEnabled() bool
-}) *Server {
-	return NewWithStorageAndGraph(port, queryExecutor, nil, TimelineQuerySourceStorage, storage, graphClient, readinessChecker, demoMode, tracingProvider)
-}
-
-// NewWithStorageAndGraph creates a new API server with dual query executor support
+// NewWithStorageAndGraph creates a new API server with graph query executor support
 func NewWithStorageAndGraph(
 	port int,
-	storageExecutor QueryExecutor,
+	storageExecutor QueryExecutor, // Can be nil - not used in graph-only mode
 	graphExecutor QueryExecutor,
 	querySource TimelineQuerySource,
-	storage *storage.Storage,
+	storage interface{}, // Can be nil - kept for signature compatibility but not used
 	graphClient graph.Client,
 	readinessChecker ReadinessChecker,
-	demoMode bool,
+	demoMode bool, // Not used but kept for signature compatibility
+	tracingProvider interface {
+		GetTracer(string) trace.Tracer
+		IsEnabled() bool
+	},
+) *Server {
+	return NewWithStorageGraphAndPipeline(port, storageExecutor, graphExecutor, querySource, storage, graphClient, nil, readinessChecker, demoMode, tracingProvider)
+}
+
+// NewWithStorageGraphAndPipeline creates a new API server with graph query executor and pipeline support
+func NewWithStorageGraphAndPipeline(
+	port int,
+	storageExecutor QueryExecutor, // Can be nil - not used in graph-only mode
+	graphExecutor QueryExecutor,
+	querySource TimelineQuerySource,
+	storage interface{}, // Can be nil - kept for signature compatibility but not used
+	graphClient graph.Client,
+	graphPipeline sync.Pipeline, // Graph pipeline for imports
+	readinessChecker ReadinessChecker,
+	demoMode bool, // Not used but kept for signature compatibility
 	tracingProvider interface {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
@@ -86,11 +88,10 @@ func NewWithStorageAndGraph(
 		queryExecutor:      storageExecutor,
 		graphQueryExecutor: graphExecutor,
 		querySource:        querySource,
-		storage:            storage,
 		graphClient:        graphClient,
+		graphPipeline:      graphPipeline,
 		router:             http.NewServeMux(),
 		readinessChecker:   readinessChecker,
-		demoMode:           demoMode,
 		tracingProvider:    tracingProvider,
 	}
 
@@ -126,11 +127,12 @@ func NewWithStorageAndGraph(
 	handler := s.corsMiddleware(s.router)
 
 	// Create HTTP server
+	// Use longer timeouts to accommodate long-running imports (can take 5+ minutes)
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  10 * time.Minute, // Allow time to read large request bodies
+		WriteTimeout: 10 * time.Minute, // Allow time for processing + response writing (imports can take 5+ min)
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -146,8 +148,15 @@ func (s *Server) registerHandlers() {
 		tracer = otel.GetTracerProvider().Tracer("spectre.api")
 	}
 
-	searchHandler := NewSearchHandler(s.queryExecutor, s.logger, tracer)
-	
+	// Select appropriate executor for search handler
+	var searchExecutor QueryExecutor
+	if s.graphQueryExecutor != nil && s.querySource == TimelineQuerySourceGraph {
+		searchExecutor = s.graphQueryExecutor
+	} else {
+		searchExecutor = s.queryExecutor
+	}
+	searchHandler := NewSearchHandler(searchExecutor, s.logger, tracer)
+
 	// Create timeline handler with appropriate executor(s)
 	var timelineHandler *TimelineHandler
 	if s.graphQueryExecutor != nil && s.querySource == TimelineQuerySourceGraph {
@@ -163,7 +172,7 @@ func (s *Server) registerHandlers() {
 		s.logger.Info("Timeline handler using STORAGE query executor only")
 		timelineHandler = NewTimelineHandler(s.queryExecutor, s.logger, tracer)
 	}
-	
+
 	// Select appropriate executor for metadata handler (same as timeline)
 	var metadataExecutor QueryExecutor
 	if s.graphQueryExecutor != nil && s.querySource == TimelineQuerySourceGraph {
@@ -188,18 +197,24 @@ func (s *Server) registerHandlers() {
 		s.logger.Info("Registered /v1/timeline/compare endpoint for A/B testing")
 	}
 
-	// Register export/import handlers if storage is available
-	if s.storage != nil {
-		exportHandler := NewExportHandler(s.storage, s.logger)
-		importHandler := NewImportHandler(s.storage, s.logger)
-		s.router.HandleFunc("/v1/storage/export", s.withMethod(http.MethodGet, exportHandler.Handle))
-		s.router.HandleFunc("/v1/storage/import", s.withMethod(http.MethodPost, importHandler.Handle))
-	}
-
 	// Register root cause handler if graph client is available
 	if s.graphClient != nil {
 		rootCauseHandler := NewRootCauseHandler(s.graphClient, s.logger, tracer)
 		s.router.HandleFunc("/v1/root-cause", s.withMethod(http.MethodGet, rootCauseHandler.Handle))
+	}
+
+	// Register import handler if graph pipeline is available
+	if s.graphPipeline != nil {
+		importHandler := NewImportHandler(s.graphPipeline, s.logger)
+		s.router.HandleFunc("/v1/storage/import", s.withMethod(http.MethodPost, importHandler.Handle))
+		s.logger.Info("Registered /v1/storage/import endpoint for event imports")
+	}
+
+	// Register export handler if graph query executor is available
+	if s.graphQueryExecutor != nil {
+		exportHandler := NewExportHandler(s.graphQueryExecutor, s.logger)
+		s.router.HandleFunc("/v1/storage/export", s.withMethod(http.MethodGet, exportHandler.Handle))
+		s.logger.Info("Registered /v1/storage/export endpoint for event exports")
 	}
 
 	// Serve static UI files and handle SPA routing
@@ -356,7 +371,6 @@ func (s *Server) Stop(ctx context.Context) error {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"status": "healthy",
-		"demo":   s.demoMode,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

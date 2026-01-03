@@ -21,6 +21,7 @@ func TestUIFilterByNamespace(t *testing.T) {
 		deployments_are_created_in_namespaces([]string{namespace1, namespace2}).and().
 		resources_are_available().and().
 		navigated_to_timeline(10 * time.Minute).and().
+		scroll_timeline_to_load_all_resources().and().
 		page_loads_completely().and().
 		wait_for_text_in_timeline(namespace1).and().
 		wait_for_text_in_timeline(namespace2)
@@ -44,6 +45,7 @@ func TestUIFilterByKind(t *testing.T) {
 		deployment_is_created("test-deployment-2", "").and().
 		resources_are_available().and().
 		navigated_to_timeline(10 * time.Minute).and().
+		scroll_timeline_to_load_all_resources().and().
 		page_loads_completely().and().
 		wait_for_text_in_timeline("test-deployment")
 
@@ -71,6 +73,7 @@ func TestUISearchFilter(t *testing.T) {
 		deployment_is_created(otherName, "").and().
 		resources_are_available().and().
 		navigated_to_timeline(10 * time.Minute).and().
+		scroll_timeline_to_load_all_resources().and().
 		page_loads_completely().and().
 		wait_for_text_in_timeline(targetName).and().
 		wait_for_text_in_timeline(otherName)
