@@ -9,7 +9,7 @@ import (
 )
 
 type DefaultResourcesStage struct {
-	helpers.BaseStage
+	*helpers.BaseContext
 
 	testNamespace1 string
 	testNamespace2 string
@@ -22,9 +22,7 @@ type DefaultResourcesStage struct {
 }
 
 func NewDefaultResourcesStage(t *testing.T) (*DefaultResourcesStage, *DefaultResourcesStage, *DefaultResourcesStage) {
-	s := &DefaultResourcesStage{
-		BaseStage: helpers.NewBaseStage(t),
-	}
+	s := &DefaultResourcesStage{}
 	return s, s, s
 }
 
@@ -33,7 +31,8 @@ func (s *DefaultResourcesStage) and() *DefaultResourcesStage {
 }
 
 func (s *DefaultResourcesStage) a_test_environment() *DefaultResourcesStage {
-	s.BaseStage.SetupTestEnvironment()
+	testCtx := helpers.SetupE2ETest(s.T)
+	s.BaseContext = helpers.NewBaseContext(s.T, testCtx)
 
 	// Initialize helper managers
 	s.nsManager = helpers.NewNamespaceManager(s.T, s.K8sClient)

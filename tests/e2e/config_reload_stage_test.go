@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 )
 
 type ConfigReloadStage struct {
-	helpers.BaseStage
+	*helpers.BaseContext
 
 	testNamespace    string
 	statefulSet      *appsv1.StatefulSet
@@ -26,9 +27,7 @@ type ConfigReloadStage struct {
 }
 
 func NewConfigReloadStage(t *testing.T) (*ConfigReloadStage, *ConfigReloadStage, *ConfigReloadStage) {
-	s := &ConfigReloadStage{
-		BaseStage: helpers.NewBaseStage(t),
-	}
+	s := &ConfigReloadStage{}
 	return s, s, s
 }
 
@@ -38,7 +37,8 @@ func (s *ConfigReloadStage) and() *ConfigReloadStage {
 
 func (s *ConfigReloadStage) a_test_environment() *ConfigReloadStage {
 	// Use custom minimal watcher config for this test
-	s.BaseStage.SetupTestEnvironmentWithValues("tests/e2e/fixtures/helm-values-minimal-watcher.yaml")
+	testCtx := helpers.SetupE2ETestWithValuesFile(s.T, "tests/e2e/fixtures/helm-values-minimal-watcher.yaml")
+	s.BaseContext = helpers.NewBaseContext(s.T, testCtx)
 
 	// Initialize helper managers
 	s.nsManager = helpers.NewNamespaceManager(s.T, s.K8sClient)
@@ -53,7 +53,7 @@ func (s *ConfigReloadStage) a_test_namespace() *ConfigReloadStage {
 	defer cancel()
 
 	// Use namespace manager to create namespace with automatic cleanup
-	namespace, err := s.nsManager.CreateNamespaceWithRandomSuffix(ctx, "test-config")
+	namespace, err := s.nsManager.CreateNamespace(ctx, "test-config")
 	s.Require.NoError(err, "failed to create namespace")
 	s.testNamespace = namespace
 
@@ -102,7 +102,7 @@ func (s *ConfigReloadStage) watcher_config_is_updated_to_include_statefulset() *
 	ctx, cancel := s.ctxHelper.WithLongTimeout()
 	defer cancel()
 
-	s.configMapName = s.TestCtx.ReleaseName + "-spectre"
+	s.configMapName = fmt.Sprintf("%s-spectre", s.TestCtx.ReleaseName)
 	s.newWatcherConfig = `resources:
   - group: "apps"
     version: "v1"

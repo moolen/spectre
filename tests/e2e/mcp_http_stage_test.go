@@ -7,8 +7,12 @@ import (
 	"github.com/moolen/spectre/tests/e2e/helpers"
 )
 
+const (
+	clusterHealthTimeout = 30 * time.Second
+)
+
 type MCPHTTPStage struct {
-	helpers.BaseStage
+	*helpers.BaseContext
 
 	mcpClient *helpers.MCPClient
 
@@ -19,14 +23,11 @@ type MCPHTTPStage struct {
 	promptResult   map[string]interface{}
 
 	// Helper managers
-	mcpManager *helpers.MCPServerManager
-	ctxHelper  *helpers.ContextHelper
+	ctxHelper *helpers.ContextHelper
 }
 
 func NewMCPHTTPStage(t *testing.T) (*MCPHTTPStage, *MCPHTTPStage, *MCPHTTPStage) {
-	s := &MCPHTTPStage{
-		BaseStage: helpers.NewBaseStage(t),
-	}
+	s := &MCPHTTPStage{}
 	return s, s, s
 }
 
@@ -35,10 +36,10 @@ func (s *MCPHTTPStage) and() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) a_test_environment() *MCPHTTPStage {
-	s.BaseStage.SetupTestEnvironment()
+	testCtx := helpers.SetupE2ETest(s.T)
+	s.BaseContext = helpers.NewBaseContext(s.T, testCtx)
 
 	// Initialize helper managers
-	s.mcpManager = helpers.NewMCPServerManager(s.T, s.TestCtx)
 	s.ctxHelper = helpers.NewContextHelper(s.T)
 
 	return s
@@ -48,19 +49,38 @@ func (s *MCPHTTPStage) mcp_server_is_deployed() *MCPHTTPStage {
 	ctx, cancel := s.ctxHelper.WithDefaultTimeout()
 	defer cancel()
 
-	// Use MCP manager to deploy server - single method call vs manual Helm update
-	err := s.mcpManager.DeployMCPServer(ctx)
-	s.Require.NoError(err, "failed to deploy MCP server")
+	// Update Helm release to enable MCP server
+	err := helpers.UpdateHelmRelease(s.TestCtx, map[string]interface{}{
+		"mcp": map[string]interface{}{
+			"enabled":  true,
+			"httpAddr": ":8082",
+		},
+	})
+	s.Require.NoError(err, "failed to update Helm release with MCP enabled")
+
+	// Wait for the deployment to be ready
+	err = helpers.WaitForAppReady(ctx, s.TestCtx.K8sClient, s.TestCtx.Namespace, s.TestCtx.ReleaseName)
+	s.Require.NoError(err, "failed to wait for app to be ready after MCP enable")
 
 	return s
 }
 
 func (s *MCPHTTPStage) mcp_client_is_connected() *MCPHTTPStage {
-	// Use MCP manager to connect client - handles port-forward creation and cleanup automatically
-	client, err := s.mcpManager.ConnectMCPClient()
-	s.Require.NoError(err, "failed to connect MCP client")
+	// Create port-forward for MCP server
+	serviceName := s.TestCtx.ReleaseName + "-spectre"
+	mcpPortForward, err := helpers.NewPortForwarder(s.T, s.TestCtx.Cluster.GetContext(), s.TestCtx.Namespace, serviceName, 8082)
+	s.Require.NoError(err, "failed to create MCP port-forward")
 
-	s.mcpClient = client
+	err = mcpPortForward.WaitForReady(30 * time.Second)
+	s.Require.NoError(err, "MCP server not reachable via port-forward")
+
+	s.T.Cleanup(func() {
+		if err := mcpPortForward.Stop(); err != nil {
+			s.T.Logf("Warning: failed to stop MCP port-forward: %v", err)
+		}
+	})
+
+	s.mcpClient = helpers.NewMCPClient(s.T, mcpPortForward.GetURL())
 	return s
 }
 
@@ -86,9 +106,8 @@ func (s *MCPHTTPStage) session_is_initialized() *MCPHTTPStage {
 	ctx, cancel := s.ctxHelper.WithTimeout(10 * time.Second)
 	defer cancel()
 
-	// Use MCP manager to initialize session
-	result, err := s.mcpManager.InitializeMCPSession(ctx, s.mcpClient)
-	s.Require.NoError(err, "failed to initialize session")
+	result, err := s.mcpClient.Initialize(ctx)
+	s.Require.NoError(err, "initialize failed")
 	s.Require.NotNil(result, "initialize result should not be nil")
 
 	s.initResult = result
@@ -144,7 +163,7 @@ func (s *MCPHTTPStage) four_tools_are_available() *MCPHTTPStage {
 	// Should have 6 tools with graph enabled (default in Helm)
 	// but allow 4 if graph is disabled
 	toolCount := len(s.tools)
-	s.Assert.True(toolCount == 4 || toolCount == 6,
+	s.Assert.True(toolCount == 4 || toolCount == 6, 
 		"should have 4 tools (base) or 6 tools (with graph), got %d", toolCount)
 	s.T.Logf("Available tools count: %d", toolCount)
 	return s
@@ -163,7 +182,7 @@ func (s *MCPHTTPStage) expected_tools_are_present() *MCPHTTPStage {
 
 	// Graph tools are conditional (only present if graph.enabled=true)
 	graphTools := map[string]bool{
-		"find_root_cause":        false,
+		"find_root_cause":       false,
 		"calculate_blast_radius": false,
 	}
 
@@ -189,7 +208,7 @@ func (s *MCPHTTPStage) expected_tools_are_present() *MCPHTTPStage {
 			s.T.Logf("✓ Graph tool %s is available", toolName)
 		}
 	}
-
+	
 	if !hasGraphTools {
 		s.T.Log("ℹ Graph tools not available (graph.enabled=false)")
 	}
@@ -210,7 +229,7 @@ func (s *MCPHTTPStage) each_tool_has_description_and_schema() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) cluster_health_tool_is_called() *MCPHTTPStage {
-	ctx, cancel := s.ctxHelper.WithTimeout(30 * time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(clusterHealthTimeout)
 	defer cancel()
 
 	args := map[string]interface{}{
