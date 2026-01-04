@@ -1,7 +1,8 @@
-package api
+package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -74,6 +75,32 @@ func (m *mockConcurrentQueryExecutor) GetMaxConcurrent() int32 {
 
 func (m *mockConcurrentQueryExecutor) SetSharedCache(cache interface{}) {
 	// Mock doesn't need to implement caching
+}
+
+// createTestEvent is a helper function to create test events
+func createTestEvent(id, kind, namespace, name string, timestamp int64) models.Event {
+	return models.Event{
+		ID:        id,
+		Timestamp: timestamp,
+		Type:      models.EventTypeCreate,
+		Resource: models.ResourceMetadata{
+			Group:     "",
+			Version:   "v1",
+			Kind:      kind,
+			Namespace: namespace,
+			Name:      name,
+			UID:       "uid-" + id,
+		},
+		Data:     json.RawMessage(`{"kind":"` + kind + `"}`),
+		DataSize: 100,
+	}
+}
+
+// createTestEventWithGroup creates a test event with a resource group
+func createTestEventWithGroup(id, group, kind, namespace, name string, timestamp int64) models.Event {
+	evt := createTestEvent(id, kind, namespace, name, timestamp)
+	evt.Resource.Group = group
+	return evt
 }
 
 // TestExecuteConcurrentQueries_BothQueriesSucceed tests the happy path

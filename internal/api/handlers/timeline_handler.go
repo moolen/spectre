@@ -1,4 +1,4 @@
-package api
+package handlers
 
 import (
 	"compress/gzip"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analyzer"
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/attribute"
@@ -20,43 +21,43 @@ import (
 )
 
 // TimelineQuerySource specifies which executor to use for queries
-type TimelineQuerySource string
+type TimelineQuerySource = api.TimelineQuerySource
 
 const (
-	TimelineQuerySourceStorage TimelineQuerySource = "storage"
-	TimelineQuerySourceGraph   TimelineQuerySource = "graph"
+	TimelineQuerySourceStorage = api.TimelineQuerySourceStorage
+	TimelineQuerySourceGraph   = api.TimelineQuerySourceGraph
 )
 
 // TimelineHandler handles /v1/timeline requests
 // Returns full resource data with statusSegments and events for timeline visualization
 type TimelineHandler struct {
-	storageExecutor QueryExecutor       // Storage-based query executor
-	graphExecutor   QueryExecutor       // Graph-based query executor (optional)
+	storageExecutor api.QueryExecutor   // Storage-based query executor
+	graphExecutor   api.QueryExecutor   // Graph-based query executor (optional)
 	querySource     TimelineQuerySource // Which executor to use
 	logger          *logging.Logger
-	validator       *Validator
+	validator       *api.Validator
 	tracer          trace.Tracer
 }
 
 // NewTimelineHandler creates a new timeline handler with storage executor only
-func NewTimelineHandler(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
+func NewTimelineHandler(queryExecutor api.QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
 	return &TimelineHandler{
 		storageExecutor: queryExecutor,
 		querySource:     TimelineQuerySourceStorage,
 		logger:          logger,
-		validator:       NewValidator(),
+		validator:       api.NewValidator(),
 		tracer:          tracer,
 	}
 }
 
 // NewTimelineHandlerWithMode creates a timeline handler with dual executors
-func NewTimelineHandlerWithMode(storageExecutor, graphExecutor QueryExecutor, source TimelineQuerySource, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
+func NewTimelineHandlerWithMode(storageExecutor, graphExecutor api.QueryExecutor, source TimelineQuerySource, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
 	return &TimelineHandler{
 		storageExecutor: storageExecutor,
 		graphExecutor:   graphExecutor,
 		querySource:     source,
 		logger:          logger,
-		validator:       NewValidator(),
+		validator:       api.NewValidator(),
 		tracer:          tracer,
 	}
 }
@@ -425,22 +426,22 @@ func (th *TimelineHandler) parseQuery(r *http.Request) (*models.QueryRequest, er
 	query := r.URL.Query()
 
 	startStr := query.Get("start")
-	start, err := ParseTimestamp(startStr, "start")
+	start, err := api.ParseTimestamp(startStr, "start")
 	if err != nil {
 		return nil, err
 	}
 
 	endStr := query.Get("end")
-	end, err := ParseTimestamp(endStr, "end")
+	end, err := api.ParseTimestamp(endStr, "end")
 	if err != nil {
 		return nil, err
 	}
 
 	if start < 0 || end < 0 {
-		return nil, NewValidationError("timestamps must be non-negative")
+		return nil, api.NewValidationError("timestamps must be non-negative")
 	}
 	if start > end {
-		return nil, NewValidationError("start timestamp must be less than or equal to end timestamp")
+		return nil, api.NewValidationError("start timestamp must be less than or equal to end timestamp")
 	}
 
 	// Parse multi-value filters
@@ -527,15 +528,7 @@ func parseIntOrDefault(s string, defaultVal int) int {
 }
 
 func (th *TimelineHandler) respondWithError(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-
-	response := map[string]string{
-		"error":   errorCode,
-		"message": message,
-	}
-
-	_ = writeJSON(w, response)
+	api.WriteError(w, statusCode, errorCode, message)
 }
 
 // addServerTimingHeaders adds Server-Timing headers to the response
@@ -595,19 +588,19 @@ func (th *TimelineHandler) writeJSONResponse(w http.ResponseWriter, r *http.Requ
 			}
 		}()
 
-		if err := writeJSON(gzWriter, data); err != nil {
+		if err := api.WriteJSON(gzWriter, data); err != nil {
 			th.logger.Error("Failed to write compressed JSON: %v", err)
 		}
 	} else {
 		w.WriteHeader(http.StatusOK)
-		if err := writeJSON(w, data); err != nil {
+		if err := api.WriteJSON(w, data); err != nil {
 			th.logger.Error("Failed to write JSON: %v", err)
 		}
 	}
 }
 
 // getActiveExecutor returns the appropriate query executor based on configuration
-func (th *TimelineHandler) getActiveExecutor() QueryExecutor {
+func (th *TimelineHandler) getActiveExecutor() api.QueryExecutor {
 	switch th.querySource {
 	case TimelineQuerySourceGraph:
 		if th.graphExecutor != nil {

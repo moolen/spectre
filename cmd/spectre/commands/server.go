@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/api"
+	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/config"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graphservice"
@@ -96,7 +97,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	// Load configuration
 	cfg := config.LoadConfig(
 		apiPort,
-		logLevel,
+		logLevelFlags,
 		watcherConfigPath,
 		maxConcurrentRequests,
 		tracingEnabled,
@@ -111,13 +112,13 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	// Setup logging
-	if err := setupLog(cfg.LogLevel); err != nil {
+	if err := setupLog(cfg.LogLevelFlags); err != nil {
 		HandleError(err, "Failed to setup logging")
 	}
 	logger := logging.GetLogger("server")
 
 	logger.Info("Starting Spectre v%s", Version)
-	logger.Debug("Configuration loaded: APIPort=%d, LogLevel=%s", cfg.APIPort, cfg.LogLevel)
+	logger.Debug("Configuration loaded: APIPort=%d", cfg.APIPort)
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
@@ -238,11 +239,11 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	// Set up readiness checker: use watcher if available, otherwise use no-op
-	var readinessChecker api.ReadinessChecker
+	var readinessChecker apiserver.ReadinessChecker
 	if watcherComponent != nil {
 		readinessChecker = watcherComponent
 	} else {
-		readinessChecker = &api.NoOpReadinessChecker{}
+		readinessChecker = &apiserver.NoOpReadinessChecker{}
 	}
 
 	// Use graph as the query source
@@ -285,7 +286,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			logging.Field("total_duration", totalDuration))
 	}
 
-	apiComponent := api.NewWithStorageGraphAndPipeline(
+	apiComponent := apiserver.NewWithStorageGraphAndPipeline(
 		cfg.APIPort,
 		nil, // No storage executor
 		graphQueryExecutor,

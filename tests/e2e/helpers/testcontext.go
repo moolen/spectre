@@ -52,6 +52,15 @@ type TestContext struct {
 	ReleaseName string
 	Namespace   string
 
+	// IsSharedDeployment indicates if this test is using a shared Spectre deployment
+	// (true) or an isolated deployment (false). When true, cleanup will NOT uninstall
+	// the Helm release.
+	IsSharedDeployment bool
+
+	// SharedDeployment holds reference to the shared deployment if IsSharedDeployment=true.
+	// This is used to extract audit logs from the shared deployment's pod.
+	SharedDeployment *SharedDeployment
+
 	cleanupOnce sync.Once
 	cleanupFn   func()
 }
@@ -78,10 +87,18 @@ func (tc *TestContext) ReconnectPortForward() error {
 		}
 	}
 
-	// Create new port-forward
+	// Determine the correct namespace and service name based on deployment type
+	namespace := tc.Namespace
 	serviceName := fmt.Sprintf("%s-spectre", tc.ReleaseName)
 
-	portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetContext(), tc.Namespace, serviceName, defaultServicePort)
+	if tc.IsSharedDeployment && tc.SharedDeployment != nil {
+		// Using shared deployment - reconnect to shared namespace
+		namespace = tc.SharedDeployment.Namespace
+		serviceName = fmt.Sprintf("%s-spectre", tc.SharedDeployment.ReleaseName)
+	}
+
+	// Create new port-forward
+	portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetContext(), namespace, serviceName, defaultServicePort)
 	if err != nil {
 		return fmt.Errorf("failed to create new port-forward: %w", err)
 	}

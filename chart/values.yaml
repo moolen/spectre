@@ -206,7 +206,19 @@ persistence:
   existingClaim: ""
 
 config:
-  logLevel: "debug"
+  logLevel: "info"
+  # Per-package log level overrides
+  # Supports exact package names and wildcard patterns (*.suffix)
+  # Examples:
+  #   graph.sync: "debug"      # Exact match for graph.sync package
+  #   graph.*: "debug"         # Wildcard pattern for all graph.* packages
+  #   controller: "warn"       # Only warn and above for controller
+  # If a package matches multiple patterns, the most specific pattern wins
+  # Packages not listed use the default logLevel above
+  logLevels: {}
+    # graph.sync: "debug"
+    # graph.*: "debug"
+    # controller: "warn"
   maxConcurrentRequests: 100
   # Watcher configuration - resources to watch
   # Each resource specifies Group/Version/Kind and optional namespace

@@ -64,36 +64,27 @@ func (s *MCPFailureScenarioStage) and() *MCPFailureScenarioStage {
 // ==================== Setup Stages ====================
 
 func (s *MCPFailureScenarioStage) a_test_environment() *MCPFailureScenarioStage {
-	s.testCtx = helpers.SetupE2ETest(s.t)
+	// Use shared MCP-enabled deployment instead of creating a new one per test
+	s.testCtx = helpers.SetupE2ETestSharedMCP(s.t)
 	// Set initial query time window (will be updated as test progresses)
 	s.queryStartTime = time.Now().Unix()
 	return s
 }
 
 func (s *MCPFailureScenarioStage) mcp_server_is_deployed() *MCPFailureScenarioStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
-	defer cancel()
-
-	// Update Helm release to enable MCP server
-	err := helpers.UpdateHelmRelease(s.testCtx, map[string]interface{}{
-		"mcp": map[string]interface{}{
-			"enabled":  true,
-			"httpAddr": ":8082",
-		},
-	})
-	s.require.NoError(err, "failed to update Helm release with MCP enabled")
-
-	// Wait for the deployment to be ready
-	err = helpers.WaitForAppReady(ctx, s.testCtx.K8sClient, s.testCtx.Namespace, s.testCtx.ReleaseName)
-	s.require.NoError(err, "failed to wait for app to be ready after MCP enable")
-
+	// MCP server is already deployed and enabled on the shared deployment
+	// No need to update Helm release or wait for deployment
+	s.t.Logf("Using shared MCP deployment in namespace: %s", s.testCtx.SharedDeployment.Namespace)
 	return s
 }
 
 func (s *MCPFailureScenarioStage) mcp_client_is_connected() *MCPFailureScenarioStage {
-	// Create port-forward for MCP server
+	// Create port-forward to the shared MCP server
 	serviceName := s.testCtx.ReleaseName + "-spectre"
-	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetContext(), s.testCtx.Namespace, serviceName, 8082)
+	// Important: Use SharedDeployment.Namespace, not testCtx.Namespace
+	// testCtx.Namespace is for test resources, SharedDeployment.Namespace is where Spectre runs
+	mcpNamespace := s.testCtx.SharedDeployment.Namespace
+	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetContext(), mcpNamespace, serviceName, 8082)
 	s.require.NoError(err, "failed to create MCP port-forward")
 
 	err = mcpPortForward.WaitForReady(30 * time.Second)

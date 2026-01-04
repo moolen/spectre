@@ -39,7 +39,7 @@ func (s *MCPStdioStage) and() *MCPStdioStage {
 }
 
 func (s *MCPStdioStage) a_test_environment() *MCPStdioStage {
-	s.testCtx = helpers.SetupE2ETest(s.t)
+	s.testCtx = helpers.SetupE2ETestShared(s.t)
 	return s
 }
 

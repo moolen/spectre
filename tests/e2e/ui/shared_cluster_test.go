@@ -65,12 +65,37 @@ func runWithSharedCluster(m *testing.M) int {
 	helpers.SetCachedHelmValues(values, imageRef)
 
 	log.Println("✓ Test image built and loaded")
+
+	// Deploy shared Spectre for UI tests
+	log.Println("Deploying shared Spectre for UI tests...")
+	uiDep, err := helpers.DeploySharedDeployment(
+		&testing.T{},
+		cluster,
+		"e2e-ui",
+		"spectre-e2e-ui",
+		nil, // no pre-deploy function for UI tests
+	)
+	if err != nil {
+		log.Printf("❌ Failed to deploy UI shared deployment: %v", err)
+		return 1
+	}
+	helpers.RegisterSharedDeployment("standard", uiDep) // UI tests use "standard" key
+	log.Printf("✓ UI shared deployment registered: %s", uiDep.ReleaseName)
+
 	log.Println("================================================")
-	log.Println("Running UI e2e tests with shared cluster...")
+	log.Println("Running UI e2e tests with shared deployment...")
 	log.Println("================================================")
 
 	// Run all tests
 	exitCode := m.Run()
+
+	// Cleanup shared deployment
+	log.Println("================================================")
+	log.Println("Cleaning up UI shared deployment...")
+	log.Println("================================================")
+	if err := helpers.CleanupSharedDeployment(&testing.T{}, uiDep); err != nil {
+		log.Printf("Warning: failed to cleanup UI deployment: %v", err)
+	}
 
 	log.Println("================================================")
 	log.Printf("UI tests completed with exit code: %d", exitCode)

@@ -81,6 +81,10 @@ func (k *K8sClient) CreateNamespace(ctx context.Context, name string) error {
 
 	_, err := k.Clientset.CoreV1().Namespaces().Create(ctx, namespace, metav1.CreateOptions{})
 	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			k.t.Logf("✓ Namespace already exists: %s (reusing)", name)
+			return nil
+		}
 		return fmt.Errorf("failed to create namespace %s: %w", name, err)
 	}
 

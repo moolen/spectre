@@ -8,6 +8,7 @@ func TestScenarioPodRestart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping e2e test in short mode")
 	}
+	t.Parallel()
 
 	given, when, then := NewPodRestartStage(t)
 
