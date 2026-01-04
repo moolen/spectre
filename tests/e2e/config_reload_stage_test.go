@@ -13,6 +13,8 @@ import (
 type ConfigReloadStage struct {
 	*helpers.BaseContext
 
+	t *testing.T
+
 	testNamespace    string
 	statefulSet      *appsv1.StatefulSet
 	deployment       *appsv1.Deployment
@@ -27,7 +29,9 @@ type ConfigReloadStage struct {
 }
 
 func NewConfigReloadStage(t *testing.T) (*ConfigReloadStage, *ConfigReloadStage, *ConfigReloadStage) {
-	s := &ConfigReloadStage{}
+	s := &ConfigReloadStage{
+		t: t,
+	}
 	return s, s, s
 }
 
@@ -37,8 +41,8 @@ func (s *ConfigReloadStage) and() *ConfigReloadStage {
 
 func (s *ConfigReloadStage) a_test_environment() *ConfigReloadStage {
 	// Use custom minimal watcher config for this test
-	testCtx := helpers.SetupE2ETestWithValuesFile(s.T, "tests/e2e/fixtures/helm-values-minimal-watcher.yaml")
-	s.BaseContext = helpers.NewBaseContext(s.T, testCtx)
+	testCtx := helpers.SetupE2ETestWithValuesFile(s.t, "tests/e2e/fixtures/helm-values-minimal-watcher.yaml")
+	s.BaseContext = helpers.NewBaseContext(s.t, testCtx)
 
 	// Initialize helper managers
 	s.nsManager = helpers.NewNamespaceManager(s.T, s.K8sClient)

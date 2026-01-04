@@ -11,6 +11,8 @@ import (
 type DefaultResourcesStage struct {
 	*helpers.BaseContext
 
+	t *testing.T
+
 	testNamespace1 string
 	testNamespace2 string
 	deployment     *appsv1.Deployment
@@ -22,7 +24,9 @@ type DefaultResourcesStage struct {
 }
 
 func NewDefaultResourcesStage(t *testing.T) (*DefaultResourcesStage, *DefaultResourcesStage, *DefaultResourcesStage) {
-	s := &DefaultResourcesStage{}
+	s := &DefaultResourcesStage{
+		t: t,
+	}
 	return s, s, s
 }
 
@@ -31,8 +35,8 @@ func (s *DefaultResourcesStage) and() *DefaultResourcesStage {
 }
 
 func (s *DefaultResourcesStage) a_test_environment() *DefaultResourcesStage {
-	testCtx := helpers.SetupE2ETest(s.T)
-	s.BaseContext = helpers.NewBaseContext(s.T, testCtx)
+	testCtx := helpers.SetupE2ETest(s.t)
+	s.BaseContext = helpers.NewBaseContext(s.t, testCtx)
 
 	// Initialize helper managers
 	s.nsManager = helpers.NewNamespaceManager(s.T, s.K8sClient)

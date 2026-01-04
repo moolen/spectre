@@ -14,6 +14,8 @@ const (
 type MCPHTTPStage struct {
 	*helpers.BaseContext
 
+	t *testing.T
+
 	mcpClient *helpers.MCPClient
 
 	initResult     map[string]interface{}
@@ -27,7 +29,9 @@ type MCPHTTPStage struct {
 }
 
 func NewMCPHTTPStage(t *testing.T) (*MCPHTTPStage, *MCPHTTPStage, *MCPHTTPStage) {
-	s := &MCPHTTPStage{}
+	s := &MCPHTTPStage{
+		t: t,
+	}
 	return s, s, s
 }
 
@@ -36,11 +40,11 @@ func (s *MCPHTTPStage) and() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) a_test_environment() *MCPHTTPStage {
-	testCtx := helpers.SetupE2ETest(s.T)
-	s.BaseContext = helpers.NewBaseContext(s.T, testCtx)
+	testCtx := helpers.SetupE2ETest(s.t)
+	s.BaseContext = helpers.NewBaseContext(s.t, testCtx)
 
 	// Initialize helper managers
-	s.ctxHelper = helpers.NewContextHelper(s.T)
+	s.ctxHelper = helpers.NewContextHelper(s.t)
 
 	return s
 }
