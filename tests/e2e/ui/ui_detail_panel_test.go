@@ -17,7 +17,8 @@ func TestUIDetailPanelInteraction(t *testing.T) {
 		browser_is_initialized().and().
 		deployment_is_created("", "").and().
 		resources_are_available().and().
-		navigated_to_timeline(10 * time.Minute)
+		navigated_to_timeline(10 * time.Minute).and().
+		scroll_timeline_to_load_all_resources()
 
 	when.resource_label_is_clicked()
 

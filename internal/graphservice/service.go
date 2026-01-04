@@ -160,37 +160,11 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.logger.Info("Event listener started and ready to receive events")
 
-	// Perform rebuild if configured (must happen after pipeline is started)
-	if s.config.RebuildOnStart && s.rebuilder != nil {
-		s.logger.Info("Graph rebuild on start is enabled (RebuildIfEmptyOnly: %v, RebuildWindow: %v)",
-			s.config.RebuildIfEmptyOnly, s.config.RebuildWindow)
-		
-		opts := sync.RebuildOptions{
-			TimeWindow:       s.config.RebuildWindow,
-			BatchSize:        s.config.PipelineConfig.BatchSize,
-			IncludeK8sEvents: true,
+		// Rebuild functionality removed - graph starts empty
+		// No rebuild from storage since storage package is removed
+		if s.config.RebuildOnStart {
+			s.logger.Info("Graph rebuild on start is disabled (storage package removed - graph starts empty)")
 		}
-
-		if s.config.RebuildIfEmptyOnly {
-			// Check if graph is empty before rebuilding
-			s.logger.Info("Checking if graph is empty before rebuilding...")
-			if err := s.rebuilder.RebuildIfEmpty(ctx, opts, s.IsGraphEmpty); err != nil {
-				s.logger.Warn("Failed to rebuild graph: %v", err)
-				// Don't fail startup - continue with current graph state
-			}
-		} else {
-			// Always rebuild
-			s.logger.Info("Forcing graph rebuild (RebuildIfEmptyOnly is false)")
-			if err := s.rebuilder.Rebuild(ctx, opts); err != nil {
-				s.logger.Warn("Failed to rebuild graph: %v", err)
-				// Don't fail startup - continue with current graph state
-			}
-		}
-	} else if s.config.RebuildOnStart {
-		s.logger.Warn("Graph rebuild on start is enabled but rebuilder is not initialized")
-	} else {
-		s.logger.Info("Graph rebuild on start is disabled")
-	}
 
 	// Start consuming batches
 	go s.consumeBatches(ctx)
@@ -228,17 +202,11 @@ func (s *Service) Stop(ctx context.Context) error {
 	return nil
 }
 
-// InitializeWithStorage sets up the service with a storage backend for rebuild
-func (s *Service) InitializeWithStorage(ctx context.Context, storage sync.StorageQuerier) error {
-	if err := s.Initialize(ctx); err != nil {
-		return err
-	}
-
-	// Create rebuilder (rebuild will happen in Start() after pipeline is ready)
-	s.rebuilder = sync.NewRebuilder(storage, s.pipeline)
-	s.logger.Info("Rebuilder initialized with storage backend")
-
-	return nil
+// InitializeWithStorage is deprecated - storage package removed
+// This method is kept for compatibility but does nothing
+func (s *Service) InitializeWithStorage(ctx context.Context, storage interface{}) error {
+	// Storage rebuild is no longer supported
+	return s.Initialize(ctx)
 }
 
 // OnEvent handles an event from Spectre storage

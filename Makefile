@@ -1,4 +1,4 @@
-.PHONY: help build build-ui build-mcp run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down graph-logs test-graph test-graph-integration
+.PHONY: help build build-ui build-mcp run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down test-graph test-graph-integration test-integration test-graph-integration-coverage test-graph-integration-single
 
 # Default target
 help:
@@ -17,20 +17,11 @@ help:
 	@echo "  test           - Run all tests (Go + UI)"
 	@echo "  test-go        - Run Go tests only"
 	@echo "  test-ui        - Run UI tests only"
-	@echo "  test-e2e       - Run e2e tests"
-	@echo "  test-e2e-ui    - Run UI e2e tests"
-	@echo "  test-e2e-all   - Run all e2e tests"
 	@echo "  clean-test-clusters - Delete persistent test Kind clusters"
-	@echo "  test-unit      - Run unit tests only"
-	@echo "  test-integration - Run integration tests only"
-	@echo "  test-coverage  - Run tests with coverage report"
-	@echo "  test-graph     - Run graph layer unit tests"
-	@echo "  test-graph-integration - Run graph integration tests (starts FalkorDB)"
 	@echo ""
 	@echo "Graph Layer:"
 	@echo "  graph-up       - Start FalkorDB for development"
 	@echo "  graph-down     - Stop FalkorDB"
-	@echo "  graph-logs     - View FalkorDB logs"
 	@echo ""
 	@echo "Development:"
 	@echo "  dev-iterate    - Quick iteration: clean, build, restart all services locally"
@@ -102,13 +93,8 @@ test-ui:
 	@cd ui && npm ci --prefer-offline --no-audit --no-fund 2>/dev/null && npm run test
 
 # Run all tests (Go + UI)
-test: test-go test-graph-integration test-ui
+test: test-go test-ui
 	@echo "All tests completed successfully!"
-
-# Run e2e tests
-test-e2e:
-	@echo "Running e2e tests..."
-	@go test -v -timeout 60m ./tests/e2e/...
 
 # Clean up test Kind clusters
 clean-test-clusters:
@@ -116,15 +102,6 @@ clean-test-clusters:
 	@kind delete cluster --name spectre-e2e-shared 2>/dev/null || true
 	@kind delete cluster --name spectre-ui-e2e-shared 2>/dev/null || true
 	@echo "✓ Test clusters cleaned up"
-
-# Run UI e2e tests
-test-e2e-ui:
-	@echo "Running UI e2e tests..."
-	@go test -v -timeout 60m ./tests/e2e/ui/...
-
-# Run all e2e tests
-test-e2e-all: test-e2e test-e2e-ui
-	@echo "All e2e tests completed!"
 
 # Clean build artifacts
 clean:
@@ -198,7 +175,6 @@ deps-verify:
 # Generate protobuf code
 proto:
 	@echo "Generating protobuf code..."
-	@protoc --go_out=. --go_opt=paths=source_relative internal/storage/index.proto
 	@protoc --go_out=. --go_opt=module=github.com/moolen/spectre internal/models/event.proto
 	@protoc --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
@@ -250,22 +226,6 @@ graph-down:
 	@docker compose -f docker-compose.graph.yml down falkordb
 	@echo "FalkorDB stopped"
 
-# View FalkorDB logs
-graph-logs:
-	@docker compose -f docker-compose.graph.yml logs -f
-
-# Run graph layer unit tests
-test-graph:
-	@echo "Running graph layer unit tests..."
-	@go test -v -cover ./internal/graph/...
-	@echo "Graph unit tests complete!"
-
-# Run graph integration tests (starts FalkorDB automatically)
-test-graph-integration: graph-up
-	@echo "Running graph integration tests..."
-	@go test -v -tags=integration ./internal/graph/... ./internal/analysis/... -run Integration || (make graph-down && exit 1)
-	@make graph-down
-	@echo "Graph integration tests complete!"
 
 # ============================================================================
 
@@ -297,10 +257,10 @@ dev-iterate: build
 	mkdir -p $(DATA_LOCAL_DIR)/logs
 	KUBECONFIG=$(KUBECONFIG) \
 		$(BINARY_PATH) server \
-		--data-dir=$(DATA_LOCAL_DIR) \
 		--log-level=debug \
 		--graph-enabled=true \
 		--graph-host=localhost \
+		--graph-rebuild-on-start=false \
 		--graph-port=6379 \
 		--watcher-config=hack/watcher.yaml \
 		> $(DATA_LOCAL_DIR)/logs/spectre.log 2>&1 &

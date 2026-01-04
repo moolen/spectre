@@ -45,9 +45,8 @@ type K8sEvent struct {
 
 // MetadataResponse represents cluster metadata
 type MetadataResponse struct {
-	Namespaces []string `json:"namespaces"`
-	Kinds      []string `json:"kinds"`
-	Groups     []string `json:"groups"`
+	Namespaces []string  `json:"namespaces"`
+	Kinds      []string  `json:"kinds"`
 	TimeRange  TimeRange `json:"timeRange"`
 }
 

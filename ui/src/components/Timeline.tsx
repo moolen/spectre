@@ -13,6 +13,9 @@ interface TimelineProps {
   timeRange: TimeRange;
   onVisibleTimeRangeChange?: (timeRange: TimeRange) => void;
   onZoomDetected?: () => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 const MARGIN = { top: 40, right: 30, bottom: 20, left: 240 };
@@ -27,7 +30,10 @@ export const Timeline: React.FC<TimelineProps> = ({
     sidebarWidth = 0,
     timeRange,
     onVisibleTimeRangeChange,
-    onZoomDetected
+    onZoomDetected,
+    hasMore = false,
+    loadingMore = false,
+    onLoadMore,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const stickyAxisRef = useRef<SVGSVGElement>(null);
@@ -78,6 +84,22 @@ export const Timeline: React.FC<TimelineProps> = ({
     resizeObserver.observe(containerRef.current);
     return () => resizeObserver.disconnect();
   }, []);
+
+  // Scroll detection for lazy loading
+  useEffect(() => {
+    if (!containerRef.current || !hasMore || !onLoadMore) return;
+    const container = containerRef.current;
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const scrolledToBottom = scrollHeight - scrollTop - clientHeight < 200; // 200px threshold
+      if (scrolledToBottom && !loadingMore) {
+        onLoadMore();
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [hasMore, loadingMore, onLoadMore]);
 
   const width = containerSize.width || 800;
   const height = containerSize.height || 600;
@@ -641,7 +663,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .filter((d: any) => highlightedEventIds.includes(d.id))
         .raise();
 
-  }, [selectedPoint, highlightedEventIds, themeColors, theme]);
+  }, [selectedPoint, highlightedEventIds, themeColors, theme, sortedResources]);
 
   // Track previous sidebar width to detect panel closing
   const prevSidebarWidth = useRef(0);
@@ -877,6 +899,19 @@ export const Timeline: React.FC<TimelineProps> = ({
           <pre className="text-xs text-[var(--color-text-primary)] whitespace-pre-wrap font-sans">
             {tooltip.content}
           </pre>
+        </div>
+      )}
+      {/* Loading indicator for pagination */}
+      {loadingMore && (
+        <div className="sticky bottom-0 left-0 right-0 flex items-center justify-center py-4 bg-[var(--color-surface-secondary)] border-t border-[var(--color-border-soft)] z-10">
+          <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
+            <div className="animate-spin">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+              </svg>
+            </div>
+            <span className="text-sm">Loading more resources...</span>
+          </div>
         </div>
       )}
     </div>

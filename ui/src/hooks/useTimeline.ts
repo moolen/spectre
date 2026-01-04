@@ -5,10 +5,13 @@ import { apiClient } from '../services/api';
 interface UseTimelineResult {
   resources: K8sResource[];
   loading: boolean;
+  loadingMore: boolean;
   error: Error | null;
   refresh: () => void;
   totalCount: number;
   loadedCount: number;
+  hasMore: boolean;
+  loadMore: () => void;
 }
 
 interface UseTimelineOptions {
@@ -19,9 +22,12 @@ interface UseTimelineOptions {
   filters?: {
     namespace?: string;
     kind?: string;
+    namespaces?: string[];
+    kinds?: string[];
     group?: string;
     version?: string;
   };
+  pageSize?: number;
   refreshToken?: number;
 }
 
@@ -41,9 +47,12 @@ interface UseTimelineOptions {
 export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => {
   const [resources, setResources] = useState<K8sResource[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [loadedCount, setLoadedCount] = useState<number>(0);
+  const [hasMore, setHasMore] = useState<boolean>(false);
+  const [nextCursor, setNextCursor] = useState<string>('');
   const abortControllerRef = useRef<AbortController | null>(null);
   const accumulatedResourcesRef = useRef<K8sResource[]>([]);
   const batchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -54,10 +63,12 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
     return JSON.stringify({
       namespace: options.filters.namespace || null,
       kind: options.filters.kind || null,
+      namespaces: options.filters.namespaces || null,
+      kinds: options.filters.kinds || null,
       group: options.filters.group || null,
       version: options.filters.version || null,
     });
-  }, [options?.filters?.namespace, options?.filters?.kind, options?.filters?.group, options?.filters?.version]);
+  }, [options?.filters?.namespace, options?.filters?.kind, options?.filters?.namespaces, options?.filters?.kinds, options?.filters?.group, options?.filters?.version]);
 
   const startTimeMs = options?.startTime?.getTime() ?? null;
   const endTimeMs = options?.endTime?.getTime() ?? null;
@@ -71,28 +82,32 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
 
   const prevRefreshTokenRef = useRef<number>(refreshToken);
 
-  const fetchData = useCallback(async (force = false) => {
+  const fetchData = useCallback(async (force = false, cursor?: string) => {
     if (!options?.startTime || !options?.endTime) {
       setLoading(false);
       return;
     }
 
-    // Only fetch if time range or filters actually changed
-    const timeRangeChanged =
-      prevStartTimeRef.current !== startTimeMs ||
-      prevEndTimeRef.current !== endTimeMs;
-    const filtersChanged = prevFiltersRef.current !== filtersKey;
-    const refreshChanged = prevRefreshTokenRef.current !== refreshToken;
+    const isLoadingMore = !!cursor;
 
-    if (!force && !timeRangeChanged && !filtersChanged && !refreshChanged) {
-      return; // No changes, skip fetch
+    // Only fetch if time range or filters actually changed (unless loading more)
+    if (!isLoadingMore) {
+      const timeRangeChanged =
+        prevStartTimeRef.current !== startTimeMs ||
+        prevEndTimeRef.current !== endTimeMs;
+      const filtersChanged = prevFiltersRef.current !== filtersKey;
+      const refreshChanged = prevRefreshTokenRef.current !== refreshToken;
+
+      if (!force && !timeRangeChanged && !filtersChanged && !refreshChanged) {
+        return; // No changes, skip fetch
+      }
+
+      // Update refs BEFORE fetching to prevent duplicate calls
+      prevStartTimeRef.current = startTimeMs;
+      prevEndTimeRef.current = endTimeMs;
+      prevFiltersRef.current = filtersKey;
+      prevRefreshTokenRef.current = refreshToken;
     }
-
-    // Update refs BEFORE fetching to prevent duplicate calls
-    prevStartTimeRef.current = startTimeMs;
-    prevEndTimeRef.current = endTimeMs;
-    prevFiltersRef.current = filtersKey;
-    prevRefreshTokenRef.current = refreshToken;
 
     // Cancel any previous request and pending batches
     if (abortControllerRef.current) {
@@ -131,11 +146,17 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
     };
 
     try {
-      setLoading(true);
-      setError(null);
-      setResources([]);
-      setTotalCount(0);
-      setLoadedCount(0);
+      if (isLoadingMore) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setError(null);
+        setResources([]);
+        setTotalCount(0);
+        setLoadedCount(0);
+        setHasMore(false);
+        setNextCursor('');
+      }
 
       // Fetch timeline data from backend using gRPC streaming
       // Use raw string expressions if provided, otherwise use millisecond timestamps
@@ -150,16 +171,30 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
       const BATCH_SIZE = 50; // Flush every 50 resources
       const BATCH_DELAY_MS = 150; // Or after 150ms of no new data
 
+      // Build filters with pagination support
+      const apiFilters = {
+        ...options?.filters,
+        pageSize: options?.pageSize || 100,
+        cursor: cursor || '',
+      };
+
       // Use gRPC streaming with batched progressive rendering
       const result = await apiClient.getTimelineGrpc(
         startParam,
         endParam,
-        options?.filters,
+        apiFilters,
         (chunk) => {
           console.log("getTimeline Grpc: chunk.resources", chunk.resources);
           // Update total count from metadata (first chunk) - this is critical
           if (chunk.metadata?.totalCount !== undefined) {
             setTotalCount(chunk.metadata.totalCount);
+          }
+          // Update pagination state from metadata
+          if (chunk.metadata.hasMore !== undefined) {
+            setHasMore(chunk.metadata.hasMore);
+          }
+          if (chunk.metadata.nextCursor) {
+            setNextCursor(chunk.metadata.nextCursor);
           }
 
           // Accumulate resources for batching
@@ -191,9 +226,13 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
         batchTimeoutRef.current = null;
       }
       flushBatch();
-      
+
       // Ensure loading is stopped even if no data was received
-      setLoading(false);
+      if (isLoadingMore) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         // Request was cancelled, ignore
@@ -201,9 +240,13 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
       }
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch timeline data';
       setError(new Error(errorMessage));
-      setLoading(false);
+      if (isLoadingMore) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
-  }, [startTimeMs, endTimeMs, filtersKey, options?.rawStart, options?.rawEnd, refreshToken]);
+  }, [startTimeMs, endTimeMs, filtersKey, options?.rawStart, options?.rawEnd, options?.filters, options?.pageSize, refreshToken]);
 
   useEffect(() => {
     fetchData();
@@ -220,12 +263,21 @@ export const useTimeline = (options?: UseTimelineOptions): UseTimelineResult => 
     };
   }, [fetchData]);
 
+  const loadMore = useCallback(() => {
+    console.log("loading more", hasMore, loadingMore, nextCursor)
+    if (!hasMore || loadingMore || !nextCursor) return;
+    fetchData(false, nextCursor);
+  }, [hasMore, loadingMore, nextCursor, fetchData]);
+
   return {
     resources,
     loading,
+    loadingMore,
     error,
     refresh: () => fetchData(true),
     totalCount,
-    loadedCount
+    loadedCount,
+    hasMore,
+    loadMore,
   };
 };

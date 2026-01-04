@@ -8,19 +8,29 @@ option go_package = "github.com/moolen/spectre/internal/api/pb";
 message TimelineRequest {
   int64 start_timestamp = 1;
   int64 end_timestamp = 2;
-  string namespace = 3;
-  string kind = 4;
+  string namespace = 3;       // Single namespace filter (deprecated, use namespaces)
+  string kind = 4;            // Single kind filter (deprecated, use kinds)
   string name = 5;
   string label_selector = 6;
+  // Multi-value filters (take precedence over single-value if both set)
+  repeated string namespaces = 7;  // Multiple namespace filter
+  repeated string kinds = 8;        // Multiple kind filter
+  // Pagination parameters
+  int32 page_size = 9;              // Resources per page (default: 100, max: 500)
+  string cursor = 10;               // Opaque cursor for next page (empty = first page)
 }
 
 // TimelineMetadata sent first in stream
 message TimelineMetadata {
-  int32 total_count = 1;
+  int32 total_count = 1;              // Total count (may be estimate for large datasets)
   int32 files_searched = 2;
   int32 segments_scanned = 3;
   int32 segments_skipped = 4;
   int64 query_execution_time_ms = 5;
+  // Pagination response fields
+  string next_cursor = 6;             // Cursor for next page (empty = no more pages)
+  bool has_more = 7;                  // True if more pages available
+  int32 page_size = 8;                // Actual page size used
 }
 
 // StatusSegment represents resource status over time

@@ -236,7 +236,7 @@ class ApiClient {
     if (getDemoMode()) {
       console.log('[Demo Mode] getTimelineGrpc falling back to REST API');
       const resources = await this.getTimeline(startTime, endTime, filters);
-      
+
       // If a chunk callback was provided, call it with all resources at once
       if (onChunk) {
         console.log('[Demo Mode] Calling onChunk with', resources.length, 'resources');
@@ -248,7 +248,7 @@ class ApiClient {
           },
         });
       }
-      
+
       return resources;
     }
 
@@ -266,8 +266,12 @@ class ApiClient {
       endTimestamp: endSeconds,
       namespace: filters?.namespace ?? '',
       kind: filters?.kind ?? '',
+      namespaces: filters?.namespaces ?? [],
+      kinds: filters?.kinds ?? [],
       name: '',
       labelSelector: '',
+      pageSize: filters?.pageSize ?? 0,
+      cursor: filters?.cursor ?? '',
     };
 
     const allResources: K8sResource[] = [];
@@ -278,6 +282,7 @@ class ApiClient {
         // Transform gRPC resources to K8sResource format
         const transformed = result.resources.map(r => this.transformGrpcResource(r));
         allResources.push(...transformed);
+        console.log(result, transformed)
 
         // Forward to caller with transformed data
         onChunk({
@@ -435,13 +440,11 @@ class ApiClient {
 
   /**
    * Export storage data
-   * Returns a Blob that can be downloaded
+   * Returns a Blob that can be downloaded (gzipped JSON)
    */
   async exportData(options: {
     from: string;
     to: string;
-    includeOpenHour?: boolean;
-    compression?: boolean;
     clusterId?: string;
     instanceId?: string;
   }): Promise<Blob> {
@@ -449,11 +452,21 @@ class ApiClient {
     if (getDemoMode()) {
       throw new Error('Export is not available in demo mode');
     }
+    
+    // Convert human-readable time strings to Unix timestamps (seconds)
+    const fromDate = parseTimeExpression(options.from);
+    const toDate = parseTimeExpression(options.to);
+    
+    if (!fromDate || !toDate) {
+      throw new Error('Invalid time range: could not parse start or end time');
+    }
+    
+    const fromTimestamp = Math.floor(fromDate.getTime() / 1000);
+    const toTimestamp = Math.floor(toDate.getTime() / 1000);
+    
     const params = new URLSearchParams();
-    params.append('from', options.from);
-    params.append('to', options.to);
-    params.append('include_open_hour', (options.includeOpenHour ?? true).toString());
-    params.append('compression', (options.compression ?? true).toString());
+    params.append('from', fromTimestamp.toString());
+    params.append('to', toTimestamp.toString());
     if (options.clusterId) params.append('cluster_id', options.clusterId);
     if (options.instanceId) params.append('instance_id', options.instanceId);
 

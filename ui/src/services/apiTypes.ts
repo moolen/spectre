@@ -48,9 +48,6 @@ export interface K8sEventDTO {
 export interface MetadataResponse {
   namespaces: string[];
   kinds: string[];
-  groups: string[];
-  resourceCounts: Record<string, number>;
-  totalEvents: number;
   timeRange: TimeRangeInfo;
 }
 

@@ -4,7 +4,11 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,6 +145,85 @@ func (k *K8sClient) ListPods(ctx context.Context, namespace, selector string) (*
 	return k.Clientset.CoreV1().Pods(namespace).List(ctx, opts)
 }
 
+// DescribePod describes a pod and logs its status, useful for debugging failures
+func (k *K8sClient) DescribePod(ctx context.Context, namespace, name string) error {
+	pod, err := k.GetPod(ctx, namespace, name)
+	if err != nil {
+		k.t.Logf("⚠ Failed to get pod %s/%s for description: %v", namespace, name, err)
+		return err
+	}
+
+	k.t.Logf("=== Pod Description: %s/%s ===", namespace, name)
+	k.t.Logf("Status: Phase=%s, Reason=%s, Message=%s", pod.Status.Phase, pod.Status.Reason, pod.Status.Message)
+
+	// Log container statuses
+	for _, containerStatus := range pod.Status.ContainerStatuses {
+		k.t.Logf("Container %s: Ready=%v, RestartCount=%d",
+			containerStatus.Name, containerStatus.Ready, containerStatus.RestartCount)
+
+		if containerStatus.State.Waiting != nil {
+			k.t.Logf("  Waiting: Reason=%s, Message=%s",
+				containerStatus.State.Waiting.Reason, containerStatus.State.Waiting.Message)
+		}
+		if containerStatus.State.Running != nil {
+			k.t.Logf("  Running: StartedAt=%v", containerStatus.State.Running.StartedAt)
+		}
+		if containerStatus.State.Terminated != nil {
+			k.t.Logf("  Terminated: Reason=%s, ExitCode=%d, Message=%s, FinishedAt=%v",
+				containerStatus.State.Terminated.Reason,
+				containerStatus.State.Terminated.ExitCode,
+				containerStatus.State.Terminated.Message,
+				containerStatus.State.Terminated.FinishedAt)
+		}
+
+		// Log last termination state if present
+		if containerStatus.LastTerminationState.Terminated != nil {
+			k.t.Logf("  LastTermination: Reason=%s, ExitCode=%d, FinishedAt=%v",
+				containerStatus.LastTerminationState.Terminated.Reason,
+				containerStatus.LastTerminationState.Terminated.ExitCode,
+				containerStatus.LastTerminationState.Terminated.FinishedAt)
+		}
+	}
+
+	// Log resource requests/limits if available
+	if len(pod.Spec.Containers) > 0 {
+		container := pod.Spec.Containers[0]
+		if container.Resources.Requests != nil {
+			k.t.Logf("Resource Requests: %v", container.Resources.Requests)
+		}
+		if container.Resources.Limits != nil {
+			k.t.Logf("Resource Limits: %v", container.Resources.Limits)
+		}
+	}
+
+	k.t.Logf("=== End Pod Description ===")
+	return nil
+}
+
+// GetPodLogs retrieves logs from a specific container in a pod
+func (k *K8sClient) GetPodLogs(ctx context.Context, namespace, podName, containerName string, tailLines *int64) (string, error) {
+	opts := &corev1.PodLogOptions{
+		Container: containerName,
+	}
+	if tailLines != nil {
+		opts.TailLines = tailLines
+	}
+
+	req := k.Clientset.CoreV1().Pods(namespace).GetLogs(podName, opts)
+	logs, err := req.Stream(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to stream logs: %w", err)
+	}
+	defer logs.Close()
+
+	logBytes, err := io.ReadAll(logs)
+	if err != nil {
+		return "", fmt.Errorf("failed to read logs: %w", err)
+	}
+
+	return string(logBytes), nil
+}
+
 // GetPod retrieves a single pod.
 func (k *K8sClient) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
 	return k.Clientset.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -272,6 +355,40 @@ func RunCommand(command string) (string, error) {
 	return string(output), err
 }
 
+// ExtractAuditLog extracts the audit log from a pod and saves it to a local file.
+func (k *K8sClient) ExtractAuditLog(ctx context.Context, kubeContext, namespace, podName, containerName, auditLogPath, localPath string) error {
+	k.t.Logf("Extracting audit log from pod %s/%s (container: %s) to %s", namespace, podName, containerName, localPath)
+
+	// Use kubectl exec to read the audit log file
+	cmd := exec.CommandContext(ctx, "kubectl", "--context", kubeContext,
+		"exec", "-n", namespace, podName, "-c", containerName,
+		"--", "cat", auditLogPath)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// If file doesn't exist, that's okay - just log and return
+		if strings.Contains(string(output), "No such file") || strings.Contains(string(output), "not found") {
+			k.t.Logf("Audit log file not found in pod (may not have been created): %s", auditLogPath)
+			return nil
+		}
+		return fmt.Errorf("failed to extract audit log: %w\nOutput: %s", err, string(output))
+	}
+
+	// Create .tests directory if it doesn't exist
+	dir := filepath.Dir(localPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	// Write the audit log to local file
+	if err := os.WriteFile(localPath, output, 0644); err != nil {
+		return fmt.Errorf("failed to write audit log to %s: %w", localPath, err)
+	}
+
+	k.t.Logf("✓ Audit log extracted: %s (%d bytes)", localPath, len(output))
+	return nil
+}
+
 // WaitForStorageClass waits for a storage class and its provisioner to be available.
 func (k *K8sClient) WaitForStorageClass(ctx context.Context, name string, timeout time.Duration) error {
 	k.t.Logf("Waiting for StorageClass to be available: %s", name)
@@ -341,13 +458,13 @@ func (k *K8sClient) UpdateConfigMap(ctx context.Context, namespace, name string,
 // WaitForNamespaceDeleted waits for a namespace to be fully deleted
 func (k *K8sClient) WaitForNamespaceDeleted(ctx context.Context, namespace string, timeout time.Duration) error {
 	k.t.Helper()
-	
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():

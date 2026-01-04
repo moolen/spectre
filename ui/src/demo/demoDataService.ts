@@ -51,8 +51,12 @@ type DemoEvent = {
 export type TimelineFilters = {
   namespace?: string;
   kind?: string;
+  namespaces?: string[];
+  kinds?: string[];
   group?: string;
   version?: string;
+  pageSize?: number;
+  cursor?: string;
 };
 
 const dataset: DemoDataset = rawDataset as DemoDataset;
@@ -134,12 +138,26 @@ function matchesFilters(resource: DemoResource, filters?: TimelineFilters): bool
     return true;
   }
 
+  // Single-value filters (backward compatibility)
   if (filters.namespace && resource.namespace !== filters.namespace) {
     return false;
   }
   if (filters.kind && resource.kind !== filters.kind) {
     return false;
   }
+
+  // Multi-value filters (take precedence over single-value if both provided)
+  if (filters.namespaces && filters.namespaces.length > 0) {
+    if (!filters.namespaces.includes(resource.namespace)) {
+      return false;
+    }
+  }
+  if (filters.kinds && filters.kinds.length > 0) {
+    if (!filters.kinds.includes(resource.kind)) {
+      return false;
+    }
+  }
+
   if (filters.group && resource.group !== filters.group) {
     return false;
   }

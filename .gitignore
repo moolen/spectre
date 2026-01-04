@@ -68,3 +68,4 @@ data/data-local/
 
 # Auto Claude data directory
 .auto-claude/
+.tests/

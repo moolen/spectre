@@ -16,51 +16,46 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// StorageWriter is the interface for writing events to storage
-type StorageWriter interface {
-	// WriteEvent writes an event to storage
-	WriteEvent(event *models.Event) error
-}
-
 // GraphPipeline is the interface for processing events through the graph pipeline
 type GraphPipeline interface {
 	ProcessEvent(ctx context.Context, event models.Event) error
 }
 
-// TimelineMode specifies where events are written
+// TimelineMode specifies where events are written (graph-only now)
 type TimelineMode string
 
 const (
-	TimelineModeStorage TimelineMode = "storage"
-	TimelineModeGraph   TimelineMode = "graph"
-	TimelineModeBoth    TimelineMode = "both"
+	TimelineModeGraph TimelineMode = "graph"
 )
 
-// EventCaptureHandler captures Kubernetes events and routes them to storage and/or graph
+// EventCaptureHandler captures Kubernetes events and routes them to graph
 type EventCaptureHandler struct {
-	storage       StorageWriter
 	graphPipeline GraphPipeline
-	mode          TimelineMode
+	auditLog      AuditLogWriter // Optional audit log
 	logger        *logging.Logger
 	pruner        *ManagedFieldsPruner
 }
 
-// NewEventCaptureHandler creates a new event capture handler (storage-only mode)
-func NewEventCaptureHandler(storage StorageWriter) *EventCaptureHandler {
+// NewEventCaptureHandler creates a new event capture handler (graph-only mode)
+func NewEventCaptureHandler(graphPipeline GraphPipeline) *EventCaptureHandler {
 	return &EventCaptureHandler{
-		storage: storage,
-		mode:    TimelineModeStorage,
-		logger:  logging.GetLogger("event_handler"),
-		pruner:  NewManagedFieldsPruner(),
+		graphPipeline: graphPipeline,
+		logger:        logging.GetLogger("event_handler"),
+		pruner:        NewManagedFieldsPruner(),
 	}
 }
 
-// NewEventCaptureHandlerWithMode creates an event handler with specified mode
-func NewEventCaptureHandlerWithMode(storage StorageWriter, graphPipeline GraphPipeline, mode TimelineMode) *EventCaptureHandler {
+// SetAuditLog sets the audit log writer for the handler
+func (h *EventCaptureHandler) SetAuditLog(writer AuditLogWriter) {
+	h.auditLog = writer
+}
+
+// NewEventCaptureHandlerWithMode creates an event handler with specified mode (graph-only now)
+func NewEventCaptureHandlerWithMode(storage interface{}, graphPipeline GraphPipeline, mode TimelineMode) *EventCaptureHandler {
+	// storage parameter is ignored - kept for signature compatibility
+	// mode must be TimelineModeGraph
 	return &EventCaptureHandler{
-		storage:       storage,
 		graphPipeline: graphPipeline,
-		mode:          mode,
 		logger:        logging.GetLogger("event_handler"),
 		pruner:        NewManagedFieldsPruner(),
 	}
@@ -153,45 +148,29 @@ func (h *EventCaptureHandler) OnDelete(obj runtime.Object) error {
 	return h.writeEvent(event)
 }
 
-// writeEvent writes an event based on the configured mode
+// writeEvent writes an event to graph
 func (h *EventCaptureHandler) writeEvent(event *models.Event) error {
 	ctx := context.Background() // Use background context for event processing
 
-	var storageErr, graphErr error
-
-	// Write to storage if needed
-	if h.mode == TimelineModeStorage || h.mode == TimelineModeBoth {
-		if h.storage != nil {
-			storageErr = h.storage.WriteEvent(event)
-			if storageErr != nil {
-				h.logger.Error("Failed to write event to storage: %v", storageErr)
-			}
+	// Write to audit log FIRST (independent of graph mode)
+	if h.auditLog != nil {
+		if err := h.auditLog.WriteEvent(event); err != nil {
+			h.logger.Warn("Failed to write event to audit log: %v", err)
+			// Don't return error - audit log is non-critical
 		}
 	}
 
-	// Write to graph if needed
-	if h.mode == TimelineModeGraph || h.mode == TimelineModeBoth {
-		if h.graphPipeline != nil {
-			graphErr = h.graphPipeline.ProcessEvent(ctx, *event)
-			if graphErr != nil {
-				h.logger.Error("Failed to write event to graph: %v", graphErr)
-			}
+	// Write to graph
+	if h.graphPipeline != nil {
+		if err := h.graphPipeline.ProcessEvent(ctx, *event); err != nil {
+			h.logger.Error("Failed to write event to graph: %v", err)
+			return err
 		}
+	} else {
+		return fmt.Errorf("graph pipeline is not set")
 	}
 
-	// In "both" mode, succeed if either write succeeds
-	if h.mode == TimelineModeBoth {
-		if storageErr != nil && graphErr != nil {
-			return fmt.Errorf("both writes failed - storage: %v, graph: %v", storageErr, graphErr)
-		}
-		return nil
-	}
-
-	// In single-mode, return the relevant error
-	if storageErr != nil {
-		return storageErr
-	}
-	return graphErr
+	return nil
 }
 
 // objectToJSON converts a Kubernetes object to JSON, pruning managedFields

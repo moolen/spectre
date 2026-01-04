@@ -7,6 +7,8 @@ export interface TimelineStreamResult {
   metadata?: TimelineMetadata;
   resources: TimelineResource[];
   isComplete: boolean;
+  hasMore?: boolean;
+  nextCursor?: string;
 }
 
 export interface StreamCallbacks {
@@ -86,6 +88,8 @@ export class TimelineGrpcService {
               metadata,
               resources: [],
               isComplete: false,
+              hasMore: chunk.metadata.hasMore,
+              nextCursor: chunk.metadata.nextCursor,
             });
           }
 
@@ -95,6 +99,8 @@ export class TimelineGrpcService {
               metadata,
               resources: chunk.batch.resources,
               isComplete: chunk.batch.isFinalBatch,
+              hasMore: metadata?.hasMore,
+              nextCursor: metadata?.nextCursor,
             });
           }
         },
@@ -150,7 +156,16 @@ export class TimelineGrpcService {
   async streamTimeline(
     start: string | number,
     end: string | number,
-    filters?: { namespace?: string; kind?: string; group?: string; version?: string },
+    filters?: {
+      namespace?: string;
+      kind?: string;
+      namespaces?: string[];
+      kinds?: string[];
+      group?: string;
+      version?: string;
+      pageSize?: number;
+      cursor?: string;
+    },
     callbacks?: StreamCallbacks,
     signal?: AbortSignal
   ): Promise<void> {
@@ -163,8 +178,12 @@ export class TimelineGrpcService {
       endTimestamp,
       namespace: filters?.namespace || '',
       kind: filters?.kind || '',
+      namespaces: filters?.namespaces || [],
+      kinds: filters?.kinds || [],
       name: '',
       labelSelector: '',
+      pageSize: filters?.pageSize || 0,
+      cursor: filters?.cursor || '',
     };
 
     return new Promise((resolve, reject) => {

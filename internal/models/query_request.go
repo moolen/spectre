@@ -50,8 +50,5 @@ func (q *QueryRequest) IsValid() bool {
 
 // HasFilters checks if any filters are specified
 func (q *QueryRequest) HasFilters() bool {
-	return q.Filters.Group != "" ||
-		q.Filters.Version != "" ||
-		q.Filters.Kind != "" ||
-		q.Filters.Namespace != ""
+	return !q.Filters.IsEmpty()
 }

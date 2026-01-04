@@ -85,11 +85,9 @@ spec:
           protocol: TCP
         {{- end }}
         args:
-        - --data-dir={{ .Values.persistence.mountPath }}
         - --api-port={{ .Values.service.targetPort }}
         - --log-level={{ .Values.config.logLevel }}
         - --watcher-config=/etc/watcher/watcher.yaml
-        - --segment-size={{ .Values.config.segmentSize | int64 }}
         - --max-concurrent-requests={{ .Values.config.maxConcurrentRequests }}
         {{- if .Values.pprof.enabled }}
         - --pprof-enabled=true
@@ -108,19 +106,11 @@ spec:
         - --graph-rebuild-on-start={{ .Values.graph.sync.rebuildOnStart }}
         - --graph-rebuild-if-empty={{ .Values.graph.sync.rebuildIfEmptyOnly }}
         - --graph-rebuild-window-hours={{ .Values.graph.sync.rebuildWindowHours }}
-        {{- if .Values.graph.timeline }}
-        - --timeline-query-source={{ .Values.graph.timeline.querySource }}
-        - --timeline-mode={{ .Values.graph.timeline.mode }}
-        {{- end }}
         {{- end }}
         {{- range .Values.extraArgs }}
         - {{ . }}
         {{- end }}
         volumeMounts:
-        {{- if .Values.persistence.enabled }}
-        - name: data
-          mountPath: {{ .Values.persistence.mountPath }}
-        {{- end }}
         - name: watcher-config
           mountPath: /etc/watcher
           readOnly: true
@@ -227,11 +217,6 @@ spec:
           {{- toYaml .Values.graph.falkordb.resources | nindent 12 }}
       {{- end }}
       volumes:
-        {{- if .Values.persistence.enabled }}
-      - name: data
-        persistentVolumeClaim:
-          claimName: {{ default (include "spectre.fullname" .) .Values.persistence.existingClaim }}
-        {{- end }}
       - name: watcher-config
         configMap:
           name: {{ include "spectre.fullname" . }}

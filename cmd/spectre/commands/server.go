@@ -19,23 +19,16 @@ import (
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
-	"github.com/moolen/spectre/internal/models"
-	"github.com/moolen/spectre/internal/storage"
 	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
 	"github.com/spf13/cobra"
 )
 
 var (
-	demo                  bool
-	dataDir               string
 	apiPort               int
 	watcherConfigPath     string
 	watcherEnabled        bool
-	segmentSize           int64
 	maxConcurrentRequests int
-	cacheMaxMB            int64
-	cacheEnabled          bool
 	importPath            string
 	pprofEnabled          bool
 	pprofPort             int
@@ -55,9 +48,8 @@ var (
 	graphRebuildOnStart     bool
 	graphRebuildIfEmpty     bool
 	graphRebuildWindowHours int
-	// Timeline mode flags
-	timelineMode        string // storage, graph, or both
-	timelineQuerySource string // storage or graph
+	// Audit log flag
+	auditLogPath string
 )
 
 var serverCmd = &cobra.Command{
@@ -69,16 +61,11 @@ stores them, and provides an API for querying and analysis.`,
 }
 
 func init() {
-	serverCmd.Flags().BoolVar(&demo, "demo", false, "Run in demo mode with embedded demo data")
-	serverCmd.Flags().StringVar(&dataDir, "data-dir", "/data", "Directory where events are stored")
 	serverCmd.Flags().IntVar(&apiPort, "api-port", 8080, "Port the API server listens on")
 	serverCmd.Flags().StringVar(&watcherConfigPath, "watcher-config", "watcher.yaml", "Path to the YAML file containing watcher configuration")
 	serverCmd.Flags().BoolVar(&watcherEnabled, "watcher-enabled", true, "Enable Kubernetes watcher (default: true)")
-	serverCmd.Flags().Int64Var(&segmentSize, "segment-size", 10*1024*1024, "Target size for compression segments in bytes (default: 10MB)")
 	serverCmd.Flags().IntVar(&maxConcurrentRequests, "max-concurrent-requests", 100, "Maximum number of concurrent API requests")
-	serverCmd.Flags().Int64Var(&cacheMaxMB, "cache-max-mb", 100, "Maximum memory for block cache in MB (default: 100MB)")
-	serverCmd.Flags().BoolVar(&cacheEnabled, "cache-enabled", true, "Enable block cache (default: true)")
-	serverCmd.Flags().StringVar(&importPath, "import", "", "Import JSON event file or directory before starting server")
+	serverCmd.Flags().StringVar(&importPath, "import-path", "", "Path to the binary file containing events to import on startup")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
 	serverCmd.Flags().DurationVar(&pprofReadTimeout, "pprof-read-timeout", 15*time.Second, "Read timeout for pprof server (default: 15s)")
@@ -95,26 +82,23 @@ func init() {
 	serverCmd.Flags().IntVar(&graphPort, "graph-port", 6379, "FalkorDB port (default: 6379)")
 	serverCmd.Flags().StringVar(&graphName, "graph-name", "spectre", "FalkorDB graph name (default: spectre)")
 	serverCmd.Flags().IntVar(&graphRetentionHours, "graph-retention-hours", 168, "Graph data retention window in hours (default: 168 = 7 days)")
-	serverCmd.Flags().BoolVar(&graphRebuildOnStart, "graph-rebuild-on-start", true, "Rebuild graph from storage on startup (default: true)")
+	serverCmd.Flags().BoolVar(&graphRebuildOnStart, "graph-rebuild-on-start", false, "Rebuild graph on startup (default: false)")
 	serverCmd.Flags().BoolVar(&graphRebuildIfEmpty, "graph-rebuild-if-empty", true, "Only rebuild if graph is empty (default: true)")
 	serverCmd.Flags().IntVar(&graphRebuildWindowHours, "graph-rebuild-window-hours", 168, "Time window for graph rebuild in hours (default: 168 = 7 days)")
 
-	// Timeline migration flags
-	serverCmd.Flags().StringVar(&timelineMode, "timeline-mode", "both", "Timeline write mode: storage, graph, or both")
-	serverCmd.Flags().StringVar(&timelineQuerySource, "timeline-query-source", "graph", "Timeline query source: storage or graph")
+	// Audit log flag
+	serverCmd.Flags().StringVar(&auditLogPath, "audit-log", "",
+		"Path to write event audit log (JSONL format) for test fixtures. "+
+			"If empty, audit logging is disabled.")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
 	// Load configuration
 	cfg := config.LoadConfig(
-		dataDir,
 		apiPort,
 		logLevel,
 		watcherConfigPath,
-		segmentSize,
 		maxConcurrentRequests,
-		cacheMaxMB,
-		cacheEnabled,
 		tracingEnabled,
 		tracingEndpoint,
 		tracingTLSCAPath,
@@ -132,12 +116,8 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 	logger := logging.GetLogger("server")
 
-	if demo {
-		logger.Info("Starting Spectre v%s [DEMO MODE]", Version)
-	} else {
-		logger.Info("Starting Spectre v%s", Version)
-	}
-	logger.Debug("Configuration loaded: DataDir=%s, APIPort=%d, LogLevel=%s", cfg.DataDir, cfg.APIPort, cfg.LogLevel)
+	logger.Info("Starting Spectre v%s", Version)
+	logger.Debug("Configuration loaded: APIPort=%d, LogLevel=%s", cfg.APIPort, cfg.LogLevel)
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
@@ -174,218 +154,87 @@ func runServer(cmd *cobra.Command, args []string) {
 		}()
 	}
 
-	// In demo mode, skip storage and watcher initialization
-	var storageComponent *storage.Storage
+	// Graph is required - check if enabled
+	if !graphEnabled {
+		logger.Error("Graph must be enabled - graph is now the only storage backend")
+		HandleError(fmt.Errorf("graph-enabled flag must be set to true"), "Configuration error")
+	}
+
 	var watcherComponent *watcher.Watcher
-	var queryExecutor api.QueryExecutor
+	var graphQueryExecutor api.QueryExecutor
+	var auditLogWriter *watcher.FileAuditLogWriter
 
-	if demo {
-		logger.Info("Demo mode enabled - using embedded demo data")
-		demoExecutor := api.NewDemoQueryExecutor()
-		queryExecutor = demoExecutor
-		logger.Info("Demo query executor created")
-	} else {
+	// Initialize audit log if enabled
+	if auditLogPath != "" {
+		logger.Info("Event audit logging enabled: %s", auditLogPath)
 		var err error
-		storageComponent, err = storage.New(cfg.DataDir, cfg.SegmentSize)
+		auditLogWriter, err = watcher.NewFileAuditLogWriter(auditLogPath)
 		if err != nil {
-			logger.Error("Failed to create storage component: %v", err)
-			HandleError(err, "Storage initialization error")
-		}
-		logger.Info("Storage component created")
-
-		// Handle import if --import flag is provided
-		if importPath != "" {
-			// Check if path is a file or directory
-			info, err := os.Stat(importPath)
-			if err != nil {
-				logger.Error("Failed to access import path: %v", err)
-				HandleError(err, "Import path error")
-			}
-
-			importOpts := storage.ImportOptions{
-				ValidateFiles:     true,
-				OverwriteExisting: true,
-			}
-
-			var report *importexport.ImportReport
-
-			if info.IsDir() {
-				// Import directory
-				logger.Info("Starting import from directory: %s", importPath)
-				fmt.Printf("Importing events from directory: %s\n", importPath)
-
-				filesProcessed := 0
-				progressCallback := func(filename string, eventCount int) {
-					filesProcessed++
-					fmt.Printf("  [%d] Loaded %d events from %s\n", filesProcessed, eventCount, filename)
-				}
-
-				report, err = importexport.WalkAndImportJSON(importPath, storageComponent, importOpts, progressCallback)
-				if err != nil {
-					logger.Error("Import failed: %v", err)
-					HandleError(err, "Import error")
-				}
-			} else {
-				// Import single file
-				logger.Info("Starting import from file: %s", importPath)
-				fmt.Printf("Importing events from file: %s\n", importPath)
-
-				startTime := time.Now()
-
-				// Read the JSON file
-				events, err := importexport.ImportJSONFile(importPath)
-				if err != nil {
-					logger.Error("Failed to read file: %v", err)
-					HandleError(err, "Import file error")
-				}
-
-				fmt.Printf("  Loaded %d events from %s\n", len(events), importPath)
-
-				// Import the events
-				storageReport, err := storageComponent.AddEventsBatch(events, importOpts)
-				if err != nil {
-					logger.Error("Import failed: %v", err)
-					HandleError(err, "Import error")
-				}
-
-				// Convert storage report to import report
-				report = &importexport.ImportReport{
-					TotalFiles:    1,
-					ImportedFiles: storageReport.ImportedFiles,
-					MergedHours:   storageReport.MergedHours,
-					SkippedFiles:  storageReport.SkippedFiles,
-					FailedFiles:   storageReport.FailedFiles,
-					TotalEvents:   storageReport.TotalEvents,
-					Errors:        storageReport.Errors,
-					Duration:      time.Since(startTime),
-				}
-			}
-
-			fmt.Println("\n" + importexport.FormatImportReport(report))
-			logger.Info("Import completed successfully")
-		}
-
-		// Only initialize watcher if enabled
-		if watcherEnabled {
-			watcherComponent, err = watcher.New(watcher.NewEventCaptureHandler(storageComponent), cfg.WatcherConfigPath)
-			if err != nil {
-				logger.Error("Failed to create watcher component: %v", err)
-				HandleError(err, "Watcher initialization error")
-			}
-			logger.Info("Watcher component created")
-		} else {
-			logger.Info("Watcher disabled - running in read-only mode")
-		}
-
-		// Create query executor with or without cache based on CLI flag
-		if cacheEnabled {
-			var err error
-			queryExecutor, err = storage.NewQueryExecutorWithCache(storageComponent, cacheMaxMB, tracingProvider)
-			if err != nil {
-				logger.Error("Failed to create cache: %v", err)
-				HandleError(err, "Cache initialization error")
-			}
-			logger.Info("Block cache enabled with max size: %dMB", cacheMaxMB)
-		} else {
-			queryExecutor = storage.NewQueryExecutor(storageComponent, tracingProvider)
-			logger.Info("Block cache disabled")
+			logger.Error("Failed to create audit log writer: %v", err)
+			HandleError(err, "Audit log initialization error")
 		}
 	}
 
-	// Initialize graph service if enabled
-	var graphServiceComponent *graphservice.Service
-	var graphQueryExecutor api.QueryExecutor
-	if graphEnabled && !demo {
-		logger.Info("Graph reasoning layer enabled - initializing graph service")
+	// Initialize graph service
+	logger.Info("Initializing graph service")
 
-		graphConfig := graph.ClientConfig{
-			Host:         graphHost,
-			Port:         graphPort,
-			GraphName:    graphName,
-			MaxRetries:   10,             // Increased to wait for FalkorDB sidecar to be ready
-			DialTimeout:  10 * time.Second, // Increased to allow sidecar startup time
-			ReadTimeout:  30 * time.Second, // Increased for complex root cause queries
-			WriteTimeout: 3 * time.Second,
-			PoolSize:     10,
+	graphConfig := graph.ClientConfig{
+		Host:         graphHost,
+		Port:         graphPort,
+		GraphName:    graphName,
+		MaxRetries:   10,               // Increased to wait for FalkorDB sidecar to be ready
+		DialTimeout:  10 * time.Second, // Increased to allow sidecar startup time
+		ReadTimeout:  30 * time.Second, // Increased for complex root cause queries
+		WriteTimeout: 3 * time.Second,
+		PoolSize:     10,
+	}
+
+	serviceConfig := graphservice.ServiceConfig{
+		GraphConfig:        graphConfig,
+		PipelineConfig:     graphservice.DefaultServiceConfig().PipelineConfig,
+		RebuildOnStart:     graphRebuildOnStart,
+		RebuildWindow:      time.Duration(graphRebuildWindowHours) * time.Hour,
+		RebuildIfEmptyOnly: graphRebuildIfEmpty,
+		AutoStartPipeline:  true,
+	}
+
+	// Set retention window from flag
+	serviceConfig.PipelineConfig.RetentionWindow = time.Duration(graphRetentionHours) * time.Hour
+
+	graphServiceComponent := graphservice.NewService(serviceConfig)
+
+	// Initialize graph service (no storage rebuild)
+	if err := graphServiceComponent.Initialize(context.Background()); err != nil {
+		logger.Error("Failed to initialize graph service: %v", err)
+		HandleError(err, "Graph service initialization error")
+	}
+	logger.Info("Graph service initialized successfully")
+
+	// Create graph query executor
+	graphClient := graphServiceComponent.GetClient()
+	graphQueryExecutor = graph.NewQueryExecutor(graphClient)
+	logger.Info("Graph query executor created")
+
+	// Initialize watcher if enabled
+	if watcherEnabled {
+		// Get the graph pipeline from the service
+		pipeline := graphServiceComponent.GetPipeline()
+
+		// Create handler with graph-only mode
+		eventHandler := watcher.NewEventCaptureHandlerWithMode(nil, pipeline, watcher.TimelineModeGraph)
+		if auditLogWriter != nil {
+			eventHandler.SetAuditLog(auditLogWriter)
 		}
 
-		serviceConfig := graphservice.ServiceConfig{
-			GraphConfig:        graphConfig,
-			PipelineConfig:     graphservice.DefaultServiceConfig().PipelineConfig,
-			RebuildOnStart:     graphRebuildOnStart,
-			RebuildWindow:      time.Duration(graphRebuildWindowHours) * time.Hour,
-			RebuildIfEmptyOnly: graphRebuildIfEmpty,
-			AutoStartPipeline:  true,
+		var err error
+		watcherComponent, err = watcher.New(eventHandler, cfg.WatcherConfigPath)
+		if err != nil {
+			logger.Error("Failed to create watcher component: %v", err)
+			HandleError(err, "Watcher initialization error")
 		}
-
-		// Set retention window from flag
-		serviceConfig.PipelineConfig.RetentionWindow = time.Duration(graphRetentionHours) * time.Hour
-
-		graphServiceComponent = graphservice.NewService(serviceConfig)
-
-		// Create storage adapter for graph service
-		storageAdapter := &graphStorageAdapter{
-			executor: storage.NewQueryExecutor(storageComponent, tracingProvider),
-		}
-
-		// Initialize graph service with storage backend
-		if err := graphServiceComponent.InitializeWithStorage(context.Background(), storageAdapter); err != nil {
-			logger.Error("Failed to initialize graph service: %v", err)
-			logger.Warn("Graph reasoning layer will be disabled - continuing without graph support")
-			graphServiceComponent = nil
-		} else {
-			logger.Info("Graph service initialized successfully")
-
-			// Create graph query executor
-			graphClient := graphServiceComponent.GetClient()
-			graphQueryExecutor = graph.NewQueryExecutor(graphClient)
-			logger.Info("Graph query executor created")
-
-			// Determine timeline mode
-			var mode watcher.TimelineMode
-			switch timelineMode {
-			case "graph":
-				mode = watcher.TimelineModeGraph
-				logger.Info("Timeline mode: GRAPH (direct writes to graph, bypassing storage)")
-			case "both":
-				mode = watcher.TimelineModeBoth
-				logger.Info("Timeline mode: BOTH (writes to both storage and graph for validation)")
-			default:
-				mode = watcher.TimelineModeStorage
-				logger.Info("Timeline mode: STORAGE (default, writes to storage only)")
-			}
-
-			// Update watcher handler if watcher is enabled
-			if watcherEnabled && watcherComponent != nil {
-				logger.Info("Updating watcher with dual-mode handler (mode: %s)", timelineMode)
-
-				// Get the graph pipeline from the service
-				pipeline := graphServiceComponent.GetPipeline()
-
-				// Create new handler with mode
-				eventHandler := watcher.NewEventCaptureHandlerWithMode(storageComponent, pipeline, mode)
-
-				// Recreate watcher with new handler
-				watcherComponent, err = watcher.New(eventHandler, cfg.WatcherConfigPath)
-				if err != nil {
-					logger.Error("Failed to recreate watcher with dual-mode handler: %v", err)
-					HandleError(err, "Watcher reinitialization error")
-				}
-				logger.Info("Watcher updated with dual-mode handler")
-			}
-
-			// Only register storage callback if mode is "storage" (not "both" or "graph")
-			// When mode is "both", the watcher handler directly writes to the graph pipeline,
-			// so we don't need the storage callback to also forward events (which would cause double processing)
-			// When mode is "graph", no storage writes happen, so the callback wouldn't fire anyway
-			if mode == watcher.TimelineModeStorage {
-				storageComponent.RegisterCallback(func(event models.Event) error {
-					logger.Debug("Storage callback: forwarding event %s to graph service", event.ID)
-					return graphServiceComponent.OnEvent(event)
-				})
-				logger.Info("Registered graph service callback with storage")
-			}
-		}
+		logger.Info("Watcher component created (graph-only mode)")
+	} else {
+		logger.Info("Watcher disabled - running in read-only mode")
 	}
 
 	// Set up readiness checker: use watcher if available, otherwise use no-op
@@ -396,73 +245,78 @@ func runServer(cmd *cobra.Command, args []string) {
 		readinessChecker = &api.NoOpReadinessChecker{}
 	}
 
-	// Get graph client if graph service is available
-	var graphClient graph.Client
-	if graphServiceComponent != nil {
-		graphClient = graphServiceComponent.GetClient()
-	}
+	// Use graph as the query source
+	querySource := api.TimelineQuerySourceGraph
+	logger.Info("Timeline query source: GRAPH")
 
-	// Determine timeline query source
-	var querySource api.TimelineQuerySource
-	switch timelineQuerySource {
-	case "graph":
-		if graphQueryExecutor != nil {
-			querySource = api.TimelineQuerySourceGraph
-			logger.Info("Timeline query source: GRAPH")
-		} else {
-			querySource = api.TimelineQuerySourceStorage
-			logger.Warn("Graph query source requested but not available, using storage")
+	// Get graph pipeline for imports
+	graphPipeline := graphServiceComponent.GetPipeline()
+
+	// Import events from file or directory if import path is specified
+	if importPath != "" {
+		logger.Info("Importing events from path: %s", importPath)
+		importStartTime := time.Now()
+
+		eventValues, err := importexport.Import(importexport.FromPath(importPath), importexport.WithLogger(logger))
+		if err != nil {
+			logger.Error("Failed to import events from path: %v", err)
+			HandleError(err, "Import error")
 		}
-	default:
-		querySource = api.TimelineQuerySourceStorage
-		logger.Info("Timeline query source: STORAGE (default)")
+
+		logger.InfoWithFields("Parsed import path",
+			logging.Field("event_count", len(eventValues)),
+			logging.Field("parse_duration", time.Since(importStartTime)))
+
+		// Process events through graph pipeline
+		importCtx, importCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer importCancel()
+
+		processStartTime := time.Now()
+		if err := graphPipeline.ProcessBatch(importCtx, eventValues); err != nil {
+			logger.Error("Failed to process imported events: %v", err)
+			HandleError(err, "Import processing error")
+		}
+
+		processDuration := time.Since(processStartTime)
+		totalDuration := time.Since(importStartTime)
+		logger.InfoWithFields("Import completed",
+			logging.Field("event_count", len(eventValues)),
+			logging.Field("process_duration", processDuration),
+			logging.Field("total_duration", totalDuration))
 	}
 
-	apiComponent := api.NewWithStorageAndGraph(
+	apiComponent := api.NewWithStorageGraphAndPipeline(
 		cfg.APIPort,
-		queryExecutor,
+		nil, // No storage executor
 		graphQueryExecutor,
 		querySource,
-		storageComponent,
+		nil, // No storage component
 		graphClient,
+		graphPipeline,
 		readinessChecker,
-		demo,
+		false, // No demo mode
 		tracingProvider,
 	)
-	logger.Info("API server component created (query source: %s)", timelineQuerySource)
+	logger.Info("API server component created (graph-only)")
 
-	// Register components based on demo mode
-	if !demo {
-		if err := manager.Register(storageComponent); err != nil {
-			logger.Error("Failed to register storage component: %v", err)
-			HandleError(err, "Storage registration error")
+	// Register components
+	// Only register watcher if it was initialized
+	if watcherComponent != nil {
+		if err := manager.Register(watcherComponent); err != nil {
+			logger.Error("Failed to register watcher component: %v", err)
+			HandleError(err, "Watcher registration error")
 		}
+	}
 
-		// Only register watcher if it was initialized
-		if watcherComponent != nil {
-			if err := manager.Register(watcherComponent, storageComponent); err != nil {
-				logger.Error("Failed to register watcher component: %v", err)
-				HandleError(err, "Watcher registration error")
-			}
-		}
+	// Register graph service
+	if err := manager.Register(graphServiceComponent); err != nil {
+		logger.Error("Failed to register graph service component: %v", err)
+		HandleError(err, "Graph service registration error")
+	}
 
-		// Register graph service if initialized (depends on storage)
-		if graphServiceComponent != nil {
-			if err := manager.Register(graphServiceComponent, storageComponent); err != nil {
-				logger.Error("Failed to register graph service component: %v", err)
-				HandleError(err, "Graph service registration error")
-			}
-		}
-
-		if err := manager.Register(apiComponent, storageComponent); err != nil {
-			logger.Error("Failed to register API server component: %v", err)
-			HandleError(err, "API server registration error")
-		}
-	} else {
-		if err := manager.Register(apiComponent); err != nil {
-			logger.Error("Failed to register API server component: %v", err)
-			HandleError(err, "API server registration error")
-		}
+	if err := manager.Register(apiComponent); err != nil {
+		logger.Error("Failed to register API server component: %v", err)
+		HandleError(err, "API server registration error")
 	}
 
 	logger.Info("All components registered with dependencies")
@@ -490,14 +344,13 @@ func runServer(cmd *cobra.Command, args []string) {
 	if err := manager.Stop(shutdownCtx); err != nil {
 		logger.Error("Error during shutdown: %v", err)
 	}
+
+	// Close audit log if it was initialized
+	if auditLogWriter != nil {
+		if err := auditLogWriter.Close(); err != nil {
+			logger.Error("Failed to close audit log: %v", err)
+		}
+	}
+
 	logger.Info("Shutdown complete")
-}
-
-// graphStorageAdapter adapts Spectre's QueryExecutor to the graph sync StorageQuerier interface
-type graphStorageAdapter struct {
-	executor api.QueryExecutor
-}
-
-func (a *graphStorageAdapter) Query(ctx context.Context, request models.QueryRequest) (*models.QueryResult, error) {
-	return a.executor.Execute(ctx, &request)
 }

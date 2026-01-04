@@ -33,13 +33,6 @@ export const useMetadata = (timeRange: TimeRange | null): UseMetadataResult => {
           timeRange.start.getTime(),
           timeRange.end.getTime()
         );
-        
-        // If no data in the requested range, try fetching metadata for all available data
-        if (metadata.totalEvents === 0) {
-          console.log('[useMetadata] No data in requested range, fetching all available metadata');
-          metadata = await apiClient.getMetadata(0, undefined);
-        }
-
         setNamespaces(metadata.namespaces || []);
         setKinds(metadata.kinds || []);
       } catch (err) {

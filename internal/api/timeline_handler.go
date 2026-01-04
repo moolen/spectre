@@ -3,15 +3,17 @@ package api
 import (
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
-	"github.com/moolen/spectre/internal/storage"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -87,8 +89,8 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(
 		attribute.Int64("query.start_timestamp", query.StartTimestamp),
 		attribute.Int64("query.end_timestamp", query.EndTimestamp),
-		attribute.String("query.namespace", query.Filters.Namespace),
-		attribute.String("query.kind", query.Filters.Kind),
+		attribute.StringSlice("query.namespaces", query.Filters.GetNamespaces()),
+		attribute.StringSlice("query.kinds", query.Filters.GetKinds()),
 	)
 
 	// Execute both queries concurrently
@@ -153,27 +155,18 @@ func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *
 		wg             sync.WaitGroup
 	)
 
-	// Create shared cache for coordinating file reads between concurrent queries
-	// This ensures each file is only read once even though both queries may need it
-	// Note: Only applies to storage executor
-	if th.querySource == TimelineQuerySourceStorage {
-		sharedCache := storage.NewSharedFileDataCache()
-		executor.SetSharedCache(sharedCache)
-		defer func() {
-			// Clear shared cache after queries complete
-			executor.SetSharedCache(nil)
-			th.logger.Debug("Shared cache coordinated %d files across concurrent queries", sharedCache.Size())
-		}()
-	}
+	// Shared cache removed - graph executor doesn't need file coordination
+	// Graph queries are handled differently and don't require shared cache
 
 	// Build Event query upfront
+	// Use same namespaces filter as the resource query
 	eventQuery := &models.QueryRequest{
 		StartTimestamp: query.StartTimestamp,
 		EndTimestamp:   query.EndTimestamp,
 		Filters: models.QueryFilters{
-			Kind:      "Event",
-			Version:   "v1",
-			Namespace: query.Filters.Namespace,
+			Kinds:      []string{"Event"},
+			Version:    "v1",
+			Namespaces: query.Filters.GetNamespaces(),
 		},
 	}
 
@@ -235,12 +228,184 @@ func (th *TimelineHandler) executeConcurrentQueries(ctx context.Context, query *
 
 // buildTimelineResponse transforms QueryResult into TimelineResponse with full resource data
 func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *models.QueryResult) *models.SearchResponse {
-	resourceBuilder := storage.NewResourceBuilder()
-	resourceMap := resourceBuilder.BuildResourcesFromEventsWithQueryTime(queryResult.Events, queryResult.QueryStartTime)
+	if queryResult == nil || len(queryResult.Events) == 0 {
+		return &models.SearchResponse{
+			Resources:       []models.Resource{},
+			Count:           0,
+			ExecutionTimeMs: int64(queryResult.ExecutionTimeMs),
+		}
+	}
+
+	// Group events by resource UID
+	eventsByResource := make(map[string][]models.Event)
+	queryStartTime := queryResult.Events[0].Timestamp
+	queryEndTime := queryResult.Events[0].Timestamp
+	
+	for _, event := range queryResult.Events {
+		uid := event.Resource.UID
+		if uid == "" {
+			continue
+		}
+		eventsByResource[uid] = append(eventsByResource[uid], event)
+		
+		// Track actual time range from events
+		if event.Timestamp < queryStartTime {
+			queryStartTime = event.Timestamp
+		}
+		if event.Timestamp > queryEndTime {
+			queryEndTime = event.Timestamp
+		}
+	}
+
+	// Build resources with status segments from events
+	resourceMap := make(map[string]*models.Resource)
+
+	for uid, events := range eventsByResource {
+		if len(events) == 0 {
+			continue
+		}
+
+		// Sort events by timestamp
+		sort.Slice(events, func(i, j int) bool {
+			return events[i].Timestamp < events[j].Timestamp
+		})
+
+		firstEvent := events[0]
+		resourceID := fmt.Sprintf("%s/%s/%s/%s", firstEvent.Resource.Group, firstEvent.Resource.Version, firstEvent.Resource.Kind, uid)
+		
+		resource := &models.Resource{
+			ID:        resourceID,
+			Group:     firstEvent.Resource.Group,
+			Version:   firstEvent.Resource.Version,
+			Kind:      firstEvent.Resource.Kind,
+			Namespace: firstEvent.Resource.Namespace,
+			Name:      firstEvent.Resource.Name,
+			Events:    []models.K8sEvent{},
+		}
+
+		// Build status segments from events
+		var segments []models.StatusSegment
+		for i, event := range events {
+			// Infer status from resource data
+			status := analyzer.InferStatusFromResource(event.Resource.Kind, event.Data, string(event.Type))
+			
+			// Determine segment end time
+			var endTime int64
+			if i < len(events)-1 {
+				endTime = events[i+1].Timestamp
+			} else {
+				endTime = queryEndTime
+			}
+
+			segment := models.StatusSegment{
+				StartTime:    event.Timestamp,
+				EndTime:      endTime,
+				Status:       status,
+				ResourceData: event.Data, // Include full resource data for container issue analysis
+			}
+
+			// Extract error message from resource data if available
+			if len(event.Data) > 0 {
+				errorMessages := analyzer.InferErrorMessages(event.Resource.Kind, event.Data, status)
+				if len(errorMessages) > 0 {
+					segment.Message = strings.Join(errorMessages, "; ")
+				}
+			} else {
+				// Log warning if data is missing for pod resources (needed for container issue detection)
+				if strings.EqualFold(event.Resource.Kind, "Pod") {
+					th.logger.Warn("Pod event missing ResourceData in timeline handler: %s/%s (event ID: %s, has %d events total)", 
+						event.Resource.Namespace, event.Resource.Name, event.ID, len(events))
+				}
+			}
+
+			segments = append(segments, segment)
+		}
+
+		resource.StatusSegments = segments
+		resourceMap[resourceID] = resource
+	}
+
+	// Helper function to safely get string from map
+	getString := func(m map[string]interface{}, key, defaultValue string) string {
+		if m == nil {
+			return defaultValue
+		}
+		if val, ok := m[key].(string); ok {
+			return val
+		}
+		return defaultValue
+	}
 
 	// Attach pre-fetched K8s events
-	if len(eventResult.Events) > 0 {
-		resourceBuilder.AttachK8sEvents(resourceMap, eventResult.Events)
+	// Match events to resources by InvolvedObjectUID
+	for _, event := range eventResult.Events {
+		// Only process Kubernetes Event resources
+		if event.Resource.Kind != "Event" {
+			continue
+		}
+
+		// Match by InvolvedObjectUID
+		if event.Resource.InvolvedObjectUID == "" {
+			continue
+		}
+
+		// Find matching resource by UID
+		var targetResource *models.Resource
+		for _, resource := range resourceMap {
+			// Extract UID from resource ID (format: group/version/kind/uid)
+			parts := strings.Split(resource.ID, "/")
+			if len(parts) >= 4 {
+				resourceUID := parts[3]
+				if resourceUID == event.Resource.InvolvedObjectUID {
+					targetResource = resource
+					break
+				}
+			}
+		}
+
+		if targetResource == nil {
+			continue
+		}
+
+		// Convert models.Event to models.K8sEvent
+		var eventData map[string]interface{}
+		if len(event.Data) > 0 {
+			if err := json.Unmarshal(event.Data, &eventData); err != nil {
+				th.logger.Warn("Failed to parse event data: %v", err)
+				continue
+			}
+		}
+
+		k8sEvent := models.K8sEvent{
+			ID:        event.ID,
+			Timestamp: event.Timestamp,
+			Reason:    getString(eventData, "reason", ""),
+			Message:   getString(eventData, "message", ""),
+			Type:      getString(eventData, "type", "Normal"),
+			Count:     1, // Default count
+		}
+
+		// Extract additional fields if present
+		if count, ok := eventData["count"].(float64); ok {
+			k8sEvent.Count = int32(count)
+		}
+		if source, ok := eventData["source"].(map[string]interface{}); ok {
+			if component, ok := source["component"].(string); ok {
+				k8sEvent.Source = component
+			}
+		}
+		if firstTimestamp, ok := eventData["firstTimestamp"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, firstTimestamp); err == nil {
+				k8sEvent.FirstTimestamp = t.UnixNano()
+			}
+		}
+		if lastTimestamp, ok := eventData["lastTimestamp"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, lastTimestamp); err == nil {
+				k8sEvent.LastTimestamp = t.UnixNano()
+			}
+		}
+
+		targetResource.Events = append(targetResource.Events, k8sEvent)
 	}
 
 	resources := make([]models.Resource, 0, len(resourceMap))
@@ -278,11 +443,16 @@ func (th *TimelineHandler) parseQuery(r *http.Request) (*models.QueryRequest, er
 		return nil, NewValidationError("start timestamp must be less than or equal to end timestamp")
 	}
 
+	// Parse multi-value filters
+	// Support both ?kind=Pod&kind=Deployment and ?kinds=Pod,Deployment
+	kinds := parseMultiValueParam(query, "kind", "kinds")
+	namespaces := parseMultiValueParam(query, "namespace", "namespaces")
+
 	filters := models.QueryFilters{
-		Group:     query.Get("group"),
-		Version:   query.Get("version"),
-		Kind:      query.Get("kind"),
-		Namespace: query.Get("namespace"),
+		Group:      query.Get("group"),
+		Version:    query.Get("version"),
+		Kinds:      kinds,
+		Namespaces: namespaces,
 	}
 
 	if err := th.validator.ValidateFilters(filters); err != nil {
@@ -300,6 +470,60 @@ func (th *TimelineHandler) parseQuery(r *http.Request) (*models.QueryRequest, er
 	}
 
 	return queryRequest, nil
+}
+
+// parseQueryWithPagination parses query parameters including pagination
+func (th *TimelineHandler) parseQueryWithPagination(r *http.Request) (*models.QueryRequest, *models.PaginationRequest, error) {
+	queryRequest, err := th.parseQuery(r)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pagination := th.parsePagination(r)
+	return queryRequest, pagination, nil
+}
+
+// parsePagination parses pagination query parameters
+func (th *TimelineHandler) parsePagination(r *http.Request) *models.PaginationRequest {
+	query := r.URL.Query()
+
+	pageSize := parseIntOrDefault(query.Get("page_size"), models.DefaultPageSize)
+	cursor := query.Get("cursor")
+
+	return &models.PaginationRequest{
+		PageSize: pageSize,
+		Cursor:   cursor,
+	}
+}
+
+// parseMultiValueParam parses a query parameter that can be specified multiple times
+// or as a comma-separated list in an alternate parameter name
+// e.g., ?kind=Pod&kind=Deployment or ?kinds=Pod,Deployment
+func parseMultiValueParam(query map[string][]string, singularName, pluralName string) []string {
+	// First, try the repeated singular param (e.g., ?kind=Pod&kind=Deployment)
+	values := query[singularName]
+	if len(values) > 0 {
+		return values
+	}
+
+	// Then, try the plural param with comma-separated values (e.g., ?kinds=Pod,Deployment)
+	if pluralCSV, ok := query[pluralName]; ok && len(pluralCSV) > 0 && pluralCSV[0] != "" {
+		return strings.Split(pluralCSV[0], ",")
+	}
+
+	return nil
+}
+
+// parseIntOrDefault parses an integer from string, returning default on error
+func parseIntOrDefault(s string, defaultVal int) int {
+	if s == "" {
+		return defaultVal
+	}
+	var val int
+	if _, err := fmt.Sscanf(s, "%d", &val); err != nil {
+		return defaultVal
+	}
+	return val
 }
 
 func (th *TimelineHandler) respondWithError(w http.ResponseWriter, statusCode int, errorCode, message string) {

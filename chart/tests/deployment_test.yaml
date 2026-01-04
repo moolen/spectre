@@ -203,25 +203,16 @@ tests:
     set:
       config:
         logLevel: debug
-        segmentSize: 20971520
         maxConcurrentRequests: 200
-      persistence:
-        mountPath: /custom-data
       service:
         targetPort: 9090
     asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--data-dir=/custom-data"
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--api-port=9090"
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--log-level=debug"
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--segment-size=20971520"
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--max-concurrent-requests=200"

@@ -10,8 +10,6 @@ import { toast } from '../utils/toast';
 interface ExportFormData {
   from: string; // Human-friendly date string (e.g., "2h ago", "2024-01-01 13:00")
   to: string;   // Human-friendly date string (e.g., "now", "2024-01-01 15:00")
-  includeOpenHour: boolean;
-  compression: boolean;
   clusterId: string;
   instanceId: string;
 }
@@ -42,8 +40,6 @@ export const SettingsMenu: React.FC = () => {
     return {
       from: '1d ago',
       to: 'now',
-      includeOpenHour: true,
-      compression: true,
       clusterId: '',
       instanceId: ''
     };
@@ -95,17 +91,15 @@ export const SettingsMenu: React.FC = () => {
       const blob = await apiClient.exportData({
         from: exportForm.from,
         to: exportForm.to,
-        includeOpenHour: exportForm.includeOpenHour,
-        compression: exportForm.compression,
         clusterId: exportForm.clusterId || undefined,
         instanceId: exportForm.instanceId || undefined,
       });
 
-      // Download the blob
+      // Download the blob (always gzipped JSON)
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `spectre-export-${Date.now()}.tar${exportForm.compression ? '.gz' : ''}`;
+      a.download = `spectre-export-${Date.now()}.json.gz`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -377,40 +371,6 @@ export const SettingsMenu: React.FC = () => {
                 </div>
 
                 {/* Options Section */}
-                <div>
-                  <div className="text-sm text-[var(--color-text-muted)] uppercase tracking-wider font-semibold mb-3">
-                    Options
-                  </div>
-
-                  <div className="bg-[var(--color-surface-muted)] rounded-lg p-4 border border-[var(--color-border-soft)] space-y-3">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={exportForm.includeOpenHour}
-                        onChange={(e) => setExportForm({ ...exportForm, includeOpenHour: e.target.checked })}
-                        className="w-4 h-4 rounded border-[var(--color-border-soft)] text-brand-500 focus:ring-brand-500"
-                      />
-                      <div className="flex-1">
-                        <div className="text-sm text-[var(--color-text-primary)]">Include open hour</div>
-                        <div className="text-xs text-[var(--color-text-muted)]">Include data from the current hour</div>
-                      </div>
-                    </label>
-
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={exportForm.compression}
-                        onChange={(e) => setExportForm({ ...exportForm, compression: e.target.checked })}
-                        className="w-4 h-4 rounded border-[var(--color-border-soft)] text-brand-500 focus:ring-brand-500"
-                      />
-                      <div className="flex-1">
-                        <div className="text-sm text-[var(--color-text-primary)]">Enable compression</div>
-                        <div className="text-xs text-[var(--color-text-muted)]">Compress archive with gzip</div>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
                 {/* Metadata Section */}
                 <div>
                   <div className="text-sm text-[var(--color-text-muted)] uppercase tracking-wider font-semibold mb-3">

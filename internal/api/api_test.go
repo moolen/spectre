@@ -555,12 +555,6 @@ func TestMetadataHandler_Handle(t *testing.T) {
 				if len(resp.Kinds) != 2 {
 					t.Errorf("expected 2 kinds, got %d", len(resp.Kinds))
 				}
-				if len(resp.Groups) != 2 {
-					t.Errorf("expected 2 groups, got %d", len(resp.Groups))
-				}
-				if resp.TotalEvents != 2 {
-					t.Errorf("expected TotalEvents=2, got %d", resp.TotalEvents)
-				}
 			},
 		},
 		{
@@ -601,9 +595,6 @@ func TestMetadataHandler_Handle(t *testing.T) {
 				}
 				if len(resp.Namespaces) != 0 {
 					t.Errorf("expected empty namespaces, got %v", resp.Namespaces)
-				}
-				if resp.TotalEvents != 0 {
-					t.Errorf("expected TotalEvents=0, got %d", resp.TotalEvents)
 				}
 				if resp.TimeRange.Earliest != 0 || resp.TimeRange.Latest != 0 {
 					t.Errorf("expected zero time range, got earliest=%d, latest=%d", resp.TimeRange.Earliest, resp.TimeRange.Latest)
@@ -1068,7 +1059,7 @@ func TestParseOptionalTimestamp(t *testing.T) {
 func TestServer_Routes(t *testing.T) {
 	mockExecutor := &mockQueryExecutor{}
 	mockChecker := &mockReadinessChecker{ready: true}
-	server := New(8080, mockExecutor, mockChecker, &mockTelemetryProvider{})
+	server := NewWithStorageAndGraph(8080, nil, mockExecutor, TimelineQuerySourceGraph, nil, nil, mockChecker, false, &mockTelemetryProvider{})
 
 	tests := []struct {
 		name       string
@@ -1102,7 +1093,7 @@ func TestServer_MethodEnforcement(t *testing.T) {
 		},
 	}
 	mockChecker := &mockReadinessChecker{ready: true}
-	server := New(8080, mockExecutor, mockChecker, &mockTelemetryProvider{})
+	server := NewWithStorageAndGraph(8080, nil, mockExecutor, TimelineQuerySourceGraph, nil, nil, mockChecker, false, &mockTelemetryProvider{})
 
 	tests := []struct {
 		name       string
@@ -1147,7 +1138,7 @@ func TestServer_ReadinessCheck(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockChecker := &mockReadinessChecker{ready: tt.ready}
-			server := New(8080, mockExecutor, mockChecker, &mockTelemetryProvider{})
+			server := NewWithStorageAndGraph(8080, nil, mockExecutor, TimelineQuerySourceGraph, nil, nil, mockChecker, false, &mockTelemetryProvider{})
 
 			req := httptest.NewRequest(http.MethodGet, "/ready", http.NoBody)
 			rr := httptest.NewRecorder()
@@ -1176,7 +1167,7 @@ func TestServer_ReadinessCheck(t *testing.T) {
 func TestCORS_Middleware(t *testing.T) {
 	mockExecutor := &mockQueryExecutor{}
 	mockChecker := &mockReadinessChecker{ready: true}
-	server := New(8080, mockExecutor, mockChecker, &mockTelemetryProvider{})
+	server := NewWithStorageAndGraph(8080, nil, mockExecutor, TimelineQuerySourceGraph, nil, nil, mockChecker, false, &mockTelemetryProvider{})
 
 	tests := []struct {
 		name         string

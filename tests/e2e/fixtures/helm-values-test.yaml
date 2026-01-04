@@ -138,9 +138,6 @@ replicaCount: 1
 
 resources:
   requests:
-    memory: "64Mi"
-    cpu: "100m"
-  limits:
     memory: "256Mi"
     cpu: "500m"
 
@@ -156,6 +153,7 @@ storage:
     maxSize: 100Mi
 
 persistence:
+  enabled: false
   storageClassName: standard
 
 podAnnotations:
@@ -170,8 +168,7 @@ graph:
   enabled: true
   falkordb:
     sidecar: true
-  # Use storage for timeline queries in tests (data is imported to storage)
-  timeline:
-    querySource: "storage"
-    mode: "both"
+    persistence:
+      # Use empty storageClassName for immediate binding in test environments
+      storageClassName: ""
 

@@ -5,20 +5,13 @@ import (
 	"strings"
 )
 
-// calculateConfidence computes a deterministic confidence score
+// calculateConfidence computes a deterministic confidence score.
+// Weights are defined in constants.go and must sum to ~1.0 for proper scoring.
 func (a *RootCauseAnalyzer) calculateConfidence(
 	symptom *ObservedSymptom,
 	graph CausalGraph,
 	rootCause *RootCauseHypothesis,
 ) ConfidenceScore {
-	// Factor weights (must sum to 1.0)
-	const (
-		weightSpecChange   = 0.30
-		weightTemporal     = 0.25
-		weightRelationship = 0.25
-		weightErrorMatch   = 0.10
-		weightCompleteness = 0.10
-	)
 
 	// Calculate each factor
 	factors := ConfidenceFactors{
@@ -29,12 +22,12 @@ func (a *RootCauseAnalyzer) calculateConfidence(
 		ChainCompleteness:    calculateCompletenessFactor(graph),
 	}
 
-	// Weighted average
-	score := factors.DirectSpecChange*weightSpecChange +
-		factors.TemporalProximity*weightTemporal +
-		factors.RelationshipStrength*weightRelationship +
-		factors.ErrorMessageMatch*weightErrorMatch +
-		factors.ChainCompleteness*weightCompleteness
+	// Weighted average using constants
+	score := factors.DirectSpecChange*ConfidenceWeightSpecChange +
+		factors.TemporalProximity*ConfidenceWeightTemporal +
+		factors.RelationshipStrength*ConfidenceWeightRelationship +
+		factors.ErrorMessageMatch*ConfidenceWeightErrorMatch +
+		factors.ChainCompleteness*ConfidenceWeightChain
 
 	// Generate rationale
 	rationale := generateConfidenceRationale(factors, score)
@@ -46,21 +39,20 @@ func (a *RootCauseAnalyzer) calculateConfidence(
 	}
 }
 
-// calculateSpecChangeFactor: 1.0 if configChanged=true, 0.5 if UPDATE, 0.0 otherwise
+// calculateSpecChangeFactor: 1.0 if configChanged=true, SpecChangeFactorUpdate if UPDATE, 0.0 otherwise
 func calculateSpecChangeFactor(rootCause *RootCauseHypothesis) float64 {
 	if rootCause.ChangeEvent.ConfigChanged {
 		return 1.0
 	}
 	if rootCause.ChangeEvent.EventType == "UPDATE" {
-		return 0.5
+		return SpecChangeFactorUpdate
 	}
 	return 0.0
 }
 
-// calculateTemporalFactor: 1.0 - (timeLagMs / 600000) capped at [0, 1]
+// calculateTemporalFactor: 1.0 - (timeLagMs / TemporalFactorMaxLag) capped at [0, 1]
 func calculateTemporalFactor(timeLagMs int64) float64 {
-	// 10 minutes = 600,000ms
-	maxLagMs := 600000.0
+	maxLagMs := float64(TemporalFactorMaxLag)
 	if timeLagMs < 0 {
 		timeLagMs = 0
 	}
@@ -74,7 +66,7 @@ func calculateTemporalFactor(timeLagMs int64) float64 {
 	return factor
 }
 
-// calculateRelationshipFactor: MANAGES=1.0, OWNS=0.8, etc.
+// calculateRelationshipFactor: Uses relationship strength constants
 func calculateRelationshipFactor(graph CausalGraph) float64 {
 	if len(graph.Edges) == 0 {
 		return 0.0
@@ -86,13 +78,13 @@ func calculateRelationshipFactor(graph CausalGraph) float64 {
 		var strength float64
 		switch edge.RelationshipType {
 		case "MANAGES":
-			strength = 1.0
+			strength = RelationshipStrengthManages
 		case "OWNS":
-			strength = 0.8
+			strength = RelationshipStrengthOwns
 		case "TRIGGERED_BY":
-			strength = 0.7
+			strength = RelationshipStrengthTriggeredBy
 		default:
-			strength = 0.5
+			strength = RelationshipStrengthDefault
 		}
 		if strength > maxStrength {
 			maxStrength = strength
@@ -101,7 +93,7 @@ func calculateRelationshipFactor(graph CausalGraph) float64 {
 	return maxStrength
 }
 
-// calculateErrorMatchFactor: 1.0 if error mentions config/image, 0.5 if generic, 0.0 if none
+// calculateErrorMatchFactor: 1.0 if error mentions config/image, ErrorMatchFactorGeneric if generic, 0.0 if none
 func calculateErrorMatchFactor(symptom *ObservedSymptom, rootCause *RootCauseHypothesis) float64 {
 	errorLower := strings.ToLower(symptom.ErrorMessage)
 
@@ -115,7 +107,7 @@ func calculateErrorMatchFactor(symptom *ObservedSymptom, rootCause *RootCauseHyp
 
 	// Generic error messages
 	if symptom.ErrorMessage != "" {
-		return 0.5
+		return ErrorMatchFactorGeneric
 	}
 
 	return 0.0
@@ -123,8 +115,8 @@ func calculateErrorMatchFactor(symptom *ObservedSymptom, rootCause *RootCauseHyp
 
 // calculateCompletenessFactor: nodes in graph / expected nodes
 func calculateCompletenessFactor(graph CausalGraph) float64 {
-	// Expected: Pod <- ReplicaSet <- Deployment <- [Manager] = 3-4 nodes
-	expectedNodes := 3.0
+	// Expected: Pod <- ReplicaSet <- Deployment <- [Manager] = ChainCompletenessMinNodes
+	expectedNodes := float64(ChainCompletenessMinNodes)
 	actualNodes := 0.0
 	for _, node := range graph.Nodes {
 		if node.NodeType == "SPINE" {

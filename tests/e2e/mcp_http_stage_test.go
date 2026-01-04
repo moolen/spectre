@@ -1,20 +1,21 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/moolen/spectre/tests/e2e/helpers"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+)
+
+const (
+	clusterHealthTimeout = 30 * time.Second
 )
 
 type MCPHTTPStage struct {
-	t         *testing.T
-	require   *require.Assertions
-	assert    *assert.Assertions
-	testCtx   *helpers.TestContext
+	*helpers.BaseContext
+
+	t *testing.T
+
 	mcpClient *helpers.MCPClient
 
 	initResult     map[string]interface{}
@@ -22,13 +23,14 @@ type MCPHTTPStage struct {
 	toolCallResult map[string]interface{}
 	prompts        []helpers.PromptDefinition
 	promptResult   map[string]interface{}
+
+	// Helper managers
+	ctxHelper *helpers.ContextHelper
 }
 
 func NewMCPHTTPStage(t *testing.T) (*MCPHTTPStage, *MCPHTTPStage, *MCPHTTPStage) {
 	s := &MCPHTTPStage{
-		t:       t,
-		require: require.New(t),
-		assert:  assert.New(t),
+		t: t,
 	}
 	return s, s, s
 }
@@ -38,136 +40,141 @@ func (s *MCPHTTPStage) and() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) a_test_environment() *MCPHTTPStage {
-	s.testCtx = helpers.SetupE2ETest(s.t)
+	testCtx := helpers.SetupE2ETest(s.t)
+	s.BaseContext = helpers.NewBaseContext(s.t, testCtx)
+
+	// Initialize helper managers
+	s.ctxHelper = helpers.NewContextHelper(s.t)
+
 	return s
 }
 
 func (s *MCPHTTPStage) mcp_server_is_deployed() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
+	ctx, cancel := s.ctxHelper.WithDefaultTimeout()
 	defer cancel()
 
 	// Update Helm release to enable MCP server
-	err := helpers.UpdateHelmRelease(s.testCtx, map[string]interface{}{
+	err := helpers.UpdateHelmRelease(s.TestCtx, map[string]interface{}{
 		"mcp": map[string]interface{}{
 			"enabled":  true,
 			"httpAddr": ":8082",
 		},
 	})
-	s.require.NoError(err, "failed to update Helm release with MCP enabled")
+	s.Require.NoError(err, "failed to update Helm release with MCP enabled")
 
 	// Wait for the deployment to be ready
-	err = helpers.WaitForAppReady(ctx, s.testCtx.K8sClient, s.testCtx.Namespace, s.testCtx.ReleaseName)
-	s.require.NoError(err, "failed to wait for app to be ready after MCP enable")
+	err = helpers.WaitForAppReady(ctx, s.TestCtx.K8sClient, s.TestCtx.Namespace, s.TestCtx.ReleaseName)
+	s.Require.NoError(err, "failed to wait for app to be ready after MCP enable")
 
 	return s
 }
 
 func (s *MCPHTTPStage) mcp_client_is_connected() *MCPHTTPStage {
 	// Create port-forward for MCP server
-	serviceName := s.testCtx.ReleaseName + "-spectre"
-	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetContext(), s.testCtx.Namespace, serviceName, 8082)
-	s.require.NoError(err, "failed to create MCP port-forward")
+	serviceName := s.TestCtx.ReleaseName + "-spectre"
+	mcpPortForward, err := helpers.NewPortForwarder(s.T, s.TestCtx.Cluster.GetContext(), s.TestCtx.Namespace, serviceName, 8082)
+	s.Require.NoError(err, "failed to create MCP port-forward")
 
 	err = mcpPortForward.WaitForReady(30 * time.Second)
-	s.require.NoError(err, "MCP server not reachable via port-forward")
+	s.Require.NoError(err, "MCP server not reachable via port-forward")
 
-	s.t.Cleanup(func() {
+	s.T.Cleanup(func() {
 		if err := mcpPortForward.Stop(); err != nil {
-			s.t.Logf("Warning: failed to stop MCP port-forward: %v", err)
+			s.T.Logf("Warning: failed to stop MCP port-forward: %v", err)
 		}
 	})
 
-	s.mcpClient = helpers.NewMCPClient(s.t, mcpPortForward.GetURL())
+	s.mcpClient = helpers.NewMCPClient(s.T, mcpPortForward.GetURL())
 	return s
 }
 
 func (s *MCPHTTPStage) mcp_server_is_healthy() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(10 * time.Second)
 	defer cancel()
 
 	err := s.mcpClient.Health(ctx)
-	s.require.NoError(err, "MCP server health check failed")
+	s.Require.NoError(err, "MCP server health check failed")
 	return s
 }
 
 func (s *MCPHTTPStage) ping_succeeds() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(10 * time.Second)
 	defer cancel()
 
 	err := s.mcpClient.Ping(ctx)
-	s.require.NoError(err, "ping failed")
+	s.Require.NoError(err, "ping failed")
 	return s
 }
 
 func (s *MCPHTTPStage) session_is_initialized() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(10 * time.Second)
 	defer cancel()
 
 	result, err := s.mcpClient.Initialize(ctx)
-	s.require.NoError(err, "initialize failed")
-	s.require.NotNil(result, "initialize result should not be nil")
+	s.Require.NoError(err, "initialize failed")
+	s.Require.NotNil(result, "initialize result should not be nil")
 
 	s.initResult = result
 	return s
 }
 
 func (s *MCPHTTPStage) server_info_is_correct() *MCPHTTPStage {
-	s.require.NotNil(s.initResult, "initialize must be called first")
+	s.Require.NotNil(s.initResult, "initialize must be called first")
 
 	serverInfo, ok := s.initResult["serverInfo"].(map[string]interface{})
-	s.require.True(ok, "serverInfo should be present in initialize result")
+	s.Require.True(ok, "serverInfo should be present in initialize result")
 
 	name, ok := serverInfo["name"].(string)
-	s.require.True(ok, "serverInfo.name should be a string")
-	s.assert.Equal("Spectre MCP Server", name)
+	s.Require.True(ok, "serverInfo.name should be a string")
+	s.Assert.Equal("Spectre MCP Server", name)
 
 	version, ok := serverInfo["version"].(string)
-	s.require.True(ok, "serverInfo.version should be a string")
-	s.assert.NotEmpty(version)
+	s.Require.True(ok, "serverInfo.version should be a string")
+	s.Assert.NotEmpty(version)
 
 	return s
 }
 
 func (s *MCPHTTPStage) capabilities_include_tools_and_prompts() *MCPHTTPStage {
-	s.require.NotNil(s.initResult, "initialize must be called first")
+	s.Require.NotNil(s.initResult, "initialize must be called first")
 
 	capabilities, ok := s.initResult["capabilities"].(map[string]interface{})
-	s.require.True(ok, "capabilities should be present in initialize result")
+	s.Require.True(ok, "capabilities should be present in initialize result")
 
 	_, hasTools := capabilities["tools"]
-	s.assert.True(hasTools, "capabilities should include tools")
+	s.Assert.True(hasTools, "capabilities should include tools")
 
 	_, hasPrompts := capabilities["prompts"]
-	s.assert.True(hasPrompts, "capabilities should include prompts")
+	s.Assert.True(hasPrompts, "capabilities should include prompts")
 
 	return s
 }
 
 func (s *MCPHTTPStage) tools_are_listed() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(10 * time.Second)
 	defer cancel()
 
 	tools, err := s.mcpClient.ListTools(ctx)
-	s.require.NoError(err, "list tools failed")
-	s.require.NotNil(tools, "tools should not be nil")
+	s.Require.NoError(err, "list tools failed")
+	s.Require.NotNil(tools, "tools should not be nil")
 
 	s.tools = tools
 	return s
 }
 
 func (s *MCPHTTPStage) four_tools_are_available() *MCPHTTPStage {
-	s.require.NotNil(s.tools, "tools must be listed first")
+	s.Require.NotNil(s.tools, "tools must be listed first")
 	// Should have 6 tools with graph enabled (default in Helm)
 	// but allow 4 if graph is disabled
 	toolCount := len(s.tools)
-	s.assert.True(toolCount == 4 || toolCount == 6, 
+	s.Assert.True(toolCount == 4 || toolCount == 6, 
 		"should have 4 tools (base) or 6 tools (with graph), got %d", toolCount)
-	s.t.Logf("Available tools count: %d", toolCount)
+	s.T.Logf("Available tools count: %d", toolCount)
 	return s
 }
 
 func (s *MCPHTTPStage) expected_tools_are_present() *MCPHTTPStage {
-	s.require.NotNil(s.tools, "tools must be listed first")
+	s.Require.NotNil(s.tools, "tools must be listed first")
 
 	// Base tools that should always be present
 	baseTools := map[string]bool{
@@ -194,7 +201,7 @@ func (s *MCPHTTPStage) expected_tools_are_present() *MCPHTTPStage {
 
 	// Assert all base tools are present
 	for toolName, found := range baseTools {
-		s.assert.True(found, "expected base tool %s to be present", toolName)
+		s.Assert.True(found, "expected base tool %s to be present", toolName)
 	}
 
 	// Graph tools should be present with default Helm config, but are optional
@@ -202,31 +209,31 @@ func (s *MCPHTTPStage) expected_tools_are_present() *MCPHTTPStage {
 	for toolName, found := range graphTools {
 		if found {
 			hasGraphTools = true
-			s.t.Logf("✓ Graph tool %s is available", toolName)
+			s.T.Logf("✓ Graph tool %s is available", toolName)
 		}
 	}
 	
 	if !hasGraphTools {
-		s.t.Log("ℹ Graph tools not available (graph.enabled=false)")
+		s.T.Log("ℹ Graph tools not available (graph.enabled=false)")
 	}
 
 	return s
 }
 
 func (s *MCPHTTPStage) each_tool_has_description_and_schema() *MCPHTTPStage {
-	s.require.NotNil(s.tools, "tools must be listed first")
+	s.Require.NotNil(s.tools, "tools must be listed first")
 
 	for _, tool := range s.tools {
-		s.assert.NotEmpty(tool.Name, "tool should have a name")
-		s.assert.NotEmpty(tool.Description, "tool %s should have a description", tool.Name)
-		s.assert.NotNil(tool.InputSchema, "tool %s should have an input schema", tool.Name)
+		s.Assert.NotEmpty(tool.Name, "tool should have a name")
+		s.Assert.NotEmpty(tool.Description, "tool %s should have a description", tool.Name)
+		s.Assert.NotNil(tool.InputSchema, "tool %s should have an input schema", tool.Name)
 	}
 
 	return s
 }
 
 func (s *MCPHTTPStage) cluster_health_tool_is_called() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 30*time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(clusterHealthTimeout)
 	defer cancel()
 
 	args := map[string]interface{}{
@@ -235,54 +242,54 @@ func (s *MCPHTTPStage) cluster_health_tool_is_called() *MCPHTTPStage {
 	}
 
 	result, err := s.mcpClient.CallTool(ctx, "cluster_health", args)
-	s.require.NoError(err, "cluster_health tool call failed")
-	s.require.NotNil(result, "tool result should not be nil")
+	s.Require.NoError(err, "cluster_health tool call failed")
+	s.Require.NotNil(result, "tool result should not be nil")
 
 	s.toolCallResult = result
 	return s
 }
 
 func (s *MCPHTTPStage) tool_result_contains_content() *MCPHTTPStage {
-	s.require.NotNil(s.toolCallResult, "tool must be called first")
+	s.Require.NotNil(s.toolCallResult, "tool must be called first")
 
 	content, ok := s.toolCallResult["content"]
-	s.require.True(ok, "result should contain 'content' field")
-	s.assert.NotNil(content, "content should not be nil")
+	s.Require.True(ok, "result should contain 'content' field")
+	s.Assert.NotNil(content, "content should not be nil")
 
 	return s
 }
 
 func (s *MCPHTTPStage) tool_result_is_not_error() *MCPHTTPStage {
-	s.require.NotNil(s.toolCallResult, "tool must be called first")
+	s.Require.NotNil(s.toolCallResult, "tool must be called first")
 
 	isError, ok := s.toolCallResult["isError"].(bool)
 	if ok {
-		s.assert.False(isError, "tool result should not be an error")
+		s.Assert.False(isError, "tool result should not be an error")
 	}
 
 	return s
 }
 
 func (s *MCPHTTPStage) prompts_are_listed() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(10 * time.Second)
 	defer cancel()
 
 	prompts, err := s.mcpClient.ListPrompts(ctx)
-	s.require.NoError(err, "list prompts failed")
-	s.require.NotNil(prompts, "prompts should not be nil")
+	s.Require.NoError(err, "list prompts failed")
+	s.Require.NotNil(prompts, "prompts should not be nil")
 
 	s.prompts = prompts
 	return s
 }
 
 func (s *MCPHTTPStage) two_prompts_are_available() *MCPHTTPStage {
-	s.require.NotNil(s.prompts, "prompts must be listed first")
-	s.assert.Len(s.prompts, 2, "should have exactly 2 prompts")
+	s.Require.NotNil(s.prompts, "prompts must be listed first")
+	s.Assert.Len(s.prompts, 2, "should have exactly 2 prompts")
 	return s
 }
 
 func (s *MCPHTTPStage) expected_prompts_are_present() *MCPHTTPStage {
-	s.require.NotNil(s.prompts, "prompts must be listed first")
+	s.Require.NotNil(s.prompts, "prompts must be listed first")
 
 	expectedPrompts := map[string]bool{
 		"post_mortem_incident_analysis": false,
@@ -296,18 +303,18 @@ func (s *MCPHTTPStage) expected_prompts_are_present() *MCPHTTPStage {
 	}
 
 	for promptName, found := range expectedPrompts {
-		s.assert.True(found, "expected prompt %s to be present", promptName)
+		s.Assert.True(found, "expected prompt %s to be present", promptName)
 	}
 
 	return s
 }
 
 func (s *MCPHTTPStage) prompt_has_required_arguments() *MCPHTTPStage {
-	s.require.NotNil(s.prompts, "prompts must be listed first")
+	s.Require.NotNil(s.prompts, "prompts must be listed first")
 
 	for _, prompt := range s.prompts {
-		s.assert.NotEmpty(prompt.Name, "prompt should have a name")
-		s.assert.NotEmpty(prompt.Description, "prompt %s should have a description", prompt.Name)
+		s.Assert.NotEmpty(prompt.Name, "prompt should have a name")
+		s.Assert.NotEmpty(prompt.Description, "prompt %s should have a description", prompt.Name)
 
 		// Check that each prompt has at least some arguments
 		hasRequiredArgs := false
@@ -317,14 +324,14 @@ func (s *MCPHTTPStage) prompt_has_required_arguments() *MCPHTTPStage {
 				break
 			}
 		}
-		s.assert.True(hasRequiredArgs, "prompt %s should have at least one required argument", prompt.Name)
+		s.Assert.True(hasRequiredArgs, "prompt %s should have at least one required argument", prompt.Name)
 	}
 
 	return s
 }
 
 func (s *MCPHTTPStage) post_mortem_prompt_is_retrieved() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(10 * time.Second)
 	defer cancel()
 
 	args := map[string]interface{}{
@@ -333,34 +340,34 @@ func (s *MCPHTTPStage) post_mortem_prompt_is_retrieved() *MCPHTTPStage {
 	}
 
 	result, err := s.mcpClient.GetPrompt(ctx, "post_mortem_incident_analysis", args)
-	s.require.NoError(err, "get prompt failed")
-	s.require.NotNil(result, "prompt result should not be nil")
+	s.Require.NoError(err, "get prompt failed")
+	s.Require.NotNil(result, "prompt result should not be nil")
 
 	s.promptResult = result
 	return s
 }
 
 func (s *MCPHTTPStage) prompt_result_contains_messages() *MCPHTTPStage {
-	s.require.NotNil(s.promptResult, "prompt must be retrieved first")
+	s.Require.NotNil(s.promptResult, "prompt must be retrieved first")
 
 	messages, ok := s.promptResult["messages"]
-	s.require.True(ok, "result should contain 'messages' field")
-	s.assert.NotNil(messages, "messages should not be nil")
+	s.Require.True(ok, "result should contain 'messages' field")
+	s.Assert.NotNil(messages, "messages should not be nil")
 
 	return s
 }
 
 func (s *MCPHTTPStage) logging_level_can_be_set() *MCPHTTPStage {
-	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
+	ctx, cancel := s.ctxHelper.WithTimeout(10 * time.Second)
 	defer cancel()
 
 	err := s.mcpClient.SetLoggingLevel(ctx, "debug")
-	s.assert.NoError(err, "set logging level failed")
+	s.Assert.NoError(err, "set logging level failed")
 
 	return s
 }
 
 func (s *MCPHTTPStage) http_transport_test_complete() *MCPHTTPStage {
-	s.t.Log("✓ MCP HTTP transport test completed successfully!")
+	s.T.Log("✓ MCP HTTP transport test completed successfully!")
 	return s
 }

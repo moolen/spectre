@@ -3,42 +3,40 @@ package api
 import (
 	"compress/flate"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"time"
 
+	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
-	"github.com/moolen/spectre/internal/storage"
 )
 
 const (
-	// ContentTypeEventsBinary is the content-type for spectre binary event archives
-	ContentTypeEventsBinary = "application/vnd.spectre.events.v1+bin"
-	ContentTypeEventsJSON   = "application/vnd.spectre.events.v1+json"
 	// MaxPayloadSize is the maximum allowed request body size (30 MB)
 	MaxPayloadSize = 30 * 1024 * 1024
 )
 
-// ImportHandler handles storage import requests
+// ImportHandler handles event import requests using the graph pipeline
 type ImportHandler struct {
-	storage *storage.Storage
-	logger  *logging.Logger
+	pipeline sync.Pipeline
+	logger   *logging.Logger
 }
 
 // NewImportHandler creates a new import handler
-func NewImportHandler(storage *storage.Storage, logger *logging.Logger) *ImportHandler {
+func NewImportHandler(pipeline sync.Pipeline, logger *logging.Logger) *ImportHandler {
 	return &ImportHandler{
-		storage: storage,
-		logger:  logger,
+		pipeline: pipeline,
+		logger:   logger,
 	}
 }
 
 // Handle processes import requests
 func (h *ImportHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	// Parse query parameters
+	// Parse query parameters (kept for compatibility, but not all are used in graph mode)
 	validateFilesStr := r.URL.Query().Get("validate")
 	overwriteStr := r.URL.Query().Get("overwrite")
 
@@ -46,32 +44,26 @@ func (h *ImportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	validateFiles := validateFilesStr == "true" || validateFilesStr == "1" || validateFilesStr == ""
 	overwrite := overwriteStr == "true" || overwriteStr == "1"
 
-	opts := storage.ImportOptions{
-		ValidateFiles:     validateFiles,
-		OverwriteExisting: overwrite,
-	}
+	// Log parameters (some may not apply to graph mode)
+	h.logger.DebugWithFields("Import request received",
+		logging.Field("validate", validateFiles),
+		logging.Field("overwrite", overwrite))
 
-	contentType := r.Header.Get("Content-Type")
-
-	// empty content-type for backwards compat
-	if contentType == "" || strings.HasPrefix(contentType, ContentTypeEventsBinary) {
-		h.handleArchiveImport(w, r, opts)
-		return
-	}
-	if strings.HasPrefix(contentType, ContentTypeEventsJSON) {
-		h.handleJSONEventImport(w, r, opts)
-		return
-	}
-
-	h.logger.Error("Unsupported Content-Type: %s", contentType)
-	writeError(w, http.StatusBadRequest, "UNSUPPORTED_CONTENT_TYPE", fmt.Sprintf("Content-Type %s not supported", contentType))
+	h.handleJSONEventImport(w, r, validateFiles, overwrite)
 }
 
 // handleJSONEventImport processes a JSON batch event import request
-func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Request, opts storage.ImportOptions) {
+func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Request, validateFiles, overwrite bool) {
+	startTime := time.Now()
+
+	// Log request details for debugging
+	contentLength := r.ContentLength
 	h.logger.InfoWithFields("Starting JSON event batch import",
-		logging.Field("validate_files", opts.ValidateFiles),
-		logging.Field("overwrite", opts.OverwriteExisting))
+		logging.Field("validate", validateFiles),
+		logging.Field("overwrite", overwrite),
+		logging.Field("content_length", contentLength),
+		logging.Field("content_length_mb", float64(contentLength)/(1024*1024)),
+		logging.Field("remote_addr", r.RemoteAddr))
 
 	// Prepare to read request body with size limit
 	limitedBody := io.LimitReader(r.Body, int64(MaxPayloadSize))
@@ -84,6 +76,9 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	// Decompress if needed based on Content-Encoding header
 	var decompressedBody io.Reader = limitedBody
 	contentEncoding := r.Header.Get("Content-Encoding")
+	h.logger.DebugWithFields("Reading request body",
+		logging.Field("content_encoding", contentEncoding),
+		logging.Field("max_payload_size_mb", MaxPayloadSize/(1024*1024)))
 
 	switch contentEncoding {
 	case "gzip":
@@ -119,91 +114,82 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Parse JSON request using shared utility
-	events, err := importexport.ParseJSONEvents(decompressedBody)
+	// Parse JSON request using new Import API
+	h.logger.Debug("Starting to parse JSON events from request body")
+	eventValues, err := importexport.Import(importexport.FromReader(decompressedBody), importexport.WithLogger(h.logger))
 	if err != nil {
 		h.logger.Error("Failed to parse JSON: %v", err)
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
 		return
 	}
 
+	parseDuration := time.Since(startTime)
 	h.logger.InfoWithFields("Parsed JSON import request",
-		logging.Field("event_count", len(events)))
+		logging.Field("event_count", len(eventValues)),
+		logging.Field("parse_duration", parseDuration))
 
-	// Call storage engine to ingest events
-	report, err := h.storage.AddEventsBatch(events, opts)
-	if err != nil {
-		h.logger.Error("Event batch ingestion failed: %v", err)
+	// Process events through graph pipeline
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	h.logger.InfoWithFields("Starting batch processing through pipeline",
+		logging.Field("event_count", len(eventValues)),
+		logging.Field("timeout", "5m"))
+
+	processStartTime := time.Now()
+	var errors []string
+	if err := h.pipeline.ProcessBatch(ctx, eventValues); err != nil {
+		processDuration := time.Since(processStartTime)
+		h.logger.ErrorWithFields("Event batch processing failed",
+			logging.Field("error", err),
+			logging.Field("event_count", len(eventValues)),
+			logging.Field("process_duration", processDuration))
+		errors = append(errors, fmt.Sprintf("Batch processing failed: %v", err))
 		writeError(w, http.StatusInternalServerError, "INGEST_FAILED", err.Error())
 		return
 	}
 
+	processDuration := time.Since(processStartTime)
+	h.logger.InfoWithFields("Batch processing completed",
+		logging.Field("event_count", len(eventValues)),
+		logging.Field("process_duration", processDuration))
+
+	duration := time.Since(startTime)
+
 	h.logger.InfoWithFields("JSON event batch import completed",
-		logging.Field("total_events", report.TotalEvents),
-		logging.Field("merged_hours", report.MergedHours),
-		logging.Field("errors", len(report.Errors)))
+		logging.Field("total_events", len(eventValues)),
+		logging.Field("duration", duration))
+
+	// Calculate approximate "files created" based on unique hours
+	// This is for compatibility with existing tests that expect this field
+	hourSet := make(map[int64]bool)
+	for _, event := range eventValues {
+		hour := time.Unix(0, event.Timestamp).Truncate(time.Hour).Unix()
+		hourSet[hour] = true
+	}
+	filesCreated := len(hourSet)
 
 	// Return import report
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":         "success",
-		"total_events":   report.TotalEvents,
-		"merged_hours":   report.MergedHours,
-		"files_created":  report.MergedHours, // Number of storage files created/updated
-		"imported_files": report.ImportedFiles,
-		"duration":       report.Duration.String(),
-		"errors":         report.Errors,
+		"total_events":   len(eventValues),
+		"merged_hours":   filesCreated, // Number of unique hours
+		"files_created":  filesCreated, // For compatibility with tests
+		"imported_files": 0,            // Not applicable in graph mode
+		"duration":       duration.String(),
+		"errors":         errors,
 	}
 
-	_ = json.NewEncoder(w).Encode(response)
-}
-
-// handleArchiveImport processes a binary archive import request (existing behavior)
-func (h *ImportHandler) handleArchiveImport(w http.ResponseWriter, r *http.Request, opts storage.ImportOptions) {
-	h.logger.InfoWithFields("Starting archive import",
-		logging.Field("validate_files", opts.ValidateFiles),
-		logging.Field("overwrite", opts.OverwriteExisting))
-
-	defer func() {
-		if err := r.Body.Close(); err != nil {
-			h.logger.Error("Failed to close request body: %v", err)
-		}
-	}()
-
-	// Read archive from request body with size limit
-	limitedBody := io.LimitReader(r.Body, int64(MaxPayloadSize))
-
-	report, err := h.storage.Import(limitedBody, opts)
-	if err != nil {
-		h.logger.Error("Archive import failed: %v", err)
-		writeError(w, http.StatusInternalServerError, "IMPORT_FAILED", err.Error())
+	h.logger.Debug("Writing import response to client")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.logger.ErrorWithFields("Failed to write import response",
+			logging.Field("error", err),
+			logging.Field("total_events", len(eventValues)))
+		// Response already sent, can't send error response
 		return
 	}
-
-	h.logger.InfoWithFields("Archive import completed",
-		logging.Field("total_files", report.TotalFiles),
-		logging.Field("imported", report.ImportedFiles),
-		logging.Field("merged_hours", report.MergedHours),
-		logging.Field("failed", report.FailedFiles),
-		logging.Field("events", report.TotalEvents))
-
-	// Return import report
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	response := map[string]interface{}{
-		"status":         "success",
-		"total_files":    report.TotalFiles,
-		"imported_files": report.ImportedFiles,
-		"merged_hours":   report.MergedHours,
-		"skipped_files":  report.SkippedFiles,
-		"failed_files":   report.FailedFiles,
-		"total_events":   report.TotalEvents,
-		"duration":       report.Duration.String(),
-		"errors":         report.Errors,
-	}
-
-	_ = json.NewEncoder(w).Encode(response)
+	h.logger.Debug("Import response written successfully")
 }

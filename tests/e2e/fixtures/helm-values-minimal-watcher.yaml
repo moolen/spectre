@@ -46,6 +46,7 @@ storage:
     maxSize: 100Mi
 
 persistence:
+  enabled: false
   storageClassName: standard
 
 podAnnotations:
@@ -60,3 +61,6 @@ graph:
   enabled: true
   falkordb:
     sidecar: true
+    persistence:
+      enabled: true
+      # Don't set storageClassName to use cluster default (works with kind's local-path provisioner)

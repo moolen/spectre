@@ -34,6 +34,7 @@ func (m *mockGraphClient) GetGraphStats(ctx context.Context) (*graph.GraphStats,
 	return nil, nil
 }
 func (m *mockGraphClient) InitializeSchema(ctx context.Context) error { return nil }
+func (m *mockGraphClient) DeleteGraph(ctx context.Context) error      { return nil }
 
 func (m *mockGraphClient) ExecuteQuery(ctx context.Context, query graph.GraphQuery) (*graph.QueryResult, error) {
 	// Check if this is a Node lookup query

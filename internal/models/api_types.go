@@ -46,12 +46,9 @@ type K8sEvent struct {
 
 // MetadataResponse represents the response from /v1/metadata endpoint
 type MetadataResponse struct {
-	Namespaces     []string       `json:"namespaces"`
-	Kinds          []string       `json:"kinds"`
-	Groups         []string       `json:"groups"`
-	ResourceCounts map[string]int `json:"resourceCounts"`
-	TotalEvents    int            `json:"totalEvents"`
-	TimeRange      TimeRangeInfo  `json:"timeRange"`
+	Namespaces []string      `json:"namespaces"`
+	Kinds      []string      `json:"kinds"`
+	TimeRange  TimeRangeInfo `json:"timeRange"`
 }
 
 // TimeRangeInfo contains earliest and latest event timestamps
