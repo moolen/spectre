@@ -72,6 +72,21 @@ type CausalGraph struct {
 	Edges []GraphEdge `json:"edges"`
 }
 
+// EventSignificance provides importance scoring for individual events
+// to guide LLM attention toward high-impact changes
+type EventSignificance struct {
+	Score   float64  `json:"score"`   // 0.0 to 1.0
+	Reasons []string `json:"reasons"` // Human-readable explanation of significance
+}
+
+// EventDiff represents a single change between consecutive events
+type EventDiff struct {
+	Path     string `json:"path"`           // JSON path, e.g., "spec.replicas"
+	OldValue any    `json:"old,omitempty"`  // Previous value (nil for additions)
+	NewValue any    `json:"new,omitempty"`  // New value (nil for removals)
+	Op       string `json:"op"`             // "add", "remove", "replace"
+}
+
 // ChangeEventInfo represents a change event in the causal chain
 type ChangeEventInfo struct {
 	EventID       string    `json:"eventId"`
@@ -81,7 +96,16 @@ type ChangeEventInfo struct {
 	ConfigChanged bool      `json:"configChanged,omitempty"`
 	StatusChanged bool      `json:"statusChanged,omitempty"`
 	Description   string    `json:"description,omitempty"` // Human-readable summary
-	Data          []byte    `json:"data,omitempty"`        // Full resource JSON for diff
+
+	// Significance scoring for LLM prioritization
+	Significance *EventSignificance `json:"significance,omitempty"`
+
+	// Diff-based format (new) - mutually exclusive with Data
+	Diff         []EventDiff    `json:"diff,omitempty"`         // Changes from previous event
+	FullSnapshot map[string]any `json:"fullSnapshot,omitempty"` // Only for first event per resource
+
+	// Legacy format - full resource JSON (deprecated, for backward compat)
+	Data []byte `json:"data,omitempty"`
 }
 
 // K8sEventInfo represents a Kubernetes Event (kind: Event) related to a resource
@@ -93,6 +117,9 @@ type K8sEventInfo struct {
 	Type      string    `json:"type"`    // "Warning", "Normal", "Error"
 	Count     int       `json:"count"`   // How many times this event occurred
 	Source    string    `json:"source"`  // Component that generated the event
+
+	// Significance scoring for LLM prioritization
+	Significance *EventSignificance `json:"significance,omitempty"`
 }
 
 // RootCauseHypothesis identifies the most likely root cause

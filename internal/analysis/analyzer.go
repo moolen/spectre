@@ -23,6 +23,16 @@ func NewRootCauseAnalyzer(graphClient graph.Client) *RootCauseAnalyzer {
 	}
 }
 
+// ResponseFormat specifies the format for the API response
+type ResponseFormat string
+
+const (
+	// FormatLegacy uses base64-encoded full resource data (backward compatible)
+	FormatLegacy ResponseFormat = "legacy"
+	// FormatDiff uses diff-based format with significance scoring
+	FormatDiff ResponseFormat = "diff"
+)
+
 // AnalyzeInput defines input parameters for root cause analysis
 type AnalyzeInput struct {
 	ResourceUID      string
@@ -30,6 +40,7 @@ type AnalyzeInput struct {
 	LookbackNs       int64 // Lookback window in nanoseconds (default: 10 minutes)
 	MaxDepth         int
 	MinConfidence    float64
+	Format           ResponseFormat // Response format: "legacy" or "diff" (default: "diff")
 }
 
 // Analyze performs root cause analysis using the causality-first approach.
@@ -165,6 +176,29 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 	a.logger.Info("Analysis completed in %v - degraded=%v, symptom_only=%v, confidence=%.2f",
 		totalDuration, quality.IsDegraded, quality.IsSymptomOnly, confidence.Score)
 
+	// Apply format-specific transformations
+	format := input.Format
+	if format == "" {
+		format = FormatDiff // Default to new format
+	}
+
+	if format == FormatDiff {
+		a.logger.Debug("Applying diff format transformations")
+		// Extract error patterns from symptom for correlation
+		errorPatterns := ExtractErrorPatterns(symptom.ErrorMessage)
+
+		// Apply significance scoring and diff conversion to all nodes
+		a.applyDiffFormat(&graph, time.Unix(0, input.FailureTimestamp), errorPatterns)
+
+		// Also process root cause event
+		if rootCause.ChangeEvent.Data != nil {
+			rootCause.ChangeEvent.Significance = CalculateChangeEventSignificance(
+				&rootCause.ChangeEvent, true, time.Unix(0, input.FailureTimestamp), errorPatterns,
+			)
+			ConvertSingleEventToDiff(&rootCause.ChangeEvent, nil, true)
+		}
+	}
+
 	return &RootCauseAnalysisV2{
 		Incident: IncidentAnalysis{
 			ObservedSymptom: *symptom,
@@ -182,4 +216,25 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 			PerformanceMetrics: perfMetrics,
 		},
 	}, nil
+}
+
+// applyDiffFormat applies significance scoring and diff conversion to all graph nodes
+func (a *RootCauseAnalyzer) applyDiffFormat(graph *CausalGraph, failureTime time.Time, errorPatterns []string) {
+	for i := range graph.Nodes {
+		node := &graph.Nodes[i]
+		isOnSpine := node.NodeType == "SPINE"
+
+		// Score all events
+		ScoreEvents(node, isOnSpine, failureTime, errorPatterns)
+
+		// Convert AllEvents to diff format
+		if len(node.AllEvents) > 0 {
+			node.AllEvents = ConvertEventsToDiffFormat(node.AllEvents, true)
+		}
+
+		// Convert ChangeEvent to diff format
+		if node.ChangeEvent != nil && node.ChangeEvent.Data != nil {
+			ConvertSingleEventToDiff(node.ChangeEvent, nil, true)
+		}
+	}
 }

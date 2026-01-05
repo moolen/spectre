@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { RootCauseAnalysisV2, GraphNode, ChangeEventInfo, K8sEventInfo } from '../types/rootCause';
+import { RootCauseAnalysisV2, GraphNode, ChangeEventInfo, K8sEventInfo, EventSignificance } from '../types/rootCause';
 import * as d3 from 'd3';
 import { useSettings } from '../hooks/useSettings';
 import { diffJsonWithContext, DiffLine, detectChangeCategories, ChangeCategory } from '../utils/jsonDiff';
@@ -53,6 +53,41 @@ const DiffLineView = ({ line }: { line: DiffLine }) => {
     <div className={`flex gap-2 px-2 rounded ${styleMap[line.type]}`}>
       <span className="select-none w-3 text-[var(--color-text-muted)]">{prefixMap[line.type]}</span>
       <span className="whitespace-pre-wrap break-all">{line.content}</span>
+    </div>
+  );
+};
+
+// Significance badge component for displaying event importance
+const SignificanceBadge = ({ significance }: { significance?: EventSignificance }) => {
+  if (!significance) return null;
+
+  const score = significance.score;
+  const percentage = Math.round(score * 100);
+
+  // Determine color based on significance level
+  const getColorClasses = () => {
+    if (score >= 0.7) return 'bg-red-500/20 text-red-400 border-red-500/30';
+    if (score >= 0.4) return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+    return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+  };
+
+  const getLabel = () => {
+    if (score >= 0.7) return 'High';
+    if (score >= 0.4) return 'Med';
+    return 'Low';
+  };
+
+  // Show only the first reason as a tooltip hint
+  const tooltip = significance.reasons.length > 0
+    ? significance.reasons.join(', ')
+    : `Significance: ${percentage}%`;
+
+  return (
+    <div
+      className={`text-[8px] px-1.5 py-0.5 rounded border ${getColorClasses()} cursor-help`}
+      title={tooltip}
+    >
+      {getLabel()} {percentage}%
     </div>
   );
 };
@@ -403,6 +438,127 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
     };
   }, [isResizing]);
 
+  // Helper to convert pre-computed EventDiff[] to DiffLine[]
+  const convertEventDiffToDiffLines = (diffs: Array<{ path: string; old?: unknown; new?: unknown; op: string }>): DiffLine[] => {
+    const lines: DiffLine[] = [];
+
+    for (const d of diffs) {
+      if (d.op === 'remove' || d.op === 'replace') {
+        lines.push({
+          type: 'remove',
+          content: `${d.path}: ${JSON.stringify(d.old)}`,
+        });
+      }
+      if (d.op === 'add' || d.op === 'replace') {
+        lines.push({
+          type: 'add',
+          content: `${d.path}: ${JSON.stringify(d.new)}`,
+        });
+      }
+    }
+
+    return lines;
+  };
+
+  // Helper to convert object to DiffLine[] as context (neutral color)
+  const convertObjectToContextLines = (obj: Record<string, unknown>): DiffLine[] => {
+    const lines: DiffLine[] = [];
+    const jsonStr = JSON.stringify(obj, null, 2);
+    const jsonLines = jsonStr.split('\n');
+
+    for (const line of jsonLines) {
+      lines.push({
+        type: 'context',
+        content: line,
+      });
+    }
+
+    return lines;
+  };
+
+  // Helper to convert fullSnapshot to DiffLine[] (show all fields as additions)
+  const convertSnapshotToDiffLines = (snapshot: Record<string, unknown>): DiffLine[] => {
+    const lines: DiffLine[] = [];
+    const jsonStr = JSON.stringify(snapshot, null, 2);
+    const jsonLines = jsonStr.split('\n');
+
+    for (const line of jsonLines) {
+      lines.push({
+        type: 'add',
+        content: line,
+      });
+    }
+
+    return lines;
+  };
+
+  // Helper to apply diffs to reconstruct full resource state
+  const applyDiffsToSnapshot = (
+    snapshot: Record<string, unknown>,
+    diffs: Array<{ path: string; old?: unknown; new?: unknown; op: string }>
+  ): Record<string, unknown> => {
+    // Deep clone the snapshot
+    const result = JSON.parse(JSON.stringify(snapshot));
+
+    for (const diff of diffs) {
+      const pathParts = diff.path.split('.');
+      let current: Record<string, unknown> = result;
+
+      // Navigate to parent of the target
+      for (let i = 0; i < pathParts.length - 1; i++) {
+        const part = pathParts[i];
+        if (current[part] === undefined) {
+          current[part] = {};
+        }
+        current = current[part] as Record<string, unknown>;
+      }
+
+      const lastPart = pathParts[pathParts.length - 1];
+
+      switch (diff.op) {
+        case 'add':
+        case 'replace':
+          current[lastPart] = diff.new;
+          break;
+        case 'remove':
+          delete current[lastPart];
+          break;
+      }
+    }
+
+    return result;
+  };
+
+  // Helper to reconstruct full resource at a given event index
+  const reconstructFullResource = (eventIndex: number): Record<string, unknown> | null => {
+    if (!filteredTimeline) return null;
+
+    // Find the first change event with fullSnapshot
+    let snapshot: Record<string, unknown> | null = null;
+    let snapshotIndex = -1;
+
+    for (let i = 0; i <= eventIndex; i++) {
+      const item = filteredTimeline[i];
+      if (item.type === 'change' && item.changeEvent?.fullSnapshot) {
+        snapshot = JSON.parse(JSON.stringify(item.changeEvent.fullSnapshot));
+        snapshotIndex = i;
+        break;
+      }
+    }
+
+    if (!snapshot) return null;
+
+    // Apply all diffs from after the snapshot up to and including the current event
+    for (let i = snapshotIndex + 1; i <= eventIndex; i++) {
+      const item = filteredTimeline[i];
+      if (item.type === 'change' && item.changeEvent?.diff) {
+        snapshot = applyDiffsToSnapshot(snapshot, item.changeEvent.diff);
+      }
+    }
+
+    return snapshot;
+  };
+
   // Calculate JSON diff for selected event
   const eventDiff = useMemo(() => {
     if (!filteredTimeline || filteredTimeline.length === 0) {
@@ -412,7 +568,39 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
     const selectedItem = filteredTimeline[selectedEventIndex];
 
     // Only calculate diff for change events, not K8s events
-    if (!selectedItem || selectedItem.type !== 'change' || !selectedItem.changeEvent?.data) {
+    if (!selectedItem || selectedItem.type !== 'change' || !selectedItem.changeEvent) {
+      return null;
+    }
+
+    const changeEvent = selectedItem.changeEvent;
+
+    // New format handling
+    const hasNewFormat = changeEvent.diff !== undefined || changeEvent.fullSnapshot !== undefined;
+
+    if (hasNewFormat) {
+      // When "Show Full Resource" is enabled, reconstruct and show the full resource
+      if (showFullDiff) {
+        const fullResource = reconstructFullResource(selectedEventIndex);
+        if (fullResource) {
+          return convertObjectToContextLines(fullResource);
+        }
+      }
+
+      // Show pre-computed diff
+      if (changeEvent.diff && changeEvent.diff.length > 0) {
+        return convertEventDiffToDiffLines(changeEvent.diff);
+      }
+
+      // First event has fullSnapshot - show as additions
+      if (changeEvent.fullSnapshot) {
+        return convertSnapshotToDiffLines(changeEvent.fullSnapshot);
+      }
+
+      return null;
+    }
+
+    // Legacy format: compute diff from base64-encoded data field
+    if (!changeEvent.data) {
       return null;
     }
 
@@ -426,11 +614,8 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
     }
 
     // Parse JSON data (handle base64 encoding)
-    let currentData = null;
-    let previousData = null;
-
-    currentData = parseEventData(selectedItem.changeEvent.data);
-    previousData = parseEventData(previousChangeEvent?.data);
+    const currentData = parseEventData(changeEvent.data);
+    const previousData = parseEventData(previousChangeEvent?.data);
 
     // Calculate diff
     if (!currentData) {
@@ -1277,10 +1462,10 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
           </div>
         </div>
 
-        {/* Split panel: diff (left 70%) and event list (right 30%) */}
+        {/* Split panel: diff (left 65%) and event list (right 35%) */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left: Diff view */}
-          <div className="flex-[7] border-r border-[var(--color-border-soft)] flex flex-col">
+          <div className="flex-1 min-w-0 border-r border-[var(--color-border-soft)] flex flex-col">
             {/* Toolbar */}
             <div className="px-4 py-2 border-b border-[var(--color-border-soft)] flex items-center justify-between">
               <div className="text-[10px] font-semibold text-[var(--color-text-muted)] uppercase">
@@ -1290,7 +1475,7 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
                 onClick={() => setShowFullDiff(!showFullDiff)}
                 className="text-[10px] px-2 py-1 rounded bg-[var(--color-surface-active)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-primary)] transition-colors"
               >
-                {showFullDiff ? 'Show Changes Only' : 'Show Full Diff'}
+                {showFullDiff ? 'Show Changes Only' : 'Show Full Resource'}
               </button>
             </div>
 
@@ -1307,7 +1492,18 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
                     </div>
                   ) : filteredTimeline[selectedEventIndex].type === 'change' ? (
                     <div className="flex items-center justify-center h-full text-[var(--color-text-muted)]">
-                      {selectedEventIndex === 0 ? 'First event - no previous state to compare' : 'No data available for diff'}
+                      {(() => {
+                        const evt = filteredTimeline[selectedEventIndex].changeEvent;
+                        // Check if it's an empty diff (no changes)
+                        if (evt?.diff && evt.diff.length === 0) {
+                          return 'No changes detected in this event';
+                        }
+                        // First event without snapshot
+                        if (selectedEventIndex === 0) {
+                          return 'First event - no previous state to compare';
+                        }
+                        return 'No data available for diff';
+                      })()}
                     </div>
                   ) : null}
 
@@ -1348,8 +1544,8 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
             </div>
           </div>
 
-          {/* Right: Event timeline list */}
-          <div className="flex-[3] flex flex-col">
+          {/* Right: Event timeline list (fixed 35% width) */}
+          <div className="w-[35%] shrink-0 flex flex-col overflow-hidden">
             <div className="px-3 py-2 border-b border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]">
               <div className="text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
                 Event Timeline
@@ -1402,12 +1598,15 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
                       {item.type === 'change' && item.changeEvent ? (
                         <>
                           <div className="flex items-center justify-between mb-1">
-                            <div className={`text-[10px] font-semibold ${
-                              item.changeEvent.eventType === 'CREATE' ? 'text-emerald-400' :
-                              item.changeEvent.eventType === 'DELETE' ? 'text-red-400' :
-                              'text-blue-400'
-                            }`}>
-                              {item.changeEvent.eventType}
+                            <div className="flex items-center gap-2">
+                              <div className={`text-[10px] font-semibold ${
+                                item.changeEvent.eventType === 'CREATE' ? 'text-emerald-400' :
+                                item.changeEvent.eventType === 'DELETE' ? 'text-red-400' :
+                                'text-blue-400'
+                              }`}>
+                                {item.changeEvent.eventType}
+                              </div>
+                              <SignificanceBadge significance={item.changeEvent.significance} />
                             </div>
                             <div className="text-[9px] text-[var(--color-text-muted)]">
                               {formatTime(item.timestamp)}
@@ -1450,6 +1649,7 @@ export const RootCauseView: React.FC<RootCauseViewProps> = ({
                               }`}>
                                 {item.k8sEvent.type}
                               </div>
+                              <SignificanceBadge significance={item.k8sEvent.significance} />
                             </div>
                             <div className="text-[9px] text-[var(--color-text-muted)]">
                               {formatTime(item.timestamp)}

@@ -59,6 +59,7 @@ func (h *RootCauseHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			attribute.String("resource_uid", input.ResourceUID),
 			attribute.Int64("failure_timestamp", input.FailureTimestamp),
 			attribute.Int("max_depth", input.MaxDepth),
+			attribute.String("format", string(input.Format)),
 		)
 	}
 
@@ -169,12 +170,26 @@ func (h *RootCauseHandler) parseInput(r *http.Request) (analysis.AnalyzeInput, e
 		lookbackNs = lookbackMs * 1_000_000
 	}
 
+	// Optional: format (default "diff" for new format with significance)
+	format := analysis.FormatDiff
+	if formatStr := query.Get("format"); formatStr != "" {
+		switch formatStr {
+		case "legacy":
+			format = analysis.FormatLegacy
+		case "diff":
+			format = analysis.FormatDiff
+		default:
+			return analysis.AnalyzeInput{}, api.NewValidationError("invalid format: must be 'legacy' or 'diff'")
+		}
+	}
+
 	return analysis.AnalyzeInput{
 		ResourceUID:      resourceUID,
 		FailureTimestamp: failureTimestamp,
 		LookbackNs:       lookbackNs,
 		MaxDepth:         maxDepth,
 		MinConfidence:    minConfidence,
+		Format:           format,
 	}, nil
 }
 

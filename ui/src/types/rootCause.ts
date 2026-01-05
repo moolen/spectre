@@ -10,6 +10,24 @@ export interface SymptomResource {
   name: string;
 }
 
+/**
+ * Event significance scoring for LLM prioritization
+ */
+export interface EventSignificance {
+  score: number; // 0.0 to 1.0
+  reasons: string[]; // Human-readable explanation of significance
+}
+
+/**
+ * Represents a single change in the diff-based format
+ */
+export interface EventDiff {
+  path: string; // JSON path, e.g., "spec.replicas"
+  old?: unknown; // Previous value (undefined for additions)
+  new?: unknown; // New value (undefined for removals)
+  op: 'add' | 'remove' | 'replace';
+}
+
 export interface ChangeEventInfo {
   eventId: string;
   timestamp: string; // ISO timestamp
@@ -18,7 +36,16 @@ export interface ChangeEventInfo {
   configChanged?: boolean;
   statusChanged?: boolean;
   description?: string;
-  data?: string; // Full resource JSON for diff calculation
+
+  // Significance scoring for LLM prioritization
+  significance?: EventSignificance;
+
+  // Diff-based format (new) - mutually exclusive with data
+  diff?: EventDiff[]; // Changes from previous event
+  fullSnapshot?: Record<string, unknown>; // Only for first event per resource
+
+  // Legacy format - full resource JSON (deprecated)
+  data?: string;
 }
 
 export interface K8sEventInfo {
@@ -29,6 +56,9 @@ export interface K8sEventInfo {
   type: string; // "Warning", "Normal", "Error"
   count: number; // How many times this event occurred
   source: string; // Component that generated the event
+
+  // Significance scoring for LLM prioritization
+  significance?: EventSignificance;
 }
 
 export interface GraphNode {
