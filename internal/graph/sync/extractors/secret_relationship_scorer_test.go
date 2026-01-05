@@ -614,22 +614,3 @@ func TestCreateExternalSecretScorerConfig(t *testing.T) {
 		t.Errorf("Expected LabelKey 'external-secrets.io/name', got '%s'", config.LabelKey)
 	}
 }
-
-func TestAbsInt64(t *testing.T) {
-	tests := []struct {
-		input    int64
-		expected int64
-	}{
-		{input: 0, expected: 0},
-		{input: 42, expected: 42},
-		{input: -42, expected: 42},
-		{input: 9223372036854775807, expected: 9223372036854775807}, // max int64
-	}
-
-	for _, tt := range tests {
-		result := absInt64(tt.input)
-		if result != tt.expected {
-			t.Errorf("absInt64(%d) = %d, expected %d", tt.input, result, tt.expected)
-		}
-	}
-}

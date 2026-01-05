@@ -117,11 +117,7 @@ func (e *CertificateExtractor) extractIssuerRefEdge(
 		namespace,
 	)
 
-	// Return nil if edge is invalid (toUID is empty)
-	if edge.ToUID == "" {
-		return nil
-	}
-	return &edge
+	return extractors.ValidEdgeOrNil(edge)
 }
 
 // extractSecretEdge extracts Certificate → Secret relationship with evidence

@@ -169,7 +169,7 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 		// If CheckReadyCondition is enabled, only check temporal proximity if source is Ready
 		shouldCheckTemporal := true
 		if s.config.CheckReadyCondition {
-			shouldCheckTemporal = s.checkReadyCondition(sourceData)
+			shouldCheckTemporal = HasReadyCondition(sourceData)
 			if !shouldCheckTemporal {
 				s.logger("Source resource not Ready, skipping temporal check")
 			}
@@ -191,7 +191,7 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 
 				evidence = append(evidence, graph.EvidenceItem{
 					Type:      graph.EvidenceTypeTemporal,
-					Value:     fmt.Sprintf("Secret observed within %dms of source event", absInt64(lagMs)),
+					Value:     fmt.Sprintf("Secret observed within %dms of source event", AbsInt64(lagMs)),
 					Weight:    weight,
 					Timestamp: time.Now().UnixNano(),
 				})
@@ -234,55 +234,17 @@ func (s *SecretRelationshipScorer) checkOwnerReference(
 	return false
 }
 
-// checkReadyCondition checks if the source resource has a Ready condition set to True.
-// This is a common pattern across many Kubernetes resources (Certificate, ExternalSecret, etc.).
-func (s *SecretRelationshipScorer) checkReadyCondition(sourceData map[string]interface{}) bool {
-	status, ok := GetNestedMap(sourceData, "status")
-	if !ok {
-		return false
-	}
-
-	conditions, ok := GetNestedArray(status, "conditions")
-	if !ok {
-		return false
-	}
-
-	for _, condInterface := range conditions {
-		cond, ok := condInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		condType, _ := GetNestedString(cond, "type")
-		condStatus, _ := GetNestedString(cond, "status")
-
-		if condType == "Ready" && condStatus == "True" {
-			return true
-		}
-	}
-
-	return false
-}
-
 // calculateTemporalProximity calculates a proximity score based on time difference.
 // Returns 1.0 for immediate proximity (lagMs=0), decreasing linearly to 0.0 at window boundary.
 func (s *SecretRelationshipScorer) calculateTemporalProximity(lagMs int64, windowMs int64) float64 {
 	if windowMs == 0 {
 		return 0.0
 	}
-	absLag := absInt64(lagMs)
+	absLag := AbsInt64(lagMs)
 	if absLag > windowMs {
 		return 0.0
 	}
 	return 1.0 - (float64(absLag) / float64(windowMs))
-}
-
-// absInt64 returns the absolute value of an int64.
-func absInt64(n int64) int64 {
-	if n < 0 {
-		return -n
-	}
-	return n
 }
 
 // CreateCertificateSecretScorerConfig creates a configuration for Certificate→Secret scoring.

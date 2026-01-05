@@ -139,7 +139,8 @@ func (e *HTTPRouteExtractor) extractParentRefEdge(
 		name,
 		namespace,
 	)
-	return &edge
+
+	return extractors.ValidEdgeOrNil(edge)
 }
 
 // extractBackendRefEdge extracts a single backendRef (HTTPRoute→Service)
@@ -184,5 +185,6 @@ func (e *HTTPRouteExtractor) extractBackendRefEdge(
 		name,
 		namespace,
 	)
-	return &edge
+
+	return extractors.ValidEdgeOrNil(edge)
 }

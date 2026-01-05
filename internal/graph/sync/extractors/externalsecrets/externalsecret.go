@@ -116,11 +116,7 @@ func (e *ExternalSecretExtractor) extractSecretStoreRefEdge(
 		namespace,
 	)
 
-	// Return nil if edge is invalid (toUID is empty)
-	if edge.ToUID == "" {
-		return nil
-	}
-	return &edge
+	return extractors.ValidEdgeOrNil(edge)
 }
 
 // extractSecretEdge extracts ExternalSecret → Secret relationship with evidence
