@@ -1,9 +1,10 @@
-package api
+package handlers
 
 import (
 	"fmt"
 	"net/http"
 
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/trace"
@@ -11,18 +12,18 @@ import (
 
 // SearchHandler handles /v1/search requests
 type SearchHandler struct {
-	queryExecutor QueryExecutor
+	queryExecutor api.QueryExecutor
 	logger        *logging.Logger
-	validator     *Validator
+	validator     *api.Validator
 	tracer        trace.Tracer
 }
 
 // NewSearchHandler creates a new search handler
-func NewSearchHandler(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *SearchHandler {
+func NewSearchHandler(queryExecutor api.QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *SearchHandler {
 	return &SearchHandler{
 		queryExecutor: queryExecutor,
 		logger:        logger,
-		validator:     NewValidator(),
+		validator:     api.NewValidator(),
 		tracer:        tracer,
 	}
 }
@@ -48,7 +49,7 @@ func (sh *SearchHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	searchResponse := sh.buildSearchResponse(result)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = writeJSON(w, searchResponse)
+	_ = api.WriteJSON(w, searchResponse)
 
 	sh.logger.Debug("Search completed: resources=%d, executionTime=%dms", searchResponse.Count, searchResponse.ExecutionTimeMs)
 }
@@ -89,22 +90,22 @@ func (sh *SearchHandler) parseQuery(r *http.Request) (*models.QueryRequest, erro
 	query := r.URL.Query()
 
 	startStr := query.Get("start")
-	start, err := ParseTimestamp(startStr, "start")
+	start, err := api.ParseTimestamp(startStr, "start")
 	if err != nil {
 		return nil, err
 	}
 
 	endStr := query.Get("end")
-	end, err := ParseTimestamp(endStr, "end")
+	end, err := api.ParseTimestamp(endStr, "end")
 	if err != nil {
 		return nil, err
 	}
 
 	if start < 0 || end < 0 {
-		return nil, NewValidationError("timestamps must be non-negative")
+		return nil, api.NewValidationError("timestamps must be non-negative")
 	}
 	if start > end {
-		return nil, NewValidationError("start timestamp must be less than or equal to end timestamp")
+		return nil, api.NewValidationError("start timestamp must be less than or equal to end timestamp")
 	}
 
 	filters := models.QueryFilters{
@@ -133,13 +134,5 @@ func (sh *SearchHandler) parseQuery(r *http.Request) (*models.QueryRequest, erro
 
 // respondWithError sends an error response
 func (sh *SearchHandler) respondWithError(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-
-	response := map[string]string{
-		"error":   errorCode,
-		"message": message,
-	}
-
-	_ = writeJSON(w, response)
+	api.WriteError(w, statusCode, errorCode, message)
 }

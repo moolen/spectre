@@ -73,7 +73,7 @@ func (s *TimelinePerformanceStage) and() *TimelinePerformanceStage {
 // Given methods
 
 func (s *TimelinePerformanceStage) a_test_environment() *TimelinePerformanceStage {
-	s.testCtx = helpers.SetupE2ETest(s.t)
+	s.testCtx = helpers.SetupE2ETestShared(s.t)
 	s.k8sClient = s.testCtx.K8sClient
 	s.apiClient = s.testCtx.APIClient
 	return s

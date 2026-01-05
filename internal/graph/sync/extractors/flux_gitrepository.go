@@ -73,7 +73,9 @@ func (e *FluxGitRepositoryExtractor) ExtractRelationships(
 				secretName,
 				event.Resource.Namespace,
 			)
-			edges = append(edges, edge)
+			if edge.ToUID != "" {
+				edges = append(edges, edge)
+			}
 		}
 	}
 
@@ -100,7 +102,9 @@ func (e *FluxGitRepositoryExtractor) ExtractRelationships(
 					secretName,
 					event.Resource.Namespace,
 				)
-				edges = append(edges, edge)
+				if edge.ToUID != "" {
+					edges = append(edges, edge)
+				}
 			}
 		}
 	}

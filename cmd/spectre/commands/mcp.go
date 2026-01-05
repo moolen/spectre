@@ -58,7 +58,7 @@ func init() {
 
 func runMCP(cmd *cobra.Command, args []string) {
 	// Set up logging
-	if err := setupLog(GetLogLevel()); err != nil {
+	if err := setupLog(logLevelFlags); err != nil {
 		HandleError(err, "Failed to setup logging")
 	}
 	logger := logging.GetLogger("mcp")

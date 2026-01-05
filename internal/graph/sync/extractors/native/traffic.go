@@ -76,15 +76,15 @@ func (e *ServiceExtractor) ExtractRelationships(
 	}
 
 	// Debug logging
-	fmt.Printf("[DEBUG] ServiceExtractor: querying for Pods with selector %v in namespace %s\n", selectorLabels, event.Resource.Namespace)
-	fmt.Printf("[DEBUG] ServiceExtractor: querying ALL Pods in namespace (including deleted), will filter by labels in-memory\n")
+	e.Logger().Debug("Querying for Pods with selector=%v namespace=%s", selectorLabels, event.Resource.Namespace)
+	e.Logger().Debug("Querying ALL Pods in namespace (including deleted), will filter by labels in-memory")
 
 	result, err := lookup.QueryGraph(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pods: %w", err)
 	}
 
-	fmt.Printf("[DEBUG] ServiceExtractor: query returned %d Pods total\n", len(result.Rows))
+	e.Logger().Debug("Query returned Pods: %d", len(result.Rows))
 
 	// Create SELECTS edges for each matching pod
 	matchingCount := 0
@@ -106,7 +106,7 @@ func (e *ServiceExtractor) ExtractRelationships(
 		}
 		if deleted {
 			deletedCount++
-			fmt.Printf("[DEBUG] ServiceExtractor: Pod %s is deleted, skipping\n", podUID)
+			e.Logger().Debug("Pod is deleted, skipping uid=%s", podUID)
 			continue
 		}
 
@@ -114,21 +114,21 @@ func (e *ServiceExtractor) ExtractRelationships(
 		var podLabels map[string]string
 		if labelsJSON, ok := row[1].(string); ok && labelsJSON != "" {
 			if err := json.Unmarshal([]byte(labelsJSON), &podLabels); err != nil {
-				fmt.Printf("[DEBUG] ServiceExtractor: failed to parse labels for Pod %s: %v\n", podUID, err)
+				e.Logger().Debug("Failed to parse labels for Pod uid=%s error=%v", podUID, err)
 				continue
 			}
 		}
 
-		fmt.Printf("[DEBUG] ServiceExtractor: Pod %s has labels: %v\n", podUID, podLabels)
+		e.Logger().Debug("Pod has labels uid=%s labels=%v", podUID, podLabels)
 
 		// Check if Pod labels match selector
 		if !extractors.LabelsMatchSelector(podLabels, selectorLabels) {
-			fmt.Printf("[DEBUG] ServiceExtractor: Pod %s labels don't match selector, skipping\n", podUID)
+			e.Logger().Debug("Pod labels don't match selector, skipping uid=%s", podUID)
 			continue
 		}
 
 		matchingCount++
-		fmt.Printf("[DEBUG] ServiceExtractor: Pod %s matches selector! Creating SELECTS edge from Service %s\n", podUID, event.Resource.UID)
+		e.Logger().Debug("Pod matches selector! Creating SELECTS edge podUID=%s serviceUID=%s", podUID, event.Resource.UID)
 
 		// Create SELECTS edge with selector information
 		props := graph.SelectsEdge{
@@ -143,7 +143,7 @@ func (e *ServiceExtractor) ExtractRelationships(
 		edges = append(edges, edge)
 	}
 
-	fmt.Printf("[DEBUG] ServiceExtractor: created %d SELECTS edges (%d deleted pods skipped, %d matching)\n", len(edges), deletedCount, matchingCount)
+	e.Logger().Debug("Created SELECTS edges: %d deletedPodsSkipped=%d matchingPods=%d", len(edges), deletedCount, matchingCount)
 
 	return edges, nil
 }
@@ -266,7 +266,8 @@ func (e *IngressExtractor) extractBackendEdge(
 			serviceName,
 			event.Resource.Namespace,
 		)
-		return &edge
+
+		return extractors.ValidEdgeOrNil(edge)
 	}
 
 	// Try old API (serviceName)
@@ -286,7 +287,8 @@ func (e *IngressExtractor) extractBackendEdge(
 			serviceName,
 			event.Resource.Namespace,
 		)
-		return &edge
+
+		return extractors.ValidEdgeOrNil(edge)
 	}
 
 	return nil

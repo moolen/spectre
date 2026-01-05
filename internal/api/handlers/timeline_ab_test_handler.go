@@ -1,4 +1,4 @@
-package api
+package handlers
 
 import (
 	"context"
@@ -6,19 +6,20 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
 // TimelineCompareHandler handles /v1/timeline/compare requests for A/B testing
 type TimelineCompareHandler struct {
-	storageExecutor QueryExecutor
-	graphExecutor   QueryExecutor
+	storageExecutor api.QueryExecutor
+	graphExecutor   api.QueryExecutor
 	logger          *logging.Logger
 }
 
 // NewTimelineCompareHandler creates a new comparison handler
-func NewTimelineCompareHandler(storageExecutor, graphExecutor QueryExecutor, logger *logging.Logger) *TimelineCompareHandler {
+func NewTimelineCompareHandler(storageExecutor, graphExecutor api.QueryExecutor, logger *logging.Logger) *TimelineCompareHandler {
 	return &TimelineCompareHandler{
 		storageExecutor: storageExecutor,
 		graphExecutor:   graphExecutor,
@@ -83,7 +84,7 @@ func (h *TimelineCompareHandler) Handle(w http.ResponseWriter, r *http.Request) 
 }
 
 // executeQuery runs a query and captures metrics
-func (h *TimelineCompareHandler) executeQuery(ctx context.Context, executor QueryExecutor, query *models.QueryRequest) ComparisonMetrics {
+func (h *TimelineCompareHandler) executeQuery(ctx context.Context, executor api.QueryExecutor, query *models.QueryRequest) ComparisonMetrics {
 	start := time.Now()
 
 	result, err := executor.Execute(ctx, query)
@@ -139,22 +140,22 @@ func (h *TimelineCompareHandler) parseQuery(r *http.Request) (*models.QueryReque
 
 	// Parse start/end timestamps
 	startStr := query.Get("start")
-	start, err := ParseTimestamp(startStr, "start")
+	start, err := api.ParseTimestamp(startStr, "start")
 	if err != nil {
 		return nil, err
 	}
 
 	endStr := query.Get("end")
-	end, err := ParseTimestamp(endStr, "end")
+	end, err := api.ParseTimestamp(endStr, "end")
 	if err != nil {
 		return nil, err
 	}
 
 	if start < 0 || end < 0 {
-		return nil, NewValidationError("timestamps must be non-negative")
+		return nil, api.NewValidationError("timestamps must be non-negative")
 	}
 	if start > end {
-		return nil, NewValidationError("start timestamp must be less than or equal to end timestamp")
+		return nil, api.NewValidationError("start timestamp must be less than or equal to end timestamp")
 	}
 
 	// Parse filters

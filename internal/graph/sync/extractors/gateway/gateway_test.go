@@ -145,17 +145,13 @@ func TestGatewayExtractor_ExtractRelationships(t *testing.T) {
 		assert.Empty(t, edges)
 	})
 
-	t.Run("creates edge with empty targetUID when GatewayClass not found", func(t *testing.T) {
+	t.Run("skips edge creation when GatewayClass not found", func(t *testing.T) {
 		lookup := extractors.NewMockResourceLookup()
 		// Don't add the GatewayClass resource
 
 		edges, err := extractor.ExtractRelationships(context.Background(), event, lookup)
 		require.NoError(t, err)
-		require.Len(t, edges, 1)
-
-		edge := edges[0]
-		assert.Equal(t, graph.EdgeTypeReferencesSpec, edge.Type)
-		assert.Equal(t, "gateway-uid-123", edge.FromUID)
-		assert.Equal(t, "", edge.ToUID) // Empty because GatewayClass not found
+		// Edge should be skipped when target resource (GatewayClass) is not found
+		assert.Empty(t, edges)
 	})
 }

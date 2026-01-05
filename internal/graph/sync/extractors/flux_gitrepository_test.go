@@ -65,6 +65,7 @@ func TestFluxGitRepositoryExtractor_ExtractRelationships(t *testing.T) {
 	tests := []struct {
 		name          string
 		gitRepoData   map[string]interface{}
+		mockSecrets   map[string]*graph.ResourceIdentity // secrets to add to mock lookup
 		expectedEdges int
 	}{
 		{
@@ -75,6 +76,14 @@ func TestFluxGitRepositoryExtractor_ExtractRelationships(t *testing.T) {
 					"secretRef": map[string]interface{}{
 						"name": "git-credentials",
 					},
+				},
+			},
+			mockSecrets: map[string]*graph.ResourceIdentity{
+				"flux-system/Secret/git-credentials": {
+					UID:       "secret-uid-1",
+					Kind:      "Secret",
+					Namespace: "flux-system",
+					Name:      "git-credentials",
 				},
 			},
 			expectedEdges: 1,
@@ -90,6 +99,14 @@ func TestFluxGitRepositoryExtractor_ExtractRelationships(t *testing.T) {
 							"name": "gpg-key",
 						},
 					},
+				},
+			},
+			mockSecrets: map[string]*graph.ResourceIdentity{
+				"flux-system/Secret/gpg-key": {
+					UID:       "secret-uid-2",
+					Kind:      "Secret",
+					Namespace: "flux-system",
+					Name:      "gpg-key",
 				},
 			},
 			expectedEdges: 1,
@@ -110,6 +127,20 @@ func TestFluxGitRepositoryExtractor_ExtractRelationships(t *testing.T) {
 					},
 				},
 			},
+			mockSecrets: map[string]*graph.ResourceIdentity{
+				"flux-system/Secret/git-credentials": {
+					UID:       "secret-uid-1",
+					Kind:      "Secret",
+					Namespace: "flux-system",
+					Name:      "git-credentials",
+				},
+				"flux-system/Secret/gpg-key": {
+					UID:       "secret-uid-2",
+					Kind:      "Secret",
+					Namespace: "flux-system",
+					Name:      "gpg-key",
+				},
+			},
 			expectedEdges: 2,
 		},
 		{
@@ -119,7 +150,21 @@ func TestFluxGitRepositoryExtractor_ExtractRelationships(t *testing.T) {
 					"url": "https://github.com/example/repo",
 				},
 			},
+			mockSecrets:   nil,
 			expectedEdges: 0,
+		},
+		{
+			name: "GitRepository with secretRef but target not found",
+			gitRepoData: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"url": "https://github.com/example/repo",
+					"secretRef": map[string]interface{}{
+						"name": "missing-secret",
+					},
+				},
+			},
+			mockSecrets:   nil, // No secrets in lookup
+			expectedEdges: 0,   // Edge should not be created when target doesn't exist
 		},
 	}
 
@@ -142,8 +187,13 @@ func TestFluxGitRepositoryExtractor_ExtractRelationships(t *testing.T) {
 				Type: models.EventTypeUpdate,
 			}
 
+			// Create lookup with mock secrets
 			lookup := &MockResourceLookup{
 				resources: make(map[string]*graph.ResourceIdentity),
+			}
+			// Add mock secrets to the lookup
+			for key, secret := range tt.mockSecrets {
+				lookup.resources[key] = secret
 			}
 
 			edges, err := extractor.ExtractRelationships(ctx, event, lookup)
@@ -155,6 +205,7 @@ func TestFluxGitRepositoryExtractor_ExtractRelationships(t *testing.T) {
 			for _, edge := range edges {
 				assert.Equal(t, graph.EdgeTypeReferencesSpec, edge.Type)
 				assert.Equal(t, "gitrepo-uid", edge.FromUID)
+				assert.NotEmpty(t, edge.ToUID, "Edge ToUID should not be empty")
 
 				// Verify properties
 				var props graph.ReferencesSpecEdge

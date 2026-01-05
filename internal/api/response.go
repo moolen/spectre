@@ -6,15 +6,20 @@ import (
 	"net/http"
 )
 
-// writeJSON writes a JSON response to the response writer
-func writeJSON(w io.Writer, data interface{}) error {
+// WriteJSON writes a JSON response to the response writer
+func WriteJSON(w io.Writer, data interface{}) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(data)
 }
 
-// writeError sends an error response
-func writeError(w http.ResponseWriter, statusCode int, errorCode, message string) {
+// writeJSON is a compatibility alias for WriteJSON
+func writeJSON(w io.Writer, data interface{}) error {
+	return WriteJSON(w, data)
+}
+
+// WriteError sends an error response
+func WriteError(w http.ResponseWriter, statusCode int, errorCode, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
@@ -23,7 +28,12 @@ func writeError(w http.ResponseWriter, statusCode int, errorCode, message string
 		"message": message,
 	}
 
-	_ = writeJSON(w, response)
+	_ = WriteJSON(w, response)
+}
+
+// writeError is a compatibility alias for WriteError
+func writeError(w http.ResponseWriter, statusCode int, errorCode, message string) {
+	WriteError(w, statusCode, errorCode, message)
 }
 
 // ResponseFormatter formats API responses

@@ -1,4 +1,4 @@
-package api
+package handlers
 
 import (
 	"net/http"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analysis"
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/attribute"
@@ -16,7 +17,7 @@ import (
 type RootCauseHandler struct {
 	analyzer  *analysis.RootCauseAnalyzer
 	logger    *logging.Logger
-	validator *Validator
+	validator *api.Validator
 	tracer    trace.Tracer
 }
 
@@ -25,7 +26,7 @@ func NewRootCauseHandler(graphClient graph.Client, logger *logging.Logger, trace
 	return &RootCauseHandler{
 		analyzer:  analysis.NewRootCauseAnalyzer(graphClient),
 		logger:    logger,
-		validator: NewValidator(),
+		validator: api.NewValidator(),
 		tracer:    tracer,
 	}
 }
@@ -83,7 +84,7 @@ func (h *RootCauseHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 4. Return JSON response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = writeJSON(w, result)
+	_ = api.WriteJSON(w, result)
 }
 
 // parseInput extracts and normalizes query parameters
@@ -93,19 +94,19 @@ func (h *RootCauseHandler) parseInput(r *http.Request) (analysis.AnalyzeInput, e
 	// Required: resourceUID
 	resourceUID := query.Get("resourceUID")
 	if resourceUID == "" {
-		return analysis.AnalyzeInput{}, NewValidationError("resourceUID is required")
+		return analysis.AnalyzeInput{}, api.NewValidationError("resourceUID is required")
 	}
 
 	// Required: failureTimestamp
 	failureTimestampStr := query.Get("failureTimestamp")
 	if failureTimestampStr == "" {
-		return analysis.AnalyzeInput{}, NewValidationError("failureTimestamp is required")
+		return analysis.AnalyzeInput{}, api.NewValidationError("failureTimestamp is required")
 	}
 
 	// Parse timestamp - support both seconds and nanoseconds
 	failureTimestamp, err := strconv.ParseInt(failureTimestampStr, 10, 64)
 	if err != nil {
-		return analysis.AnalyzeInput{}, NewValidationError("invalid failureTimestamp: %v", err)
+		return analysis.AnalyzeInput{}, api.NewValidationError("invalid failureTimestamp: %v", err)
 	}
 
 	// Normalize timestamp to nanoseconds
@@ -126,7 +127,7 @@ func (h *RootCauseHandler) parseInput(r *http.Request) (analysis.AnalyzeInput, e
 	if maxDepthStr := query.Get("maxDepth"); maxDepthStr != "" {
 		parsed, err := strconv.Atoi(maxDepthStr)
 		if err != nil {
-			return analysis.AnalyzeInput{}, NewValidationError("invalid maxDepth: %v", err)
+			return analysis.AnalyzeInput{}, api.NewValidationError("invalid maxDepth: %v", err)
 		}
 		maxDepth = parsed
 	}
@@ -136,7 +137,7 @@ func (h *RootCauseHandler) parseInput(r *http.Request) (analysis.AnalyzeInput, e
 	if minConfidenceStr := query.Get("minConfidence"); minConfidenceStr != "" {
 		parsed, err := strconv.ParseFloat(minConfidenceStr, 64)
 		if err != nil {
-			return analysis.AnalyzeInput{}, NewValidationError("invalid minConfidence: %v", err)
+			return analysis.AnalyzeInput{}, api.NewValidationError("invalid minConfidence: %v", err)
 		}
 		minConfidence = parsed
 	}
@@ -147,14 +148,14 @@ func (h *RootCauseHandler) parseInput(r *http.Request) (analysis.AnalyzeInput, e
 		// Parse as duration string (e.g., "10m", "1h", "30s")
 		duration, err := time.ParseDuration(lookbackStr)
 		if err != nil {
-			return analysis.AnalyzeInput{}, NewValidationError("invalid lookback duration: %v", err)
+			return analysis.AnalyzeInput{}, api.NewValidationError("invalid lookback duration: %v", err)
 		}
 		lookbackNs = duration.Nanoseconds()
 	} else if lookbackMsStr := query.Get("lookbackMs"); lookbackMsStr != "" {
 		// Alternative: milliseconds
 		lookbackMs, err := strconv.ParseInt(lookbackMsStr, 10, 64)
 		if err != nil {
-			return analysis.AnalyzeInput{}, NewValidationError("invalid lookbackMs: %v", err)
+			return analysis.AnalyzeInput{}, api.NewValidationError("invalid lookbackMs: %v", err)
 		}
 		lookbackNs = lookbackMs * 1_000_000
 	}
@@ -172,22 +173,22 @@ func (h *RootCauseHandler) parseInput(r *http.Request) (analysis.AnalyzeInput, e
 func (h *RootCauseHandler) validateInput(input analysis.AnalyzeInput) error {
 	// Validate resourceUID
 	if input.ResourceUID == "" {
-		return NewValidationError("resourceUID cannot be empty")
+		return api.NewValidationError("resourceUID cannot be empty")
 	}
 
 	// Validate timestamp is positive
 	if input.FailureTimestamp <= 0 {
-		return NewValidationError("failureTimestamp must be positive")
+		return api.NewValidationError("failureTimestamp must be positive")
 	}
 
 	// Validate maxDepth is reasonable
 	if input.MaxDepth < 1 || input.MaxDepth > 20 {
-		return NewValidationError("maxDepth must be between 1 and 20")
+		return api.NewValidationError("maxDepth must be between 1 and 20")
 	}
 
 	// Validate minConfidence is in valid range
 	if input.MinConfidence < 0.0 || input.MinConfidence > 1.0 {
-		return NewValidationError("minConfidence must be between 0.0 and 1.0")
+		return api.NewValidationError("minConfidence must be between 0.0 and 1.0")
 	}
 
 	return nil
@@ -195,12 +196,5 @@ func (h *RootCauseHandler) validateInput(input analysis.AnalyzeInput) error {
 
 // respondWithError writes an error response
 func (h *RootCauseHandler) respondWithError(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-
-	response := map[string]string{
-		"error":   errorCode,
-		"message": message,
-	}
-	_ = writeJSON(w, response)
+	api.WriteError(w, statusCode, errorCode, message)
 }

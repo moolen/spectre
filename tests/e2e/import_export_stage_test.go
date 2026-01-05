@@ -68,6 +68,7 @@ func (s *ImportExportStage) and() *ImportExportStage {
 }
 
 func (s *ImportExportStage) a_test_environment() *ImportExportStage {
+	// Use isolated deployment because this test uninstalls and redeploys Spectre
 	s.testCtx = helpers.SetupE2ETest(s.t)
 	s.k8sClient = s.testCtx.K8sClient
 	s.apiClient = s.testCtx.APIClient

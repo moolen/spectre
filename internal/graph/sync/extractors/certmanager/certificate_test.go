@@ -355,7 +355,6 @@ func TestCertificateExtractor_ExtractRelationships(t *testing.T) {
 }
 
 func TestCertificateExtractor_ScoreSecretRelationship(t *testing.T) {
-	extractor := NewCertificateExtractor()
 	now := time.Now().UnixNano()
 
 	tests := []struct {
@@ -440,11 +439,19 @@ func TestCertificateExtractor_ScoreSecretRelationship(t *testing.T) {
 				Timestamp: tt.certTimestamp,
 			}
 
-			confidence, evidence := extractor.scoreSecretRelationship(
+			// Use the SecretRelationshipScorer directly
+			scorer := extractors.NewSecretRelationshipScorer(
+				extractors.CreateCertificateSecretScorerConfig(),
+				extractors.NewMockResourceLookup(),
+				func(format string, args ...interface{}) {},
+			)
+
+			confidence, evidence := scorer.ScoreRelationship(
 				context.Background(),
 				event,
 				tt.certData,
 				tt.secret,
+				"example-tls",
 			)
 
 			assert.GreaterOrEqual(t, confidence, tt.expectedMinConf)

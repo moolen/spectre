@@ -1,4 +1,4 @@
-package api
+package handlers
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/trace"
@@ -13,13 +14,13 @@ import (
 
 // MetadataHandler handles /v1/metadata requests
 type MetadataHandler struct {
-	queryExecutor QueryExecutor
+	queryExecutor api.QueryExecutor
 	logger        *logging.Logger
 	tracer        trace.Tracer
 }
 
 // NewMetadataHandler creates a new metadata handler
-func NewMetadataHandler(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *MetadataHandler {
+func NewMetadataHandler(queryExecutor api.QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *MetadataHandler {
 	return &MetadataHandler{
 		queryExecutor: queryExecutor,
 		logger:        logger,
@@ -38,14 +39,14 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	params := r.URL.Query()
 	startStr := params.Get("start")
-	startTime, err := ParseOptionalTimestamp(startStr, 0)
+	startTime, err := api.ParseOptionalTimestamp(startStr, 0)
 	if err != nil {
 		mh.respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
 
 	endStr := params.Get("end")
-	endTime, err := ParseOptionalTimestamp(endStr, time.Now().Unix())
+	endTime, err := api.ParseOptionalTimestamp(endStr, time.Now().Unix())
 	if err != nil {
 		mh.respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
@@ -132,18 +133,10 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = writeJSON(w, response)
+	_ = api.WriteJSON(w, response)
 }
 
 // respondWithError sends an error response
 func (mh *MetadataHandler) respondWithError(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-
-	response := map[string]string{
-		"error":   errorCode,
-		"message": message,
-	}
-
-	_ = writeJSON(w, response)
+	api.WriteError(w, statusCode, errorCode, message)
 }

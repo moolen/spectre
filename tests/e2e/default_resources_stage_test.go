@@ -35,7 +35,7 @@ func (s *DefaultResourcesStage) and() *DefaultResourcesStage {
 }
 
 func (s *DefaultResourcesStage) a_test_environment() *DefaultResourcesStage {
-	testCtx := helpers.SetupE2ETest(s.t)
+	testCtx := helpers.SetupE2ETestShared(s.t)
 	s.BaseContext = helpers.NewBaseContext(s.t, testCtx)
 
 	// Initialize helper managers

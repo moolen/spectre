@@ -72,7 +72,10 @@ func (e *GatewayExtractor) ExtractRelationships(
 		gatewayClassName,
 		"", // GatewayClass is cluster-scoped
 	)
-	edges = append(edges, edge)
+
+	if edge.ToUID != "" {
+		edges = append(edges, edge)
+	}
 
 	return edges, nil
 }

@@ -68,12 +68,23 @@ func (b *BaseExtractor) Priority() int {
 	return b.priority
 }
 
+// Logger returns the logger instance
+func (b *BaseExtractor) Logger() *logging.Logger {
+	return b.logger
+}
+
 // CreateObservedEdge creates an observed edge (100% confidence, explicit relationship)
+// Returns a zero-value edge if toUID is empty (caller should check and skip)
 func (b *BaseExtractor) CreateObservedEdge(
 	edgeType graph.EdgeType,
 	fromUID, toUID string,
 	props interface{},
 ) graph.Edge {
+	if toUID == "" {
+		b.Logger().Debug("Skipping edge creation: toUID is empty (edgeType=%v, fromUID=%s)", edgeType, fromUID)
+		return graph.Edge{} // Return zero-value edge
+	}
+
 	propsJSON, _ := json.Marshal(props)
 	return graph.Edge{
 		Type:       edgeType,
@@ -84,12 +95,18 @@ func (b *BaseExtractor) CreateObservedEdge(
 }
 
 // CreateInferredEdge creates an inferred edge with evidence and confidence
+// Returns a zero-value edge if toUID is empty (caller should check and skip)
 func (b *BaseExtractor) CreateInferredEdge(
 	edgeType graph.EdgeType,
 	fromUID, toUID string,
 	confidence float64,
 	evidence []graph.EvidenceItem,
 ) graph.Edge {
+	if toUID == "" {
+		b.Logger().Debug("Skipping edge creation: toUID is empty (edgeType=%v, fromUID=%s, confidence=%f)", edgeType, fromUID, confidence)
+		return graph.Edge{} // Return zero-value edge
+	}
+
 	now := time.Now().UnixNano()
 	props := graph.ManagesEdge{
 		Confidence:      confidence,
@@ -108,9 +125,15 @@ func (b *BaseExtractor) CreateInferredEdge(
 }
 
 // CreateReferencesSpecEdge creates a REFERENCES_SPEC edge for explicit spec references
+// Returns a zero-value edge if targetUID is empty (caller should check and skip)
 func (b *BaseExtractor) CreateReferencesSpecEdge(
 	sourceUID, targetUID, fieldPath, kind, name, namespace string,
 ) graph.Edge {
+	if targetUID == "" {
+		b.Logger().Debug("Skipping REFERENCES_SPEC edge: targetUID is empty (sourceUID=%s, fieldPath=%s, refKind=%s, refName=%s, refNamespace=%s)", sourceUID, fieldPath, kind, name, namespace)
+		return graph.Edge{} // Return zero-value edge
+	}
+
 	props := graph.ReferencesSpecEdge{
 		FieldPath:    fieldPath,
 		RefKind:      kind,
@@ -124,4 +147,10 @@ func (b *BaseExtractor) CreateReferencesSpecEdge(
 		ToUID:      targetUID,
 		Properties: propsJSON,
 	}
+}
+
+// IsValidEdge checks if an edge has a non-empty ToUID
+// Use this to filter out edges that were skipped due to missing target resources
+func IsValidEdge(edge graph.Edge) bool {
+	return edge.ToUID != ""
 }

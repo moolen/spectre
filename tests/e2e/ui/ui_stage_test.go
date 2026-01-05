@@ -46,7 +46,7 @@ func (s *UIStage) and() *UIStage {
 
 func (s *UIStage) a_test_environment() *UIStage {
 	helpers.EnsurePlaywrightInstalled(s.t)
-	s.testCtx = helpers.SetupE2ETest(s.t)
+	s.testCtx = helpers.SetupE2ETestShared(s.t)
 	s.k8sClient = s.testCtx.K8sClient
 	s.apiClient = s.testCtx.APIClient
 	s.uiURL = s.testCtx.PortForward.GetURL()

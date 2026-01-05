@@ -11,3 +11,11 @@ type QueryExecutor interface {
 	Execute(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, error)
 	SetSharedCache(cache interface{})
 }
+
+// TimelineQuerySource specifies which executor to use for queries
+type TimelineQuerySource string
+
+const (
+	TimelineQuerySourceStorage TimelineQuerySource = "storage"
+	TimelineQuerySourceGraph   TimelineQuerySource = "graph"
+)

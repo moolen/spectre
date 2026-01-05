@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync/extractors"
-	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -21,15 +18,13 @@ const (
 
 // ArgoCDApplicationExtractor extracts relationships for ArgoCD Application resources
 type ArgoCDApplicationExtractor struct {
-	extractors.BaseExtractor
-	logger *logging.Logger
+	*extractors.BaseExtractor
 }
 
 // NewArgoCDApplicationExtractor creates a new ArgoCD Application extractor
 func NewArgoCDApplicationExtractor() *ArgoCDApplicationExtractor {
 	return &ArgoCDApplicationExtractor{
-		BaseExtractor: extractors.BaseExtractor{},
-		logger:        logging.GetLogger("extractors.argocd-application"),
+		BaseExtractor: extractors.NewBaseExtractor("argocd-application", 20),
 	}
 }
 
@@ -69,7 +64,7 @@ func (e *ArgoCDApplicationExtractor) ExtractRelationships(
 	}
 
 	// Extract REFERENCES_SPEC edges to Secrets
-	secretEdges := e.extractSecretReferences(event.Resource, spec)
+	secretEdges := e.extractSecretReferences(ctx, event.Resource, spec, lookup)
 	edges = append(edges, secretEdges...)
 
 	// Only extract MANAGES edges for UPDATE events (not CREATE or DELETE)
@@ -81,7 +76,7 @@ func (e *ArgoCDApplicationExtractor) ExtractRelationships(
 	// Extract MANAGES edges to managed resources
 	managedEdges, err := e.extractManagedResources(ctx, event, spec, lookup)
 	if err != nil {
-		e.logger.Error("Failed to extract managed resources for Application %s/%s: %v",
+		e.Logger().Error("Failed to extract managed resources for Application %s/%s: %v",
 			event.Resource.Namespace, event.Resource.Name, err)
 		return edges, nil // Don't fail the entire extraction
 	}
@@ -92,14 +87,16 @@ func (e *ArgoCDApplicationExtractor) ExtractRelationships(
 
 // extractSecretReferences extracts REFERENCES_SPEC edges to Secret resources
 func (e *ArgoCDApplicationExtractor) extractSecretReferences(
+	ctx context.Context,
 	appResource models.ResourceMetadata,
 	spec map[string]interface{},
+	lookup extractors.ResourceLookup,
 ) []graph.Edge {
 	edges := []graph.Edge{}
 
 	// Handle single source
 	if source, ok := extractors.GetNestedMap(spec, "source"); ok {
-		edges = append(edges, e.extractSecretRefsFromSource(appResource, source, "spec.source")...)
+		edges = append(edges, e.extractSecretRefsFromSource(ctx, appResource, source, "spec.source", lookup)...)
 	}
 
 	// Handle multiple sources (sources[])
@@ -107,7 +104,7 @@ func (e *ArgoCDApplicationExtractor) extractSecretReferences(
 		for i, sourceInterface := range sources {
 			if source, ok := sourceInterface.(map[string]interface{}); ok {
 				fieldPath := fmt.Sprintf("spec.sources[%d]", i)
-				edges = append(edges, e.extractSecretRefsFromSource(appResource, source, fieldPath)...)
+				edges = append(edges, e.extractSecretRefsFromSource(ctx, appResource, source, fieldPath, lookup)...)
 			}
 		}
 	}
@@ -117,42 +114,44 @@ func (e *ArgoCDApplicationExtractor) extractSecretReferences(
 
 // extractSecretRefsFromSource extracts Secret references from a single source
 func (e *ArgoCDApplicationExtractor) extractSecretRefsFromSource(
+	ctx context.Context,
 	appResource models.ResourceMetadata,
 	source map[string]interface{},
 	fieldPathPrefix string,
+	lookup extractors.ResourceLookup,
 ) []graph.Edge {
 	edges := []graph.Edge{}
 
 	// Git repository secrets
 	if username, ok := extractors.GetNestedMap(source, "usernameSecret"); ok {
 		if name, ok := username["name"].(string); ok {
-			edges = append(edges, e.createSecretRefEdge(
-				appResource, name, appResource.Namespace,
-				fieldPathPrefix+".usernameSecret.name"))
+			if edge := e.createSecretRefEdge(ctx, appResource, name, appResource.Namespace, fieldPathPrefix+".usernameSecret.name", lookup); edge.ToUID != "" {
+				edges = append(edges, edge)
+			}
 		}
 	}
 
 	if password, ok := extractors.GetNestedMap(source, "passwordSecret"); ok {
 		if name, ok := password["name"].(string); ok {
-			edges = append(edges, e.createSecretRefEdge(
-				appResource, name, appResource.Namespace,
-				fieldPathPrefix+".passwordSecret.name"))
+			if edge := e.createSecretRefEdge(ctx, appResource, name, appResource.Namespace, fieldPathPrefix+".passwordSecret.name", lookup); edge.ToUID != "" {
+				edges = append(edges, edge)
+			}
 		}
 	}
 
 	if token, ok := extractors.GetNestedMap(source, "tokenSecret"); ok {
 		if name, ok := token["name"].(string); ok {
-			edges = append(edges, e.createSecretRefEdge(
-				appResource, name, appResource.Namespace,
-				fieldPathPrefix+".tokenSecret.name"))
+			if edge := e.createSecretRefEdge(ctx, appResource, name, appResource.Namespace, fieldPathPrefix+".tokenSecret.name", lookup); edge.ToUID != "" {
+				edges = append(edges, edge)
+			}
 		}
 	}
 
 	if tlsCert, ok := extractors.GetNestedMap(source, "tlsClientCertSecret"); ok {
 		if name, ok := tlsCert["name"].(string); ok {
-			edges = append(edges, e.createSecretRefEdge(
-				appResource, name, appResource.Namespace,
-				fieldPathPrefix+".tlsClientCertSecret.name"))
+			if edge := e.createSecretRefEdge(ctx, appResource, name, appResource.Namespace, fieldPathPrefix+".tlsClientCertSecret.name", lookup); edge.ToUID != "" {
+				edges = append(edges, edge)
+			}
 		}
 	}
 
@@ -164,9 +163,10 @@ func (e *ArgoCDApplicationExtractor) extractSecretRefsFromSource(
 				if valFrom, ok := valFromInterface.(map[string]interface{}); ok {
 					if secretKeyRef, ok := extractors.GetNestedMap(valFrom, "secretKeyRef"); ok {
 						if name, ok := secretKeyRef["name"].(string); ok {
-							edges = append(edges, e.createSecretRefEdge(
-								appResource, name, appResource.Namespace,
-								fmt.Sprintf("%s.helm.valuesFrom[%d].secretKeyRef.name", fieldPathPrefix, i)))
+							fieldPath := fmt.Sprintf("%s.helm.valuesFrom[%d].secretKeyRef.name", fieldPathPrefix, i)
+							if edge := e.createSecretRefEdge(ctx, appResource, name, appResource.Namespace, fieldPath, lookup); edge.ToUID != "" {
+								edges = append(edges, edge)
+							}
 						}
 					}
 				}
@@ -179,12 +179,21 @@ func (e *ArgoCDApplicationExtractor) extractSecretRefsFromSource(
 
 // createSecretRefEdge creates a REFERENCES_SPEC edge to a Secret
 func (e *ArgoCDApplicationExtractor) createSecretRefEdge(
+	ctx context.Context,
 	appResource models.ResourceMetadata,
 	secretName, secretNamespace, fieldPath string,
+	lookup extractors.ResourceLookup,
 ) graph.Edge {
+	// Look up the Secret resource
+	targetResource, _ := lookup.FindResourceByNamespace(ctx, secretNamespace, "Secret", secretName)
+	targetUID := ""
+	if targetResource != nil {
+		targetUID = targetResource.UID
+	}
+
 	return e.BaseExtractor.CreateReferencesSpecEdge(
 		appResource.UID,
-		"", // ToUID will be resolved by builder
+		targetUID,
 		fieldPath,
 		"Secret",
 		secretName,
@@ -235,6 +244,24 @@ func (e *ArgoCDApplicationExtractor) extractManagedResources(
 		return nil, fmt.Errorf("failed to query managed resources: %w", err)
 	}
 
+	// Create scorer for ArgoCD Application management relationships
+	scorer := extractors.NewManagementScorer(
+		extractors.ManagementScorerConfig{
+			LabelTemplates: map[string]string{
+				"name": argoCDInstanceLabel,
+			},
+			NamePrefixWeight:     0.4,
+			NamespaceWeight:      0.3,
+			TemporalWeight:       0.3,
+			TemporalWindowMs:     120000, // 2 minutes (ArgoCD syncs can take longer)
+			CheckReconcileEvents: false,
+		},
+		lookup,
+		func(format string, args ...interface{}) {
+			e.Logger().Debug(format, args...)
+		},
+	)
+
 	// Score each candidate resource
 	for _, row := range result.Rows {
 		candidateUID := extractors.ExtractUID(row)
@@ -242,22 +269,22 @@ func (e *ArgoCDApplicationExtractor) extractManagedResources(
 			continue
 		}
 
-		confidence, evidence := e.scoreManagementRelationship(
+		confidence, evidence := scorer.ScoreRelationship(
 			ctx,
 			event,
 			candidateUID,
 			appName,
+			event.Resource.Namespace,
 			targetNamespace,
-			lookup,
 		)
 
 		if confidence >= 0.5 {
-			edge := e.createManagesEdge(
+			edge := e.CreateInferredEdge(
+				graph.EdgeTypeManages,
 				event.Resource.UID,
 				candidateUID,
 				confidence,
 				evidence,
-				event.Timestamp,
 			)
 			edges = append(edges, edge)
 		}
@@ -266,100 +293,3 @@ func (e *ArgoCDApplicationExtractor) extractManagedResources(
 	return edges, nil
 }
 
-// scoreManagementRelationship calculates confidence score for MANAGES relationship
-func (e *ArgoCDApplicationExtractor) scoreManagementRelationship(
-	ctx context.Context,
-	appEvent models.Event,
-	candidateUID string,
-	appName string,
-	targetNamespace string,
-	lookup extractors.ResourceLookup,
-) (float64, []graph.EvidenceItem) {
-	evidence := []graph.EvidenceItem{}
-
-	candidate, err := lookup.FindResourceByUID(ctx, candidateUID)
-	if err != nil {
-		return 0.0, evidence
-	}
-
-	// Check for ArgoCD instance label (perfect confidence if matches)
-	if candidate.Labels != nil {
-		if instanceLabel, ok := candidate.Labels[argoCDInstanceLabel]; ok && instanceLabel == appName {
-			evidence = append(evidence, graph.EvidenceItem{
-				Type:      graph.EvidenceTypeLabel,
-				Value:     fmt.Sprintf("ArgoCD instance label matches: %s=%s", argoCDInstanceLabel, appName),
-				Weight:    1.0,
-				Timestamp: time.Now().UnixNano(),
-			})
-			return 1.0, evidence
-		}
-	}
-
-	// Fallback to heuristic scoring if label doesn't match perfectly
-	// This handles cases where labels might be customized or missing
-	totalWeight := 0.0
-	earnedWeight := 0.0
-
-	// Evidence 1: Name prefix match (0.4 weight)
-	// ArgoCD often names resources with Application name as prefix
-	totalWeight += 0.4
-	if strings.HasPrefix(strings.ToLower(candidate.Name), strings.ToLower(appName)) {
-		earnedWeight += 0.4
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeLabel,
-			Value:     fmt.Sprintf("name prefix matches: %s", appName),
-			Weight:    0.4,
-			Timestamp: time.Now().UnixNano(),
-		})
-	}
-
-	// Evidence 2: Namespace match (0.3 weight)
-	totalWeight += 0.3
-	if candidate.Namespace == targetNamespace {
-		earnedWeight += 0.3
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeNamespace,
-			Value:     fmt.Sprintf("deployed to target namespace: %s", targetNamespace),
-			Weight:    0.3,
-			Timestamp: time.Now().UnixNano(),
-		})
-	}
-
-	// Evidence 3: Temporal proximity (0.3 weight)
-	// Resources created within 2 minutes of Application sync
-	totalWeight += 0.3
-	lagMs := (candidate.FirstSeen - appEvent.Timestamp) / 1_000_000
-	maxLagMs := int64(120000) // 2 minutes
-	if lagMs >= 0 && lagMs <= maxLagMs {
-		proximityScore := 1.0 - (float64(lagMs) / float64(maxLagMs))
-		weight := 0.3 * proximityScore
-		earnedWeight += weight
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeTemporal,
-			Value:     fmt.Sprintf("created %dms after Application sync", lagMs),
-			Weight:    weight,
-			Timestamp: time.Now().UnixNano(),
-		})
-	}
-
-	if totalWeight > 0 {
-		return earnedWeight / totalWeight, evidence
-	}
-	return 0.0, evidence
-}
-
-// createManagesEdge creates a MANAGES edge with evidence
-func (e *ArgoCDApplicationExtractor) createManagesEdge(
-	fromUID, toUID string,
-	confidence float64,
-	evidence []graph.EvidenceItem,
-	timestamp int64,
-) graph.Edge {
-	return e.BaseExtractor.CreateInferredEdge(
-		graph.EdgeTypeManages,
-		fromUID,
-		toUID,
-		confidence,
-		evidence,
-	)
-}

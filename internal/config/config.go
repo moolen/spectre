@@ -5,8 +5,10 @@ type Config struct {
 	// APIPort is the port the API server listens on
 	APIPort int
 
-	// LogLevel is the logging level (debug, info, warn, error)
-	LogLevel string
+	// LogLevelFlags are the per-package log level configurations
+	// Format: ["debug"], ["default=info", "graph.sync=debug"], or ["info"]
+	// Kept for backward compatibility, but can hold multiple entries for per-package levels
+	LogLevelFlags []string
 
 	// WatcherConfigPath is the path to the YAML file containing watcher configuration
 	WatcherConfigPath string
@@ -28,10 +30,10 @@ type Config struct {
 }
 
 // LoadConfig creates a Config with the provided values
-func LoadConfig(apiPort int, logLevel, watcherConfigPath string, maxConcurrentRequests int, tracingEnabled bool, tracingEndpoint, tracingTLSCAPath string, tracingTLSInsecure bool) *Config {
+func LoadConfig(apiPort int, logLevelFlags []string, watcherConfigPath string, maxConcurrentRequests int, tracingEnabled bool, tracingEndpoint, tracingTLSCAPath string, tracingTLSInsecure bool) *Config {
 	cfg := &Config{
 		APIPort:               apiPort,
-		LogLevel:              logLevel,
+		LogLevelFlags:         logLevelFlags,
 		WatcherConfigPath:     watcherConfigPath,
 		MaxConcurrentRequests: maxConcurrentRequests,
 		TracingEnabled:        tracingEnabled,

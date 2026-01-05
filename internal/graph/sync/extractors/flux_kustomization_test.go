@@ -65,6 +65,7 @@ func TestFluxKustomizationExtractor_ExtractSpecReferences(t *testing.T) {
 	tests := []struct {
 		name               string
 		kustomizationData  map[string]interface{}
+		mockResources      map[string]*graph.ResourceIdentity // resources to add to mock lookup
 		expectedEdgeTypes  []graph.EdgeType
 		expectedMinEdges   int
 	}{
@@ -78,6 +79,14 @@ func TestFluxKustomizationExtractor_ExtractSpecReferences(t *testing.T) {
 						"name": "app-repo",
 					},
 					"path": "./deploy",
+				},
+			},
+			mockResources: map[string]*graph.ResourceIdentity{
+				"flux-system/GitRepository/app-repo": {
+					UID:       "gitrepo-uid-1",
+					Kind:      "GitRepository",
+					Namespace: "flux-system",
+					Name:      "app-repo",
 				},
 			},
 			expectedEdgeTypes: []graph.EdgeType{graph.EdgeTypeReferencesSpec},
@@ -100,6 +109,20 @@ func TestFluxKustomizationExtractor_ExtractSpecReferences(t *testing.T) {
 					},
 				},
 			},
+			mockResources: map[string]*graph.ResourceIdentity{
+				"flux-system/GitRepository/app-repo": {
+					UID:       "gitrepo-uid-1",
+					Kind:      "GitRepository",
+					Namespace: "flux-system",
+					Name:      "app-repo",
+				},
+				"flux-system/Secret/sops-gpg": {
+					UID:       "secret-uid-1",
+					Kind:      "Secret",
+					Namespace: "flux-system",
+					Name:      "sops-gpg",
+				},
+			},
 			expectedEdgeTypes: []graph.EdgeType{graph.EdgeTypeReferencesSpec, graph.EdgeTypeReferencesSpec},
 			expectedMinEdges:  2,
 		},
@@ -113,6 +136,14 @@ func TestFluxKustomizationExtractor_ExtractSpecReferences(t *testing.T) {
 						"name":      "app-repo",
 						"namespace": "flux-system",
 					},
+				},
+			},
+			mockResources: map[string]*graph.ResourceIdentity{
+				"flux-system/GitRepository/app-repo": {
+					UID:       "gitrepo-uid-1",
+					Kind:      "GitRepository",
+					Namespace: "flux-system",
+					Name:      "app-repo",
 				},
 			},
 			expectedEdgeTypes: []graph.EdgeType{graph.EdgeTypeReferencesSpec},
@@ -139,11 +170,16 @@ func TestFluxKustomizationExtractor_ExtractSpecReferences(t *testing.T) {
 				Type: models.EventTypeUpdate,
 			}
 
+			// Create lookup with mock resources
 			lookup := &MockResourceLookup{
 				resources: make(map[string]*graph.ResourceIdentity),
 				queryResult: &graph.QueryResult{
 					Rows: [][]interface{}{}, // No managed resources for this test
 				},
+			}
+			// Add mock resources to the lookup
+			for key, resource := range tt.mockResources {
+				lookup.resources[key] = resource
 			}
 
 			edges, err := extractor.ExtractRelationships(ctx, event, lookup)

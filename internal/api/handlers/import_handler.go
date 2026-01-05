@@ -1,4 +1,4 @@
-package api
+package handlers
 
 import (
 	"compress/flate"
@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
@@ -85,7 +86,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		gzipReader, err := gzip.NewReader(limitedBody)
 		if err != nil {
 			h.logger.Error("Failed to create gzip reader: %v", err)
-			writeError(w, http.StatusBadRequest, "INVALID_ENCODING", "Failed to decompress gzip data")
+			api.WriteError(w, http.StatusBadRequest, "INVALID_ENCODING", "Failed to decompress gzip data")
 			return
 		}
 		defer func() {
@@ -110,7 +111,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 
 	default:
 		h.logger.Error("Unsupported Content-Encoding: %s", contentEncoding)
-		writeError(w, http.StatusBadRequest, "UNSUPPORTED_ENCODING", fmt.Sprintf("Content-Encoding %s not supported", contentEncoding))
+		api.WriteError(w, http.StatusBadRequest, "UNSUPPORTED_ENCODING", fmt.Sprintf("Content-Encoding %s not supported", contentEncoding))
 		return
 	}
 
@@ -119,7 +120,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	eventValues, err := importexport.Import(importexport.FromReader(decompressedBody), importexport.WithLogger(h.logger))
 	if err != nil {
 		h.logger.Error("Failed to parse JSON: %v", err)
-		writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		api.WriteError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
 		return
 	}
 
@@ -145,7 +146,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 			logging.Field("event_count", len(eventValues)),
 			logging.Field("process_duration", processDuration))
 		errors = append(errors, fmt.Sprintf("Batch processing failed: %v", err))
-		writeError(w, http.StatusInternalServerError, "INGEST_FAILED", err.Error())
+		api.WriteError(w, http.StatusInternalServerError, "INGEST_FAILED", err.Error())
 		return
 	}
 

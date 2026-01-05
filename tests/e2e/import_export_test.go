@@ -15,6 +15,7 @@ func TestCLIImportOnStartup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping e2e test in short mode")
 	}
+	t.Parallel()
 
 	given, when, then := NewImportExportStage(t)
 
@@ -45,6 +46,7 @@ func TestImportExportRoundTrip(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping e2e test in short mode")
 	}
+	t.Parallel()
 
 	given, when, then := NewImportExportStage(t)
 
@@ -73,6 +75,7 @@ func TestJSONEventBatchImport(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping e2e test in short mode")
 	}
+	t.Parallel()
 
 	given, when, then := NewImportExportStage(t)
 
@@ -97,6 +100,7 @@ func TestBatchImportWithResourceTimeline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping e2e test in short mode")
 	}
+	t.Parallel()
 
 	given, when, then := NewImportExportStage(t)
 
@@ -123,6 +127,7 @@ func TestJSONEventBatchImportWithKubernetesEvents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping e2e test in short mode")
 	}
+	t.Parallel()
 
 	given, when, then := NewImportExportStage(t)
 

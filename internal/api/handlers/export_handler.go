@@ -1,4 +1,4 @@
-package api
+package handlers
 
 import (
 	"compress/gzip"
@@ -9,18 +9,19 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
 // ExportHandler handles event export requests using the graph query executor
 type ExportHandler struct {
-	queryExecutor QueryExecutor
+	queryExecutor api.QueryExecutor
 	logger        *logging.Logger
 }
 
 // NewExportHandler creates a new export handler
-func NewExportHandler(queryExecutor QueryExecutor, logger *logging.Logger) *ExportHandler {
+func NewExportHandler(queryExecutor api.QueryExecutor, logger *logging.Logger) *ExportHandler {
 	return &ExportHandler{
 		queryExecutor: queryExecutor,
 		logger:        logger,
@@ -41,25 +42,25 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	from, err := strconv.ParseInt(fromStr, 10, 64)
 	if err != nil {
 		h.logger.Error("Invalid 'from' parameter: %v", err)
-		writeError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Invalid 'from' parameter: must be Unix timestamp in seconds")
+		api.WriteError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Invalid 'from' parameter: must be Unix timestamp in seconds")
 		return
 	}
 
 	to, err := strconv.ParseInt(toStr, 10, 64)
 	if err != nil {
 		h.logger.Error("Invalid 'to' parameter: %v", err)
-		writeError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Invalid 'to' parameter: must be Unix timestamp in seconds")
+		api.WriteError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Invalid 'to' parameter: must be Unix timestamp in seconds")
 		return
 	}
 
 	// Validate time range
 	if from < 0 || to < 0 {
-		writeError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Timestamps must be non-negative")
+		api.WriteError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Timestamps must be non-negative")
 		return
 	}
 
 	if from > to {
-		writeError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Start timestamp must be less than or equal to end timestamp")
+		api.WriteError(w, http.StatusBadRequest, "INVALID_PARAMETER", "Start timestamp must be less than or equal to end timestamp")
 		return
 	}
 
@@ -80,7 +81,7 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// Validate query request
 	if err := query.Validate(); err != nil {
 		h.logger.Error("Invalid query request: %v", err)
-		writeError(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
+		api.WriteError(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
 		return
 	}
 
@@ -138,7 +139,7 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 				logging.Field("error", err),
 				logging.Field("query_duration", queryDuration),
 				logging.Field("page", pageCount))
-			writeError(w, http.StatusInternalServerError, "QUERY_FAILED", fmt.Sprintf("Failed to execute export query: %v", err))
+			api.WriteError(w, http.StatusInternalServerError, "QUERY_FAILED", fmt.Sprintf("Failed to execute export query: %v", err))
 			return
 		}
 

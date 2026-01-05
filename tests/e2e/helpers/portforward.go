@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ type PortForwarder struct {
 	RemotePort uint16
 	stopCh     chan struct{}
 	readyCh    chan struct{}
+	stopOnce   sync.Once
 	t          *testing.T
 }
 
@@ -82,7 +84,10 @@ func (pf *PortForwarder) GetURL() string {
 // Stop closes the port-forward.
 func (pf *PortForwarder) Stop() error {
 	pf.t.Logf("Stopping port-forward on localhost:%d", pf.LocalPort)
-	close(pf.stopCh)
+	// Use sync.Once to prevent panic from closing an already-closed channel
+	pf.stopOnce.Do(func() {
+		close(pf.stopCh)
+	})
 	// Give it a moment to clean up
 	time.Sleep(500 * time.Millisecond)
 	return nil

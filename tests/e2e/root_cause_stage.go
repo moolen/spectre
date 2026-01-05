@@ -83,7 +83,7 @@ func (s *RootCauseScenarioStage) and() *RootCauseScenarioStage {
 
 func (s *RootCauseScenarioStage) a_test_environment() *RootCauseScenarioStage {
 	startTime := time.Now()
-	s.testCtx = helpers.SetupE2ETest(s.t)
+	s.testCtx = helpers.SetupE2ETestShared(s.t)
 	s.t.Logf("✓ Test environment setup completed (took %v)", time.Since(startTime))
 	return s
 }
@@ -93,7 +93,7 @@ func (s *RootCauseScenarioStage) a_test_environment() *RootCauseScenarioStage {
 // to exist when it starts in order to watch HelmRelease, Kustomization, etc.
 func (s *RootCauseScenarioStage) a_test_environment_with_flux() *RootCauseScenarioStage {
 	startTime := time.Now()
-	s.testCtx = helpers.SetupE2ETestWithFlux(s.t)
+	s.testCtx = helpers.SetupE2ETestSharedFlux(s.t)
 	s.t.Logf("✓ Test environment with Flux setup completed (took %v)", time.Since(startTime))
 	return s
 }
@@ -113,7 +113,17 @@ func (s *RootCauseScenarioStage) spectre_is_deployed() *RootCauseScenarioStage {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	err := helpers.WaitForAppReady(ctx, s.testCtx.K8sClient, s.testCtx.Namespace, s.testCtx.ReleaseName)
+	// Determine the correct namespace and release name based on deployment type
+	namespace := s.testCtx.Namespace
+	releaseName := s.testCtx.ReleaseName
+
+	if s.testCtx.IsSharedDeployment && s.testCtx.SharedDeployment != nil {
+		// Using shared deployment - check in the shared namespace
+		namespace = s.testCtx.SharedDeployment.Namespace
+		releaseName = s.testCtx.SharedDeployment.ReleaseName
+	}
+
+	err := helpers.WaitForAppReady(ctx, s.testCtx.K8sClient, namespace, releaseName)
 	s.require.NoError(err, "Spectre deployment not ready")
 
 	s.t.Logf("✓ Spectre is deployed and ready (took %v)", time.Since(startTime))

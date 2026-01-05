@@ -115,7 +115,8 @@ func (e *ExternalSecretExtractor) extractSecretStoreRefEdge(
 		name,
 		namespace,
 	)
-	return &edge
+
+	return extractors.ValidEdgeOrNil(edge)
 }
 
 // extractSecretEdge extracts ExternalSecret → Secret relationship with evidence
@@ -129,7 +130,7 @@ func (e *ExternalSecretExtractor) extractSecretEdge(
 	// Get target secret name from spec.target.name
 	// If not specified, defaults to ExternalSecret name
 	secretName := event.Resource.Name
-	
+
 	if target, ok := extractors.GetNestedMap(spec, "target"); ok {
 		if name, ok := extractors.GetNestedString(target, "name"); ok && name != "" {
 			secretName = name
@@ -143,8 +144,16 @@ func (e *ExternalSecretExtractor) extractSecretEdge(
 		return nil
 	}
 
-	// Score the relationship based on evidence
-	confidence, evidence := e.scoreSecretRelationship(
+	// Score the relationship using SecretRelationshipScorer
+	scorer := extractors.NewSecretRelationshipScorer(
+		extractors.CreateExternalSecretScorerConfig(),
+		lookup,
+		func(format string, args ...interface{}) {
+			e.Logger().Debug(format, args...)
+		},
+	)
+
+	confidence, evidence := scorer.ScoreRelationship(
 		ctx,
 		event,
 		externalSecret,
@@ -175,130 +184,4 @@ func (e *ExternalSecretExtractor) extractSecretEdge(
 		Properties: propsJSON,
 	}
 	return &edge
-}
-
-// scoreSecretRelationship scores the ExternalSecret → Secret relationship
-func (e *ExternalSecretExtractor) scoreSecretRelationship(
-	ctx context.Context,
-	esEvent models.Event,
-	externalSecret map[string]interface{},
-	secret *graph.ResourceIdentity,
-	targetSecretName string,
-) (float64, []graph.EvidenceItem) {
-	evidence := []graph.EvidenceItem{}
-	score := 0.0
-
-	// Evidence 1: OwnerReference (100% confidence if present)
-	if e.hasOwnerReference(secret, esEvent.Resource.UID) {
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeOwnership,
-			Value:     "Secret has ownerReference to ExternalSecret",
-			Weight:    1.0,
-			Timestamp: time.Now().UnixNano(),
-		})
-		return 1.0, evidence
-	}
-
-	// Evidence 2: Name match (0.9)
-	if secret.Name == targetSecretName {
-		score += 0.9
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeLabel,
-			Value:     fmt.Sprintf("Secret name matches spec.target.name: %s", targetSecretName),
-			Weight:    0.9,
-			Timestamp: time.Now().UnixNano(),
-		})
-	}
-
-	// Evidence 3: Temporal proximity (0.7)
-	if e.isExternalSecretReady(externalSecret) {
-		// Check if Secret was created/updated recently
-		lagMs := (secret.LastSeen - esEvent.Timestamp) / 1_000_000
-		if lagMs >= -120000 && lagMs <= 120000 { // Within 2 minutes
-			proximityScore := 1.0 - (float64(abs(lagMs)) / 120000.0)
-			score += 0.7 * proximityScore
-			evidence = append(evidence, graph.EvidenceItem{
-				Type:      graph.EvidenceTypeTemporal,
-				Value:     fmt.Sprintf("Secret observed within %dms of ExternalSecret sync", abs(lagMs)),
-				Weight:    0.7 * proximityScore,
-				Timestamp: time.Now().UnixNano(),
-			})
-		}
-	}
-
-	// Evidence 4: Label match (0.5)
-	if secret.Labels != nil {
-		// Check for external-secrets.io labels
-		if _, ok := secret.Labels["external-secrets.io/name"]; ok {
-			score += 0.5
-			evidence = append(evidence, graph.EvidenceItem{
-				Type:      graph.EvidenceTypeLabel,
-				Value:     "Secret has external-secrets.io/name label",
-				Weight:    0.5,
-				Timestamp: time.Now().UnixNano(),
-			})
-		}
-	}
-
-	// Evidence 5: Namespace match (0.3)
-	if secret.Namespace == esEvent.Resource.Namespace {
-		score += 0.3
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeNamespace,
-			Value:     secret.Namespace,
-			Weight:    0.3,
-			Timestamp: time.Now().UnixNano(),
-		})
-	}
-
-	// Cap at 1.0
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	return score, evidence
-}
-
-// hasOwnerReference checks if the secret has an ownerReference to the ExternalSecret
-func (e *ExternalSecretExtractor) hasOwnerReference(secret *graph.ResourceIdentity, esUID string) bool {
-	// This would need to be checked via the actual Secret resource
-	// For now, we rely on other evidence
-	return false
-}
-
-// isExternalSecretReady checks if the ExternalSecret has synced successfully
-func (e *ExternalSecretExtractor) isExternalSecretReady(externalSecret map[string]interface{}) bool {
-	status, ok := extractors.GetNestedMap(externalSecret, "status")
-	if !ok {
-		return false
-	}
-
-	conditions, ok := extractors.GetNestedArray(status, "conditions")
-	if !ok {
-		return false
-	}
-
-	for _, condInterface := range conditions {
-		cond, ok := condInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		condType, _ := extractors.GetNestedString(cond, "type")
-		condStatus, _ := extractors.GetNestedString(cond, "status")
-
-		if condType == "Ready" && condStatus == "True" {
-			return true
-		}
-	}
-
-	return false
-}
-
-// abs returns the absolute value of an int64
-func abs(n int64) int64 {
-	if n < 0 {
-		return -n
-	}
-	return n
 }

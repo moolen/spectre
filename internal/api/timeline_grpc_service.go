@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/moolen/spectre/internal/api/pb"
@@ -13,36 +12,23 @@ import (
 )
 
 // TimelineGRPCService implements the gRPC TimelineService
+// It wraps the unified TimelineService with gRPC-compatible streaming
 type TimelineGRPCService struct {
 	pb.UnimplementedTimelineServiceServer
-	storageExecutor QueryExecutor
-	graphExecutor   QueryExecutor
-	querySource     TimelineQuerySource
-	logger          *logging.Logger
-	tracer          trace.Tracer
-	validator       *Validator
+	service *TimelineService
 }
 
 // NewTimelineGRPCService creates a new timeline gRPC service with storage executor only
 func NewTimelineGRPCService(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *TimelineGRPCService {
 	return &TimelineGRPCService{
-		storageExecutor: queryExecutor,
-		querySource:     TimelineQuerySourceStorage,
-		logger:          logger,
-		validator:       NewValidator(),
-		tracer:          tracer,
+		service: NewTimelineService(queryExecutor, logger, tracer),
 	}
 }
 
 // NewTimelineGRPCServiceWithMode creates a new timeline gRPC service with both executors
 func NewTimelineGRPCServiceWithMode(storageExecutor, graphExecutor QueryExecutor, querySource TimelineQuerySource, logger *logging.Logger, tracer trace.Tracer) *TimelineGRPCService {
 	return &TimelineGRPCService{
-		storageExecutor: storageExecutor,
-		graphExecutor:   graphExecutor,
-		querySource:     querySource,
-		logger:          logger,
-		validator:       NewValidator(),
-		tracer:          tracer,
+		service: NewTimelineServiceWithMode(storageExecutor, graphExecutor, querySource, logger, tracer),
 	}
 }
 
@@ -51,7 +37,7 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 	ctx := stream.Context()
 
 	// Start tracing span
-	ctx, span := s.tracer.Start(ctx, "grpc.GetTimeline",
+	ctx, span := s.service.Tracer().Start(ctx, "grpc.GetTimeline",
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
 			attribute.Int64("query.start_timestamp", req.StartTimestamp),
@@ -67,37 +53,28 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Invalid request")
-		s.logger.Warn("Invalid gRPC request: %v (start=%d, end=%d, namespace=%q, kind=%q)",
+		s.service.Logger().Warn("Invalid gRPC request: %v (start=%d, end=%d, namespace=%q, kind=%q)",
 			err, req.StartTimestamp, req.EndTimestamp, req.Namespace, req.Kind)
 		// Return proper gRPC error status
 		return fmt.Errorf("invalid request: %w", err)
 	}
 
-	// Execute concurrent queries (reuse existing logic from TimelineHandler)
-	timelineHandler := &TimelineHandler{
-		storageExecutor: s.storageExecutor,
-		graphExecutor:   s.graphExecutor,
-		querySource:     s.querySource,
-		logger:          s.logger,
-		validator:       s.validator,
-		tracer:          s.tracer,
-	}
-
-	resourceResult, eventResult, err := timelineHandler.executeConcurrentQueries(ctx, query)
+	// Execute concurrent queries
+	resourceResult, eventResult, err := s.service.ExecuteConcurrentQueries(ctx, query)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Query execution failed")
-		s.logger.Error("gRPC query execution failed: %v (start=%d, end=%d, namespace=%q, kind=%q)",
+		s.service.Logger().Error("gRPC query execution failed: %v (start=%d, end=%d, namespace=%q, kind=%q)",
 			err, query.StartTimestamp, query.EndTimestamp, query.Filters.Namespace, query.Filters.Kind)
 		// Return proper gRPC error status
 		return fmt.Errorf("query execution failed: %w", err)
 	}
 
 	// Log query results for debugging
-	s.logger.Debug("gRPC query completed: resources=%d, events=%d", resourceResult.Count, eventResult.Count)
+	s.service.Logger().Debug("gRPC query completed: resources=%d, events=%d", resourceResult.Count, eventResult.Count)
 
 	// Build timeline response
-	timelineResponse := timelineHandler.buildTimelineResponse(resourceResult, eventResult)
+	timelineResponse := s.service.BuildTimelineResponse(resourceResult, eventResult)
 
 	span.SetAttributes(
 		attribute.Int("result.resource_count", timelineResponse.Count),
@@ -108,7 +85,7 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 	err = s.sendMetadata(stream, resourceResult, timelineResponse.Count)
 	if err != nil {
 		span.RecordError(err)
-		s.logger.Error("Failed to send metadata: %v", err)
+		s.service.Logger().Error("Failed to send metadata: %v", err)
 		return err
 	}
 
@@ -129,20 +106,20 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 		}
 		if err := stream.Send(emptyBatch); err != nil {
 			span.RecordError(err)
-			s.logger.Error("Failed to send empty batch: %v", err)
+			s.service.Logger().Error("Failed to send empty batch: %v", err)
 			return err
 		}
 	} else {
 		err = s.streamResourceBatches(stream, groupedResources)
 		if err != nil {
 			span.RecordError(err)
-			s.logger.Error("Failed to stream resources: %v", err)
+			s.service.Logger().Error("Failed to stream resources: %v", err)
 			return err
 		}
 	}
 
 	span.SetStatus(codes.Ok, "Streaming completed successfully")
-	s.logger.Debug("gRPC streaming completed: %d resources in %d groups", timelineResponse.Count, len(groupedResources))
+	s.service.Logger().Debug("gRPC streaming completed: %d resources in %d groups", timelineResponse.Count, len(groupedResources))
 
 	return nil
 }
@@ -174,7 +151,7 @@ func (s *TimelineGRPCService) streamResourceBatches(stream pb.TimelineService_Ge
 		// Convert all models.Resource to pb.TimelineResource for this kind
 		pbResources := make([]*pb.TimelineResource, len(group.Resources))
 		for i, res := range group.Resources {
-			pbResources[i] = s.resourceToProto(&res)
+			pbResources[i] = s.service.ResourceToProto(&res)
 		}
 
 		chunk := &pb.TimelineChunk{
@@ -204,7 +181,7 @@ func (s *TimelineGRPCService) protoToQueryRequest(req *pb.TimelineRequest) (*mod
 		// They would need to be added to the models.QueryFilters struct if needed
 	}
 
-	if err := s.validator.ValidateFilters(filters); err != nil {
+	if err := s.service.Validator().ValidateFilters(filters); err != nil {
 		return nil, err
 	}
 
@@ -222,90 +199,3 @@ func (s *TimelineGRPCService) protoToQueryRequest(req *pb.TimelineRequest) (*mod
 }
 
 // resourceToProto converts internal Resource model to protobuf TimelineResource
-func (s *TimelineGRPCService) resourceToProto(res *models.Resource) *pb.TimelineResource {
-	pbResource := &pb.TimelineResource{
-		Id:          res.ID,
-		Kind:        res.Kind,
-		ApiVersion:  fmt.Sprintf("%s/%s", res.Group, res.Version),
-		Namespace:   res.Namespace,
-		Name:        res.Name,
-		PreExisting: res.PreExisting,
-		Labels:      make(map[string]string),
-	}
-
-	// Convert status segments
-	pbResource.StatusSegments = make([]*pb.StatusSegment, len(res.StatusSegments))
-	for i, seg := range res.StatusSegments {
-		// Extract reason and determine if status is inferred
-		reason, inferred := s.extractReasonFromResourceData(seg.ResourceData)
-		pbResource.StatusSegments[i] = &pb.StatusSegment{
-			Id:           fmt.Sprintf("%s-%d", res.ID, i),
-			ResourceId:   res.ID,
-			Status:       seg.Status,
-			Reason:       reason,
-			Message:      seg.Message,
-			StartTime:    seg.StartTime,
-			EndTime:      seg.EndTime,
-			Inferred:     inferred,
-			ResourceData: seg.ResourceData, // Full Kubernetes resource JSON
-		}
-	}
-
-	// Convert K8s events (note: protobuf generated K8SEvent with capital S)
-	pbResource.Events = make([]*pb.K8SEvent, len(res.Events))
-	for i, evt := range res.Events {
-		pbResource.Events[i] = &pb.K8SEvent{
-			Uid:               evt.ID,
-			Type:              evt.Type,
-			Reason:            evt.Reason,
-			Message:           evt.Message,
-			Timestamp:         evt.Timestamp,
-			InvolvedObjectUid: res.ID, // The resource this event belongs to
-		}
-	}
-
-	return pbResource
-}
-
-// extractReasonFromResourceData parses the resource JSON and extracts the reason
-// from the status conditions. Returns the reason and whether the status was inferred.
-func (s *TimelineGRPCService) extractReasonFromResourceData(data []byte) (string, bool) {
-	if len(data) == 0 {
-		return "", true // No data means status is inferred
-	}
-
-	// Parse the resource data
-	var resource map[string]interface{}
-	if err := json.Unmarshal(data, &resource); err != nil {
-		return "", true // Parse error means status is inferred
-	}
-
-	// Extract status.conditions
-	status, ok := resource["status"].(map[string]interface{})
-	if !ok {
-		return "", true // No status means inferred
-	}
-
-	conditions, ok := status["conditions"].([]interface{})
-	if !ok || len(conditions) == 0 {
-		return "", true // No conditions means inferred
-	}
-
-	// Look for Ready or Healthy condition
-	for _, condInterface := range conditions {
-		cond, ok := condInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		condType, _ := cond["type"].(string)
-		if condType == "Ready" || condType == "Healthy" {
-			// Found a condition - status is not inferred
-			reason, _ := cond["reason"].(string)
-			return reason, false
-		}
-	}
-
-	// No Ready/Healthy condition found - status is inferred
-	return "", true
-}

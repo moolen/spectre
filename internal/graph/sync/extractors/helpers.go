@@ -173,3 +173,75 @@ func CreateEvidenceItem(evidenceType graph.EvidenceType, value string, weight fl
 		Timestamp: 0, // Will be set by caller if needed
 	}
 }
+
+// AbsInt64 returns the absolute value of an int64.
+// This is useful for calculating time differences and distances in scoring algorithms.
+func AbsInt64(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// ValidEdgeOrNil returns a pointer to the edge if it has a non-empty ToUID,
+// otherwise returns nil. This is useful for filtering out edges to resources
+// that don't exist yet (pending edges that would have empty ToUID).
+//
+// Usage:
+//
+//	edge := e.CreateReferencesSpecEdge(...)
+//	if validEdge := ValidEdgeOrNil(edge); validEdge != nil {
+//	    edges = append(edges, *validEdge)
+//	}
+func ValidEdgeOrNil(edge graph.Edge) *graph.Edge {
+	if edge.ToUID == "" {
+		return nil
+	}
+	return &edge
+}
+
+// HasReadyCondition checks if a Kubernetes resource has a Ready condition set to True.
+// This is a common status pattern across many Kubernetes resources (Certificate,
+// ExternalSecret, HelmRelease, Kustomization, Application, etc.).
+//
+// Parameters:
+//   - resource: The parsed resource data (typically from json.Unmarshal of event.Data)
+//
+// Returns:
+//   - true if status.conditions[] contains an entry with type="Ready" and status="True"
+//   - false otherwise (missing status, missing conditions, Ready=False, etc.)
+//
+// Example:
+//
+//	var certificate map[string]interface{}
+//	json.Unmarshal(event.Data, &certificate)
+//	if HasReadyCondition(certificate) {
+//	    // Certificate is ready
+//	}
+func HasReadyCondition(resource map[string]interface{}) bool {
+	status, ok := GetNestedMap(resource, "status")
+	if !ok {
+		return false
+	}
+
+	conditions, ok := GetNestedArray(status, "conditions")
+	if !ok {
+		return false
+	}
+
+	for _, condInterface := range conditions {
+		cond, ok := condInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		condType, _ := GetNestedString(cond, "type")
+		condStatus, _ := GetNestedString(cond, "status")
+
+		if condType == "Ready" && condStatus == "True" {
+			return true
+		}
+	}
+
+	return false
+}

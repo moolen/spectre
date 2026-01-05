@@ -70,15 +70,60 @@ func runWithSharedCluster(m *testing.M) int {
 	helpers.SetCachedHelmValues(values, imageRef)
 
 	log.Printf("✓ Test image built and loaded (took %v)", time.Since(imageStartTime))
+
+	// Deploy ONE consolidated shared Spectre deployment with all features enabled
+	log.Println("Deploying consolidated shared Spectre instance...")
+	sharedDeployStartTime := time.Now()
+
+	// Deploy single shared Spectre with Flux CRDs + MCP enabled
+	// This deployment will be used by all tests (standard, flux, and mcp)
+	sharedDep, err := helpers.DeploySharedDeploymentWithValues(
+		&testing.T{},
+		cluster,
+		"e2e-shared",
+		"spectre-e2e-shared",
+		func(k8sClient *helpers.K8sClient, kubeContext string) error {
+			// Install Flux CRDs once (cluster-wide, available to all tests)
+			return helpers.EnsureFluxInstalled(&testing.T{}, k8sClient, kubeContext)
+		},
+		map[string]interface{}{
+			"mcp": map[string]interface{}{
+				"enabled":  true,
+				"httpAddr": ":8082",
+			},
+		},
+	)
+	if err != nil {
+		log.Printf("❌ Failed to deploy shared deployment: %v", err)
+		return 1
+	}
+
+	// Register the same deployment under all three keys for backward compatibility
+	// This allows existing tests to continue using SetupE2ETestShared(), SetupE2ETestSharedFlux(), etc.
+	helpers.RegisterSharedDeployment("standard", sharedDep)
+	helpers.RegisterSharedDeployment("flux", sharedDep)
+	helpers.RegisterSharedDeployment("mcp", sharedDep)
+	log.Printf("✓ Consolidated shared deployment registered: %s", sharedDep.ReleaseName)
+	log.Printf("✓ Features enabled: Flux CRDs (cluster-wide) + MCP server (port 8082)")
+
+	log.Printf("✓ Shared deployment ready (took %v)", time.Since(sharedDeployStartTime))
 	log.Printf("📊 Total setup time: %v", time.Since(startTime))
 	log.Println("================================================")
-	log.Println("Running e2e tests with shared cluster...")
+	log.Println("Running e2e tests with shared cluster and deployments...")
 	log.Println("================================================")
 
 	// Run all tests
 	testStartTime := time.Now()
 	exitCode := m.Run()
 	testDuration := time.Since(testStartTime)
+
+	// Cleanup shared deployment (only one deployment now)
+	log.Println("================================================")
+	log.Println("Cleaning up shared deployment...")
+	log.Println("================================================")
+	if err := helpers.CleanupSharedDeployment(&testing.T{}, sharedDep); err != nil {
+		log.Printf("Warning: failed to cleanup shared deployment: %v", err)
+	}
 
 	log.Println("================================================")
 	log.Printf("Tests completed with exit code: %d (execution took %v)", exitCode, testDuration)

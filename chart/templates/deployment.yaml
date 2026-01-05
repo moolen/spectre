@@ -86,7 +86,16 @@ spec:
         {{- end }}
         args:
         - --api-port={{ .Values.service.targetPort }}
+        {{- if .Values.config.logLevels }}
+          {{- range $package, $level := .Values.config.logLevels }}
+        - --log-level={{ $package }}={{ $level }}
+          {{- end }}
+          {{- if ne .Values.config.logLevel "info" }}
+        - --log-level=default={{ .Values.config.logLevel }}
+          {{- end }}
+        {{- else }}
         - --log-level={{ .Values.config.logLevel }}
+        {{- end }}
         - --watcher-config=/etc/watcher/watcher.yaml
         - --max-concurrent-requests={{ .Values.config.maxConcurrentRequests }}
         {{- if .Values.pprof.enabled }}

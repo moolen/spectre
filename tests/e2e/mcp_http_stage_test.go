@@ -40,7 +40,8 @@ func (s *MCPHTTPStage) and() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) a_test_environment() *MCPHTTPStage {
-	testCtx := helpers.SetupE2ETest(s.t)
+	// Use shared MCP-enabled deployment instead of creating a new one per test
+	testCtx := helpers.SetupE2ETestSharedMCP(s.t)
 	s.BaseContext = helpers.NewBaseContext(s.t, testCtx)
 
 	// Initialize helper managers
@@ -50,29 +51,18 @@ func (s *MCPHTTPStage) a_test_environment() *MCPHTTPStage {
 }
 
 func (s *MCPHTTPStage) mcp_server_is_deployed() *MCPHTTPStage {
-	ctx, cancel := s.ctxHelper.WithDefaultTimeout()
-	defer cancel()
-
-	// Update Helm release to enable MCP server
-	err := helpers.UpdateHelmRelease(s.TestCtx, map[string]interface{}{
-		"mcp": map[string]interface{}{
-			"enabled":  true,
-			"httpAddr": ":8082",
-		},
-	})
-	s.Require.NoError(err, "failed to update Helm release with MCP enabled")
-
-	// Wait for the deployment to be ready
-	err = helpers.WaitForAppReady(ctx, s.TestCtx.K8sClient, s.TestCtx.Namespace, s.TestCtx.ReleaseName)
-	s.Require.NoError(err, "failed to wait for app to be ready after MCP enable")
-
+	// MCP server is already deployed and enabled on the shared deployment
+	// No need to update Helm release or wait for deployment
+	s.T.Logf("Using shared MCP deployment in namespace: %s", s.TestCtx.SharedDeployment.Namespace)
 	return s
 }
 
 func (s *MCPHTTPStage) mcp_client_is_connected() *MCPHTTPStage {
-	// Create port-forward for MCP server
+	// Create port-forward to the shared MCP server
 	serviceName := s.TestCtx.ReleaseName + "-spectre"
-	mcpPortForward, err := helpers.NewPortForwarder(s.T, s.TestCtx.Cluster.GetContext(), s.TestCtx.Namespace, serviceName, 8082)
+	// Important: Use SharedDeployment.Namespace, not TestCtx.Namespace
+	mcpNamespace := s.TestCtx.SharedDeployment.Namespace
+	mcpPortForward, err := helpers.NewPortForwarder(s.T, s.TestCtx.Cluster.GetContext(), mcpNamespace, serviceName, 8082)
 	s.Require.NoError(err, "failed to create MCP port-forward")
 
 	err = mcpPortForward.WaitForReady(30 * time.Second)

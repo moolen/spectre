@@ -40,6 +40,8 @@ func (s *PodRestartStage) and() *PodRestartStage {
 }
 
 func (s *PodRestartStage) a_test_environment() *PodRestartStage {
+	// Use isolated deployment because this test restarts the Spectre pod,
+	// which would break port-forwards for other tests using shared deployment
 	s.testCtx = helpers.SetupE2ETest(s.t)
 	s.k8sClient = s.testCtx.K8sClient
 	s.apiClient = s.testCtx.APIClient
@@ -76,12 +78,16 @@ func (s *PodRestartStage) spectre_pod_is_restarted() *PodRestartStage {
 	ctx, cancel := context.WithTimeout(s.t.Context(), 2*time.Minute)
 	defer cancel()
 
-	podList, err := s.testCtx.K8sClient.ListPods(ctx, s.testCtx.Namespace, "app.kubernetes.io/instance="+s.testCtx.ReleaseName)
+	// Using isolated deployment - list pods from test's own namespace
+	namespace := s.testCtx.Namespace
+	releaseName := s.testCtx.ReleaseName
+
+	podList, err := s.testCtx.K8sClient.ListPods(ctx, namespace, "app.kubernetes.io/instance="+releaseName)
 	s.require.NoError(err, "failed to list pods")
 	s.require.Greater(len(podList.Items), 0, "should have at least one pod")
 
 	podName := podList.Items[0].Name
-	if err := s.testCtx.K8sClient.DeletePod(ctx, s.testCtx.Namespace, podName); err != nil {
+	if err := s.testCtx.K8sClient.DeletePod(ctx, namespace, podName); err != nil {
 		s.t.Logf("Warning: failed to delete pod %s: %v", podName, err)
 	}
 	return s
@@ -91,7 +97,11 @@ func (s *PodRestartStage) wait_for_spectre_to_be_ready() *PodRestartStage {
 	ctx, cancel := context.WithTimeout(s.t.Context(), 5*time.Minute)
 	defer cancel()
 
-	err := helpers.WaitForAppReady(ctx, s.testCtx.K8sClient, s.testCtx.Namespace, s.testCtx.ReleaseName)
+	// Using isolated deployment - check in test's own namespace
+	namespace := s.testCtx.Namespace
+	releaseName := s.testCtx.ReleaseName
+
+	err := helpers.WaitForAppReady(ctx, s.testCtx.K8sClient, namespace, releaseName)
 	s.require.NoError(err, "failed to wait for app to be ready")
 	return s
 }
