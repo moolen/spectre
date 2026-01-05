@@ -116,6 +116,11 @@ func (e *CertificateExtractor) extractIssuerRefEdge(
 		name,
 		namespace,
 	)
+
+	// Return nil if edge is invalid (toUID is empty)
+	if edge.ToUID == "" {
+		return nil
+	}
 	return &edge
 }
 
@@ -136,17 +141,25 @@ func (e *CertificateExtractor) extractSecretEdge(
 	// Look up the secret
 	secret, err := lookup.FindResourceByNamespace(ctx, event.Resource.Namespace, "Secret", secretName)
 	if err != nil || secret == nil {
-		// Secret doesn't exist yet - create edge with empty targetUID
-		// This allows us to track the intent even before the Secret is created
+		// Secret doesn't exist yet
 		return nil
 	}
 
-	// Score the relationship based on evidence
-	confidence, evidence := e.scoreSecretRelationship(
+	// Score the relationship using SecretRelationshipScorer
+	scorer := extractors.NewSecretRelationshipScorer(
+		extractors.CreateCertificateSecretScorerConfig(),
+		lookup,
+		func(format string, args ...interface{}) {
+			e.Logger().Debug(format, args...)
+		},
+	)
+
+	confidence, evidence := scorer.ScoreRelationship(
 		ctx,
 		event,
 		certificate,
 		secret,
+		secretName,
 	)
 
 	// Only create edge if confidence meets threshold
@@ -172,131 +185,4 @@ func (e *CertificateExtractor) extractSecretEdge(
 		Properties: propsJSON,
 	}
 	return &edge
-}
-
-// scoreSecretRelationship scores the Certificate → Secret relationship
-func (e *CertificateExtractor) scoreSecretRelationship(
-	ctx context.Context,
-	certEvent models.Event,
-	certificate map[string]interface{},
-	secret *graph.ResourceIdentity,
-) (float64, []graph.EvidenceItem) {
-	evidence := []graph.EvidenceItem{}
-	score := 0.0
-
-	// Evidence 1: OwnerReference (100% confidence if present)
-	if e.hasOwnerReference(secret, certEvent.Resource.UID) {
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeOwnership,
-			Value:     "Secret has ownerReference to Certificate",
-			Weight:    1.0,
-			Timestamp: time.Now().UnixNano(),
-		})
-		return 1.0, evidence
-	}
-
-	// Evidence 2: Annotation (0.9)
-	if secret.Labels != nil {
-		// Check in labels first (some versions store it there)
-		if certName, ok := secret.Labels[certNameAnnotation]; ok && certName == certEvent.Resource.Name {
-			score += 0.9
-			evidence = append(evidence, graph.EvidenceItem{
-				Type:      graph.EvidenceTypeAnnotation,
-				Value:     fmt.Sprintf("annotation %s=%s", certNameAnnotation, certName),
-				Weight:    0.9,
-				Timestamp: time.Now().UnixNano(),
-			})
-		}
-	}
-
-	// Evidence 3: Temporal proximity (0.8)
-	if e.isCertificateReady(certificate) {
-		// Check if Secret was created/updated around the same time as Certificate became ready
-		lagMs := (secret.LastSeen - certEvent.Timestamp) / 1_000_000
-		if lagMs >= -60000 && lagMs <= 60000 { // Within 60 seconds
-			proximityScore := 1.0 - (float64(abs(lagMs)) / 60000.0)
-			score += 0.8 * proximityScore
-			evidence = append(evidence, graph.EvidenceItem{
-				Type:      graph.EvidenceTypeTemporal,
-				Value:     fmt.Sprintf("Secret observed within %dms of Certificate", abs(lagMs)),
-				Weight:    0.8 * proximityScore,
-				Timestamp: time.Now().UnixNano(),
-			})
-		}
-	}
-
-	// Evidence 4: Name match (0.5)
-	if secret.Name == certEvent.Resource.Name || // Direct name match
-		secret.Name == fmt.Sprintf("%s-tls", certEvent.Resource.Name) { // Common pattern
-		score += 0.5
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeLabel,
-			Value:     fmt.Sprintf("Secret name matches Certificate: %s", secret.Name),
-			Weight:    0.5,
-			Timestamp: time.Now().UnixNano(),
-		})
-	}
-
-	// Evidence 5: Namespace match (0.3)
-	if secret.Namespace == certEvent.Resource.Namespace {
-		score += 0.3
-		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeNamespace,
-			Value:     secret.Namespace,
-			Weight:    0.3,
-			Timestamp: time.Now().UnixNano(),
-		})
-	}
-
-	// Cap at 1.0
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	return score, evidence
-}
-
-// hasOwnerReference checks if the secret has an ownerReference to the certificate
-func (e *CertificateExtractor) hasOwnerReference(secret *graph.ResourceIdentity, certUID string) bool {
-	// This would need to be checked via the actual Secret resource
-	// For now, we rely on other evidence
-	// In a real implementation, we'd query the Secret's ownerReferences
-	return false
-}
-
-// isCertificateReady checks if the Certificate has a Ready condition
-func (e *CertificateExtractor) isCertificateReady(certificate map[string]interface{}) bool {
-	status, ok := extractors.GetNestedMap(certificate, "status")
-	if !ok {
-		return false
-	}
-
-	conditions, ok := extractors.GetNestedArray(status, "conditions")
-	if !ok {
-		return false
-	}
-
-	for _, condInterface := range conditions {
-		cond, ok := condInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		condType, _ := extractors.GetNestedString(cond, "type")
-		condStatus, _ := extractors.GetNestedString(cond, "status")
-
-		if condType == "Ready" && condStatus == "True" {
-			return true
-		}
-	}
-
-	return false
-}
-
-// abs returns the absolute value of an int64
-func abs(n int64) int64 {
-	if n < 0 {
-		return -n
-	}
-	return n
 }
