@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/moolen/spectre/internal/analysis"
@@ -95,6 +96,14 @@ func (h *RootCauseHandler) parseInput(r *http.Request) (analysis.AnalyzeInput, e
 	resourceUID := query.Get("resourceUID")
 	if resourceUID == "" {
 		return analysis.AnalyzeInput{}, api.NewValidationError("resourceUID is required")
+	}
+
+	// Extract UID from resource ID if it's in format: /group/version/kind/uid or group/version/kind/uid
+	// The graph database stores only the UUID portion, not the full GVK path
+	parts := strings.Split(resourceUID, "/")
+	if len(parts) >= 4 {
+		// Format: /v1/Pod/uuid or apps/v1/Deployment/uuid
+		resourceUID = parts[len(parts)-1] // Take the last part (the UUID)
 	}
 
 	// Required: failureTimestamp
