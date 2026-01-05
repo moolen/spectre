@@ -18,6 +18,7 @@ func RegisterHandlers(
 	querySource api.TimelineQuerySource,
 	graphClient graph.Client,
 	graphPipeline sync.Pipeline,
+	metadataCache *api.MetadataCache,
 	logger *logging.Logger,
 	tracer trace.Tracer,
 	withMethod func(string, http.HandlerFunc) http.HandlerFunc,
@@ -56,7 +57,7 @@ func RegisterHandlers(
 		logger.Info("Metadata handler using STORAGE query executor")
 		metadataExecutor = storageExecutor
 	}
-	metadataHandler := NewMetadataHandler(metadataExecutor, logger, tracer)
+	metadataHandler := NewMetadataHandler(metadataExecutor, metadataCache, logger, tracer)
 
 	router.HandleFunc("/v1/search", withMethod(http.MethodGet, searchHandler.Handle))
 	router.HandleFunc("/v1/timeline", withMethod(http.MethodGet, timelineHandler.Handle))
