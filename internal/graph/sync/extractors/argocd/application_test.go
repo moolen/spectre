@@ -225,7 +225,17 @@ func TestArgoCDApplicationExtractor_ExtractSecretReferences(t *testing.T) {
 			}
 
 			lookup := &MockResourceLookup{
-				resources: make(map[string]*graph.ResourceIdentity),
+				resources: map[string]*graph.ResourceIdentity{
+					// Add all the referenced secrets so they can be found
+					"argocd/Secret/git-credentials": {UID: "secret-git-credentials"},
+					"argocd/Secret/git-creds":       {UID: "secret-git-creds"},
+					"argocd/Secret/git-username":    {UID: "secret-git-username"},
+					"argocd/Secret/git-password":    {UID: "secret-git-password"},
+					"argocd/Secret/git-token":       {UID: "secret-git-token"},
+					"argocd/Secret/repo1-creds":     {UID: "secret-repo1-creds"},
+					"argocd/Secret/repo2-token":     {UID: "secret-repo2-token"},
+					"argocd/Secret/helm-values":     {UID: "secret-helm-values"},
+				},
 				queryResult: &graph.QueryResult{
 					Rows: [][]interface{}{}, // No managed resources for this test
 				},

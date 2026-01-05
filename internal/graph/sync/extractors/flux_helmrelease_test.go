@@ -35,6 +35,16 @@ func (m *mockResourceLookup) AddResource(uid, kind, namespace, name string, firs
 	}
 }
 
+// addResource adds a full ResourceIdentity to the mock (used by management_scorer_test.go)
+func (m *mockResourceLookup) addResource(uid string, res *graph.ResourceIdentity) {
+	m.resources[uid] = res
+}
+
+// addEvents adds change events to the mock (used by management_scorer_test.go)
+func (m *mockResourceLookup) addEvents(uid string, events []graph.ChangeEvent) {
+	m.events[uid] = events
+}
+
 func (m *mockResourceLookup) FindResourceByUID(ctx context.Context, uid string) (*graph.ResourceIdentity, error) {
 	if res, ok := m.resources[uid]; ok {
 		return res, nil

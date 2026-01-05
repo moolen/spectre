@@ -34,12 +34,12 @@ func (e *NetworkPolicyExtractor) ExtractRelationships(
 	event models.Event,
 	lookup extractors.ResourceLookup,
 ) ([]graph.Edge, error) {
-	fmt.Printf("[DEBUG] NetworkPolicyExtractor: extracting edges for %s/%s\n", event.Resource.Namespace, event.Resource.Name)
+	e.Logger().Debug("Extracting edges namespace=%s name=%s", event.Resource.Namespace, event.Resource.Name)
 	edges := []graph.Edge{}
 
 	// Skip if being deleted
 	if event.Type == models.EventTypeDelete {
-		fmt.Printf("[DEBUG] NetworkPolicyExtractor: skipping deleted NetworkPolicy\n")
+		e.Logger().Debug("Skipping deleted NetworkPolicy")
 		return edges, nil
 	}
 
@@ -50,14 +50,14 @@ func (e *NetworkPolicyExtractor) ExtractRelationships(
 
 	spec, ok := extractors.GetNestedMap(netpol, "spec")
 	if !ok {
-		fmt.Printf("[DEBUG] NetworkPolicyExtractor: no spec found\n")
+		e.Logger().Debug("No spec found")
 		return edges, nil
 	}
 
 	// Get podSelector
 	podSelector, ok := extractors.GetNestedMap(spec, "podSelector")
 	if !ok {
-		fmt.Printf("[DEBUG] NetworkPolicyExtractor: no podSelector found\n")
+		e.Logger().Debug("No podSelector found")
 		return edges, nil
 	}
 
@@ -65,12 +65,12 @@ func (e *NetworkPolicyExtractor) ExtractRelationships(
 	matchLabels, ok := extractors.GetNestedMap(podSelector, "matchLabels")
 	if !ok {
 		// Empty podSelector {} means select all pods in namespace
-		fmt.Printf("[DEBUG] NetworkPolicyExtractor: empty podSelector, selecting all pods\n")
+		e.Logger().Debug("Empty podSelector, selecting all pods")
 		matchLabels = make(map[string]interface{})
 	}
 
 	selectorLabels := extractors.ParseLabelsFromMap(matchLabels)
-	fmt.Printf("[DEBUG] NetworkPolicyExtractor: selector labels: %v\n", selectorLabels)
+	e.Logger().Debug("Selector labels: %v", selectorLabels)
 
 	// Build query for matching pods
 	var query graph.GraphQuery
@@ -113,18 +113,18 @@ func (e *NetworkPolicyExtractor) ExtractRelationships(
 		return nil, fmt.Errorf("failed to query pods: %w", err)
 	}
 
-	fmt.Printf("[DEBUG] NetworkPolicyExtractor: query returned %d rows\n", len(result.Rows))
+	e.Logger().Debug("Query returned rows: %d", len(result.Rows))
 
 	// Create edges for each matching pod
 	// Using SELECTS edge type to indicate the policy applies to these pods
 	for _, row := range result.Rows {
 		podUID := extractors.ExtractUID(row)
 		if podUID == "" {
-			fmt.Printf("[DEBUG] NetworkPolicyExtractor: empty UID in row\n")
+			e.Logger().Debug("Empty UID in row")
 			continue
 		}
 
-		fmt.Printf("[DEBUG] NetworkPolicyExtractor: creating SELECTS edge to Pod %s\n", podUID)
+		e.Logger().Debug("Creating SELECTS edge to Pod uid=%s", podUID)
 
 		props := graph.SelectsEdge{
 			SelectorLabels: selectorLabels,
@@ -138,6 +138,6 @@ func (e *NetworkPolicyExtractor) ExtractRelationships(
 		edges = append(edges, edge)
 	}
 
-	fmt.Printf("[DEBUG] NetworkPolicyExtractor: created %d edges\n", len(edges))
+	e.Logger().Debug("Created edges: %d", len(edges))
 	return edges, nil
 }

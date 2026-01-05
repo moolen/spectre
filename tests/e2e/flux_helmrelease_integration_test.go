@@ -28,6 +28,9 @@ func TestFluxHelmReleaseExtractorIntegration(t *testing.T) {
 	builder := sync.NewGraphBuilderWithClient(mockClient)
 
 	t.Run("extract_spec_references_from_helmrelease", func(t *testing.T) {
+		// Pre-populate the mock graph with the Secret that HelmRelease references
+		mockClient.AddResource("secret-frontend-values-uid", "Secret", "default", "frontend-values", time.Now().UnixNano())
+
 		// Create a HelmRelease event
 		helmRelease := createHelmReleaseResource()
 		event := createEventFromResource(helmRelease, models.EventTypeCreate)
@@ -170,8 +173,31 @@ func (m *mockGraphClient) ExecuteQuery(ctx context.Context, query graph.GraphQue
 		return &graph.QueryResult{Rows: [][]interface{}{}}, nil
 	}
 
-	// Handle namespace queries for managed resources
+	// Handle FindResourceByNamespace queries (namespace + kind + name)
 	if namespace, ok := query.Parameters["namespace"].(string); ok {
+		if kind, hasKind := query.Parameters["kind"].(string); hasKind {
+			if name, hasName := query.Parameters["name"].(string); hasName {
+				// This is a FindResourceByNamespace query
+				for _, res := range m.resources {
+					if res.Namespace == namespace && res.Kind == kind && res.Name == name {
+						return &graph.QueryResult{
+							Rows: [][]interface{}{
+								{map[string]interface{}{
+									"uid":       res.UID,
+									"kind":      res.Kind,
+									"namespace": res.Namespace,
+									"name":      res.Name,
+									"firstSeen": res.FirstSeen,
+								}},
+							},
+						}, nil
+					}
+				}
+				return &graph.QueryResult{Rows: [][]interface{}{}}, nil
+			}
+		}
+
+		// Handle namespace queries for managed resources (namespace only)
 		var rows [][]interface{}
 		for uid, res := range m.resources {
 			if res.Namespace == namespace {

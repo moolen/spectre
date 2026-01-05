@@ -264,6 +264,7 @@ func TestIngressExtractor_ExtractRelationships(t *testing.T) {
 	tests := []struct {
 		name          string
 		ingressData   map[string]interface{}
+		mockServices  map[string]*graph.ResourceIdentity // services to add to mock lookup
 		expectedEdges int
 	}{
 		{
@@ -287,6 +288,14 @@ func TestIngressExtractor_ExtractRelationships(t *testing.T) {
 					},
 				},
 			},
+			mockServices: map[string]*graph.ResourceIdentity{
+				"default/Service/frontend": {
+					UID:       "frontend-service-uid",
+					Kind:      "Service",
+					Namespace: "default",
+					Name:      "frontend",
+				},
+			},
 			expectedEdges: 1,
 		},
 		{
@@ -308,6 +317,14 @@ func TestIngressExtractor_ExtractRelationships(t *testing.T) {
 					},
 				},
 			},
+			mockServices: map[string]*graph.ResourceIdentity{
+				"default/Service/frontend": {
+					UID:       "frontend-service-uid",
+					Kind:      "Service",
+					Namespace: "default",
+					Name:      "frontend",
+				},
+			},
 			expectedEdges: 1,
 		},
 		{
@@ -319,6 +336,14 @@ func TestIngressExtractor_ExtractRelationships(t *testing.T) {
 							"name": "default-backend",
 						},
 					},
+				},
+			},
+			mockServices: map[string]*graph.ResourceIdentity{
+				"default/Service/default-backend": {
+					UID:       "default-backend-uid",
+					Kind:      "Service",
+					Namespace: "default",
+					Name:      "default-backend",
 				},
 			},
 			expectedEdges: 1,
@@ -351,6 +376,20 @@ func TestIngressExtractor_ExtractRelationships(t *testing.T) {
 					},
 				},
 			},
+			mockServices: map[string]*graph.ResourceIdentity{
+				"default/Service/frontend": {
+					UID:       "frontend-service-uid",
+					Kind:      "Service",
+					Namespace: "default",
+					Name:      "frontend",
+				},
+				"default/Service/backend": {
+					UID:       "backend-service-uid",
+					Kind:      "Service",
+					Namespace: "default",
+					Name:      "backend",
+				},
+			},
 			expectedEdges: 2,
 		},
 	}
@@ -373,8 +412,13 @@ func TestIngressExtractor_ExtractRelationships(t *testing.T) {
 				Type: models.EventTypeUpdate,
 			}
 
+			// Create lookup with mock services
 			lookup := &MockResourceLookup{
 				resources: make(map[string]*graph.ResourceIdentity),
+			}
+			// Add mock services to the lookup
+			for key, service := range tt.mockServices {
+				lookup.resources[key] = service
 			}
 
 			edges, err := extractor.ExtractRelationships(ctx, event, lookup)
@@ -386,6 +430,7 @@ func TestIngressExtractor_ExtractRelationships(t *testing.T) {
 			for _, edge := range edges {
 				assert.Equal(t, graph.EdgeTypeReferencesSpec, edge.Type)
 				assert.Equal(t, "ingress-uid", edge.FromUID)
+				assert.NotEmpty(t, edge.ToUID, "Edge ToUID should not be empty")
 			}
 		})
 	}
