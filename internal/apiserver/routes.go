@@ -57,6 +57,7 @@ func (s *Server) registerHTTPHandlers() {
 		s.querySource,
 		s.graphClient,
 		s.graphPipeline,
+		s.metadataCache,
 		s.logger,
 		tracer,
 		s.withMethod,

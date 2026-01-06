@@ -116,6 +116,9 @@ spec:
         - --graph-rebuild-if-empty={{ .Values.graph.sync.rebuildIfEmptyOnly }}
         - --graph-rebuild-window-hours={{ .Values.graph.sync.rebuildWindowHours }}
         {{- end }}
+        {{- if .Values.metadataCache }}
+        - --metadata-cache-refresh-seconds={{ .Values.metadataCache.refreshSeconds }}
+        {{- end }}
         {{- range .Values.extraArgs }}
         - {{ . }}
         {{- end }}

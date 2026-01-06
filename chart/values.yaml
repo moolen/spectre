@@ -193,6 +193,13 @@ graph:
     # Batch timeout (in seconds)
     batchTimeoutSeconds: 5
 
+# Metadata cache configuration
+metadataCache:
+  # How often to refresh the metadata cache (in seconds)
+  # Lower values mean more up-to-date metadata but more database queries
+  # Higher values reduce database load but may show stale data
+  refreshSeconds: 30
+
 # Persistent storage configuration (deprecated - storage package removed)
 persistence:
   enabled: false

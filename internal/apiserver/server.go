@@ -36,7 +36,8 @@ type Server struct {
 	graphExecutor     api.QueryExecutor       // Graph-based query executor
 	querySource       api.TimelineQuerySource // Which executor to use for timeline queries
 	graphClient       graph.Client
-	graphPipeline     sync.Pipeline // Graph sync pipeline for imports
+	graphPipeline     sync.Pipeline   // Graph sync pipeline for imports
+	metadataCache     *api.MetadataCache // In-memory metadata cache for fast responses
 	router            *http.ServeMux
 	readinessChecker  ReadinessChecker
 	tracingProvider   interface {
@@ -60,7 +61,7 @@ func NewWithStorageAndGraph(
 		IsEnabled() bool
 	},
 ) *Server {
-	return NewWithStorageGraphAndPipeline(port, storageExecutor, graphExecutor, querySource, storage, graphClient, nil, readinessChecker, demoMode, tracingProvider)
+	return NewWithStorageGraphAndPipeline(port, storageExecutor, graphExecutor, querySource, storage, graphClient, nil, readinessChecker, demoMode, tracingProvider, 30*time.Second)
 }
 
 // NewWithStorageGraphAndPipeline creates a new API server with graph query executor and pipeline support
@@ -78,6 +79,7 @@ func NewWithStorageGraphAndPipeline(
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	},
+	metadataRefreshPeriod time.Duration, // How often to refresh the metadata cache
 ) *Server {
 	s := &Server{
 		port:             port,
@@ -90,6 +92,21 @@ func NewWithStorageGraphAndPipeline(
 		router:           http.NewServeMux(),
 		readinessChecker: readinessChecker,
 		tracingProvider:  tracingProvider,
+	}
+
+	// Create metadata cache if we have a query executor
+	// Use graph executor if available (more efficient), otherwise storage executor
+	var metadataExecutor api.QueryExecutor
+	if graphExecutor != nil {
+		metadataExecutor = graphExecutor
+	} else {
+		metadataExecutor = storageExecutor
+	}
+
+	if metadataExecutor != nil {
+		// Create cache with configurable refresh period
+		s.metadataCache = api.NewMetadataCache(metadataExecutor, s.logger, metadataRefreshPeriod)
+		s.logger.Info("Metadata cache created with refresh period %v (will initialize on server start)", metadataRefreshPeriod)
 	}
 
 	// Register all routes and handlers
@@ -129,6 +146,18 @@ func (s *Server) Start(ctx context.Context) error {
 	default:
 	}
 
+	// Start metadata cache if available
+	if s.metadataCache != nil {
+		s.logger.Info("Initializing metadata cache...")
+		if err := s.metadataCache.Start(ctx); err != nil {
+			s.logger.Error("Failed to start metadata cache: %v", err)
+			// Don't fail server startup - cache is optional optimization
+			// Handlers will fall back to direct queries
+		} else {
+			s.logger.Info("Metadata cache started successfully")
+		}
+	}
+
 	// Start HTTP server in a goroutine
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -144,6 +173,11 @@ func (s *Server) Start(ctx context.Context) error {
 // Gracefully stops the HTTP server
 func (s *Server) Stop(ctx context.Context) error {
 	s.logger.Info("Stopping API server...")
+
+	// Stop metadata cache if running
+	if s.metadataCache != nil {
+		s.metadataCache.Stop()
+	}
 
 	// Stop HTTP server
 	done := make(chan error, 1)

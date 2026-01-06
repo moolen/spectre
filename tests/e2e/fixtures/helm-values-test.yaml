@@ -172,3 +172,8 @@ graph:
       # Use empty storageClassName for immediate binding in test environments
       storageClassName: ""
 
+# Metadata cache configuration for tests
+# Use a very short refresh period to avoid race conditions in E2E tests
+metadataCache:
+  refreshSeconds: 2
+

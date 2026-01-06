@@ -149,6 +149,12 @@ func (s *DefaultResourcesStage) metadata_contains_expected_data() *DefaultResour
 	ctx, cancel := s.ctxHelper.WithDefaultTimeout()
 	defer cancel()
 
+	// Wait for metadata cache to refresh
+	// The cache refreshes every 2 seconds in test configuration
+	// Wait 3 seconds to ensure at least one refresh has occurred
+	s.T.Log("Waiting 3s for metadata cache to refresh...")
+	time.Sleep(3 * time.Second)
+
 	metadata, err := s.APIClient.GetMetadata(ctx, nil, nil)
 	s.Require.NoError(err)
 

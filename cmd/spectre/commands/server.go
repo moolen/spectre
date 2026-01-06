@@ -51,6 +51,8 @@ var (
 	graphRebuildWindowHours int
 	// Audit log flag
 	auditLogPath string
+	// Metadata cache configuration
+	metadataCacheRefreshSeconds int
 )
 
 var serverCmd = &cobra.Command{
@@ -91,6 +93,10 @@ func init() {
 	serverCmd.Flags().StringVar(&auditLogPath, "audit-log", "",
 		"Path to write event audit log (JSONL format) for test fixtures. "+
 			"If empty, audit logging is disabled.")
+
+	// Metadata cache configuration
+	serverCmd.Flags().IntVar(&metadataCacheRefreshSeconds, "metadata-cache-refresh-seconds", 30,
+		"Metadata cache refresh period in seconds (default: 30)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -297,6 +303,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		readinessChecker,
 		false, // No demo mode
 		tracingProvider,
+		time.Duration(metadataCacheRefreshSeconds)*time.Second,
 	)
 	logger.Info("API server component created (graph-only)")
 

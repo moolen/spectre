@@ -15,21 +15,25 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-function getCacheKey(resourceUID: string, timestamp: Date, lookbackMs?: number): string {
+function getCacheKey(resourceUID: string, timestamp: Date, lookbackMs?: number, format?: ResponseFormat): string {
   // Round to nearest second to improve cache hit rate
   const timestampSec = Math.floor(timestamp.getTime() / 1000);
   const lookbackKey = lookbackMs ? `:${lookbackMs}` : '';
-  return `${resourceUID}:${timestampSec}${lookbackKey}`;
+  const formatKey = format ? `:${format}` : ':diff';
+  return `${resourceUID}:${timestampSec}${lookbackKey}${formatKey}`;
 }
 
 function isCacheValid(entry: CacheEntry): boolean {
   return Date.now() - entry.timestamp < CACHE_TTL_MS;
 }
 
+export type ResponseFormat = 'legacy' | 'diff';
+
 export interface RootCauseOptions {
   maxDepth?: number;
   minConfidence?: number;
   lookbackMs?: number;  // Lookback in milliseconds
+  format?: ResponseFormat; // Response format: 'legacy' or 'diff' (default: 'diff')
 }
 
 /**
@@ -41,7 +45,7 @@ export async function fetchRootCauseAnalysis(
   options?: RootCauseOptions
 ): Promise<RootCauseAnalysisV2> {
   // Check cache first
-  const cacheKey = getCacheKey(resourceUID, failureTimestamp, options?.lookbackMs);
+  const cacheKey = getCacheKey(resourceUID, failureTimestamp, options?.lookbackMs, options?.format);
   const cached = cache.get(cacheKey);
 
   if (cached && isCacheValid(cached)) {
@@ -66,6 +70,9 @@ export async function fetchRootCauseAnalysis(
   if (options?.lookbackMs !== undefined) {
     params.set('lookbackMs', options.lookbackMs.toString());
   }
+
+  // Default to 'diff' format for new format with significance scoring
+  params.set('format', options?.format || 'diff');
 
   // Fetch from API with retry logic for network failures
   const url = `/v1/root-cause?${params.toString()}`;

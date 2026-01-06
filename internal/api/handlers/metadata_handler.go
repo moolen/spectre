@@ -15,14 +15,17 @@ import (
 // MetadataHandler handles /v1/metadata requests
 type MetadataHandler struct {
 	queryExecutor api.QueryExecutor
+	metadataCache *api.MetadataCache
 	logger        *logging.Logger
 	tracer        trace.Tracer
 }
 
 // NewMetadataHandler creates a new metadata handler
-func NewMetadataHandler(queryExecutor api.QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *MetadataHandler {
+// metadataCache is optional - if nil, queries will go directly to the executor
+func NewMetadataHandler(queryExecutor api.QueryExecutor, metadataCache *api.MetadataCache, logger *logging.Logger, tracer trace.Tracer) *MetadataHandler {
 	return &MetadataHandler{
 		queryExecutor: queryExecutor,
+		metadataCache: metadataCache,
 		logger:        logger,
 		tracer:        tracer,
 	}
@@ -54,6 +57,27 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	startTimeNs := startTime * 1e9
 	endTimeNs := endTime * 1e9
+
+	// If cache is available and no time filtering requested, use cache
+	// Cache contains all metadata regardless of time range
+	// Note: startTime=0 and endTime=current time means "all data"
+	useCache := mh.metadataCache != nil && startTime == 0
+
+	if useCache {
+		mh.logger.Debug("Using metadata cache for request")
+		cachedData, err := mh.metadataCache.Get()
+		if err == nil {
+			// Successfully got cached data - return it immediately
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Cache", "HIT")
+			w.WriteHeader(http.StatusOK)
+			_ = api.WriteJSON(w, cachedData)
+			return
+		}
+
+		// Cache failed - log and fall through to direct query
+		mh.logger.Warn("Metadata cache unavailable, falling back to direct query: %v", err)
+	}
 
 	// Try to use efficient metadata query if available
 	var namespacesList, kindsList []string
@@ -132,6 +156,7 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Cache", "MISS")
 	w.WriteHeader(http.StatusOK)
 	_ = api.WriteJSON(w, response)
 }

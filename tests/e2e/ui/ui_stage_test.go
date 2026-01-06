@@ -143,8 +143,12 @@ func (s *UIStage) resources_are_available() *UIStage {
 	for _, dep := range s.deployments {
 		helpers.EventuallyResourceCreated(s.t, s.apiClient, dep.Namespace, "Deployment", dep.Name, helpers.DefaultEventuallyOption)
 	}
-	// Wait additional time for storage to fully index and UI to update
-	// This is needed for UI rendering, not backend indexing (different from removed backend sleeps)
+	// Wait additional time for:
+	// 1. Storage to fully index
+	// 2. Metadata cache to refresh (refreshes every 2s in test config)
+	// 3. UI to update
+	// Using 5 seconds to ensure at least 2 cache refresh cycles have occurred
+	s.t.Log("Waiting 5s for resources to be indexed and metadata cache to refresh...")
 	time.Sleep(5 * time.Second)
 	return s
 }
