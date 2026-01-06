@@ -61,7 +61,7 @@ func NewWithStorageAndGraph(
 		IsEnabled() bool
 	},
 ) *Server {
-	return NewWithStorageGraphAndPipeline(port, storageExecutor, graphExecutor, querySource, storage, graphClient, nil, readinessChecker, demoMode, tracingProvider)
+	return NewWithStorageGraphAndPipeline(port, storageExecutor, graphExecutor, querySource, storage, graphClient, nil, readinessChecker, demoMode, tracingProvider, 30*time.Second)
 }
 
 // NewWithStorageGraphAndPipeline creates a new API server with graph query executor and pipeline support
@@ -79,6 +79,7 @@ func NewWithStorageGraphAndPipeline(
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	},
+	metadataRefreshPeriod time.Duration, // How often to refresh the metadata cache
 ) *Server {
 	s := &Server{
 		port:             port,
@@ -103,9 +104,9 @@ func NewWithStorageGraphAndPipeline(
 	}
 
 	if metadataExecutor != nil {
-		// Create cache with 30-second refresh period
-		s.metadataCache = api.NewMetadataCache(metadataExecutor, s.logger, 30*time.Second)
-		s.logger.Info("Metadata cache created (will initialize on server start)")
+		// Create cache with configurable refresh period
+		s.metadataCache = api.NewMetadataCache(metadataExecutor, s.logger, metadataRefreshPeriod)
+		s.logger.Info("Metadata cache created with refresh period %v (will initialize on server start)", metadataRefreshPeriod)
 	}
 
 	// Register all routes and handlers
