@@ -195,7 +195,9 @@ func ConvertEventsToDiffFormat(events []ChangeEventInfo, filterNoisy bool) []Cha
 
 	for i, event := range reversed {
 		result[i] = event
-		result[i].Data = nil // Clear legacy field
+		// Keep Data field for anomaly detection (needed to check container statuses)
+		// Even though we're adding Diff/FullSnapshot, Data is still useful for state checks
+		// result[i].Data = nil // Don't clear - needed for anomaly detection
 
 		if i == 0 {
 			// First event (chronologically oldest) gets full snapshot

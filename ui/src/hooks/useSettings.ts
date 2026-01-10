@@ -4,11 +4,41 @@ export type Theme = 'dark' | 'light';
 export type TimeFormat = '24h' | '12h';
 export type AutoRefreshOption = 'off' | '30s' | '60s' | '300s';
 
+// Default kinds to show in timeline and graph views
+export const DEFAULT_KINDS = [
+  'Pod',
+  'Deployment',
+  'ReplicaSet',
+  'StatefulSet',
+  'HelmRelease'
+];
+
+// Common kinds available for selection in settings
+export const COMMON_KINDS = [
+  // Workloads
+  'Pod', 'Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob',
+  // Networking
+  'Service', 'Ingress', 'NetworkPolicy',
+  // Config
+  'ConfigMap', 'Secret',
+  // Storage
+  'PersistentVolumeClaim',
+  // Flux
+  'HelmRelease', 'Kustomization', 'GitRepository', 'HelmRepository',
+  // ArgoCD
+  'Application',
+  // RBAC
+  'ServiceAccount', 'Role', 'RoleBinding', 'ClusterRole', 'ClusterRoleBinding',
+  // Other
+  'Node', 'Namespace', 'Event'
+];
+
 export interface SettingsState {
   theme: Theme;
   timeFormat: TimeFormat;
   compactMode: boolean;
   autoRefresh: AutoRefreshOption;
+  defaultKinds: string[];
 }
 
 interface SettingsContextValue extends SettingsState {
@@ -16,6 +46,7 @@ interface SettingsContextValue extends SettingsState {
   setTimeFormat: (format: TimeFormat) => void;
   setCompactMode: (enabled: boolean) => void;
   setAutoRefresh: (value: AutoRefreshOption) => void;
+  setDefaultKinds: (kinds: string[]) => void;
   formatTime: (date: Date) => string;
 }
 
@@ -23,7 +54,8 @@ const DEFAULT_SETTINGS: SettingsState = {
   theme: 'dark',
   timeFormat: '24h',
   compactMode: false,
-  autoRefresh: 'off'
+  autoRefresh: 'off',
+  defaultKinds: DEFAULT_KINDS
 };
 
 const STORAGE_KEY = 'spectre-settings';
@@ -77,6 +109,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setTimeFormat: (format) => setSettings((prev) => ({ ...prev, timeFormat: format })),
     setCompactMode: (enabled) => setSettings((prev) => ({ ...prev, compactMode: enabled })),
     setAutoRefresh: (value) => setSettings((prev) => ({ ...prev, autoRefresh: value })),
+    setDefaultKinds: (kinds) => setSettings((prev) => ({ ...prev, defaultKinds: kinds })),
     formatTime
   };
 

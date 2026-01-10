@@ -144,7 +144,7 @@ func (e *FluxKustomizationExtractor) extractManagedResources(
 		Query: `
 			MATCH (r:ResourceIdentity)
 			WHERE (r.namespace = $namespace OR r.namespace = "")
-			  AND r.deleted = false
+			  AND NOT r.deleted
 			  AND r.uid <> $kustomizationUID
 			RETURN r
 			LIMIT 500

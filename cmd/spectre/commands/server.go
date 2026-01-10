@@ -16,6 +16,7 @@ import (
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/config"
 	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/graphservice"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/lifecycle"
@@ -161,10 +162,15 @@ func runServer(cmd *cobra.Command, args []string) {
 		}()
 	}
 
-	// Graph is required - check if enabled
-	if !graphEnabled {
-		logger.Error("Graph must be enabled - graph is now the only storage backend")
-		HandleError(fmt.Errorf("graph-enabled flag must be set to true"), "Configuration error")
+	// Graph is required unless running in audit-only mode
+	auditOnlyMode := !graphEnabled && auditLogPath != "" && watcherEnabled
+	if !graphEnabled && !auditOnlyMode {
+		logger.Error("Graph must be enabled - graph is now the only storage backend (or use --audit-log with --watcher-enabled for audit-only mode)")
+		HandleError(fmt.Errorf("graph-enabled flag must be set to true, or use audit-only mode"), "Configuration error")
+	}
+
+	if auditOnlyMode {
+		logger.Info("Running in audit-only mode - no graph database, events written to: %s", auditLogPath)
 	}
 
 	var watcherComponent *watcher.Watcher
@@ -182,55 +188,72 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// Initialize graph service
-	logger.Info("Initializing graph service")
+	var graphServiceComponent *graphservice.Service
+	var graphClient graph.Client
+	var graphPipeline sync.Pipeline
 
-	graphConfig := graph.ClientConfig{
-		Host:         graphHost,
-		Port:         graphPort,
-		GraphName:    graphName,
-		MaxRetries:   10,               // Increased to wait for FalkorDB sidecar to be ready
-		DialTimeout:  10 * time.Second, // Increased to allow sidecar startup time
-		ReadTimeout:  30 * time.Second, // Increased for complex root cause queries
-		WriteTimeout: 3 * time.Second,
-		PoolSize:     10,
+	// Initialize graph service (unless in audit-only mode)
+	if !auditOnlyMode {
+		logger.Info("Initializing graph service")
+
+		graphConfig := graph.ClientConfig{
+			Host:               graphHost,
+			Port:               graphPort,
+			GraphName:          graphName,
+			MaxRetries:         10,                // Increased to wait for FalkorDB sidecar to be ready
+			DialTimeout:        10 * time.Second,  // Increased to allow sidecar startup time
+			ReadTimeout:        120 * time.Second, // Increased for resource-constrained environments
+			WriteTimeout:       120 * time.Second, // Increased for resource-constrained environments
+			PoolSize:           10,
+			QueryCacheEnabled:  true,             // Enable query caching for performance
+			QueryCacheMemoryMB: 128,              // 128MB cache for query results
+			QueryCacheTTL:      30 * time.Second, // 30 second TTL for cached queries
+		}
+
+		serviceConfig := graphservice.ServiceConfig{
+			GraphConfig:        graphConfig,
+			PipelineConfig:     graphservice.DefaultServiceConfig().PipelineConfig,
+			RebuildOnStart:     graphRebuildOnStart,
+			RebuildWindow:      time.Duration(graphRebuildWindowHours) * time.Hour,
+			RebuildIfEmptyOnly: graphRebuildIfEmpty,
+			AutoStartPipeline:  true,
+		}
+
+		// Set retention window from flag
+		serviceConfig.PipelineConfig.RetentionWindow = time.Duration(graphRetentionHours) * time.Hour
+
+		graphServiceComponent = graphservice.NewService(serviceConfig)
+
+		// Initialize graph service (no storage rebuild)
+		if err := graphServiceComponent.Initialize(context.Background()); err != nil {
+			logger.Error("Failed to initialize graph service: %v", err)
+			HandleError(err, "Graph service initialization error")
+		}
+		logger.Info("Graph service initialized successfully")
+
+		// Create graph query executor
+		graphClient = graphServiceComponent.GetClient()
+		graphQueryExecutor = graph.NewQueryExecutor(graphClient)
+		logger.Info("Graph query executor created")
+
+		graphPipeline = graphServiceComponent.GetPipeline()
 	}
-
-	serviceConfig := graphservice.ServiceConfig{
-		GraphConfig:        graphConfig,
-		PipelineConfig:     graphservice.DefaultServiceConfig().PipelineConfig,
-		RebuildOnStart:     graphRebuildOnStart,
-		RebuildWindow:      time.Duration(graphRebuildWindowHours) * time.Hour,
-		RebuildIfEmptyOnly: graphRebuildIfEmpty,
-		AutoStartPipeline:  true,
-	}
-
-	// Set retention window from flag
-	serviceConfig.PipelineConfig.RetentionWindow = time.Duration(graphRetentionHours) * time.Hour
-
-	graphServiceComponent := graphservice.NewService(serviceConfig)
-
-	// Initialize graph service (no storage rebuild)
-	if err := graphServiceComponent.Initialize(context.Background()); err != nil {
-		logger.Error("Failed to initialize graph service: %v", err)
-		HandleError(err, "Graph service initialization error")
-	}
-	logger.Info("Graph service initialized successfully")
-
-	// Create graph query executor
-	graphClient := graphServiceComponent.GetClient()
-	graphQueryExecutor = graph.NewQueryExecutor(graphClient)
-	logger.Info("Graph query executor created")
 
 	// Initialize watcher if enabled
 	if watcherEnabled {
-		// Get the graph pipeline from the service
-		pipeline := graphServiceComponent.GetPipeline()
-
-		// Create handler with graph-only mode
-		eventHandler := watcher.NewEventCaptureHandlerWithMode(nil, pipeline, watcher.TimelineModeGraph)
-		if auditLogWriter != nil {
+		// Create handler - with or without graph pipeline
+		var eventHandler *watcher.EventCaptureHandler
+		if auditOnlyMode {
+			// Audit-only mode: no graph pipeline
+			eventHandler = watcher.NewEventCaptureHandler(nil)
 			eventHandler.SetAuditLog(auditLogWriter)
+			logger.Info("Creating watcher in audit-only mode")
+		} else {
+			// Normal mode: with graph pipeline
+			eventHandler = watcher.NewEventCaptureHandlerWithMode(nil, graphPipeline, watcher.TimelineModeGraph)
+			if auditLogWriter != nil {
+				eventHandler.SetAuditLog(auditLogWriter)
+			}
 		}
 
 		var err error
@@ -239,7 +262,11 @@ func runServer(cmd *cobra.Command, args []string) {
 			logger.Error("Failed to create watcher component: %v", err)
 			HandleError(err, "Watcher initialization error")
 		}
-		logger.Info("Watcher component created (graph-only mode)")
+		if auditOnlyMode {
+			logger.Info("Watcher component created (audit-only mode)")
+		} else {
+			logger.Info("Watcher component created (graph-only mode)")
+		}
 	} else {
 		logger.Info("Watcher disabled - running in read-only mode")
 	}
@@ -252,12 +279,55 @@ func runServer(cmd *cobra.Command, args []string) {
 		readinessChecker = &apiserver.NoOpReadinessChecker{}
 	}
 
+	// The remaining code only applies when not in audit-only mode
+	if auditOnlyMode {
+		// In audit-only mode, just register watcher and wait for events
+		if watcherComponent != nil {
+			if err := manager.Register(watcherComponent); err != nil {
+				logger.Error("Failed to register watcher component: %v", err)
+				HandleError(err, "Watcher registration error")
+			}
+		}
+
+		logger.Info("All components registered (audit-only mode)")
+		ctx, cancel := context.WithCancel(context.Background())
+		if err := manager.Start(ctx); err != nil {
+			logger.Error("Failed to start components: %v", err)
+			HandleError(err, "Startup error")
+		}
+
+		logger.Info("Audit-only mode started - watching events and writing to: %s", auditLogPath)
+
+		// Set up signal handling for graceful shutdown
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+		// Wait for shutdown signal
+		<-sigChan
+		logger.Info("Shutdown signal received, gracefully shutting down...")
+		cancel()
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer shutdownCancel()
+
+		if err := manager.Stop(shutdownCtx); err != nil {
+			logger.Error("Error during shutdown: %v", err)
+		}
+
+		// Close audit log
+		if auditLogWriter != nil {
+			if err := auditLogWriter.Close(); err != nil {
+				logger.Error("Failed to close audit log: %v", err)
+			}
+		}
+
+		logger.Info("Shutdown complete")
+		return
+	}
+
 	// Use graph as the query source
 	querySource := api.TimelineQuerySourceGraph
 	logger.Info("Timeline query source: GRAPH")
-
-	// Get graph pipeline for imports
-	graphPipeline := graphServiceComponent.GetPipeline()
 
 	// Import events from file or directory if import path is specified
 	if importPath != "" {

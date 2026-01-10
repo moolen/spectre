@@ -153,7 +153,6 @@ func inferDaemonSetStatus(obj *resourceData) string {
 		return ""
 	}
 
-	// TODO: does not work as expected. see demo data.
 	desired := obj.statusInt("desiredNumberScheduled")
 	ready := obj.statusInt("numberReady")
 	unavailable := obj.statusInt("numberUnavailable")

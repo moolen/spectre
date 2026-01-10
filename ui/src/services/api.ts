@@ -19,6 +19,7 @@ import {
   transformStatusSegmentsWithErrorHandling,
 } from './dataTransformer';
 import { buildDemoMetadata, buildDemoTimelineResponse, TimelineFilters } from '../demo/demoDataService';
+import { NamespaceGraphRequest, NamespaceGraphResponse } from '../types/namespaceGraph';
 import { isHumanFriendlyExpression, parseTimeExpression } from '../utils/timeParsing';
 import { TimelineGrpcService, TimelineStreamResult as GrpcStreamResult } from './timeline-grpc';
 import { TimelineResource as GrpcTimelineResource, TimelineMetadata } from '../generated/timeline';
@@ -77,7 +78,7 @@ interface ApiClientConfig {
 
 class ApiClient {
   private baseUrl: string;
-  private timeout: number = 30000; // 30 seconds default
+  private timeout: number = 180000; // 3 minutes default for resource-constrained environments
   private grpcService: TimelineGrpcService;
 
   constructor(config: ApiClientConfig) {
@@ -587,6 +588,44 @@ class ApiClient {
       clearTimeout(timeoutId);
     }
   }
+
+  /**
+   * Get namespace graph data for visualization
+   * Returns resource graph with optional anomalies and causal paths
+   */
+  async getNamespaceGraph(params: NamespaceGraphRequest): Promise<NamespaceGraphResponse> {
+    // Demo mode support - import dynamically to avoid circular dependency
+    if (getDemoMode()) {
+      const { buildDemoNamespaceGraphResponse } = await import('../demo/demoDataService');
+      return buildDemoNamespaceGraphResponse(params.namespace, params.timestamp);
+    }
+
+    const queryParams = new URLSearchParams();
+    queryParams.append('namespace', params.namespace);
+    queryParams.append('timestamp', params.timestamp.toString());
+    
+    if (params.includeAnomalies) {
+      queryParams.append('includeAnomalies', 'true');
+    }
+    if (params.includeCausalPaths) {
+      queryParams.append('includeCausalPaths', 'true');
+    }
+    if (params.lookback) {
+      queryParams.append('lookback', params.lookback);
+    }
+    if (params.maxDepth !== undefined) {
+      queryParams.append('maxDepth', params.maxDepth.toString());
+    }
+    if (params.limit !== undefined) {
+      queryParams.append('limit', params.limit.toString());
+    }
+    if (params.cursor) {
+      queryParams.append('cursor', params.cursor);
+    }
+
+    const endpoint = `/v1/namespace-graph?${queryParams.toString()}`;
+    return this.request<NamespaceGraphResponse>(endpoint);
+  }
 }
 
 // Create singleton instance with environment-based configuration
@@ -595,7 +634,7 @@ const baseUrl =
 
 export const apiClient = new ApiClient({
   baseUrl,
-  timeout: 30000,
+  timeout: 180000, // 3 minutes for slow environments
 });
 
 // Export for testing/mocking

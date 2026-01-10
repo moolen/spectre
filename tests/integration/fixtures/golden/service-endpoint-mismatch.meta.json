@@ -1,0 +1,24 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "Service",
+        "category": "State",
+        "type": "NoReadyEndpoints",
+        "min_severity": "high",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "Service",
+      "intermediate_kinds": [],
+      "symptom_kind": "Service",
+      "min_confidence": 0.65
+    }
+  },
+  "scenario": {
+    "description": "Service with no ready endpoints due to unhealthy pods",
+    "name": "service-endpoint-mismatch"
+  },
+  "timestamp": 1767982636
+}

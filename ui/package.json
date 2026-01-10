@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "test": "vitest --run",
     "test:watch": "vitest",
+    "test:ct": "playwright test -c playwright-ct.config.ts",
+    "test:ct:ui": "playwright test -c playwright-ct.config.ts --ui",
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
@@ -28,6 +30,7 @@
     "sonner": "^2.0.7"
   },
   "devDependencies": {
+    "@playwright/experimental-ct-react": "^1.57.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",

@@ -212,6 +212,22 @@ func FindNodeByKind(rca *analysis.RootCauseAnalysisV2, kind string) *analysis.Gr
 	return nil
 }
 
+// FindAllNodesByKind finds all nodes in the graph matching the given resource kind.
+// Returns an empty slice if none found.
+func FindAllNodesByKind(rca *analysis.RootCauseAnalysisV2, kind string) []*analysis.GraphNode {
+	var nodes []*analysis.GraphNode
+	if rca == nil || rca.Incident.Graph.Nodes == nil {
+		return nodes
+	}
+
+	for i := range rca.Incident.Graph.Nodes {
+		if rca.Incident.Graph.Nodes[i].Resource.Kind == kind {
+			nodes = append(nodes, &rca.Incident.Graph.Nodes[i])
+		}
+	}
+	return nodes
+}
+
 // RequireGraphHasEdgeBetweenKinds verifies that the graph contains an edge of the specified
 // relationship type between nodes of the given kinds.
 func RequireGraphHasEdgeBetweenKinds(t *testing.T, rca *analysis.RootCauseAnalysisV2, fromKind, relType, toKind string) {
@@ -219,15 +235,26 @@ func RequireGraphHasEdgeBetweenKinds(t *testing.T, rca *analysis.RootCauseAnalys
 	require.NotNil(t, rca.Incident, "Incident should not be nil")
 	require.NotNil(t, rca.Incident.Graph, "Graph should not be nil")
 
-	fromNode := FindNodeByKind(rca, fromKind)
-	require.NotNil(t, fromNode, "Graph should contain node of kind %s", fromKind)
+	fromNodes := FindAllNodesByKind(rca, fromKind)
+	require.NotEmpty(t, fromNodes, "Graph should contain node of kind %s", fromKind)
 
-	toNode := FindNodeByKind(rca, toKind)
-	require.NotNil(t, toNode, "Graph should contain node of kind %s", toKind)
+	toNodes := FindAllNodesByKind(rca, toKind)
+	require.NotEmpty(t, toNodes, "Graph should contain node of kind %s", toKind)
 
+	// Build sets of node IDs for efficient lookup
+	fromIDs := make(map[string]bool)
+	for _, n := range fromNodes {
+		fromIDs[n.ID] = true
+	}
+	toIDs := make(map[string]bool)
+	for _, n := range toNodes {
+		toIDs[n.ID] = true
+	}
+
+	// Check if any edge exists between any fromKind node and any toKind node
 	found := false
 	for _, edge := range rca.Incident.Graph.Edges {
-		if edge.From == fromNode.ID && edge.To == toNode.ID && edge.RelationshipType == relType {
+		if fromIDs[edge.From] && toIDs[edge.To] && edge.RelationshipType == relType {
 			found = true
 			break
 		}

@@ -177,8 +177,6 @@ func TestNodeAndEdgeTypes(t *testing.T) {
 	// Test EdgeType constants
 	assert.Equal(t, EdgeType("OWNS"), EdgeTypeOwns)
 	assert.Equal(t, EdgeType("CHANGED"), EdgeTypeChanged)
-	assert.Equal(t, EdgeType("TRIGGERED_BY"), EdgeTypeTriggeredBy)
-	assert.Equal(t, EdgeType("PRECEDED_BY"), EdgeTypePrecededBy)
 	assert.Equal(t, EdgeType("SELECTS"), EdgeTypeSelects)
 	assert.Equal(t, EdgeType("SCHEDULED_ON"), EdgeTypeScheduledOn)
 	assert.Equal(t, EdgeType("MOUNTS"), EdgeTypeMounts)

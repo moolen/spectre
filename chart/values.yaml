@@ -149,15 +149,16 @@ graph:
         - ReadWriteOnce
 
     # Health check configuration
+    # Note: FalkorDB can take time to initialize, especially with persistence enabled
     livenessProbe:
       enabled: true
       exec:
         command:
           - redis-cli
           - ping
-      initialDelaySeconds: 10
+      initialDelaySeconds: 60
       periodSeconds: 10
-      timeoutSeconds: 5
+      timeoutSeconds: 15
       failureThreshold: 3
       successThreshold: 1
 
@@ -167,9 +168,9 @@ graph:
         command:
           - redis-cli
           - ping
-      initialDelaySeconds: 5
+      initialDelaySeconds: 45
       periodSeconds: 5
-      timeoutSeconds: 3
+      timeoutSeconds: 15
       failureThreshold: 3
       successThreshold: 1
 

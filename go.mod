@@ -5,11 +5,8 @@ go 1.24.1
 require (
 	connectrpc.com/connect v1.19.1
 	github.com/FalkorDB/falkordb-go/v2 v2.0.2
-	github.com/bits-and-blooms/bitset v1.24.2
-	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/klauspost/compress v1.18.1
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/markusmobius/go-dateparser v1.2.4
 	github.com/playwright-community/playwright-go v0.5200.1
@@ -104,6 +101,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/klauspost/compress v1.18.1 // indirect
 	github.com/lann/builder v0.0.0-20180802200727-47ae307949d0 // indirect
 	github.com/lann/ps v0.0.0-20150810152359-62de8c46ede0 // indirect
 	github.com/lib/pq v1.10.9 // indirect

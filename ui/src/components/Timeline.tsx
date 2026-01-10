@@ -71,18 +71,53 @@ export const Timeline: React.FC<TimelineProps> = ({
   }, [theme]);
 
   // Measure container size with ResizeObserver
+  // Ignore width changes during sidebar animation to prevent layout thrashing
+  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSizeRef = useRef({ width: 0, height: 0 });
+  const isInitializedRef = useRef(false);
+  
   useEffect(() => {
     if (!containerRef.current) return;
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        setContainerSize({ width, height });
+        
+        // Always update on first observation
+        if (!isInitializedRef.current) {
+          isInitializedRef.current = true;
+          lastSizeRef.current = { width, height };
+          setContainerSize({ width, height });
+          return;
+        }
+        
+        // Only respond to height changes, not width changes
+        // Width changes are typically caused by sidebar animation and shouldn't trigger re-render
+        // The SVG will stretch/shrink naturally via CSS
+        const heightDiff = Math.abs(height - lastSizeRef.current.height);
+        if (heightDiff < 1) return;
+        
+        // Clear any pending resize update
+        if (resizeTimeoutRef.current) {
+          clearTimeout(resizeTimeoutRef.current);
+        }
+        
+        // Debounce height updates
+        resizeTimeoutRef.current = setTimeout(() => {
+          lastSizeRef.current = { width: lastSizeRef.current.width, height };
+          setContainerSize(prev => ({ ...prev, height }));
+          resizeTimeoutRef.current = null;
+        }, 50);
       }
     });
 
     resizeObserver.observe(containerRef.current);
-    return () => resizeObserver.disconnect();
+    return () => {
+      resizeObserver.disconnect();
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current);
+      }
+    };
   }, []);
 
   // Scroll detection for lazy loading

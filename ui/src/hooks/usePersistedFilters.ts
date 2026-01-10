@@ -1,41 +1,46 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const STORAGE_KEY_KINDS = 'spectre-filters-kinds';
 const STORAGE_KEY_NAMESPACES = 'spectre-filters-namespaces';
+const STORAGE_KEY_DEFAULT_KINDS_HASH = 'spectre-filters-default-kinds-hash';
 
 export interface PersistedFilters {
   kinds: string[];
   namespaces: string[];
 }
 
-const DEFAULT_RUNTIME_KINDS = [
-  'Deployment',
-  'StatefulSet',
-  'ReplicaSet',
-  'Pod',
-  'Job',
-  'CronJob',
-  'Service'
-];
+// Simple hash function to detect when default kinds change
+const hashArray = (arr: string[]): string => {
+  return arr.slice().sort().join(',');
+};
 
-const loadFilters = (): PersistedFilters => {
+const loadFilters = (defaultKinds: string[]): PersistedFilters => {
   if (typeof window === 'undefined') {
-    return { kinds: DEFAULT_RUNTIME_KINDS, namespaces: [] };
+    return { kinds: defaultKinds, namespaces: [] };
   }
 
   try {
     const kindsStr = window.localStorage.getItem(STORAGE_KEY_KINDS);
     const namespacesStr = window.localStorage.getItem(STORAGE_KEY_NAMESPACES);
 
-    const kinds = kindsStr ? JSON.parse(kindsStr) : DEFAULT_RUNTIME_KINDS;
+    // Parse kinds from localStorage, but treat empty array as "use defaults"
+    // An empty array means no explicit user selection, so fall back to defaults
+    let kinds = defaultKinds;
+    if (kindsStr) {
+      const parsed = JSON.parse(kindsStr);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        kinds = parsed;
+      }
+    }
+
     const namespaces = namespacesStr ? JSON.parse(namespacesStr) : [];
 
     return {
-      kinds: Array.isArray(kinds) ? kinds : DEFAULT_RUNTIME_KINDS,
+      kinds,
       namespaces: Array.isArray(namespaces) ? namespaces : []
     };
   } catch {
-    return { kinds: DEFAULT_RUNTIME_KINDS, namespaces: [] };
+    return { kinds: defaultKinds, namespaces: [] };
   }
 };
 
@@ -52,9 +57,50 @@ const saveFilters = (filters: PersistedFilters) => {
 
 export const usePersistedFilters = (
   availableKinds: string[],
-  availableNamespaces: string[]
+  availableNamespaces: string[],
+  defaultKinds: string[]
 ) => {
-  const [filters, setFilters] = useState<PersistedFilters>(() => loadFilters());
+  const [filters, setFilters] = useState<PersistedFilters>(() => loadFilters(defaultKinds));
+  const previousDefaultKindsHashRef = useRef<string | null>(null);
+  const initializedRef = useRef(false);
+
+  // Ensure we have kinds on initial load - if empty, use defaults
+  // This handles the case where localStorage had an empty array from a previous bug
+  useEffect(() => {
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      if (filters.kinds.length === 0 && defaultKinds.length > 0) {
+        console.log('[usePersistedFilters] Empty kinds on init, applying defaults:', defaultKinds);
+        setFilters(prev => ({ ...prev, kinds: defaultKinds }));
+      }
+    }
+  }, [defaultKinds, filters.kinds.length]);
+
+  // Reset filters when default kinds setting changes
+  useEffect(() => {
+    const currentHash = hashArray(defaultKinds);
+    const storedHash = window.localStorage.getItem(STORAGE_KEY_DEFAULT_KINDS_HASH);
+    
+    // Initialize the ref on first render
+    if (previousDefaultKindsHashRef.current === null) {
+      previousDefaultKindsHashRef.current = storedHash || currentHash;
+      // Store the hash if not already stored
+      if (!storedHash) {
+        window.localStorage.setItem(STORAGE_KEY_DEFAULT_KINDS_HASH, currentHash);
+      }
+      return;
+    }
+
+    // Check if defaults have changed since last time
+    if (storedHash !== currentHash) {
+      console.log('[usePersistedFilters] Default kinds changed, resetting filters');
+      // Reset to new defaults
+      setFilters(prev => ({ ...prev, kinds: defaultKinds }));
+      // Update the stored hash
+      window.localStorage.setItem(STORAGE_KEY_DEFAULT_KINDS_HASH, currentHash);
+      previousDefaultKindsHashRef.current = currentHash;
+    }
+  }, [defaultKinds]);
 
   // Validate filters against available options when metadata changes
   // Use functional update to avoid dependency on filters state
@@ -66,9 +112,11 @@ export const usePersistedFilters = (
     }
 
     setFilters(prev => {
-      // Only validate kinds if we have available kinds, otherwise keep current
+      // Validate kinds: keep if in availableKinds OR in defaultKinds
+      // This preserves default kinds even when not in current metadata
+      // (e.g., no Pods exist in the time range, but Pod is a valid default)
       const validatedKinds = availableKinds.length > 0
-        ? prev.kinds.filter(kind => availableKinds.includes(kind))
+        ? prev.kinds.filter(kind => availableKinds.includes(kind) || defaultKinds.includes(kind))
         : prev.kinds;
 
       // Only validate namespaces if we have available namespaces, otherwise keep current
@@ -88,7 +136,7 @@ export const usePersistedFilters = (
       }
       return prev;
     });
-  }, [availableKinds, availableNamespaces]);
+  }, [availableKinds, availableNamespaces, defaultKinds]);
 
   // Save to localStorage whenever filters change
   useEffect(() => {

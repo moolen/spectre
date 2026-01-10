@@ -26,7 +26,7 @@ func TestRootCauseEndpoint_Ingress_SameNamespace(t *testing.T) {
 	// Load the JSONL fixture
 	_, testFile, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(testFile)
-	fixturePath := filepath.Join(testDir, "fixtures", "testrootcause-ingress-samenamespace-endp.jsonl")
+	fixturePath := filepath.Join(testDir, "..", "fixtures", "testrootcause-ingress-samenamespace-endp.jsonl")
 	err = harness.SeedEventsFromAuditLog(ctx, fixturePath)
 	require.NoError(t, err)
 

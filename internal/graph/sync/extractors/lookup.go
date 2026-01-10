@@ -40,13 +40,18 @@ func (l *graphClientLookup) FindResourceByUID(ctx context.Context, uid string) (
 }
 
 func (l *graphClientLookup) FindResourceByNamespace(ctx context.Context, namespace, kind, name string) (*graph.ResourceIdentity, error) {
+	// Note: We intentionally do NOT filter out deleted resources here.
+	// When building edges (e.g., REFERENCES_SPEC), we need to connect to resources
+	// even if they've been deleted. This enables:
+	// 1. Causal path analysis tracing from deleted resources
+	// 2. ResourceDeleted anomaly detection on referenced resources
+	// 3. Understanding "resource was deleted causing failure" scenarios
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity)
 			WHERE r.namespace = $namespace
 			  AND r.kind = $kind
 			  AND r.name = $name
-			  AND r.deleted = false
 			RETURN r
 			LIMIT 1
 		`,

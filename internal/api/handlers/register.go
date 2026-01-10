@@ -70,10 +70,32 @@ func RegisterHandlers(
 		logger.Info("Registered /v1/timeline/compare endpoint for A/B testing")
 	}
 
-	// Register root cause handler if graph client is available
+	// Register causal graph handler if graph client is available
 	if graphClient != nil {
-		rootCauseHandler := NewRootCauseHandler(graphClient, logger, tracer)
-		router.HandleFunc("/v1/root-cause", withMethod(http.MethodGet, rootCauseHandler.Handle))
+		causalGraphHandler := NewCausalGraphHandler(graphClient, logger, tracer)
+		router.HandleFunc("/v1/causal-graph", withMethod(http.MethodGet, causalGraphHandler.Handle))
+		logger.Info("Registered /v1/causal-graph endpoint")
+	}
+
+	// Register anomaly handler if graph client is available
+	if graphClient != nil {
+		anomalyHandler := NewAnomalyHandler(graphClient, logger, tracer)
+		router.HandleFunc("/v1/anomalies", withMethod(http.MethodGet, anomalyHandler.Handle))
+		logger.Info("Registered /v1/anomalies endpoint")
+	}
+
+	// Register causal paths handler if graph client is available
+	if graphClient != nil {
+		causalPathsHandler := NewCausalPathsHandler(graphClient, logger, tracer)
+		router.HandleFunc("/v1/causal-paths", withMethod(http.MethodGet, causalPathsHandler.Handle))
+		logger.Info("Registered /v1/causal-paths endpoint")
+	}
+
+	// Register namespace graph handler if graph client is available
+	if graphClient != nil {
+		namespaceGraphHandler := NewNamespaceGraphHandler(graphClient, logger, tracer)
+		router.HandleFunc("/v1/namespace-graph", withMethod(http.MethodGet, namespaceGraphHandler.Handle))
+		logger.Info("Registered /v1/namespace-graph endpoint")
 	}
 
 	// Register import handler if graph pipeline is available

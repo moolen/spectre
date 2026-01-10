@@ -65,8 +65,8 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 		return nil, nil, fmt.Errorf("failed to execute graph query: %w", err)
 	}
 
-	// Convert graph results to events
-	allEvents, err := qe.parseTimelineResults(result)
+	// Convert graph results to events and K8sEvents
+	allEvents, k8sEventsByResource, err := qe.parseTimelineResults(result)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse graph results: %w", err)
 	}
@@ -168,11 +168,12 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 	executionTime := time.Since(start)
 
 	queryResult := &models.QueryResult{
-		Events:          limitedEvents,
-		Count:           int32(len(limitedEvents)),
-		ExecutionTimeMs: int32(executionTime.Milliseconds()),
-		QueryStartTime:  startTimeNs,
-		QueryEndTime:    endTimeNs,
+		Events:              limitedEvents,
+		Count:               int32(len(limitedEvents)),
+		ExecutionTimeMs:     int32(executionTime.Milliseconds()),
+		QueryStartTime:      startTimeNs,
+		QueryEndTime:        endTimeNs,
+		K8sEventsByResource: k8sEventsByResource,
 	}
 
 	paginationResp := &models.PaginationResponse{
@@ -316,9 +317,13 @@ func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models
 	}
 }
 
-// parseTimelineResults converts graph query results into Event objects
-func (qe *QueryExecutor) parseTimelineResults(result *QueryResult) ([]models.Event, error) {
+// parseTimelineResults converts graph query results into Event objects and K8sEvents
+// Returns:
+//   - events: ChangeEvents for building resource status segments
+//   - k8sEventsByResource: map of resource UID to K8sEvents for timeline display
+func (qe *QueryExecutor) parseTimelineResults(result *QueryResult) ([]models.Event, map[string][]models.K8sEvent, error) {
 	var events []models.Event
+	k8sEventsByResource := make(map[string][]models.K8sEvent)
 
 	// Parse result rows
 	for _, row := range result.Rows {
@@ -374,18 +379,50 @@ func (qe *QueryExecutor) parseTimelineResults(result *QueryResult) ([]models.Eve
 				}
 				// Debug: log if event data is missing for pods
 				if resourceMeta.Kind == "Pod" && len(event.Data) == 0 {
-					qe.logger.Debug("Pod ChangeEvent missing data field: resource=%s/%s, eventID=%s", 
+					qe.logger.Debug("Pod ChangeEvent missing data field: resource=%s/%s, eventID=%s",
 						resourceMeta.Namespace, resourceMeta.Name, event.ID)
 				}
 				events = append(events, *event)
 			}
 		}
 
-		// TODO: Attach K8s events (row[2] if present)
+		// Parse K8sEvents from row[2]
+		if k8sEventsData, ok := row[2].([]interface{}); ok && len(k8sEventsData) > 0 {
+			for _, k8sEventData := range k8sEventsData {
+				k8sEventProps, err := ParseNodeFromResult(k8sEventData)
+				if err != nil {
+					qe.logger.Debug("Failed to parse K8sEvent node: %v", err)
+					continue
+				}
+
+				k8sEvent := qe.parseK8sEvent(k8sEventProps)
+				if k8sEvent != nil {
+					k8sEventsByResource[resourceMeta.UID] = append(k8sEventsByResource[resourceMeta.UID], *k8sEvent)
+				}
+			}
+		}
 	}
 
-	qe.logger.Info("Parsed %d events from graph query", len(events))
-	return events, nil
+	qe.logger.Info("Parsed %d events and %d K8sEvents from graph query", len(events), len(k8sEventsByResource))
+	return events, k8sEventsByResource, nil
+}
+
+// parseK8sEvent converts a K8sEvent graph node to a models.K8sEvent
+func (qe *QueryExecutor) parseK8sEvent(node map[string]interface{}) *models.K8sEvent {
+	eventID := getStringField(node, "id")
+	if eventID == "" {
+		return nil
+	}
+
+	return &models.K8sEvent{
+		ID:        eventID,
+		Timestamp: getInt64Field(node, "timestamp"),
+		Reason:    getStringField(node, "reason"),
+		Message:   getStringField(node, "message"),
+		Type:      getStringField(node, "type"),
+		Count:     int32(getInt64Field(node, "count")),
+		Source:    getStringField(node, "source"),
+	}
 }
 
 // parseResourceMetadata extracts ResourceMetadata from a ResourceIdentity node

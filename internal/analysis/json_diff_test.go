@@ -305,9 +305,7 @@ func TestConvertEventsToDiffFormat(t *testing.T) {
 				if event.FullSnapshot == nil {
 					t.Error("expected FullSnapshot to be set for first event")
 				}
-				if event.Data != nil {
-					t.Error("expected Data to be cleared")
-				}
+				// Data is intentionally kept for anomaly detection (container status checks)
 				if event.Diff != nil {
 					t.Error("expected Diff to be nil for first event")
 				}
@@ -342,9 +340,7 @@ func TestConvertEventsToDiffFormat(t *testing.T) {
 				if event.FullSnapshot != nil {
 					t.Error("expected FullSnapshot to be nil for newest event")
 				}
-				if event.Data != nil {
-					t.Error("expected Data to be cleared")
-				}
+				// Data is intentionally kept for anomaly detection (container status checks)
 			},
 			checkSecond: func(t *testing.T, event ChangeEventInfo) {
 				// Second in output (oldest) should have FullSnapshot
@@ -354,9 +350,7 @@ func TestConvertEventsToDiffFormat(t *testing.T) {
 				if event.Diff != nil {
 					t.Error("expected Diff to be nil for oldest event")
 				}
-				if event.Data != nil {
-					t.Error("expected Data to be cleared")
-				}
+				// Data is intentionally kept for anomaly detection (container status checks)
 			},
 		},
 		{

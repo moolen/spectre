@@ -150,7 +150,7 @@ func (mc *MetadataCache) refreshLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 			if err := mc.refresh(ctx); err != nil {
 				mc.logger.Error("Background metadata cache refresh failed: %v", err)
 			}

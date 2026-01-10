@@ -26,7 +26,7 @@ func TestRootCauseEndpoint_FluxHelmRelease(t *testing.T) {
 	// Load the JSONL fixture
 	_, testFile, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(testFile)
-	fixturePath := filepath.Join(testDir, "fixtures", "testrootcause-fluxhelmrelease-endpoint-e.jsonl")
+	fixturePath := filepath.Join(testDir, "..", "fixtures", "testrootcause-fluxhelmrelease-endpoint-e.jsonl")
 	err = harness.SeedEventsFromAuditLog(ctx, fixturePath)
 	require.NoError(t, err)
 
@@ -72,7 +72,7 @@ func TestRootCauseEndpoint_FluxHelmRelease_LongLookback(t *testing.T) {
 	// Load the JSONL fixture
 	_, testFile, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(testFile)
-	fixturePath := filepath.Join(testDir, "fixtures", "testrootcause-fluxhelmrelease-longlookba.jsonl")
+	fixturePath := filepath.Join(testDir, "..", "fixtures", "testrootcause-fluxhelmrelease-longlookba.jsonl")
 	err = harness.SeedEventsFromAuditLog(ctx, fixturePath)
 	require.NoError(t, err)
 
@@ -125,7 +125,7 @@ func TestRootCauseEndpoint_FluxHelmReleaseValuesFrom(t *testing.T) {
 	// Load the JSONL fixture
 	_, testFile, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(testFile)
-	fixturePath := filepath.Join(testDir, "fixtures", "testrootcause-fluxhelmreleasevaluesfrom-.jsonl")
+	fixturePath := filepath.Join(testDir, "..", "fixtures", "testrootcause-fluxhelmreleasevaluesfrom-.jsonl")
 	err = harness.SeedEventsFromAuditLog(ctx, fixturePath)
 	require.NoError(t, err)
 

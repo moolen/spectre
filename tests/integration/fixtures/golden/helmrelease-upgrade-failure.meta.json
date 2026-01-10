@@ -1,0 +1,41 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "Pod",
+        "category": "State",
+        "type": "ImagePullBackOff",
+        "min_severity": "high",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "HelmRelease",
+        "category": "State",
+        "type": "ErrorStatus",
+        "min_severity": "high",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "Deployment",
+        "category": "Change",
+        "type": "ImageChanged",
+        "min_severity": "medium",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "HelmRelease",
+      "intermediate_kinds": [
+        "Deployment",
+        "ReplicaSet"
+      ],
+      "symptom_kind": "Pod",
+      "min_confidence": 0.85
+    }
+  },
+  "scenario": {
+    "description": "HelmRelease upgrade failure due to invalid container image tag",
+    "name": "helmrelease-upgrade-failure"
+  },
+  "timestamp": 1767982573
+}

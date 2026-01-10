@@ -282,9 +282,9 @@ func (a *APIClient) Health(ctx context.Context) error {
 	return nil
 }
 
-// RootCause queries the /v1/root-cause endpoint.
+// RootCause queries the /v1/causal-graph endpoint.
 func (a *APIClient) RootCause(ctx context.Context, resourceUID string, failureTimestamp int64, lookback time.Duration, maxDepth int, minConfidence float64) (*analysis.RootCauseAnalysisV2, error) {
-	baseURL := fmt.Sprintf("%s/v1/root-cause", a.BaseURL)
+	baseURL := fmt.Sprintf("%s/v1/causal-graph", a.BaseURL)
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse base URL: %w", err)

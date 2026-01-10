@@ -4,7 +4,6 @@ import { FilterBar } from '../components/FilterBar';
 import { Timeline } from '../components/Timeline';
 import { DetailPanel } from '../components/DetailPanel';
 import { RootCauseView } from '../components/RootCauseView';
-import { TimeRangePicker } from '../components/TimeRangePicker';
 import { useTimeline } from '../hooks/useTimeline';
 import { useMetadata } from '../hooks/useMetadata';
 import { usePersistedFilters } from '../hooks/usePersistedFilters';
@@ -32,24 +31,17 @@ function TimelinePage() {
   const originalUrlParamsRef = useRef<{ start?: string; end?: string } | null>(null);
   const isUpdatingFromZoom = useRef(false);
 
-  // Auto-set time range in demo mode if no URL params
+  // Auto-set time range to now-30m -> now if no URL params
   useEffect(() => {
     const startParam = searchParams.get('start');
     const endParam = searchParams.get('end');
 
-    console.log('[Demo Mode Check]', {
-      hasStart: !!startParam,
-      hasEnd: !!endParam,
-      isDemoMode: getDemoMode(),
-      shouldAutoSet: !startParam && !endParam && getDemoMode()
-    });
-
-    // Only auto-set if we're in demo mode and no time range is set
-    if (!startParam && !endParam && getDemoMode()) {
-      console.log('[Demo Mode] Auto-setting time range to now-2h -> now');
-      // Set default time range to "now-2h" to "now" (last 2 hours)
+    // Only auto-set if no time range is specified in URL
+    if (!startParam && !endParam) {
+      console.log('[TimelinePage] Auto-setting time range to now-30m -> now');
+      // Set default time range to "now-30m" to "now" (last 30 minutes)
       const endExpr = 'now';
-      const startExpr = 'now-2h';
+      const startExpr = 'now-30m';
 
       setSearchParams({
         start: startExpr,
@@ -209,9 +201,12 @@ function TimelinePage() {
   // Fetch metadata (namespaces and kinds) for the time range
   const { namespaces: availableNamespaces, kinds: availableKinds } = useMetadata(timeRange);
 
+  // Get default kinds from settings
+  const { defaultKinds } = useSettings();
+
   // Load persisted filters from localStorage
   const { kinds: persistedKinds, namespaces: persistedNamespaces, setKinds, setNamespaces } =
-    usePersistedFilters(availableKinds, availableNamespaces);
+    usePersistedFilters(availableKinds, availableNamespaces, defaultKinds);
 
   // Selection State
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
@@ -535,10 +530,17 @@ function TimelinePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedPoint, selectedResource]);
 
-  // Show time range picker if no range is selected
+  // Show loading state if time range hasn't been set yet (waiting for auto-set)
   if (!timeRange) {
     return (
-      <TimeRangePicker onConfirm={handleTimeRangeChange} />
+      <div className="flex flex-col h-screen bg-[var(--color-app-bg)] text-[var(--color-text-primary)] overflow-hidden font-sans transition-colors duration-300 items-center justify-center">
+        <div className="animate-spin mb-4">
+          <svg className="w-12 h-12 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+          </svg>
+        </div>
+        <p className="text-[var(--color-text-muted)]">Loading timeline...</p>
+      </div>
     );
   }
 

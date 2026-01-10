@@ -73,9 +73,9 @@ func DefaultClientConfig() ClientConfig {
 		Password:     "",
 		GraphName:    "spectre",
 		MaxRetries:   3,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
+		DialTimeout:  30 * time.Second,
+		ReadTimeout:  120 * time.Second,
+		WriteTimeout: 120 * time.Second,
 		PoolSize:     10,
 
 		// Query cache defaults
@@ -126,10 +126,16 @@ func (c *falkorClient) Connect(ctx context.Context) error {
 
 	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
 
-	// Create connection options
+	// Create connection options with timeouts
+	// Note: falkordb.ConnectionOption is an alias for redis.Options
 	connOpts := &falkordb.ConnectionOption{
-		Addr:     addr,
-		Password: c.config.Password,
+		Addr:         addr,
+		Password:     c.config.Password,
+		DialTimeout:  c.config.DialTimeout,
+		ReadTimeout:  c.config.ReadTimeout,
+		WriteTimeout: c.config.WriteTimeout,
+		PoolSize:     c.config.PoolSize,
+		MaxRetries:   c.config.MaxRetries,
 	}
 
 	// Create FalkorDB client
@@ -462,12 +468,15 @@ func (c *falkorClient) InitializeSchema(ctx context.Context) error {
 	// 2. ChangeEvent.timestamp (time-range queries)
 	// 3. ChangeEvent.id (idempotency)
 	// 4. K8sEvent.timestamp
+	// 5. Composite indexes for namespace graph queries
 
 	indexes := []string{
+		// Primary indexes
 		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.uid)",
 		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.kind)",
 		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.namespace)",
 		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.deleted)",
+		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.firstSeen)",
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.id)",
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.timestamp)",
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.status)",
@@ -612,10 +621,12 @@ func replaceCypherParameters(query string, params map[string]interface{}) string
 // parseGraphQueryResult parses the result from GRAPH.QUERY command
 // FalkorDB returns results in a specific format:
 // [
-//   [header1, header2, ...],           // Column names
-//   [row1_col1, row1_col2, ...],      // Data rows
-//   [row2_col1, row2_col2, ...],
-//   [statistics]                       // Query statistics
+//
+//	[header1, header2, ...],           // Column names
+//	[row1_col1, row1_col2, ...],      // Data rows
+//	[row2_col1, row2_col2, ...],
+//	[statistics]                       // Query statistics
+//
 // ]
 func parseGraphQueryResult(result interface{}) (*QueryResult, error) {
 	// FalkorDB returns an array

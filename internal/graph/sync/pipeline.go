@@ -15,16 +15,16 @@ import (
 
 // pipeline implements the Pipeline interface
 type pipeline struct {
-	config   PipelineConfig
-	client   graph.Client
-	schema   *graph.Schema
-	builder  GraphBuilder
+	config    PipelineConfig
+	client    graph.Client
+	schema    *graph.Schema
+	builder   GraphBuilder
 	causality CausalityEngine
 	retention RetentionManager
-	logger   *logging.Logger
+	logger    *logging.Logger
 
 	// Statistics (atomic counters)
-	stats PipelineStats
+	stats     PipelineStats
 	statsLock sync.RWMutex
 
 	// Control
@@ -157,6 +157,11 @@ func (p *pipeline) ProcessBatch(ctx context.Context, events []models.Event) erro
 
 	start := time.Now()
 	p.logger.Info("Processing batch of %d events (two-phase)", len(events))
+
+	// Set batch cache for change detection
+	// This allows detectChanges to find previous events from the same batch
+	p.builder.SetBatchCache(events)
+	defer p.builder.ClearBatchCache()
 
 	// PHASE 1: Create all resource nodes
 	phase1Start := time.Now()
@@ -371,13 +376,6 @@ func (p *pipeline) createEdge(ctx context.Context, edge graph.Edge) error {
 			return err
 		}
 		query = graph.CreateManagesEdgeQuery(edge.FromUID, edge.ToUID, props)
-
-	case graph.EdgeTypeAnnotates:
-		var props graph.AnnotatesEdge
-		if err := json.Unmarshal(edge.Properties, &props); err != nil {
-			return err
-		}
-		query = graph.CreateAnnotatesEdgeQuery(edge.FromUID, edge.ToUID, props)
 
 	case graph.EdgeTypeCreatesObserved:
 		var props graph.CreatesObservedEdge

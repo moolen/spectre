@@ -86,11 +86,18 @@ func (a *RootCauseAnalyzer) getManagers(ctx context.Context, resourceUIDs []stri
 // - USES_SERVICE_ACCOUNT: Pods using ServiceAccounts
 // - SELECTS: Services/NetworkPolicies selecting resources
 // - GRANTS_TO: RoleBindings granting permissions to ServiceAccounts
+// - BINDS_ROLE: RoleBindings binding to Roles/ClusterRoles
 // - INGRESS_REF: Ingresses referencing Services
-func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUIDs []string) (map[string][]RelatedResourceData, error) {
+//
+// The failureTimestamp and lookbackNs parameters are used to include deleted resources
+// that were deleted within the time window (important for root cause analysis).
+func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUIDs []string, failureTimestamp int64, lookbackNs int64) (map[string][]RelatedResourceData, error) {
 	if len(resourceUIDs) == 0 {
 		return make(map[string][]RelatedResourceData), nil
 	}
+
+	// Calculate the start of the time window
+	startNs := failureTimestamp - lookbackNs
 
 	query := graph.GraphQuery{
 		Timeout: DefaultQueryTimeoutMs,
@@ -98,19 +105,38 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 			// Direct relationships from resources
 			UNWIND $resourceUIDs as uid
 			MATCH (resource:ResourceIdentity {uid: uid})
+			// REFERENCES_SPEC: include deleted resources if deleted within time window
 			OPTIONAL MATCH (resource)-[refSpec:REFERENCES_SPEC]->(referencedResource:ResourceIdentity)
+			WHERE coalesce(referencedResource.deleted, false) = false 
+			   OR (referencedResource.deletedAt >= $startNs AND referencedResource.deletedAt <= $endNs)
 			OPTIONAL MATCH (resource)-[scheduledOn:SCHEDULED_ON]->(node:ResourceIdentity)
+			WHERE coalesce(node.deleted, false) = false 
+			   OR (node.deletedAt >= $startNs AND node.deletedAt <= $endNs)
 			OPTIONAL MATCH (resource)-[usesSA:USES_SERVICE_ACCOUNT]->(sa:ResourceIdentity)
+			WHERE coalesce(sa.deleted, false) = false 
+			   OR (sa.deletedAt >= $startNs AND sa.deletedAt <= $endNs)
 			OPTIONAL MATCH (selector:ResourceIdentity)-[selects:SELECTS]->(resource)
 			WHERE selector.kind IN ['Service', 'NetworkPolicy']
+			  AND (coalesce(selector.deleted, false) = false 
+			       OR (selector.deletedAt >= $startNs AND selector.deletedAt <= $endNs))
 
 			// Find Ingresses that reference Services that select this resource
 			OPTIONAL MATCH (ingress:ResourceIdentity)-[ref:REFERENCES_SPEC]->(selector)
 			WHERE ingress.kind = 'Ingress' AND selector.kind = 'Service'
+			  AND (coalesce(ingress.deleted, false) = false 
+			       OR (ingress.deletedAt >= $startNs AND ingress.deletedAt <= $endNs))
 
 			// Get RoleBindings that grant to service accounts used by this resource
 			OPTIONAL MATCH (rb:ResourceIdentity)-[grantsTo:GRANTS_TO]->(sa)
 			WHERE sa IS NOT NULL
+			  AND (coalesce(rb.deleted, false) = false 
+			       OR (rb.deletedAt >= $startNs AND rb.deletedAt <= $endNs))
+
+			// Get the Role/ClusterRole that the RoleBinding binds to
+			OPTIONAL MATCH (rb)-[bindsRole:BINDS_ROLE]->(role:ResourceIdentity)
+			WHERE rb IS NOT NULL
+			  AND (coalesce(role.deleted, false) = false 
+			       OR (role.deletedAt >= $startNs AND role.deletedAt <= $endNs))
 
 			RETURN resource.uid as resourceUID,
 			       referencedResource, 'REFERENCES_SPEC' as refSpecType,
@@ -118,10 +144,13 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 			       sa, 'USES_SERVICE_ACCOUNT' as usesSAType,
 			       selector, 'SELECTS' as selectsType,
 			       rb, 'GRANTS_TO' as grantsToType,
-			       ingress, 'INGRESS_REF' as ingressRefType
+			       ingress, 'INGRESS_REF' as ingressRefType,
+			       role, 'BINDS_ROLE' as bindsRoleType
 		`,
 		Parameters: map[string]interface{}{
 			"resourceUIDs": resourceUIDs,
+			"startNs":      startNs,
+			"endNs":        failureTimestamp,
 		},
 	}
 
@@ -136,8 +165,8 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 
 	for i, row := range result.Rows {
 		a.logger.Debug("getRelatedResources: ROW %d: len=%d", i, len(row))
-		if len(row) < 13 {
-			a.logger.Debug("getRelatedResources: skipping row with < 13 columns: %d", len(row))
+		if len(row) < 15 {
+			a.logger.Debug("getRelatedResources: skipping row with < 15 columns: %d", len(row))
 			continue
 		}
 
@@ -186,11 +215,15 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 		}
 
 		// Parse each relationship type
+		// Column indices: 0=resourceUID, 1=referencedResource, 2=refSpecType,
+		//   3=node, 4=scheduledOnType, 5=sa, 6=usesSAType, 7=selector, 8=selectsType,
+		//   9=rb, 10=grantsToType, 11=ingress, 12=ingressRefType, 13=role, 14=bindsRoleType
 		addRelated(1, "REFERENCES_SPEC")      // referencedResource (outgoing from resource)
 		addRelated(3, "SCHEDULED_ON")         // node
 		addRelated(5, "USES_SERVICE_ACCOUNT") // sa
 		addRelated(7, "SELECTS")              // selector (incoming to resource, reversed in causal_chain.go)
-		addRelated(9, "GRANTS_TO")            // rb
+		addRelated(9, "GRANTS_TO")            // rb (RoleBinding)
+		addRelated(13, "BINDS_ROLE")          // role (Role/ClusterRole bound by RoleBinding)
 
 		// Special handling for INGRESS_REF to also capture the Service UID
 		if row[11] != nil {

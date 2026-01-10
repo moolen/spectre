@@ -1437,7 +1437,7 @@ func (s *RootCauseScenarioStage) root_cause_endpoint_is_called_with_lookback(loo
 	}
 
 	// Call HTTP endpoint
-	s.t.Logf("Calling /v1/root-cause with resourceUID=%s, timestamp=%d, lookback=%v",
+	s.t.Logf("Calling /v1/causal-graph with resourceUID=%s, timestamp=%d, lookback=%v",
 		s.failedPodUID, s.failureTimestamp, lookback)
 
 	callStart := time.Now()

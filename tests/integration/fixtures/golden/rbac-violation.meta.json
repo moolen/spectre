@@ -1,0 +1,34 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "Role",
+        "category": "Change",
+        "type": "RoleModified",
+        "min_severity": "high",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "Pod",
+        "category": "Event",
+        "type": "BackOff",
+        "min_severity": "high",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "Role",
+      "intermediate_kinds": [
+        "RoleBinding",
+        "ServiceAccount"
+      ],
+      "symptom_kind": "Pod",
+      "min_confidence": 0.7
+    }
+  },
+  "scenario": {
+    "description": "Pod fails after Role permissions are removed - tests RBAC causal path tracking",
+    "name": "rbac-violation"
+  },
+  "timestamp": 1767982462
+}

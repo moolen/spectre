@@ -8,8 +8,8 @@ import "time"
 
 const (
 	// DefaultQueryTimeoutMs is the default timeout for graph queries in milliseconds.
-	// This should be sufficient for most queries but can be overridden if needed.
-	DefaultQueryTimeoutMs = 5000
+	// Set to 120 seconds to accommodate resource-constrained environments.
+	DefaultQueryTimeoutMs = 120000
 
 	// DefaultLookbackWindow is the default time window to look back for related events.
 	// 10 minutes is chosen as a reasonable balance between finding relevant changes
@@ -106,13 +106,13 @@ const (
 const (
 	// SlowQueryThresholdMs is the threshold for logging slow queries.
 	// Queries exceeding this duration will be logged as warnings.
-	SlowQueryThresholdMs = 2000
+	SlowQueryThresholdMs = 5000
 
 	// SlowGraphBuildThresholdMs is the threshold for logging slow graph building.
 	// Graph building exceeding this duration will be logged as warnings.
-	SlowGraphBuildThresholdMs = 5000
+	SlowGraphBuildThresholdMs = 10000
 
 	// SlowAnalysisThresholdMs is the threshold for logging slow analysis.
 	// Full analysis exceeding this duration will be logged as warnings.
-	SlowAnalysisThresholdMs = 10000
+	SlowAnalysisThresholdMs = 20000
 )

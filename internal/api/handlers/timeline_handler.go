@@ -337,76 +337,91 @@ func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *model
 		return defaultValue
 	}
 
-	// Attach pre-fetched K8s events
-	// Match events to resources by InvolvedObjectUID
-	for _, event := range eventResult.Events {
-		// Only process Kubernetes Event resources
-		if event.Resource.Kind != "Event" {
-			continue
-		}
-
-		// Match by InvolvedObjectUID
-		if event.Resource.InvolvedObjectUID == "" {
-			continue
-		}
-
-		// Find matching resource by UID
-		var targetResource *models.Resource
+	// Attach K8s events to resources
+	// Priority 1: Use K8sEventsByResource from graph executor if available (direct from EMITTED_EVENT relationships)
+	if len(queryResult.K8sEventsByResource) > 0 {
+		th.logger.Debug("Using K8sEventsByResource from graph executor: %d resources have events", len(queryResult.K8sEventsByResource))
 		for _, resource := range resourceMap {
 			// Extract UID from resource ID (format: group/version/kind/uid)
 			parts := strings.Split(resource.ID, "/")
 			if len(parts) >= 4 {
 				resourceUID := parts[3]
-				if resourceUID == event.Resource.InvolvedObjectUID {
-					targetResource = resource
-					break
+				if events, ok := queryResult.K8sEventsByResource[resourceUID]; ok {
+					resource.Events = append(resource.Events, events...)
 				}
 			}
 		}
-
-		if targetResource == nil {
-			continue
-		}
-
-		// Convert models.Event to models.K8sEvent
-		var eventData map[string]interface{}
-		if len(event.Data) > 0 {
-			if err := json.Unmarshal(event.Data, &eventData); err != nil {
-				th.logger.Warn("Failed to parse event data: %v", err)
+	} else {
+		// Priority 2: Fall back to matching Event resources by InvolvedObjectUID (storage executor path)
+		for _, event := range eventResult.Events {
+			// Only process Kubernetes Event resources
+			if event.Resource.Kind != "Event" {
 				continue
 			}
-		}
 
-		k8sEvent := models.K8sEvent{
-			ID:        event.ID,
-			Timestamp: event.Timestamp,
-			Reason:    getString(eventData, "reason", ""),
-			Message:   getString(eventData, "message", ""),
-			Type:      getString(eventData, "type", "Normal"),
-			Count:     1, // Default count
-		}
+			// Match by InvolvedObjectUID
+			if event.Resource.InvolvedObjectUID == "" {
+				continue
+			}
 
-		// Extract additional fields if present
-		if count, ok := eventData["count"].(float64); ok {
-			k8sEvent.Count = int32(count)
-		}
-		if source, ok := eventData["source"].(map[string]interface{}); ok {
-			if component, ok := source["component"].(string); ok {
-				k8sEvent.Source = component
+			// Find matching resource by UID
+			var targetResource *models.Resource
+			for _, resource := range resourceMap {
+				// Extract UID from resource ID (format: group/version/kind/uid)
+				parts := strings.Split(resource.ID, "/")
+				if len(parts) >= 4 {
+					resourceUID := parts[3]
+					if resourceUID == event.Resource.InvolvedObjectUID {
+						targetResource = resource
+						break
+					}
+				}
 			}
-		}
-		if firstTimestamp, ok := eventData["firstTimestamp"].(string); ok {
-			if t, err := time.Parse(time.RFC3339, firstTimestamp); err == nil {
-				k8sEvent.FirstTimestamp = t.UnixNano()
-			}
-		}
-		if lastTimestamp, ok := eventData["lastTimestamp"].(string); ok {
-			if t, err := time.Parse(time.RFC3339, lastTimestamp); err == nil {
-				k8sEvent.LastTimestamp = t.UnixNano()
-			}
-		}
 
-		targetResource.Events = append(targetResource.Events, k8sEvent)
+			if targetResource == nil {
+				continue
+			}
+
+			// Convert models.Event to models.K8sEvent
+			var eventData map[string]interface{}
+			if len(event.Data) > 0 {
+				if err := json.Unmarshal(event.Data, &eventData); err != nil {
+					th.logger.Warn("Failed to parse event data: %v", err)
+					continue
+				}
+			}
+
+			k8sEvent := models.K8sEvent{
+				ID:        event.ID,
+				Timestamp: event.Timestamp,
+				Reason:    getString(eventData, "reason", ""),
+				Message:   getString(eventData, "message", ""),
+				Type:      getString(eventData, "type", "Normal"),
+				Count:     1, // Default count
+			}
+
+			// Extract additional fields if present
+			if count, ok := eventData["count"].(float64); ok {
+				k8sEvent.Count = int32(count)
+			}
+			if source, ok := eventData["source"].(map[string]interface{}); ok {
+				if component, ok := source["component"].(string); ok {
+					k8sEvent.Source = component
+				}
+			}
+			if firstTimestamp, ok := eventData["firstTimestamp"].(string); ok {
+				if t, err := time.Parse(time.RFC3339, firstTimestamp); err == nil {
+					k8sEvent.FirstTimestamp = t.UnixNano()
+				}
+			}
+			if lastTimestamp, ok := eventData["lastTimestamp"].(string); ok {
+				if t, err := time.Parse(time.RFC3339, lastTimestamp); err == nil {
+					k8sEvent.LastTimestamp = t.UnixNano()
+				}
+			}
+
+			targetResource.Events = append(targetResource.Events, k8sEvent)
+		}
 	}
 
 	resources := make([]models.Resource, 0, len(resourceMap))

@@ -148,7 +148,7 @@ func (h *EventCaptureHandler) OnDelete(obj runtime.Object) error {
 	return h.writeEvent(event)
 }
 
-// writeEvent writes an event to graph
+// writeEvent writes an event to graph and/or audit log
 func (h *EventCaptureHandler) writeEvent(event *models.Event) error {
 	ctx := context.Background() // Use background context for event processing
 
@@ -160,15 +160,17 @@ func (h *EventCaptureHandler) writeEvent(event *models.Event) error {
 		}
 	}
 
-	// Write to graph
+	// Write to graph if available
 	if h.graphPipeline != nil {
 		if err := h.graphPipeline.ProcessEvent(ctx, *event); err != nil {
 			h.logger.Error("Failed to write event to graph: %v", err)
 			return err
 		}
-	} else {
-		return fmt.Errorf("graph pipeline is not set")
+	} else if h.auditLog == nil {
+		// Only error if neither graph nor audit log is configured
+		return fmt.Errorf("neither graph pipeline nor audit log is configured")
 	}
+	// If only audit log is configured (no graph), that's valid - audit-only mode
 
 	return nil
 }

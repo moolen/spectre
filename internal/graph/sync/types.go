@@ -60,6 +60,12 @@ type GraphBuilder interface {
 
 	// ExtractRelationships extracts relationships from resource data
 	ExtractRelationships(ctx context.Context, event models.Event) ([]graph.Edge, error)
+
+	// SetBatchCache caches events from the current batch for change detection
+	SetBatchCache(events []models.Event)
+
+	// ClearBatchCache clears the batch cache after processing is complete
+	ClearBatchCache()
 }
 
 // CausalityEngine infers causality relationships between events
@@ -154,31 +160,31 @@ type ListenerStats struct {
 // PipelineConfig configures the sync pipeline
 type PipelineConfig struct {
 	// Batch processing
-	BatchSize     int           // Number of events per batch
-	BatchTimeout  time.Duration // Max time to wait for batch to fill
-	BufferSize    int           // Event buffer size
-	WorkerCount   int           // Number of parallel workers
+	BatchSize    int           // Number of events per batch
+	BatchTimeout time.Duration // Max time to wait for batch to fill
+	BufferSize   int           // Event buffer size
+	WorkerCount  int           // Number of parallel workers
 
 	// Retention
 	RetentionWindow time.Duration // How long to keep events in graph
 
 	// Causality inference
-	EnableCausality      bool          // Enable causality inference
-	CausalityMaxLag      time.Duration // Max time lag for causality
-	CausalityMinConfidence float64     // Min confidence to create edge
+	EnableCausality        bool          // Enable causality inference
+	CausalityMaxLag        time.Duration // Max time lag for causality
+	CausalityMinConfidence float64       // Min confidence to create edge
 
 	// Performance
-	EnableAsync    bool          // Process events asynchronously
-	SyncTimeout    time.Duration // Timeout for graph operations
-	RetryAttempts  int           // Number of retries on failure
-	RetryDelay     time.Duration // Delay between retries
+	EnableAsync   bool          // Process events asynchronously
+	SyncTimeout   time.Duration // Timeout for graph operations
+	RetryAttempts int           // Number of retries on failure
+	RetryDelay    time.Duration // Delay between retries
 }
 
 // DefaultPipelineConfig returns default pipeline configuration
 func DefaultPipelineConfig() PipelineConfig {
 	return PipelineConfig{
 		BatchSize:              100,
-		BatchTimeout:           5 * time.Second,
+		BatchTimeout:           60 * time.Second,
 		BufferSize:             1000,
 		WorkerCount:            4,
 		RetentionWindow:        24 * time.Hour,
@@ -186,7 +192,7 @@ func DefaultPipelineConfig() PipelineConfig {
 		CausalityMaxLag:        5 * time.Minute,
 		CausalityMinConfidence: 0.5,
 		EnableAsync:            true,
-		SyncTimeout:            10 * time.Second,
+		SyncTimeout:            120 * time.Second,
 		RetryAttempts:          3,
 		RetryDelay:             1 * time.Second,
 	}

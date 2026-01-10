@@ -230,7 +230,7 @@ func (e *ArgoCDApplicationExtractor) extractManagedResources(
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity)
-			WHERE r.deleted = false
+			WHERE NOT r.deleted
 			  AND r.labels CONTAINS $labelQuery
 			RETURN r.uid
 		`,

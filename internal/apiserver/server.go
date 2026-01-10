@@ -29,39 +29,22 @@ func (n *NoOpReadinessChecker) IsReady() bool {
 
 // Server handles HTTP API requests and Connect RPC requests
 type Server struct {
-	port              int
-	server            *http.Server
-	logger            *logging.Logger
-	queryExecutor     api.QueryExecutor
-	graphExecutor     api.QueryExecutor       // Graph-based query executor
-	querySource       api.TimelineQuerySource // Which executor to use for timeline queries
-	graphClient       graph.Client
-	graphPipeline     sync.Pipeline   // Graph sync pipeline for imports
-	metadataCache     *api.MetadataCache // In-memory metadata cache for fast responses
-	router            *http.ServeMux
-	readinessChecker  ReadinessChecker
-	tracingProvider   interface {
+	port             int
+	server           *http.Server
+	logger           *logging.Logger
+	queryExecutor    api.QueryExecutor
+	graphExecutor    api.QueryExecutor       // Graph-based query executor
+	querySource      api.TimelineQuerySource // Which executor to use for timeline queries
+	graphClient      graph.Client
+	graphPipeline    sync.Pipeline      // Graph sync pipeline for imports
+	metadataCache    *api.MetadataCache // In-memory metadata cache for fast responses
+	staticCache      *staticFileCache   // In-memory static file cache for fast UI serving
+	router           *http.ServeMux
+	readinessChecker ReadinessChecker
+	tracingProvider  interface {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	}
-}
-
-// NewWithStorageAndGraph creates a new API server with graph query executor support
-func NewWithStorageAndGraph(
-	port int,
-	storageExecutor api.QueryExecutor, // Can be nil - not used in graph-only mode
-	graphExecutor api.QueryExecutor,
-	querySource api.TimelineQuerySource,
-	storage interface{}, // Can be nil - kept for signature compatibility but not used
-	graphClient graph.Client,
-	readinessChecker ReadinessChecker,
-	demoMode bool, // Not used but kept for signature compatibility
-	tracingProvider interface {
-		GetTracer(string) trace.Tracer
-		IsEnabled() bool
-	},
-) *Server {
-	return NewWithStorageGraphAndPipeline(port, storageExecutor, graphExecutor, querySource, storage, graphClient, nil, readinessChecker, demoMode, tracingProvider, 30*time.Second)
 }
 
 // NewWithStorageGraphAndPipeline creates a new API server with graph query executor and pipeline support

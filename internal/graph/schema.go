@@ -304,11 +304,11 @@ func CreateGrantsToEdgeQuery(bindingUID, subjectUID string, props GrantsToEdge) 
 			    r.subjectNamespace = $subjectNamespace
 		`,
 		Parameters: map[string]interface{}{
-			"bindingUID":        bindingUID,
-			"subjectUID":        subjectUID,
-			"subjectKind":       props.SubjectKind,
-			"subjectName":       props.SubjectName,
-			"subjectNamespace":  props.SubjectNamespace,
+			"bindingUID":       bindingUID,
+			"subjectUID":       subjectUID,
+			"subjectKind":      props.SubjectKind,
+			"subjectName":      props.SubjectName,
+			"subjectNamespace": props.SubjectNamespace,
 		},
 	}
 }
@@ -317,7 +317,7 @@ func CreateGrantsToEdgeQuery(bindingUID, subjectUID string, props GrantsToEdge) 
 func CreateSelectsEdgeQuery(serviceUID, podUID string, props SelectsEdge) GraphQuery {
 	// Serialize selectorLabels to JSON
 	selectorLabelsJSON, _ := json.Marshal(props.SelectorLabels)
-	
+
 	return GraphQuery{
 		Query: `
 			MATCH (service:ResourceIdentity {uid: $serviceUID})
@@ -657,32 +657,6 @@ func CreateManagesEdgeQuery(managerUID, managedUID string, props ManagesEdge) Gr
 	}
 }
 
-// CreateAnnotatesEdgeQuery creates an ANNOTATES relationship
-func CreateAnnotatesEdgeQuery(sourceUID, targetUID string, props AnnotatesEdge) GraphQuery {
-	return GraphQuery{
-		Query: `
-			MATCH (source:ResourceIdentity {uid: $sourceUID})
-			MATCH (target:ResourceIdentity {uid: $targetUID})
-			MERGE (source)-[r:ANNOTATES]->(target)
-			ON CREATE SET
-				r.annotationKey = $annotationKey,
-				r.annotationValue = $annotationValue,
-				r.confidence = $confidence
-			ON MATCH SET
-				r.annotationKey = $annotationKey,
-				r.annotationValue = $annotationValue,
-				r.confidence = $confidence
-		`,
-		Parameters: map[string]interface{}{
-			"sourceUID":       sourceUID,
-			"targetUID":       targetUID,
-			"annotationKey":   props.AnnotationKey,
-			"annotationValue": props.AnnotationValue,
-			"confidence":      props.Confidence,
-		},
-	}
-}
-
 // CreateCreatesObservedEdgeQuery creates a CREATES_OBSERVED relationship
 func CreateCreatesObservedEdgeQuery(sourceUID, targetUID string, props CreatesObservedEdge) GraphQuery {
 	return GraphQuery{
@@ -719,7 +693,7 @@ func FindManagedResourcesQuery(crUID string, minConfidence float64) GraphQuery {
 			MATCH (cr:ResourceIdentity {uid: $crUID})
 			      -[manages:MANAGES]->(managed:ResourceIdentity)
 			WHERE manages.confidence >= $minConfidence
-			  AND managed.deleted = false
+			  AND NOT managed.deleted
 			RETURN managed, manages
 			ORDER BY manages.confidence DESC
 		`,

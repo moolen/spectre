@@ -120,10 +120,12 @@ func (e *FluxManagedResourceExtractor) createHelmReleaseEdge(
 		Confidence: 1.0, // Perfect confidence from Flux labels
 		Evidence: []graph.EvidenceItem{
 			{
-				Type:      graph.EvidenceTypeLabel,
-				Value:     fmt.Sprintf("Flux HelmRelease labels: %s=%s, %s=%s", fluxNameLabel, helmReleaseName, fluxNamespaceLabel, helmReleaseNamespace),
-				Weight:    1.0,
-				Timestamp: timestamp,
+				Type:       graph.EvidenceTypeLabel,
+				Value:      fmt.Sprintf("Flux HelmRelease labels: %s=%s, %s=%s", fluxNameLabel, helmReleaseName, fluxNamespaceLabel, helmReleaseNamespace),
+				Weight:     1.0,
+				Timestamp:  timestamp,
+				Key:        fluxNameLabel,
+				MatchValue: helmReleaseName,
 			},
 		},
 		FirstObserved:   timestamp,
@@ -173,10 +175,12 @@ func (e *FluxManagedResourceExtractor) createKustomizationEdge(
 		Confidence: 1.0, // Perfect confidence from Kustomize labels
 		Evidence: []graph.EvidenceItem{
 			{
-				Type:      graph.EvidenceTypeLabel,
-				Value:     fmt.Sprintf("Flux Kustomization labels: %s=%s, %s=%s", kustomizeNameLabel, kustomizationName, kustomizeNsLabel, kustomizationNamespace),
-				Weight:    1.0,
-				Timestamp: timestamp,
+				Type:       graph.EvidenceTypeLabel,
+				Value:      fmt.Sprintf("Flux Kustomization labels: %s=%s, %s=%s", kustomizeNameLabel, kustomizationName, kustomizeNsLabel, kustomizationNamespace),
+				Weight:     1.0,
+				Timestamp:  timestamp,
+				Key:        kustomizeNameLabel,
+				MatchValue: kustomizationName,
 			},
 		},
 		FirstObserved:   timestamp,

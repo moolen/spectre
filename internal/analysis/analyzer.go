@@ -193,7 +193,7 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 		// Also process root cause event
 		if rootCause.ChangeEvent.Data != nil {
 			rootCause.ChangeEvent.Significance = CalculateChangeEventSignificance(
-				&rootCause.ChangeEvent, true, time.Unix(0, input.FailureTimestamp), errorPatterns,
+				&rootCause.ChangeEvent, rootCause.Resource.Kind, true, time.Unix(0, input.FailureTimestamp), errorPatterns,
 			)
 			ConvertSingleEventToDiff(&rootCause.ChangeEvent, nil, true)
 		}
