@@ -12,7 +12,6 @@ import { K8sResource, FilterState, SelectedPoint, TimeRange, ResourceStatus } fr
 import { RootCauseAnalysisV2 } from '../types/rootCause';
 import { useSettings } from '../hooks/useSettings';
 import { parseTimeExpression } from '../utils/timeParsing';
-import { getDemoMode } from '../services/api';
 import { fetchRootCauseAnalysis } from '../services/rootCauseService';
 import { toast } from '../utils/toast';
 

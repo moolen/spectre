@@ -15,6 +15,10 @@ interface SelectDropdownProps {
   searchable?: boolean;
   /** Minimum width of the dropdown trigger (default: '160px') */
   minWidth?: string;
+  /** Custom formatter for displaying option values (default: identity) */
+  formatOption?: (value: string) => string;
+  /** Whether to sort options alphabetically (default: true) */
+  sortOptions?: boolean;
 }
 
 /**
@@ -36,6 +40,8 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   multiple = false,
   searchable = true,
   minWidth = '160px',
+  formatOption = (v) => v,
+  sortOptions = true,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -53,15 +59,21 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     return selected ? [selected as string] : [];
   }, [selected, multiple]);
 
-  // Sort options alphabetically and filter by search query
+  // Optionally sort options alphabetically and filter by search query
   const filteredOptions = useMemo(() => {
-    const sorted = [...options].sort((a, b) => a.localeCompare(b));
+    const processed = sortOptions
+      ? [...options].sort((a, b) => a.localeCompare(b))
+      : options;
     if (!searchQuery.trim()) {
-      return sorted;
+      return processed;
     }
     const query = searchQuery.toLowerCase();
-    return sorted.filter(option => option.toLowerCase().includes(query));
-  }, [options, searchQuery]);
+    // Search against both the raw value and formatted display value
+    return processed.filter(option =>
+      option.toLowerCase().includes(query) ||
+      formatOption(option).toLowerCase().includes(query)
+    );
+  }, [options, searchQuery, sortOptions, formatOption]);
 
   // Handle click outside
   useEffect(() => {
@@ -221,10 +233,10 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       return label;
     }
     if (selectedArray.length === 1) {
-      return selectedArray[0];
+      return formatOption(selectedArray[0]);
     }
-    return selectedArray.join(', ');
-  }, [selectedArray, label]);
+    return selectedArray.map(formatOption).join(', ');
+  }, [selectedArray, label, formatOption]);
 
   const hasSelection = selectedArray.length > 0;
 
@@ -247,7 +259,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         }`}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        title={hasSelection ? selectedArray.join(', ') : ''}
+        title={hasSelection ? selectedArray.map(formatOption).join(', ') : ''}
       >
         <span className="truncate max-w-[200px]">
           {displayText}
@@ -350,7 +362,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
                         )}
                       </div>
                     )}
-                    <span className="text-sm select-none">{option}</span>
+                    <span className="text-sm select-none">{formatOption(option)}</span>
                   </div>
                 );
               })

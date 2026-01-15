@@ -1,6 +1,12 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { SelectDropdown } from '../SelectDropdown';
-import { getDemoMode } from '../../services/api';
+import { TimestampPicker } from '../TimestampPicker';
+import { LOOKBACK_OPTIONS } from '../../hooks/usePersistedGraphLookback';
+
+// Create a lookup map for formatting lookback values to labels
+const LOOKBACK_LABELS: Record<string, string> = Object.fromEntries(
+  LOOKBACK_OPTIONS.map(opt => [opt.value, opt.label])
+);
 
 interface NamespaceGraphControlsProps {
   /** Current namespace */
@@ -15,6 +21,16 @@ interface NamespaceGraphControlsProps {
   availableKinds: string[];
   /** Callback when kinds change */
   onKindsChange: (kinds: string[]) => void;
+  /** Current timestamp expression (e.g., "now", "2h ago") */
+  timestampExpression: string;
+  /** Callback when timestamp changes */
+  onTimestampChange: (expression: string) => void;
+  /** Resolved timestamp for display */
+  resolvedTimestamp?: Date;
+  /** Current lookback period for spec changes */
+  lookback: string;
+  /** Callback when lookback changes */
+  onLookbackChange: (lookback: string) => void;
 }
 
 /**
@@ -28,6 +44,11 @@ export const NamespaceGraphControls: React.FC<NamespaceGraphControlsProps> = ({
   kinds,
   availableKinds,
   onKindsChange,
+  timestampExpression,
+  onTimestampChange,
+  resolvedTimestamp,
+  lookback,
+  onLookbackChange,
 }) => {
   const handleNamespaceChange = (value: string | string[] | null) => {
     if (value && typeof value === 'string') {
@@ -41,14 +62,6 @@ export const NamespaceGraphControls: React.FC<NamespaceGraphControlsProps> = ({
 
   return (
     <div className="w-full bg-[var(--color-surface-elevated)]/95 backdrop-blur border-b border-[var(--color-border-soft)] p-4 flex flex-row gap-6 items-center shadow-lg z-30 text-[var(--color-text-primary)] transition-colors duration-300">
-      {/* Demo Mode Indicator */}
-      {getDemoMode() && (
-        <div className="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center gap-2 min-w-max">
-          <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
-          <span className="text-xs font-semibold text-amber-300">Demo Mode</span>
-        </div>
-      )}
-
       {/* Namespace Dropdown */}
       <SelectDropdown
         label="Select Namespace"
@@ -67,6 +80,30 @@ export const NamespaceGraphControls: React.FC<NamespaceGraphControlsProps> = ({
         onChange={handleKindsChange}
         multiple={true}
         minWidth="200px"
+      />
+
+      {/* Timestamp Picker */}
+      <TimestampPicker
+        expression={timestampExpression}
+        onChange={onTimestampChange}
+        resolvedTimestamp={resolvedTimestamp}
+      />
+
+      {/* Lookback Dropdown */}
+      <SelectDropdown
+        label="Lookback"
+        options={LOOKBACK_OPTIONS.map(opt => opt.value)}
+        selected={lookback}
+        onChange={(value) => {
+          if (value && typeof value === 'string') {
+            onLookbackChange(value);
+          }
+        }}
+        multiple={false}
+        searchable={false}
+        sortOptions={false}
+        formatOption={(value) => LOOKBACK_LABELS[value] || value}
+        minWidth="140px"
       />
     </div>
   );

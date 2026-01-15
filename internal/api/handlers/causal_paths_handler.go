@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/moolen/spectre/internal/analysis/causal_paths"
+	"github.com/moolen/spectre/internal/analysis"
+	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
@@ -74,12 +76,37 @@ func (h *CausalPathsHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 3. Execute path discovery
 	result, err := h.discoverer.DiscoverCausalPaths(ctx, input)
 	if err != nil {
-		if span != nil {
-			span.RecordError(err)
+		// Check if this is a "no data in range" error - return 200 with hint instead of 500
+		var noDataErr *analysis.ErrNoChangeEventInRange
+		if errors.As(err, &noDataErr) {
+			// Return HTTP 200 with empty paths and a helpful hint
+			result = &causalpaths.CausalPathsResponse{
+				Paths: []causalpaths.CausalPath{},
+				Metadata: causalpaths.ResponseMetadata{
+					QueryExecutionMs: 0,
+					AlgorithmVersion: causalpaths.AlgorithmVersion,
+					ExecutedAt:       time.Now(),
+					NodesExplored:    0,
+					PathsDiscovered:  0,
+					PathsReturned:    0,
+				},
+				Hint: noDataErr.Hint(),
+			}
+			if span != nil {
+				span.SetAttributes(
+					attribute.String("hint", noDataErr.Hint()),
+					attribute.Bool("no_data_in_range", true),
+				)
+			}
+			h.logger.Debug("No data in requested time range: %v", err)
+		} else {
+			if span != nil {
+				span.RecordError(err)
+			}
+			h.logger.Error("Causal paths discovery failed: %v", err)
+			h.respondWithError(w, http.StatusInternalServerError, "DISCOVERY_FAILED", err.Error())
+			return
 		}
-		h.logger.Error("Causal paths discovery failed: %v", err)
-		h.respondWithError(w, http.StatusInternalServerError, "DISCOVERY_FAILED", err.Error())
-		return
 	}
 
 	// Add result metrics to span

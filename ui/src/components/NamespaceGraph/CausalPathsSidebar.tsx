@@ -22,6 +22,12 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
   onPathSelect,
   isLoading = false,
 }) => {
+  // Sort paths by confidence score (highest first)
+  const sortedPaths = React.useMemo(
+    () => [...causalPaths].sort((a, b) => b.confidenceScore - a.confidenceScore),
+    [causalPaths]
+  );
+
   // Get confidence color based on score
   const getConfidenceColor = (score: number): string => {
     if (score >= 0.7) return 'text-green-400 bg-green-500/20';
@@ -76,9 +82,9 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
               <span className="text-[10px] text-[var(--color-text-muted)]">Loading paths...</span>
             </div>
           </div>
-        ) : causalPaths.length > 0 ? (
+        ) : sortedPaths.length > 0 ? (
           <div className="divide-y divide-[var(--color-border-soft)]">
-            {causalPaths.map((path, index) => {
+            {sortedPaths.map((path, index) => {
               const isSelected = selectedPathId === path.id;
               const confidencePercent = Math.round(path.confidenceScore * 100);
 
@@ -112,9 +118,6 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
 
                   {/* Root cause resource */}
                   <div className="mb-2">
-                    <div className="text-[9px] text-[var(--color-text-muted)] uppercase mb-0.5">
-                      Root Cause
-                    </div>
                     <div className="text-xs font-semibold text-[var(--color-text-primary)]">
                       {path.candidateRoot.resource.kind}/{path.candidateRoot.resource.name}
                     </div>
@@ -166,50 +169,87 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
                         Path Steps
                       </div>
                       <div className="space-y-1">
-                        {path.steps.map((step, stepIndex) => (
-                          <div
-                            key={stepIndex}
-                            className="flex items-center gap-2"
-                          >
-                            {/* Step indicator */}
-                            <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
-                              stepIndex === 0
-                                ? 'bg-red-500 text-white'
-                                : stepIndex === path.steps.length - 1
-                                  ? 'bg-blue-500 text-white'
-                                  : 'bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
-                            }`}>
-                              {stepIndex + 1}
-                            </div>
+                        {path.steps.map((step, stepIndex) => {
+                          // Check if step has spec changes to display
+                          const hasSpecChanges = step.node.primaryEvent?.diff && step.node.primaryEvent.diff.length > 0;
 
-                            {/* Resource info */}
-                            <div className="flex-1 min-w-0">
-                              <div className="text-[10px] text-[var(--color-text-primary)] truncate">
-                                {step.node.resource.kind}/{step.node.resource.name}
+                          return (
+                            <div
+                              key={stepIndex}
+                              className="group relative flex items-center gap-2"
+                            >
+                              {/* Step indicator */}
+                              <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
+                                stepIndex === 0
+                                  ? 'bg-red-500 text-white'
+                                  : stepIndex === path.steps.length - 1
+                                    ? 'bg-blue-500 text-white'
+                                    : 'bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
+                              }`}>
+                                {stepIndex + 1}
                               </div>
-                              {step.edge && (
-                                <div className="text-[8px] text-[var(--color-text-muted)]">
-                                  via {step.edge.relationshipType}
-                                  <span className={`ml-1 ${
-                                    step.edge.edgeCategory === 'CAUSE_INTRODUCING'
-                                      ? 'text-orange-400'
-                                      : 'text-gray-500'
-                                  }`}>
-                                    ({step.edge.edgeCategory === 'CAUSE_INTRODUCING' ? 'causal' : 'ownership'})
-                                  </span>
+
+                              {/* Resource info */}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[10px] text-[var(--color-text-primary)] truncate flex items-center gap-1">
+                                  {step.node.resource.kind}/{step.node.resource.name}
+                                  {hasSpecChanges && (
+                                    <span className="text-[8px] px-1 py-0.5 bg-blue-500/20 text-blue-400 rounded" title="Has spec changes">
+                                      Δ
+                                    </span>
+                                  )}
+                                </div>
+                                {step.edge && (
+                                  <div className="text-[8px] text-[var(--color-text-muted)]">
+                                    via {step.edge.relationshipType}
+                                    <span className={`ml-1 ${
+                                      step.edge.edgeCategory === 'CAUSE_INTRODUCING'
+                                        ? 'text-orange-400'
+                                        : 'text-gray-500'
+                                    }`}>
+                                      ({step.edge.edgeCategory === 'CAUSE_INTRODUCING' ? 'causal' : 'ownership'})
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Anomaly indicator */}
+                              {step.node.anomalies && step.node.anomalies.length > 0 && (
+                                <div
+                                  className="w-2 h-2 rounded-full bg-red-500"
+                                  title={`${step.node.anomalies.length} anomal${step.node.anomalies.length > 1 ? 'ies' : 'y'}`}
+                                />
+                              )}
+
+                              {/* Hover tooltip for spec changes */}
+                              {hasSpecChanges && (
+                                <div className="absolute z-50 hidden group-hover:block left-0 top-full mt-1 p-2
+                                                bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)]
+                                                rounded shadow-lg max-w-xs max-h-48 overflow-auto">
+                                  <div className="text-[9px] text-[var(--color-text-muted)] uppercase mb-1">
+                                    Spec Changes
+                                  </div>
+                                  <pre className="text-[9px] font-mono whitespace-pre-wrap break-words">
+                                    {step.node.primaryEvent!.diff!.map((d, i) => {
+                                      const opColor = d.op === 'add' ? 'text-green-500' : d.op === 'remove' ? 'text-red-500' : 'text-amber-500';
+                                      return (
+                                        <div key={i} className={opColor}>
+                                          {d.op === 'add' ? '+' : d.op === 'remove' ? '-' : '~'} {d.path}: {
+                                            d.op === 'remove'
+                                              ? JSON.stringify(d.old)
+                                              : d.op === 'add'
+                                                ? JSON.stringify(d.new)
+                                                : `${JSON.stringify(d.old)} → ${JSON.stringify(d.new)}`
+                                          }
+                                        </div>
+                                      );
+                                    })}
+                                  </pre>
                                 </div>
                               )}
                             </div>
-
-                            {/* Anomaly indicator */}
-                            {step.node.anomalies && step.node.anomalies.length > 0 && (
-                              <div
-                                className="w-2 h-2 rounded-full bg-red-500"
-                                title={`${step.node.anomalies.length} anomal${step.node.anomalies.length > 1 ? 'ies' : 'y'}`}
-                              />
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       {/* Ranking breakdown */}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
@@ -36,15 +37,23 @@ type Server struct {
 	graphExecutor    api.QueryExecutor       // Graph-based query executor
 	querySource      api.TimelineQuerySource // Which executor to use for timeline queries
 	graphClient      graph.Client
-	graphPipeline    sync.Pipeline      // Graph sync pipeline for imports
-	metadataCache    *api.MetadataCache // In-memory metadata cache for fast responses
-	staticCache      *staticFileCache   // In-memory static file cache for fast UI serving
+	graphPipeline    sync.Pipeline               // Graph sync pipeline for imports
+	metadataCache    *api.MetadataCache          // In-memory metadata cache for fast responses
+	nsGraphCache     *namespacegraph.Cache       // In-memory namespace graph cache for fast responses
+	staticCache      *staticFileCache            // In-memory static file cache for fast UI serving
 	router           *http.ServeMux
 	readinessChecker ReadinessChecker
 	tracingProvider  interface {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	}
+}
+
+// NamespaceGraphCacheConfig holds configuration for the namespace graph cache
+type NamespaceGraphCacheConfig struct {
+	Enabled     bool
+	RefreshTTL  time.Duration
+	MaxMemoryMB int64
 }
 
 // NewWithStorageGraphAndPipeline creates a new API server with graph query executor and pipeline support
@@ -57,12 +66,12 @@ func NewWithStorageGraphAndPipeline(
 	graphClient graph.Client,
 	graphPipeline sync.Pipeline, // Graph pipeline for imports
 	readinessChecker ReadinessChecker,
-	demoMode bool, // Not used but kept for signature compatibility
 	tracingProvider interface {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	},
 	metadataRefreshPeriod time.Duration, // How often to refresh the metadata cache
+	nsGraphCacheConfig NamespaceGraphCacheConfig, // Namespace graph cache configuration
 ) *Server {
 	s := &Server{
 		port:             port,
@@ -90,6 +99,19 @@ func NewWithStorageGraphAndPipeline(
 		// Create cache with configurable refresh period
 		s.metadataCache = api.NewMetadataCache(metadataExecutor, s.logger, metadataRefreshPeriod)
 		s.logger.Info("Metadata cache created with refresh period %v (will initialize on server start)", metadataRefreshPeriod)
+	}
+
+	// Create namespace graph cache if enabled and graph client is available
+	if nsGraphCacheConfig.Enabled && graphClient != nil {
+		analyzer := namespacegraph.NewAnalyzer(graphClient)
+		cacheConfig := namespacegraph.CacheConfig{
+			RefreshTTL:  nsGraphCacheConfig.RefreshTTL,
+			MaxMemoryMB: nsGraphCacheConfig.MaxMemoryMB,
+		}
+		// Pass metadata cache for namespace discovery and pre-warming
+		s.nsGraphCache = namespacegraph.NewCache(cacheConfig, analyzer, s.metadataCache, s.logger)
+		s.logger.Info("Namespace graph cache created with refresh TTL %v, max memory %dMB (will initialize on server start)",
+			nsGraphCacheConfig.RefreshTTL, nsGraphCacheConfig.MaxMemoryMB)
 	}
 
 	// Register all routes and handlers
@@ -141,6 +163,18 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start namespace graph cache if available
+	if s.nsGraphCache != nil {
+		s.logger.Info("Initializing namespace graph cache...")
+		if err := s.nsGraphCache.Start(ctx); err != nil {
+			s.logger.Error("Failed to start namespace graph cache: %v", err)
+			// Don't fail server startup - cache is optional optimization
+			// Handlers will fall back to direct queries
+		} else {
+			s.logger.Info("Namespace graph cache started successfully")
+		}
+	}
+
 	// Start HTTP server in a goroutine
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -160,6 +194,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	// Stop metadata cache if running
 	if s.metadataCache != nil {
 		s.metadataCache.Stop()
+	}
+
+	// Stop namespace graph cache if running
+	if s.nsGraphCache != nil {
+		s.nsGraphCache.Stop()
 	}
 
 	// Stop HTTP server
@@ -230,4 +269,11 @@ func (s *Server) IsRunning() bool {
 // Returns the human-readable name of the API server component
 func (s *Server) Name() string {
 	return "API Server"
+}
+
+// GetNamespaceGraphCache returns the namespace graph cache for registration
+// with the event-driven invalidation system.
+// Returns nil if caching is disabled.
+func (s *Server) GetNamespaceGraphCache() *namespacegraph.Cache {
+	return s.nsGraphCache
 }

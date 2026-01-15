@@ -27,8 +27,8 @@ func NewQueryExecutor(client Client) *QueryExecutor {
 // Execute executes a timeline query against the graph database
 // This implements the same interface as storage.QueryExecutor
 func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, error) {
-	// Use ExecutePaginated with nil pagination for backward compatibility
-	result, _, err := qe.ExecutePaginated(ctx, query, nil)
+	// Use ExecutePaginated with pagination from query (or nil for defaults)
+	result, _, err := qe.ExecutePaginated(ctx, query, query.Pagination)
 	return result, err
 }
 

@@ -192,7 +192,7 @@ Response:
 **Location**: `internal/mcp/`
 
 **Responsibilities**:
-- Expose 4 investigation tools (cluster_health, resource_changes, investigate, resource_explorer)
+- Expose 3 investigation tools (cluster_health, resource_changes, investigate)
 - Provide 2 structured prompts (post-mortem analysis, live incident handling)
 - Translate natural language queries to API calls
 - Format responses for LLM consumption

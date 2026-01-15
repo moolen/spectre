@@ -102,8 +102,7 @@ const sidebars = {
           items: [
             'mcp-integration/tools-reference/cluster-health',
             'mcp-integration/tools-reference/resource-changes',
-            'mcp-integration/tools-reference/investigate',
-            'mcp-integration/tools-reference/resource-explorer',
+            'mcp-integration/tools-reference/resource-timeline',
           ],
         },
         {

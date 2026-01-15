@@ -225,13 +225,19 @@ func (e *ArgoCDApplicationExtractor) extractManagedResources(
 		targetNamespace = event.Resource.Namespace
 	}
 
-	// Query for resources with ArgoCD instance label
+	// Query for top-level resources with ArgoCD instance label
 	// Note: We query across the target namespace, not the Application's namespace
+	// IMPORTANT: Exclude resources that have owners (via OWNS edges) to avoid creating
+	// transitive MANAGES edges. For example, we want:
+	//   Application --[MANAGES]--> Deployment --[OWNS]--> ReplicaSet --[OWNS]--> Pod
+	// NOT:
+	//   Application --[MANAGES]--> Pod (bypassing the ownership chain)
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity)
 			WHERE NOT r.deleted
 			  AND r.labels CONTAINS $labelQuery
+			  AND NOT EXISTS { MATCH (:ResourceIdentity)-[:OWNS]->(r) }
 			RETURN r.uid
 		`,
 		Parameters: map[string]interface{}{

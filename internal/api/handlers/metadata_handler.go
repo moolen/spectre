@@ -58,13 +58,12 @@ func (mh *MetadataHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	startTimeNs := startTime * 1e9
 	endTimeNs := endTime * 1e9
 
-	// If cache is available and no time filtering requested, use cache
-	// Cache contains all metadata regardless of time range
-	// Note: startTime=0 and endTime=current time means "all data"
-	useCache := mh.metadataCache != nil && startTime == 0
-
-	if useCache {
-		mh.logger.Debug("Using metadata cache for request")
+	// Always try to use cache first when available
+	// Metadata (namespaces, kinds) changes infrequently, so returning cached data
+	// provides fast responses. The cache is refreshed in the background periodically.
+	// Time filtering for metadata is rarely needed since filter dropdowns need all values.
+	if mh.metadataCache != nil {
+		mh.logger.Debug("Attempting to use metadata cache")
 		cachedData, err := mh.metadataCache.Get()
 		if err == nil {
 			// Successfully got cached data - return it immediately

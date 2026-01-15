@@ -70,6 +70,11 @@ export interface ChangeEventInfo {
   timestamp: number; // Unix nanoseconds
   eventType: string; // "ADDED" | "MODIFIED" | "DELETED"
   description?: string;
+  status?: string; // "Ready" | "Warning" | "Error" | "Terminating" | "Unknown"
+  errorMessage?: string; // Human-readable error description
+  containerIssues?: string[]; // CrashLoopBackOff, ImagePullBackOff, OOMKilled
+  impactScore?: number; // 0.0-1.0 severity score
+  specChanges?: string; // Git-style unified diff of spec changes
 }
 
 /**

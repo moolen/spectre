@@ -7,6 +7,7 @@ interface DetailPanelProps {
   resource: K8sResource | null;
   selectedIndex?: number;
   onClose: () => void;
+  onAnalyzeRootCause?: () => void;
 }
 
 const DiffLineView = ({ line }: { line: DiffLine }) => {
@@ -130,7 +131,7 @@ const ConfigDiff = ({
   );
 };
 
-export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedIndex = 0, onClose }) => {
+export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedIndex = 0, onClose, onAnalyzeRootCause }) => {
   const { formatTime } = useSettings();
   const [showFullDiff, setShowFullDiff] = useState(false);
   const [width, setWidth] = useState(384); // Default w-96 = 24rem = 384px
@@ -303,9 +304,19 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedInde
         </div>
       </div>
 
-      {/* Footer Hint */}
-      <div className="p-3 bg-[var(--color-surface-secondary)] border-t border-[var(--color-border-soft)] text-center text-xs text-[var(--color-text-muted)]">
-        Use Arrow Left/Right to navigate history
+      {/* Footer with Actions */}
+      <div className="p-3 bg-[var(--color-surface-secondary)] border-t border-[var(--color-border-soft)] flex justify-between items-center">
+        <span className="text-xs text-[var(--color-text-muted)]">
+          Use Arrow Left/Right to navigate history
+        </span>
+        {onAnalyzeRootCause && (
+          <button
+            onClick={onAnalyzeRootCause}
+            className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+          >
+            Analyze Root Cause
+          </button>
+        )}
       </div>
     </div>
   );

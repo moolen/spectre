@@ -2,7 +2,6 @@ import React from 'react';
 import { FilterState, TimeRange } from '../types';
 import { TimeRangeDropdown } from './TimeRangeDropdown';
 import { SelectDropdown } from './SelectDropdown';
-import { getDemoMode } from '../services/api';
 
 interface FilterBarProps {
   filters: FilterState;
@@ -31,14 +30,6 @@ export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeR
 
   return (
     <div className="w-full bg-[var(--color-surface-elevated)]/95 backdrop-blur border-b border-[var(--color-border-soft)] p-4 flex flex-row gap-6 items-center shadow-lg z-30 text-[var(--color-text-primary)] transition-colors duration-300">
-        {/* Demo Mode Indicator */}
-        {getDemoMode() && (
-          <div className="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center gap-2 min-w-max">
-            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
-            <span className="text-xs font-semibold text-amber-300">Demo Mode</span>
-          </div>
-        )}
-
         {/* Search */}
         <div className="relative group min-w-[150px] flex-grow max-w-xl">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">

@@ -4,7 +4,10 @@ import { useMetadata } from '../hooks/useMetadata';
 import { useNamespaceGraph } from '../hooks/useNamespaceGraph';
 import { usePersistedFilters } from '../hooks/usePersistedFilters';
 import { usePersistedGraphNamespace } from '../hooks/usePersistedGraphNamespace';
+import { usePersistedGraphTimestamp } from '../hooks/usePersistedGraphTimestamp';
+import { usePersistedGraphLookback } from '../hooks/usePersistedGraphLookback';
 import { useSettings } from '../hooks/useSettings';
+import { parseTimeExpression, formatDateTimeForDisplay } from '../utils/timeParsing';
 import { D3GraphNode } from '../types/namespaceGraph';
 import {
   NamespaceGraph,
@@ -135,9 +138,24 @@ export default function NamespaceGraphPage() {
   // Use persisted filters for kind selection
   const { kinds: selectedKinds, setKinds } = usePersistedFilters(availableKinds, [], defaultKinds);
 
-  // Memoize timestamp to prevent infinite re-renders
-  // Only update when namespace changes (forces a fresh snapshot)
-  const graphTimestamp = useMemo(() => new Date(), [selectedNamespace]);
+  // Use persisted timestamp expression
+  const { expression: timestampExpression, setExpression: setTimestampExpression } = usePersistedGraphTimestamp();
+
+  // Use persisted lookback period for spec changes
+  const { lookback, setLookback } = usePersistedGraphLookback();
+
+  // Parse timestamp expression to Date, re-evaluate when expression or namespace changes
+  const graphTimestamp = useMemo(() => {
+    const parsed = parseTimeExpression(timestampExpression);
+    if (parsed) {
+      return parsed;
+    }
+    // Fallback to "now" if expression is invalid
+    return new Date();
+  }, [timestampExpression, selectedNamespace]);
+
+  // Determine if we're in live mode (viewing "now")
+  const isLiveMode = timestampExpression.toLowerCase().trim() === 'now';
 
   // Auto-select first namespace when namespaces load and none is selected
   useEffect(() => {
@@ -153,6 +171,7 @@ export default function NamespaceGraphPage() {
     timestamp: graphTimestamp,
     includeAnomalies: true,
     includeCausalPaths: true,
+    lookback,
     enabled: !!selectedNamespace,
     pageSize: 50,
     autoLoad: true,
@@ -314,6 +333,11 @@ export default function NamespaceGraphPage() {
         kinds={selectedKinds}
         availableKinds={availableKinds}
         onKindsChange={setKinds}
+        timestampExpression={timestampExpression}
+        onTimestampChange={setTimestampExpression}
+        resolvedTimestamp={graphTimestamp}
+        lookback={lookback}
+        onLookbackChange={setLookback}
       />
 
       {/* Main content area */}
@@ -343,6 +367,15 @@ export default function NamespaceGraphPage() {
                 onFitToView={() => graphRef.current?.fitToView()}
                 onResetZoom={() => graphRef.current?.resetZoom()}
               />
+              {/* Overlay loading indicator when refreshing with existing data */}
+              {isLoading && data && (
+                <div className="absolute inset-0 bg-[var(--color-app-bg)]/60 backdrop-blur-sm flex items-center justify-center z-20">
+                  <div className="flex flex-col items-center gap-3 p-4 rounded-lg bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] shadow-xl">
+                    <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm text-[var(--color-text-muted)]">Updating graph...</span>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -391,7 +424,17 @@ export default function NamespaceGraphPage() {
               Loading page {pagesLoaded + 1}...
             </span>
           )}
-          <span className="ml-auto">Query: {filteredData.metadata.queryExecutionMs}ms</span>
+          <span className="ml-auto flex items-center gap-3">
+            {isLiveMode ? (
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                Live
+              </span>
+            ) : (
+              <span>Snapshot: {formatDateTimeForDisplay(graphTimestamp)}</span>
+            )}
+            <span>Query: {filteredData.metadata.queryExecutionMs}ms</span>
+          </span>
         </div>
       )}
     </div>

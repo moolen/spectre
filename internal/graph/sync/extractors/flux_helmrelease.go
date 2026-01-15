@@ -259,14 +259,20 @@ func (e *FluxHelmReleaseExtractor) extractManagedResources(
 		}
 	}
 
-	// Find resources in target namespace or cluster-scoped (excluding the HelmRelease itself)
+	// Find top-level resources in target namespace or cluster-scoped (excluding the HelmRelease itself)
 	// Cluster-scoped resources (ClusterRoles, ClusterRoleBindings, CRDs, etc.) have empty namespace
+	// IMPORTANT: Exclude resources that have owners (via OWNS edges) to avoid creating
+	// transitive MANAGES edges. For example, we want:
+	//   HelmRelease --[MANAGES]--> Deployment --[OWNS]--> ReplicaSet --[OWNS]--> Pod
+	// NOT:
+	//   HelmRelease --[MANAGES]--> Pod (bypassing the ownership chain)
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity)
 			WHERE (r.namespace = $namespace OR r.namespace = "")
 			  AND NOT r.deleted
 			  AND r.uid <> $helmReleaseUID
+			  AND NOT EXISTS { MATCH (:ResourceIdentity)-[:OWNS]->(r) }
 			RETURN r
 			LIMIT 500
 		`,

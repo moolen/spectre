@@ -650,7 +650,6 @@ curl -X POST http://spectre-mcp:8081/mcp \
 
 - [resource_changes Tool](./resource-changes) - Identify what changed during incidents
 - [investigate Tool](./investigate) - Deep dive into specific resources
-- [resource_explorer Tool](./resource-explorer) - Browse and discover resources
 - [Post-Mortem Prompt](../prompts-reference/post-mortem) - Uses cluster_health as step 2
 - [Live Incident Prompt](../prompts-reference/live-incident) - Uses cluster_health for triage
 - [Getting Started](../getting-started) - Setup and first investigation

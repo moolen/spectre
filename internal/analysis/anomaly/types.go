@@ -40,11 +40,11 @@ type AnomalyNode struct {
 type Anomaly struct {
 	Node      AnomalyNode            `json:"node"`
 	Category  AnomalyCategory        `json:"category"`
-	Type      string                 `json:"type"`      // Specific anomaly type
+	Type      string                 `json:"type"` // Specific anomaly type
 	Severity  Severity               `json:"severity"`
 	Timestamp time.Time              `json:"timestamp"`
-	Summary   string                 `json:"summary"`   // Human-readable description
-	Details   map[string]interface{} `json:"details"`   // Anomaly-specific data
+	Summary   string                 `json:"summary"` // Human-readable description
+	Details   map[string]interface{} `json:"details"` // Anomaly-specific data
 }
 
 // AnomalyResponse is the API response structure
@@ -59,6 +59,7 @@ type ResponseMetadata struct {
 	TimeWindow      TimeWindow `json:"time_window"`
 	NodesAnalyzed   int        `json:"nodes_analyzed"`
 	ExecutionTimeMs int64      `json:"execution_time_ms"`
+	Hint            string     `json:"hint,omitempty"` // Hint when no data in range but earlier data exists
 }
 
 // TimeWindow represents the analysis time range

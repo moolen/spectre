@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
@@ -19,6 +20,7 @@ func RegisterHandlers(
 	graphClient graph.Client,
 	graphPipeline sync.Pipeline,
 	metadataCache *api.MetadataCache,
+	namespaceGraphCache *namespacegraph.Cache,
 	logger *logging.Logger,
 	tracer trace.Tracer,
 	withMethod func(string, http.HandlerFunc) http.HandlerFunc,
@@ -93,9 +95,15 @@ func RegisterHandlers(
 
 	// Register namespace graph handler if graph client is available
 	if graphClient != nil {
-		namespaceGraphHandler := NewNamespaceGraphHandler(graphClient, logger, tracer)
+		var namespaceGraphHandler *NamespaceGraphHandler
+		if namespaceGraphCache != nil {
+			namespaceGraphHandler = NewNamespaceGraphHandlerWithCache(graphClient, namespaceGraphCache, logger, tracer)
+			logger.Info("Registered /v1/namespace-graph endpoint (with caching)")
+		} else {
+			namespaceGraphHandler = NewNamespaceGraphHandler(graphClient, logger, tracer)
+			logger.Info("Registered /v1/namespace-graph endpoint")
+		}
 		router.HandleFunc("/v1/namespace-graph", withMethod(http.MethodGet, namespaceGraphHandler.Handle))
-		logger.Info("Registered /v1/namespace-graph endpoint")
 	}
 
 	// Register import handler if graph pipeline is available

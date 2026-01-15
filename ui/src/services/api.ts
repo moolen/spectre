@@ -18,7 +18,6 @@ import {
   transformK8sEventsWithErrorHandling,
   transformStatusSegmentsWithErrorHandling,
 } from './dataTransformer';
-import { buildDemoMetadata, buildDemoTimelineResponse, TimelineFilters } from '../demo/demoDataService';
 import { NamespaceGraphRequest, NamespaceGraphResponse } from '../types/namespaceGraph';
 import { isHumanFriendlyExpression, parseTimeExpression } from '../utils/timeParsing';
 import { TimelineGrpcService, TimelineStreamResult as GrpcStreamResult } from './timeline-grpc';
@@ -30,11 +29,16 @@ export interface ApiTimelineStreamResult {
   isComplete: boolean;
 }
 
-// Check if demo mode is enabled at build time
-const BUILD_TIME_DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
-
-// Runtime demo mode detection (fetched from backend /health endpoint)
-let runtimeDemoMode: boolean | null = null;
+export interface TimelineFilters {
+  namespace?: string;
+  namespaces?: string[];
+  kind?: string;
+  kinds?: string[];
+  group?: string;
+  version?: string;
+  pageSize?: number;
+  cursor?: string;
+}
 
 export interface ApiMetadata {
   namespaces: string[];
@@ -154,27 +158,6 @@ class ApiClient {
     endTime: string | number,
     filters?: TimelineFilters
   ): Promise<K8sResource[]> {
-    // In demo mode, use demo data directly
-    if (getDemoMode()) {
-      console.log('[Demo Mode] getTimeline called with:', { startTime, endTime, filters });
-      // Handle human-friendly expressions in demo mode
-      let startSeconds: number;
-      if (typeof startTime === 'string' && isHumanFriendlyExpression(startTime)) {
-        const parsedDate = parseTimeExpression(startTime);
-        if (!parsedDate) {
-          throw new Error(`Unable to parse timestamp value: ${startTime}`);
-        }
-        startSeconds = Math.floor(parsedDate.getTime() / 1000);
-      } else {
-        startSeconds = normalizeToSeconds(startTime);
-      }
-      const response = buildDemoTimelineResponse(startSeconds, filters);
-      console.log('[Demo Mode] buildDemoTimelineResponse returned:', { count: response.count, resourceCount: response.resources.length });
-      const transformed = transformSearchResponse(response);
-      console.log('[Demo Mode] transformSearchResponse returned:', { count: transformed.length });
-      return transformed;
-    }
-
     const params = new URLSearchParams();
 
     // If startTime/endTime are strings that look like human-friendly expressions, pass them through
@@ -199,27 +182,8 @@ class ApiClient {
     if (filters?.version) params.append('version', filters.version);
 
     const endpoint = `/v1/timeline?${params.toString()}`;
-    try {
-      const response = await this.request<SearchResponse>(endpoint);
-      return transformSearchResponse(response);
-    } catch (error) {
-      // Only fall back to demo data for network/timeout errors, not validation errors
-      if (error instanceof Error && (
-        error.message.includes('Network error') ||
-        error.message.includes('timeout') ||
-        error.message.includes('Failed to fetch') ||
-        error.message.includes('<!DOCTYPE') ||
-        error.message.includes('404')
-      )) {
-        console.warn('Falling back to embedded demo timeline data:', error);
-        // For fallback, we need numeric timestamps
-        const startSeconds = Math.floor(Date.now() / 1000) - 3600; // Default 1h ago
-        const fallbackResponse = buildDemoTimelineResponse(startSeconds, filters);
-        return transformSearchResponse(fallbackResponse);
-      }
-      // Re-throw validation and other errors
-      throw error;
-    }
+    const response = await this.request<SearchResponse>(endpoint);
+    return transformSearchResponse(response);
   }
 
   /**
@@ -233,26 +197,6 @@ class ApiClient {
     onChunk?: (result: ApiTimelineStreamResult) => void,
     visibleCount: number = 50
   ): Promise<K8sResource[]> {
-    // Demo mode not supported for gRPC yet - fall back to REST
-    if (getDemoMode()) {
-      console.log('[Demo Mode] getTimelineGrpc falling back to REST API');
-      const resources = await this.getTimeline(startTime, endTime, filters);
-
-      // If a chunk callback was provided, call it with all resources at once
-      if (onChunk) {
-        console.log('[Demo Mode] Calling onChunk with', resources.length, 'resources');
-        onChunk({
-          resources,
-          isComplete: true,
-          metadata: {
-            totalCount: resources.length,
-          },
-        });
-      }
-
-      return resources;
-    }
-
     // Normalize timestamps to seconds
     const startSeconds = typeof startTime === 'string' && isHumanFriendlyExpression(startTime)
       ? Math.floor((parseTimeExpression(startTime)?.getTime() ?? Date.now()) / 1000)
@@ -362,40 +306,6 @@ class ApiClient {
     startTime?: string | number,
     endTime?: string | number
   ): Promise<MetadataResponse> {
-    // In demo mode, use demo data directly
-    if (getDemoMode()) {
-      let startSeconds: number;
-      if (startTime !== undefined) {
-        if (typeof startTime === 'string' && isHumanFriendlyExpression(startTime)) {
-          const parsedDate = parseTimeExpression(startTime);
-          if (!parsedDate) {
-            throw new Error(`Unable to parse timestamp value: ${startTime}`);
-          }
-          startSeconds = Math.floor(parsedDate.getTime() / 1000);
-        } else {
-          startSeconds = normalizeToSeconds(startTime);
-        }
-      } else {
-        startSeconds = Math.floor(Date.now() / 1000) - 2 * 60 * 60;
-      }
-
-      let endSeconds: number;
-      if (endTime !== undefined) {
-        if (typeof endTime === 'string' && isHumanFriendlyExpression(endTime)) {
-          const parsedDate = parseTimeExpression(endTime);
-          if (!parsedDate) {
-            throw new Error(`Unable to parse timestamp value: ${endTime}`);
-          }
-          endSeconds = Math.floor(parsedDate.getTime() / 1000);
-        } else {
-          endSeconds = normalizeToSeconds(endTime);
-        }
-      } else {
-        endSeconds = startSeconds + 2 * 60 * 60;
-      }
-      return buildDemoMetadata(startSeconds, endSeconds);
-    }
-
     const params = new URLSearchParams();
 
     if (startTime !== undefined) {
@@ -420,23 +330,7 @@ class ApiClient {
       ? `/v1/metadata?${params.toString()}`
       : '/v1/metadata';
 
-    try {
-      return await this.request<MetadataResponse>(endpoint);
-    } catch (error) {
-      // Only fall back to demo data for network/timeout errors
-      if (error instanceof Error && (
-        error.message.includes('Network error') ||
-        error.message.includes('timeout') ||
-        error.message.includes('Failed to fetch')
-      )) {
-        console.warn('Falling back to embedded demo metadata:', error);
-        const fallbackStart = Math.floor(Date.now() / 1000) - 2 * 60 * 60;
-        const fallbackEnd = fallbackStart + 2 * 60 * 60;
-        return buildDemoMetadata(fallbackStart, fallbackEnd);
-      }
-      // Re-throw validation and other errors
-      throw error;
-    }
+    return await this.request<MetadataResponse>(endpoint);
   }
 
   /**
@@ -449,11 +343,6 @@ class ApiClient {
     clusterId?: string;
     instanceId?: string;
   }): Promise<Blob> {
-    // Export is not available in demo mode
-    if (getDemoMode()) {
-      throw new Error('Export is not available in demo mode');
-    }
-    
     // Convert human-readable time strings to Unix timestamps (seconds)
     const fromDate = parseTimeExpression(options.from);
     const toDate = parseTimeExpression(options.to);
@@ -527,10 +416,6 @@ class ApiClient {
       overwrite?: boolean;
     }
   ): Promise<{ total_events: number; imported_files: number }> {
-    // Import is not available in demo mode
-    if (getDemoMode()) {
-      throw new Error('Import is not available in demo mode');
-    }
     const params = new URLSearchParams();
     if (options?.validate !== undefined) {
       params.append('validate', options.validate.toString());
@@ -594,12 +479,6 @@ class ApiClient {
    * Returns resource graph with optional anomalies and causal paths
    */
   async getNamespaceGraph(params: NamespaceGraphRequest): Promise<NamespaceGraphResponse> {
-    // Demo mode support - import dynamically to avoid circular dependency
-    if (getDemoMode()) {
-      const { buildDemoNamespaceGraphResponse } = await import('../demo/demoDataService');
-      return buildDemoNamespaceGraphResponse(params.namespace, params.timestamp);
-    }
-
     const queryParams = new URLSearchParams();
     queryParams.append('namespace', params.namespace);
     queryParams.append('timestamp', params.timestamp.toString());
@@ -639,53 +518,6 @@ export const apiClient = new ApiClient({
 
 // Export for testing/mocking
 export { ApiClient };
-
-/**
- * Detect if the backend is running in demo mode
- * Checks the /health endpoint for the demo flag
- */
-export async function detectDemoMode(): Promise<boolean> {
-  // Return cached result if already detected
-  if (runtimeDemoMode !== null) {
-    return runtimeDemoMode;
-  }
-
-  // Fall back to build-time setting if runtime detection fails
-  if (BUILD_TIME_DEMO_MODE) {
-    runtimeDemoMode = true;
-    return true;
-  }
-
-  try {
-    const response = await fetch('/health', {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!response.ok) {
-      return BUILD_TIME_DEMO_MODE;
-    }
-
-    const data = await response.json() as { demo?: boolean };
-    runtimeDemoMode = data.demo ?? false;
-    return runtimeDemoMode;
-  } catch (error) {
-    // If health check fails, fall back to build-time setting
-    runtimeDemoMode = BUILD_TIME_DEMO_MODE;
-    return runtimeDemoMode;
-  }
-}
-
-/**
- * Get the current demo mode status (without additional fetch)
- * Use detectDemoMode() to perform detection first
- */
-export function getDemoMode(): boolean {
-  if (runtimeDemoMode !== null) {
-    return runtimeDemoMode;
-  }
-  return BUILD_TIME_DEMO_MODE;
-}
 
 function normalizeToSeconds(value: string | number): number {
   if (typeof value === 'number') {

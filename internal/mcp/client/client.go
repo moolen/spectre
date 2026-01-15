@@ -31,7 +31,8 @@ func NewSpectreClient(baseURL string) *SpectreClient {
 }
 
 // QueryTimeline queries the timeline API
-func (c *SpectreClient) QueryTimeline(startTime, endTime int64, filters map[string]string) (*TimelineResponse, error) {
+// pageSize of 0 or negative uses the default (100), use a large value like 10000 for unlimited
+func (c *SpectreClient) QueryTimeline(startTime, endTime int64, filters map[string]string, pageSize int) (*TimelineResponse, error) {
 	q := url.Values{}
 	q.Set("start", fmt.Sprintf("%d", startTime))
 	q.Set("end", fmt.Sprintf("%d", endTime))
@@ -40,6 +41,11 @@ func (c *SpectreClient) QueryTimeline(startTime, endTime int64, filters map[stri
 		if v != "" {
 			q.Set(k, v)
 		}
+	}
+
+	// Add page_size parameter if specified
+	if pageSize > 0 {
+		q.Set("page_size", fmt.Sprintf("%d", pageSize))
 	}
 
 	url := fmt.Sprintf("%s/v1/timeline?%s", c.baseURL, q.Encode())
@@ -146,4 +152,76 @@ func (c *SpectreClient) PingWithRetry(logger Logger) error {
 	}
 
 	return fmt.Errorf("failed to connect to Spectre API after %d attempts: %w", maxRetries, lastErr)
+}
+
+// DetectAnomalies queries the anomalies API to detect anomalies in a resource's causal subgraph
+func (c *SpectreClient) DetectAnomalies(resourceUID string, start, end int64) (*AnomalyResponse, error) {
+	q := url.Values{}
+	q.Set("resourceUID", resourceUID)
+	q.Set("start", fmt.Sprintf("%d", start))
+	q.Set("end", fmt.Sprintf("%d", end))
+
+	reqURL := fmt.Sprintf("%s/v1/anomalies?%s", c.baseURL, q.Encode())
+	resp, err := c.httpClient.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query anomalies: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("anomalies API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result AnomalyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode anomalies response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// QueryCausalPaths queries the causal paths API
+func (c *SpectreClient) QueryCausalPaths(resourceUID string, failureTimestamp int64, lookbackMinutes, maxDepth, maxPaths int) (*CausalPathsResponse, error) {
+	q := url.Values{}
+	q.Set("resourceUID", resourceUID)
+	q.Set("failureTimestamp", fmt.Sprintf("%d", failureTimestamp))
+
+	// Convert lookback minutes to duration string (e.g., "10m")
+	if lookbackMinutes > 0 {
+		q.Set("lookback", fmt.Sprintf("%dm", lookbackMinutes))
+	}
+	if maxDepth > 0 {
+		q.Set("maxDepth", fmt.Sprintf("%d", maxDepth))
+	}
+	if maxPaths > 0 {
+		q.Set("maxPaths", fmt.Sprintf("%d", maxPaths))
+	}
+
+	reqURL := fmt.Sprintf("%s/v1/causal-paths?%s", c.baseURL, q.Encode())
+	resp, err := c.httpClient.Get(reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query causal paths: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("causal paths API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result CausalPathsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode causal paths response: %w", err)
+	}
+
+	return &result, nil
 }

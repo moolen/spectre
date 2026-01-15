@@ -7,7 +7,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/mcp/client"
 	"github.com/moolen/spectre/internal/mcp/tools"
 )
@@ -21,17 +20,15 @@ type Tool interface {
 type SpectreServer struct {
 	mcpServer     *server.MCPServer
 	spectreClient *SpectreClient
-	graphClient   graph.Client // Optional graph client for graph-based tools
 	tools         map[string]Tool
 	version       string
 }
 
 // ServerOptions configures the Spectre MCP server
 type ServerOptions struct {
-	SpectreURL  string
-	Version     string
-	GraphConfig *graph.ClientConfig // Optional graph database config
-	Logger      client.Logger       // Optional logger for retry messages
+	SpectreURL string
+	Version    string
+	Logger     client.Logger // Optional logger for retry messages
 }
 
 // NewSpectreServer creates a new Spectre MCP server
@@ -63,20 +60,6 @@ func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
 		spectreClient: spectreClient,
 		tools:         make(map[string]Tool),
 		version:       opts.Version,
-	}
-
-	// Optionally initialize graph client
-	if opts.GraphConfig != nil {
-		graphClient := graph.NewClient(*opts.GraphConfig)
-		// Test connection
-		ctx := context.Background()
-		if err := graphClient.Connect(ctx); err != nil {
-			return nil, fmt.Errorf("failed to connect to graph database: %w", err)
-		}
-		if err := graphClient.Ping(ctx); err != nil {
-			return nil, fmt.Errorf("failed to ping graph database: %w", err)
-		}
-		s.graphClient = graphClient
 	}
 
 	// Register tools
@@ -118,54 +101,55 @@ func (s *SpectreServer) registerTools() {
 		},
 	)
 
-	// Register resource_changes tool
+	// Register resource_timeline_changes tool
 	s.registerTool(
-		"resource_changes",
-		"Get summarized resource changes with categorization and impact scoring for LLM analysis",
-		tools.NewResourceChangesTool(s.spectreClient),
+		"resource_timeline_changes",
+		"Get semantic field-level changes for resources by UID with noise filtering and status condition summarization",
+		tools.NewResourceTimelineChangesTool(s.spectreClient),
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
+				"resource_uids": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "List of resource UIDs to query (required, max 10)",
+				},
 				"start_time": map[string]interface{}{
 					"type":        "integer",
-					"description": "Start timestamp (Unix seconds or milliseconds)",
+					"description": "Optional: start timestamp (Unix seconds or milliseconds). Default: 1 hour ago",
 				},
 				"end_time": map[string]interface{}{
 					"type":        "integer",
-					"description": "End timestamp (Unix seconds or milliseconds)",
+					"description": "Optional: end timestamp (Unix seconds or milliseconds). Default: now",
 				},
-				"kinds": map[string]interface{}{
-					"type":        "string",
-					"description": "Optional: comma-separated resource kinds to filter (e.g., 'Pod,Deployment')",
+				"include_full_snapshot": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Optional: include first segment's full resource JSON (default: false)",
 				},
-				"impact_threshold": map[string]interface{}{
-					"type":        "number",
-					"description": "Optional: minimum impact score 0-1.0 to include in results",
-				},
-				"max_resources": map[string]interface{}{
+				"max_changes_per_resource": map[string]interface{}{
 					"type":        "integer",
-					"description": "Optional: max resources to return (default 50, max 500)",
+					"description": "Optional: max changes per resource (default 50, max 200)",
 				},
 			},
-			"required": []string{"start_time", "end_time"},
+			"required": []string{"resource_uids"},
 		},
 	)
 
-	// Register investigate tool
+	// Register resource_timeline tool
 	s.registerTool(
-		"investigate",
-		"Get detailed investigation evidence with status timeline, events, and investigation prompts for RCA",
-		tools.NewInvestigateTool(s.spectreClient),
+		"resource_timeline",
+		"Get resource timeline with status segments, events, and transitions for root cause analysis",
+		tools.NewResourceTimelineTool(s.spectreClient),
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"resource_kind": map[string]interface{}{
 					"type":        "string",
-					"description": "Resource kind to investigate (e.g., 'Pod', 'Deployment')",
+					"description": "Resource kind to get timeline for (e.g., 'Pod', 'Deployment')",
 				},
 				"resource_name": map[string]interface{}{
 					"type":        "string",
-					"description": "Optional: specific resource name to investigate, or '*' for all",
+					"description": "Optional: specific resource name, or '*' for all",
 				},
 				"namespace": map[string]interface{}{
 					"type":        "string",
@@ -179,113 +163,72 @@ func (s *SpectreServer) registerTools() {
 					"type":        "integer",
 					"description": "End timestamp (Unix seconds or milliseconds)",
 				},
-				"investigation_type": map[string]interface{}{
-					"type":        "string",
-					"description": "Optional: 'incident' for live response, 'post-mortem' for historical analysis, or 'auto' to detect",
-				},
-				"max_investigations": map[string]interface{}{
+				"max_results": map[string]interface{}{
 					"type":        "integer",
-					"description": "Optional: max resources to investigate when using '*' (default 20, max 100)",
+					"description": "Optional: max resources to return when using '*' (default 20, max 100)",
 				},
 			},
 			"required": []string{"resource_kind", "start_time", "end_time"},
 		},
 	)
 
-	// Register resource_explorer tool
+	// Register detect_anomalies tool
 	s.registerTool(
-		"resource_explorer",
-		"Browse and discover resources in the cluster with filtering and status overview",
-		tools.NewResourceExplorerTool(s.spectreClient),
+		"detect_anomalies",
+		"Detect anomalies in a resource's causal subgraph including crash loops, config errors, state transitions, and networking issues",
+		tools.NewDetectAnomaliesTool(s.spectreClient),
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"kind": map[string]interface{}{
+				"resource_uid": map[string]interface{}{
 					"type":        "string",
-					"description": "Optional: filter by resource kind (e.g., 'Pod', 'Deployment')",
+					"description": "The UID of the resource to analyze for anomalies",
 				},
-				"namespace": map[string]interface{}{
-					"type":        "string",
-					"description": "Optional: filter by Kubernetes namespace",
-				},
-				"status": map[string]interface{}{
-					"type":        "string",
-					"description": "Optional: filter by status (Ready, Warning, Error, Terminating)",
-				},
-				"time": map[string]interface{}{
+				"start_time": map[string]interface{}{
 					"type":        "integer",
-					"description": "Optional: snapshot at specific time (Unix seconds), 0 or omit for latest",
+					"description": "Start timestamp (Unix seconds or milliseconds)",
 				},
-				"max_resources": map[string]interface{}{
+				"end_time": map[string]interface{}{
 					"type":        "integer",
-					"description": "Optional: max resources to return (default 200, max 1000)",
+					"description": "End timestamp (Unix seconds or milliseconds)",
 				},
 			},
-			"required": []string{},
+			"required": []string{"resource_uid", "start_time", "end_time"},
 		},
 	)
 
-	// Register graph-based tools if graph client is available
-	if s.graphClient != nil {
-		// Register find_root_cause tool
-		s.registerTool(
-			"find_root_cause",
-			"Trace backward from a failing resource to identify likely root cause using graph-based causality analysis",
-			tools.NewGraphFindRootCauseTool(s.graphClient),
-			map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"resourceUID": map[string]interface{}{
-						"type":        "string",
-						"description": "The UID of the resource that failed",
-					},
-					"failureTimestamp": map[string]interface{}{
-						"type":        "integer",
-						"description": "Unix timestamp (seconds or nanoseconds) when the failure occurred",
-					},
-					"maxDepth": map[string]interface{}{
-						"type":        "integer",
-						"description": "Optional: maximum depth to traverse causality chain (default: 5)",
-					},
-					"minConfidence": map[string]interface{}{
-						"type":        "number",
-						"description": "Optional: minimum confidence score 0.0-1.0 for causality links (default: 0.6)",
-					},
+	// Register causal_paths tool
+	s.registerTool(
+		"causal_paths",
+		"Discover causal paths from root causes to a failing resource using graph-based causality analysis. Returns ranked paths with confidence scores.",
+		tools.NewCausalPathsTool(s.spectreClient),
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"resourceUID": map[string]interface{}{
+					"type":        "string",
+					"description": "The UID of the resource that failed (symptom)",
 				},
-				"required": []string{"resourceUID", "failureTimestamp"},
-			},
-		)
-
-		// Register calculate_blast_radius tool
-		s.registerTool(
-			"calculate_blast_radius",
-			"Determine which resources are affected by a change to a given resource using graph relationship traversal",
-			tools.NewGraphBlastRadiusTool(s.graphClient),
-			map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"resourceUID": map[string]interface{}{
-						"type":        "string",
-						"description": "The UID of the resource that changed",
-					},
-					"changeTimestamp": map[string]interface{}{
-						"type":        "integer",
-						"description": "Unix timestamp (seconds or nanoseconds) when the change occurred",
-					},
-					"timeWindowMs": map[string]interface{}{
-						"type":        "integer",
-						"description": "Optional: time window in milliseconds to look for impacts (default: 300000 = 5 minutes)",
-					},
-					"relationshipTypes": map[string]interface{}{
-						"type":        "array",
-						"items":       map[string]interface{}{"type": "string"},
-						"description": "Optional: relationship types to traverse (default: [\"OWNS\", \"SELECTS\", \"SCHEDULED_ON\"])",
-					},
+				"failureTimestamp": map[string]interface{}{
+					"type":        "integer",
+					"description": "Unix timestamp (seconds or nanoseconds) when the failure occurred",
 				},
-				"required": []string{"resourceUID", "changeTimestamp"},
+				"lookbackMinutes": map[string]interface{}{
+					"type":        "integer",
+					"description": "Optional: how far back to search for causes in minutes (default: 10)",
+				},
+				"maxDepth": map[string]interface{}{
+					"type":        "integer",
+					"description": "Optional: maximum depth to traverse causality chain (default: 5, max: 10)",
+				},
+				"maxPaths": map[string]interface{}{
+					"type":        "integer",
+					"description": "Optional: maximum number of causal paths to return (default: 5, max: 20)",
+				},
 			},
-		)
-	}
+			"required": []string{"resourceUID", "failureTimestamp"},
+		},
+	)
 }
 
 func (s *SpectreServer) registerTool(name, description string, tool Tool, inputSchema map[string]interface{}) {

@@ -142,29 +142,22 @@ func (s *MCPStdioStage) tools_are_listed() *MCPStdioStage {
 
 func (s *MCPStdioStage) four_tools_are_available() *MCPStdioStage {
 	s.require.NotNil(s.tools, "tools must be listed first")
-	// Tools can be 4 (base tools only) or 6 (with graph tools)
-	// Graph tools are conditional on --graph-enabled flag
+	// Should have 5 tools (base tools including causal_paths)
 	toolCount := len(s.tools)
-	s.assert.True(toolCount == 4 || toolCount == 6, 
-		"should have 4 tools (base) or 6 tools (with graph), got %d", toolCount)
+	s.assert.Equal(5, toolCount, "should have 5 tools, got %d", toolCount)
 	return s
 }
 
 func (s *MCPStdioStage) expected_tools_are_present() *MCPStdioStage {
 	s.require.NotNil(s.tools, "tools must be listed first")
 
-	// Base tools that should always be present
+	// Base tools that should always be present (including causal_paths which now uses HTTP API)
 	baseTools := map[string]bool{
-		"cluster_health":    false,
-		"resource_changes":  false,
-		"investigate":       false,
-		"resource_explorer": false,
-	}
-
-	// Graph tools are conditional (only present if --graph-enabled)
-	graphTools := map[string]bool{
-		"find_root_cause":       false,
-		"calculate_blast_radius": false,
+		"cluster_health":            false,
+		"resource_timeline_changes": false,
+		"resource_timeline":         false,
+		"detect_anomalies":          false,
+		"causal_paths":              false,
 	}
 
 	// Convert tools to JSON and back to get proper types
@@ -181,28 +174,12 @@ func (s *MCPStdioStage) expected_tools_are_present() *MCPStdioStage {
 			if _, expected := baseTools[name]; expected {
 				baseTools[name] = true
 			}
-			if _, expected := graphTools[name]; expected {
-				graphTools[name] = true
-			}
 		}
 	}
 
 	// Assert all base tools are present
 	for toolName, found := range baseTools {
 		s.assert.True(found, "expected base tool %s to be present", toolName)
-	}
-
-	// Graph tools are optional - just log if present
-	hasGraphTools := false
-	for toolName, found := range graphTools {
-		if found {
-			hasGraphTools = true
-			s.t.Logf("✓ Graph tool %s is available", toolName)
-		}
-	}
-	
-	if !hasGraphTools {
-		s.t.Log("ℹ Graph tools not available (--graph-enabled not set)")
 	}
 
 	return s

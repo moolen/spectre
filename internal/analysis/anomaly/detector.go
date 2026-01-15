@@ -3,6 +3,7 @@ package anomaly
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -74,6 +75,21 @@ func (d *AnomalyDetector) Detect(ctx context.Context, input DetectInput) (*Anoma
 
 	result, err := d.analyzer.Analyze(ctx, analyzeInput)
 	if err != nil {
+		// Check if this is a "no data in range" error with a hint
+		var noDataErr *analysis.ErrNoChangeEventInRange
+		if errors.As(err, &noDataErr) {
+			// Return success with empty anomalies and a hint
+			d.logger.Debug("No data in requested time range, returning hint: %s", noDataErr.Hint())
+			return &AnomalyResponse{
+				Anomalies: []Anomaly{},
+				Metadata: ResponseMetadata{
+					ResourceUID: input.ResourceUID,
+					TimeWindow:  timeWindow,
+					Hint:        noDataErr.Hint(),
+				},
+			}, nil
+		}
+
 		d.logger.Error("Failed to analyze causal graph: %v", err)
 		return nil, fmt.Errorf("failed to analyze causal graph: %w", err)
 	}

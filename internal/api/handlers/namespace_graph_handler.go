@@ -14,18 +14,42 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// TimestampBucketSize is the bucket size for timestamp normalization.
+// All timestamps are rounded down to the nearest 30-second boundary.
+// This ensures all requests within a 30s window get identical responses.
+const TimestampBucketSize = 30 * time.Second
+
+// bucketTimestamp rounds a timestamp (in nanoseconds) down to the nearest bucket boundary.
+// This normalizes "now" requests so multiple clients get the same cached snapshot.
+func bucketTimestamp(ts int64) int64 {
+	bucketNs := int64(TimestampBucketSize)
+	return (ts / bucketNs) * bucketNs
+}
+
 // NamespaceGraphHandler handles /v1/namespace-graph requests
 type NamespaceGraphHandler struct {
 	analyzer  *namespacegraph.Analyzer
+	cache     *namespacegraph.Cache
 	logger    *logging.Logger
 	validator *api.Validator
 	tracer    trace.Tracer
 }
 
-// NewNamespaceGraphHandler creates a new handler
+// NewNamespaceGraphHandler creates a new handler without caching
 func NewNamespaceGraphHandler(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
 	return &NamespaceGraphHandler{
 		analyzer:  namespacegraph.NewAnalyzer(graphClient),
+		logger:    logger,
+		validator: api.NewValidator(),
+		tracer:    tracer,
+	}
+}
+
+// NewNamespaceGraphHandlerWithCache creates a new handler with caching enabled
+func NewNamespaceGraphHandlerWithCache(graphClient graph.Client, cache *namespacegraph.Cache, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
+	return &NamespaceGraphHandler{
+		analyzer:  namespacegraph.NewAnalyzer(graphClient),
+		cache:     cache,
 		logger:    logger,
 		validator: api.NewValidator(),
 		tracer:    tracer,
@@ -77,8 +101,15 @@ func (h *NamespaceGraphHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	h.logger.Debug("Processing namespace graph request: namespace=%s, timestamp=%d",
 		input.Namespace, input.Timestamp)
 
-	// 3. Execute analysis
-	result, err := h.analyzer.Analyze(ctx, input)
+	// 3. Execute analysis (use cache if available)
+	var result *namespacegraph.NamespaceGraphResponse
+
+	if h.cache != nil {
+		result, err = h.cache.Analyze(ctx, input)
+	} else {
+		result, err = h.analyzer.Analyze(ctx, input)
+	}
+
 	if err != nil {
 		if span != nil {
 			span.RecordError(err)
@@ -95,6 +126,8 @@ func (h *NamespaceGraphHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			attribute.Int("edges_returned", result.Metadata.EdgeCount),
 			attribute.Int64("query_execution_ms", result.Metadata.QueryExecutionMs),
 			attribute.Bool("has_more", result.Metadata.HasMore),
+			attribute.Bool("cache_hit", result.Metadata.Cached),
+			attribute.Int64("cache_age_ms", result.Metadata.CacheAge),
 		)
 	}
 
@@ -126,6 +159,10 @@ func (h *NamespaceGraphHandler) parseInput(r *http.Request) (namespacegraph.Anal
 	if err != nil {
 		return namespacegraph.AnalyzeInput{}, api.NewValidationError("invalid timestamp: %v", err)
 	}
+
+	// Bucket timestamp to 30s intervals for cache efficiency
+	// All requests within a 30s window get the same cached snapshot
+	timestamp = bucketTimestamp(timestamp)
 
 	// Optional: includeAnomalies (default false)
 	includeAnomalies := false

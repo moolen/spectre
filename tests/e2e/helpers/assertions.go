@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analysis"
+	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -308,4 +309,101 @@ func getKeys(m map[string]bool) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// ==================== Causal Paths Assertions ====================
+
+// RequireCausalPathsNonEmpty verifies that the causal paths response has at least one path.
+func RequireCausalPathsNonEmpty(t *testing.T, resp *causalpaths.CausalPathsResponse) {
+	require.NotNil(t, resp, "Causal paths response should not be nil")
+	require.NotEmpty(t, resp.Paths, "Causal paths should not be empty")
+	require.Greater(t, resp.Metadata.NodesExplored, 0, "Should have explored at least one node")
+}
+
+// RequireCausalPathsHasKinds verifies that the causal paths contain nodes of all specified kinds.
+func RequireCausalPathsHasKinds(t *testing.T, resp *causalpaths.CausalPathsResponse, expectedKinds []string) {
+	require.NotNil(t, resp, "Causal paths response should not be nil")
+
+	kindSet := make(map[string]bool)
+	for _, path := range resp.Paths {
+		for _, step := range path.Steps {
+			kindSet[step.Node.Resource.Kind] = true
+		}
+	}
+
+	for _, expectedKind := range expectedKinds {
+		require.True(t, kindSet[expectedKind], "Paths should contain node of kind %s. Found kinds: %v", expectedKind, getKeys(kindSet))
+	}
+}
+
+// FindCausalPathNodeByKind finds a node in the causal paths by its resource kind.
+// Returns nil if not found.
+func FindCausalPathNodeByKind(resp *causalpaths.CausalPathsResponse, kind string) *causalpaths.PathNode {
+	if resp == nil {
+		return nil
+	}
+
+	for _, path := range resp.Paths {
+		for i := range path.Steps {
+			if path.Steps[i].Node.Resource.Kind == kind {
+				return &path.Steps[i].Node
+			}
+		}
+	}
+	return nil
+}
+
+// RequireCausalPathsHasEdgeBetweenKinds verifies that paths contain an edge of the specified
+// relationship type between nodes of the given kinds.
+func RequireCausalPathsHasEdgeBetweenKinds(t *testing.T, resp *causalpaths.CausalPathsResponse, fromKind, relType, toKind string) {
+	require.NotNil(t, resp, "Causal paths response should not be nil")
+
+	found := false
+	for _, path := range resp.Paths {
+		for i := 1; i < len(path.Steps); i++ {
+			prevStep := path.Steps[i-1]
+			step := path.Steps[i]
+
+			if prevStep.Node.Resource.Kind == fromKind &&
+				step.Node.Resource.Kind == toKind &&
+				step.Edge != nil &&
+				step.Edge.RelationshipType == relType {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	require.True(t, found, "Paths should contain edge %s -[%s]-> %s", fromKind, relType, toKind)
+}
+
+// GetCausalPathRootCause returns the root cause (first node in first path) from causal paths.
+func GetCausalPathRootCause(resp *causalpaths.CausalPathsResponse) *causalpaths.PathNode {
+	if resp == nil || len(resp.Paths) == 0 {
+		return nil
+	}
+	return &resp.Paths[0].CandidateRoot
+}
+
+// RequireCausalPathRootCauseKind verifies that the root cause is of the expected kind.
+func RequireCausalPathRootCauseKind(t *testing.T, resp *causalpaths.CausalPathsResponse, expectedKind string) {
+	require.NotNil(t, resp, "Causal paths response should not be nil")
+	require.NotEmpty(t, resp.Paths, "Should have at least one path")
+
+	rootCause := &resp.Paths[0].CandidateRoot
+	require.Equal(t, expectedKind, rootCause.Resource.Kind,
+		"Root cause should be %s, got %s", expectedKind, rootCause.Resource.Kind)
+}
+
+// RequireCausalPathConfidenceAbove verifies the top path's confidence score is above the threshold.
+func RequireCausalPathConfidenceAbove(t *testing.T, resp *causalpaths.CausalPathsResponse, threshold float64) {
+	require.NotNil(t, resp, "Causal paths response should not be nil")
+	require.NotEmpty(t, resp.Paths, "Should have at least one path")
+
+	confidence := resp.Paths[0].ConfidenceScore
+	require.GreaterOrEqual(t, confidence, threshold,
+		"Confidence score should be >= %.2f (got %.2f)", threshold, confidence)
 }

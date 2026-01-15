@@ -12,11 +12,6 @@ import { userEvent } from '@testing-library/user-event';
 import { FilterBar } from './FilterBar';
 import { FilterState } from '../types';
 
-// Mock the services/api module
-vi.mock('../services/api', () => ({
-  getDemoMode: vi.fn(() => false),
-}));
-
 // Mock child components that aren't under test
 vi.mock('./TimeRangeDropdown', () => ({
   TimeRangeDropdown: () => <div data-testid="time-range-dropdown">TimeRangeDropdown</div>,

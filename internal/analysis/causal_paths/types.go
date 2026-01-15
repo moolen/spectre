@@ -20,6 +20,8 @@ type CausalPathsInput struct {
 type CausalPathsResponse struct {
 	Paths    []CausalPath     `json:"paths"`
 	Metadata ResponseMetadata `json:"metadata"`
+	// Hint provides guidance when no paths are found (e.g., data exists at a different time range)
+	Hint string `json:"hint,omitempty"`
 }
 
 // CausalPath represents a single causal path from root cause to symptom

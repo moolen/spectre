@@ -46,7 +46,8 @@ func (r *ExtractorRegistry) Extract(ctx context.Context, event models.Event) ([]
 			continue
 		}
 
-		r.logger.Debug("Applying extractor %s to %s/%s", extractor.Name(), event.Resource.Kind, event.Resource.Name)
+		r.logger.Debug("Applying extractor %s to %s/%s/%s",
+			extractor.Name(), event.Resource.Namespace, event.Resource.Kind, event.Resource.Name)
 
 		edges, err := extractor.ExtractRelationships(ctx, event, r.lookup)
 		if err != nil {
@@ -55,7 +56,10 @@ func (r *ExtractorRegistry) Extract(ctx context.Context, event models.Event) ([]
 			continue
 		}
 
-		r.logger.Debug("Extractor %s produced %d edges", extractor.Name(), len(edges))
+		if len(edges) > 0 {
+			r.logger.Debug("Extractor %s produced %d edges for %s/%s",
+				extractor.Name(), len(edges), event.Resource.Kind, event.Resource.Name)
+		}
 		allEdges = append(allEdges, edges...)
 	}
 

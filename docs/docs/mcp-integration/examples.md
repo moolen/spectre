@@ -935,7 +935,6 @@ You: That analysis seems incomplete. Can you investigate further?
 Claude: You're right. Let me use additional tools...
         [Calls investigate tool for related resources]
         [Calls resource_changes to find correlated events]
-        [Calls resource_explorer to find similar issues]
 ```
 
 ### Claude Doesn't Use Tools

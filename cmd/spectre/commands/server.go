@@ -16,6 +16,7 @@ import (
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/config"
 	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/graph/reconciler"
 	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/graphservice"
 	"github.com/moolen/spectre/internal/importexport"
@@ -54,6 +55,14 @@ var (
 	auditLogPath string
 	// Metadata cache configuration
 	metadataCacheRefreshSeconds int
+	// Namespace graph cache configuration
+	namespaceGraphCacheEnabled        bool
+	namespaceGraphCacheRefreshSeconds int
+	namespaceGraphCacheMemoryMB       int
+	// Reconciler configuration
+	reconcilerEnabled      bool
+	reconcilerIntervalMins int
+	reconcilerBatchSize    int
 )
 
 var serverCmd = &cobra.Command{
@@ -98,6 +107,22 @@ func init() {
 	// Metadata cache configuration
 	serverCmd.Flags().IntVar(&metadataCacheRefreshSeconds, "metadata-cache-refresh-seconds", 30,
 		"Metadata cache refresh period in seconds (default: 30)")
+
+	// Namespace graph cache configuration
+	serverCmd.Flags().BoolVar(&namespaceGraphCacheEnabled, "namespace-graph-cache-enabled", true,
+		"Enable namespace graph caching for fast responses (default: true)")
+	serverCmd.Flags().IntVar(&namespaceGraphCacheRefreshSeconds, "namespace-graph-cache-refresh-seconds", 120,
+		"Namespace graph cache refresh period in seconds (default: 120)")
+	serverCmd.Flags().IntVar(&namespaceGraphCacheMemoryMB, "namespace-graph-cache-memory-mb", 256,
+		"Maximum memory for namespace graph cache in MB (default: 256)")
+
+	// Reconciler configuration
+	serverCmd.Flags().BoolVar(&reconcilerEnabled, "reconciler-enabled", true,
+		"Enable graph reconciler to detect missed DELETE events (default: true)")
+	serverCmd.Flags().IntVar(&reconcilerIntervalMins, "reconciler-interval-minutes", 5,
+		"Reconciliation interval in minutes (default: 5)")
+	serverCmd.Flags().IntVar(&reconcilerBatchSize, "reconciler-batch-size", 100,
+		"Maximum resources to check per reconciliation cycle (default: 100)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -371,11 +396,22 @@ func runServer(cmd *cobra.Command, args []string) {
 		graphClient,
 		graphPipeline,
 		readinessChecker,
-		false, // No demo mode
 		tracingProvider,
 		time.Duration(metadataCacheRefreshSeconds)*time.Second,
+		apiserver.NamespaceGraphCacheConfig{
+			Enabled:     namespaceGraphCacheEnabled,
+			RefreshTTL:  time.Duration(namespaceGraphCacheRefreshSeconds) * time.Second,
+			MaxMemoryMB: int64(namespaceGraphCacheMemoryMB),
+		},
 	)
 	logger.Info("API server component created (graph-only)")
+
+	// Register namespace graph cache with GraphService for event-driven invalidation
+	// This enables the cache to be notified when events affect specific namespaces
+	if graphServiceComponent != nil && apiComponent.GetNamespaceGraphCache() != nil {
+		graphServiceComponent.RegisterCacheInvalidator(apiComponent.GetNamespaceGraphCache())
+		logger.Info("Registered namespace graph cache for event-driven invalidation")
+	}
 
 	// Register components
 	// Only register watcher if it was initialized
@@ -390,6 +426,36 @@ func runServer(cmd *cobra.Command, args []string) {
 	if err := manager.Register(graphServiceComponent); err != nil {
 		logger.Error("Failed to register graph service component: %v", err)
 		HandleError(err, "Graph service registration error")
+	}
+
+	// Initialize and register reconciler if enabled
+	// Requires both graph and watcher to be available
+	if reconcilerEnabled && graphClient != nil && watcherComponent != nil {
+		reconcilerConfig := reconciler.Config{
+			Enabled:   true,
+			Interval:  time.Duration(reconcilerIntervalMins) * time.Minute,
+			BatchSize: reconcilerBatchSize,
+		}
+
+		restConfig := watcherComponent.GetRestConfig()
+		if restConfig != nil {
+			reconcilerComponent, err := reconciler.New(reconcilerConfig, graphClient, restConfig)
+			if err != nil {
+				logger.Error("Failed to create reconciler: %v", err)
+				// Don't fail startup, just log the error
+			} else {
+				if err := manager.Register(reconcilerComponent, graphServiceComponent); err != nil {
+					logger.Error("Failed to register reconciler component: %v", err)
+				} else {
+					logger.Info("Reconciler component registered (interval: %dm, batch: %d)",
+						reconcilerIntervalMins, reconcilerBatchSize)
+				}
+			}
+		} else {
+			logger.Warn("Cannot initialize reconciler: watcher REST config not available")
+		}
+	} else if reconcilerEnabled {
+		logger.Info("Reconciler disabled: requires both graph and watcher to be enabled")
 	}
 
 	if err := manager.Register(apiComponent); err != nil {

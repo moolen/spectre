@@ -300,6 +300,100 @@ func (f *ResourceFetcher) FetchLatestEvents(
 	return events, nil
 }
 
+// specChangeResult holds spec data for diff computation
+type specChangeResult struct {
+	ResourceUID     string
+	LatestData      []byte
+	EarliestData    []byte
+	LatestTimestamp int64
+}
+
+// FetchSpecChanges fetches spec data for resources within a lookback window to compute diffs.
+// It returns the earliest and latest spec data within the window for each resource.
+func (f *ResourceFetcher) FetchSpecChanges(
+	ctx context.Context,
+	resourceUIDs []string,
+	timestamp int64,
+	lookbackNs int64,
+) (map[string]*specChangeResult, error) {
+	if len(resourceUIDs) == 0 {
+		return make(map[string]*specChangeResult), nil
+	}
+
+	startTimestamp := timestamp - lookbackNs
+
+	// Query to get earliest and latest events within the lookback window
+	// We need the data field to compute the diff
+	cypherQuery := `
+		UNWIND $uids AS uid
+		MATCH (r:ResourceIdentity {uid: uid})-[:CHANGED]->(e:ChangeEvent)
+		WHERE e.timestamp >= $startTimestamp AND e.timestamp <= $timestamp
+		WITH r.uid as resourceUID, e
+		ORDER BY e.timestamp ASC
+		WITH resourceUID, collect(e) as events
+		WHERE size(events) > 0
+		RETURN resourceUID,
+		       events[0].data as earliestData,
+		       events[-1].data as latestData,
+		       events[-1].timestamp as latestTimestamp
+	`
+
+	query := graph.GraphQuery{
+		Timeout: QueryTimeoutMs,
+		Query:   cypherQuery,
+		Parameters: map[string]interface{}{
+			"uids":           resourceUIDs,
+			"timestamp":      timestamp,
+			"startTimestamp": startTimestamp,
+		},
+	}
+
+	result, err := f.graphClient.ExecuteQuery(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch spec changes: %w", err)
+	}
+
+	specChanges := make(map[string]*specChangeResult)
+	for _, row := range result.Rows {
+		if len(row) < 4 {
+			continue
+		}
+
+		resourceUID, _ := row[0].(string)
+		if resourceUID == "" {
+			continue
+		}
+
+		sc := &specChangeResult{
+			ResourceUID: resourceUID,
+		}
+
+		// Parse earliest data
+		if data, ok := row[1].(string); ok {
+			sc.EarliestData = []byte(data)
+		}
+
+		// Parse latest data
+		if data, ok := row[2].(string); ok {
+			sc.LatestData = []byte(data)
+		}
+
+		// Parse latest timestamp
+		if ts, ok := row[3].(int64); ok {
+			sc.LatestTimestamp = ts
+		} else if ts, ok := row[3].(float64); ok {
+			sc.LatestTimestamp = int64(ts)
+		}
+
+		// Only include if we have both data points to compare
+		if len(sc.EarliestData) > 0 && len(sc.LatestData) > 0 {
+			specChanges[resourceUID] = sc
+		}
+	}
+
+	return specChanges, nil
+}
+
 // parseResourceResults parses the query result into resourceResult structs
 func parseResourceResults(result *graph.QueryResult) []resourceResult {
 	resources := make([]resourceResult, 0, len(result.Rows))

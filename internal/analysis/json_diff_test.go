@@ -43,9 +43,9 @@ func TestComputeJSONDiff(t *testing.T) {
 			newJSON: `{"spec":{"template":{"spec":{"containers":[{"name":"app","image":"v2"}]}}}}`,
 			expected: []EventDiff{
 				{
-					Path:     "spec.template.spec.containers",
-					OldValue: []any{map[string]any{"name": "app", "image": "v1"}},
-					NewValue: []any{map[string]any{"name": "app", "image": "v2"}},
+					Path:     "spec.template.spec.containers[name=app].image",
+					OldValue: "v1",
+					NewValue: "v2",
 					Op:       "replace",
 				},
 			},

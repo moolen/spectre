@@ -64,16 +64,19 @@ func (mc *MetadataCache) Stop() {
 }
 
 // Get returns the cached metadata
-// If the cache is empty or has an error, it returns the error
+// It prefers returning stale cached data over returning an error,
+// since metadata changes infrequently and stale data is better than slow responses
 func (mc *MetadataCache) Get() (*models.MetadataResponse, error) {
 	mc.mu.RLock()
 	defer mc.mu.RUnlock()
 
-	if mc.lastErr != nil {
-		return nil, mc.lastErr
-	}
-
+	// Return cached data if available, even if last refresh failed
+	// Stale metadata is acceptable since it changes infrequently
 	if mc.metadata == nil {
+		// No cached data at all - return appropriate error
+		if mc.lastErr != nil {
+			return nil, mc.lastErr
+		}
 		return nil, ErrCacheNotReady
 	}
 

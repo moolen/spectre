@@ -4,6 +4,8 @@ import { Toaster } from 'sonner';
 import TimelinePage from './pages/TimelinePage';
 import SettingsPage from './pages/SettingsPage';
 import NamespaceGraphPage from './pages/NamespaceGraphPage';
+import AgentsPage from './pages/AgentsPage';
+import IntegrationsPage from './pages/IntegrationsPage';
 import Sidebar from './components/Sidebar';
 
 const appContainerStyles: React.CSSProperties = {
@@ -12,14 +14,6 @@ const appContainerStyles: React.CSSProperties = {
   backgroundColor: '#111111',
   overflow: 'hidden',
 };
-
-// Placeholder components for routes that don't exist yet
-const PlaceholderPage = ({ title }: { title: string }) => (
-  <div style={{ padding: '24px', color: '#ffffff' }}>
-    <h1 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '16px' }}>{title}</h1>
-    <p style={{ color: '#a0a0a0' }}>This page is under construction.</p>
-  </div>
-);
 
 function App() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
@@ -47,8 +41,8 @@ function App() {
         <Routes>
           <Route path="/" element={<TimelinePage />} />
           <Route path="/graph" element={<NamespaceGraphPage />} />
-          <Route path="/agents" element={<PlaceholderPage title="Agents" />} />
-          <Route path="/dashboards" element={<PlaceholderPage title="Dashboards" />} />
+          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/integrations" element={<IntegrationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>

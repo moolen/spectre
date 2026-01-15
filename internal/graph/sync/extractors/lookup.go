@@ -46,6 +46,7 @@ func (l *graphClientLookup) FindResourceByNamespace(ctx context.Context, namespa
 	// 1. Causal path analysis tracing from deleted resources
 	// 2. ResourceDeleted anomaly detection on referenced resources
 	// 3. Understanding "resource was deleted causing failure" scenarios
+
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity)

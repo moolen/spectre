@@ -36,3 +36,16 @@ func ApplyDefaultLimit(limit, defaultLimit, maxLimit int) int {
 	}
 	return limit
 }
+
+// TruncateMessage truncates a message keeping prefix and suffix with an omission marker.
+// If the message is shorter than prefixLen + suffixLen + len(omitMarker), it is returned as-is.
+func TruncateMessage(msg string, prefixLen, suffixLen int) string {
+	const omitMarker = "[..omitted..]"
+	minLen := prefixLen + suffixLen + len(omitMarker)
+
+	if len(msg) <= minLen {
+		return msg
+	}
+
+	return msg[:prefixLen] + omitMarker + msg[len(msg)-suffixLen:]
+}

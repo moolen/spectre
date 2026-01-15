@@ -220,7 +220,7 @@ export function useNamespaceGraph(options: UseNamespaceGraphOptions): UseNamespa
       clearAutoLoadTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [namespace, timestampNanos, enabled]);
+  }, [namespace, timestampNanos, lookback, enabled]);
 
   // Auto-load effect - watches for cursor changes and loads more
   useEffect(() => {

@@ -77,7 +77,7 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	)
 	defer span.End()
 
-	query, err := th.parseQuery(r)
+	query, pagination, err := th.parseQueryWithPagination(r)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Invalid request")
@@ -85,6 +85,9 @@ func (th *TimelineHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		th.respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
+
+	// Attach pagination to query so executor can use it
+	query.Pagination = pagination
 
 	// Add query parameters as span attributes
 	span.SetAttributes(
@@ -241,14 +244,14 @@ func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *model
 	eventsByResource := make(map[string][]models.Event)
 	queryStartTime := queryResult.Events[0].Timestamp
 	queryEndTime := queryResult.Events[0].Timestamp
-	
+
 	for _, event := range queryResult.Events {
 		uid := event.Resource.UID
 		if uid == "" {
 			continue
 		}
 		eventsByResource[uid] = append(eventsByResource[uid], event)
-		
+
 		// Track actual time range from events
 		if event.Timestamp < queryStartTime {
 			queryStartTime = event.Timestamp
@@ -273,9 +276,16 @@ func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *model
 
 		firstEvent := events[0]
 		resourceID := fmt.Sprintf("%s/%s/%s/%s", firstEvent.Resource.Group, firstEvent.Resource.Version, firstEvent.Resource.Kind, uid)
-		
+
+		// Extract UUID from resourceID (last segment after splitting by /)
+		// Format: "group/version/kind/uuid" or already just "uuid"
+		resourceUUID := resourceID
+		if parts := strings.Split(resourceID, "/"); len(parts) > 0 {
+			resourceUUID = parts[len(parts)-1]
+		}
+
 		resource := &models.Resource{
-			ID:        resourceID,
+			ID:        resourceUUID,
 			Group:     firstEvent.Resource.Group,
 			Version:   firstEvent.Resource.Version,
 			Kind:      firstEvent.Resource.Kind,
@@ -289,7 +299,7 @@ func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *model
 		for i, event := range events {
 			// Infer status from resource data
 			status := analyzer.InferStatusFromResource(event.Resource.Kind, event.Data, string(event.Type))
-			
+
 			// Determine segment end time
 			var endTime int64
 			if i < len(events)-1 {
@@ -314,7 +324,7 @@ func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *model
 			} else {
 				// Log warning if data is missing for pod resources (needed for container issue detection)
 				if strings.EqualFold(event.Resource.Kind, "Pod") {
-					th.logger.Warn("Pod event missing ResourceData in timeline handler: %s/%s (event ID: %s, has %d events total)", 
+					th.logger.Warn("Pod event missing ResourceData in timeline handler: %s/%s (event ID: %s, has %d events total)",
 						event.Resource.Namespace, event.Resource.Name, event.ID, len(events))
 				}
 			}
@@ -367,14 +377,10 @@ func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *model
 			// Find matching resource by UID
 			var targetResource *models.Resource
 			for _, resource := range resourceMap {
-				// Extract UID from resource ID (format: group/version/kind/uid)
-				parts := strings.Split(resource.ID, "/")
-				if len(parts) >= 4 {
-					resourceUID := parts[3]
-					if resourceUID == event.Resource.InvolvedObjectUID {
-						targetResource = resource
-						break
-					}
+				// resource.ID is the UID directly (set at line 288)
+				if resource.ID == event.Resource.InvolvedObjectUID {
+					targetResource = resource
+					break
 				}
 			}
 

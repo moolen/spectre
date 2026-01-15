@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/moolen/spectre/internal/analysis"
 	"github.com/moolen/spectre/internal/analysis/anomaly"
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
 	"github.com/moolen/spectre/internal/graph"
@@ -17,7 +18,6 @@ type Analyzer struct {
 	resourceFetcher     *ResourceFetcher
 	relationshipFetcher *RelationshipFetcher
 	anomalyDetector     *anomaly.AnomalyDetector
-	lightweightDetector *LightweightAnomalyDetector
 	pathDiscoverer      *causalpaths.PathDiscoverer
 	logger              *logging.Logger
 }
@@ -29,7 +29,6 @@ func NewAnalyzer(graphClient graph.Client) *Analyzer {
 		resourceFetcher:     NewResourceFetcher(graphClient),
 		relationshipFetcher: NewRelationshipFetcher(graphClient),
 		anomalyDetector:     anomaly.NewDetector(graphClient),
-		lightweightDetector: NewLightweightAnomalyDetector(),
 		pathDiscoverer:      causalpaths.NewPathDiscoverer(graphClient),
 		logger:              logging.GetLogger("namespacegraph.analyzer"),
 	}
@@ -106,6 +105,32 @@ func (a *Analyzer) Analyze(ctx context.Context, input AnalyzeInput) (*NamespaceG
 
 	a.logger.Info("Fetched %d latest events for %d resources", len(latestEvents), len(allUIDs))
 
+	// Step 3.5: Fetch spec changes within lookback window
+	lookbackNs := input.Lookback.Nanoseconds()
+	specChanges, err := a.resourceFetcher.FetchSpecChanges(ctx, allUIDs, input.Timestamp, lookbackNs)
+	if err != nil {
+		a.logger.Warn("Failed to fetch spec changes: %v", err)
+		specChanges = make(map[string]*specChangeResult)
+	}
+
+	// Compute diffs and attach to latest events
+	for uid, sc := range specChanges {
+		if event, ok := latestEvents[uid]; ok {
+			diffs, err := analysis.ComputeJSONDiff(sc.EarliestData, sc.LatestData)
+			if err != nil {
+				a.logger.Debug("Failed to compute diff for %s: %v", uid, err)
+				continue
+			}
+			// Filter to only include spec changes (exclude status, managedFields, etc.)
+			diffs = analysis.FilterSpecOnly(diffs)
+			if len(diffs) > 0 {
+				event.SpecChanges = analysis.FormatUnifiedDiff(diffs)
+			}
+		}
+	}
+
+	a.logger.Debug("Computed spec changes for %d resources", len(specChanges))
+
 	// Step 4: Fetch relationships between all resources
 	edgeResults, err := a.relationshipFetcher.FetchRelationships(ctx, allUIDs)
 	if err != nil {
@@ -119,11 +144,16 @@ func (a *Analyzer) Analyze(ctx context.Context, input AnalyzeInput) (*NamespaceG
 	nodes := a.buildNodes(allResources, latestEvents)
 	edges := a.buildEdges(edgeResults)
 
-	// Step 6: Lightweight anomaly detection (uses already-fetched data, no extra queries)
+	// Step 6: Full-fledged anomaly detection (runs per-resource anomaly analysis)
 	var anomalies []anomaly.Anomaly
 	if input.IncludeAnomalies {
-		anomalies = a.lightweightDetector.DetectFromNodes(nodes, input.Timestamp)
-		a.logger.Debug("Detected %d anomalies (lightweight)", len(anomalies))
+		anomalies, err = a.detectAnomalies(ctx, allResources, input)
+		if err != nil {
+			a.logger.Warn("Failed to detect anomalies: %v", err)
+			// Continue without anomalies
+			anomalies = nil
+		}
+		a.logger.Debug("Detected %d anomalies", len(anomalies))
 	}
 
 	// Step 7: Optional causal path discovery (only if anomalies found and requested)
@@ -160,10 +190,27 @@ func (a *Analyzer) Analyze(ctx context.Context, input AnalyzeInput) (*NamespaceG
 }
 
 // buildNodes converts resource results to Node structs
+// It filters out resources that have been deleted (latest event type is DELETE)
 func (a *Analyzer) buildNodes(resources []resourceResult, latestEvents map[string]*ChangeEventInfo) []Node {
 	nodes := make([]Node, 0, len(resources))
 
 	for _, r := range resources {
+		// Check if the latest event is a DELETE - if so, skip this resource
+		// This provides a safety filter in case the r.deleted flag wasn't set correctly
+		// (e.g., due to race conditions or incomplete data)
+		if event, ok := latestEvents[r.UID]; ok && event.EventType == "DELETE" {
+			a.logger.Debug("Skipping deleted resource: %s/%s (latest event is DELETE at %d)",
+				r.Kind, r.Name, event.Timestamp)
+			continue
+		}
+
+		// Also skip if the resource is marked as deleted in the graph
+		if r.Deleted {
+			a.logger.Debug("Skipping deleted resource: %s/%s (marked as deleted at %d)",
+				r.Kind, r.Name, r.DeletedAt)
+			continue
+		}
+
 		node := Node{
 			UID:       r.UID,
 			Kind:      r.Kind,

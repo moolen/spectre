@@ -13,13 +13,14 @@ import (
 
 // Service manages the graph reasoning layer
 type Service struct {
-	config    ServiceConfig
-	client    graph.Client
-	schema    *graph.Schema
-	pipeline  sync.Pipeline
-	listener  sync.EventListener
-	rebuilder *sync.Rebuilder
-	logger    *logging.Logger
+	config         ServiceConfig
+	client         graph.Client
+	schema         *graph.Schema
+	pipeline       sync.Pipeline
+	listener       sync.EventListener
+	rebuilder      *sync.Rebuilder
+	changeDetector *sync.NamespaceChangeDetector
+	logger         *logging.Logger
 
 	// Status
 	initialized bool
@@ -60,14 +61,23 @@ func NewService(config ServiceConfig) *Service {
 	client := graph.NewClient(config.GraphConfig)
 	pipeline := sync.NewPipeline(config.PipelineConfig, client)
 	listener := sync.NewEventListener(config.PipelineConfig)
+	logger := logging.GetLogger("graph.service")
+
+	// Create change detector for event-driven cache invalidation
+	changeDetector := sync.NewNamespaceChangeDetector(
+		sync.DefaultNamespaceChangeDetectorConfig(),
+		client,
+		logging.GetLogger("graph.change_detector"),
+	)
 
 	return &Service{
-		config:   config,
-		client:   client,
-		schema:   graph.NewSchema(client),
-		pipeline: pipeline,
-		listener: listener,
-		logger:   logging.GetLogger("graph.service"),
+		config:         config,
+		client:         client,
+		schema:         graph.NewSchema(client),
+		pipeline:       pipeline,
+		listener:       listener,
+		changeDetector: changeDetector,
+		logger:         logger,
 	}
 }
 
@@ -166,6 +176,12 @@ func (s *Service) Start(ctx context.Context) error {
 			s.logger.Info("Graph rebuild on start is disabled (storage package removed - graph starts empty)")
 		}
 
+	// Start change detector for event-driven cache invalidation
+	if s.changeDetector != nil {
+		s.changeDetector.Start(ctx)
+		s.logger.Info("Namespace change detector started")
+	}
+
 	// Start consuming batches
 	go s.consumeBatches(ctx)
 
@@ -181,6 +197,11 @@ func (s *Service) Stop(ctx context.Context) error {
 	}
 
 	s.logger.Info("Stopping graph service")
+
+	// Stop change detector first (stops watching for events)
+	if s.changeDetector != nil {
+		s.changeDetector.Stop()
+	}
 
 	// Stop listener
 	if err := s.listener.Stop(ctx); err != nil {
@@ -247,6 +268,13 @@ func (s *Service) consumeBatches(ctx context.Context) {
 				s.logger.Error("Failed to process batch %s: %v", batch.BatchID, err)
 				// Continue processing - don't fail entire service
 			}
+
+			// Notify change detector for event-driven cache invalidation
+			// This happens AFTER pipeline processing so the graph is up-to-date
+			// when caches query for related namespaces
+			if s.changeDetector != nil {
+				s.changeDetector.OnEventBatch(ctx, batch.Events)
+			}
 		}
 	}
 }
@@ -297,4 +325,13 @@ type ServiceStats struct {
 // Name returns the component name for lifecycle management
 func (s *Service) Name() string {
 	return "graph"
+}
+
+// RegisterCacheInvalidator registers a CacheInvalidator to receive
+// event-driven invalidation notifications from the NamespaceChangeDetector.
+// This should be called after the GraphService is created but before Start().
+func (s *Service) RegisterCacheInvalidator(invalidator sync.CacheInvalidator) {
+	if s.changeDetector != nil {
+		s.changeDetector.Subscribe(invalidator)
+	}
 }

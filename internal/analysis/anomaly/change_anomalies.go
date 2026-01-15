@@ -192,9 +192,7 @@ func (d *ChangeAnomalyDetector) detectSpecificChanges(input DetectorInput, event
 					Timestamp: event.Timestamp,
 					Summary:   "Node taint added",
 					Details: map[string]interface{}{
-						"path":      diff.Path,
-						"new_value": diff.NewValue,
-						"operation": diff.Op,
+						"unified_diff": analysis.FormatValueDiff(diff.Path, diff.OldValue, diff.NewValue),
 					},
 				})
 			}
@@ -251,10 +249,7 @@ func (d *ChangeAnomalyDetector) detectSpecificChanges(input DetectorInput, event
 				Timestamp: event.Timestamp,
 				Summary:   "Container image changed",
 				Details: map[string]interface{}{
-					"path":      diff.Path,
-					"old_value": diff.OldValue,
-					"new_value": diff.NewValue,
-					"operation": diff.Op,
+					"unified_diff": analysis.FormatValueDiff(diff.Path, diff.OldValue, diff.NewValue),
 				},
 			})
 		}
@@ -286,10 +281,7 @@ func (d *ChangeAnomalyDetector) detectSpecificChanges(input DetectorInput, event
 				Timestamp: event.Timestamp,
 				Summary:   "Container resource limits/requests changed",
 				Details: map[string]interface{}{
-					"path":      diff.Path,
-					"old_value": diff.OldValue,
-					"new_value": diff.NewValue,
-					"operation": diff.Op,
+					"unified_diff": analysis.FormatValueDiff(diff.Path, diff.OldValue, diff.NewValue),
 				},
 			})
 		}
@@ -318,10 +310,7 @@ func extractReplicaChangeDetails(diffs []analysis.EventDiff) map[string]interfac
 
 	for _, diff := range diffs {
 		if strings.Contains(diff.Path, "replicas") || strings.Contains(diff.Path, "Replicas") {
-			details["path"] = diff.Path
-			details["old_value"] = diff.OldValue
-			details["new_value"] = diff.NewValue
-			details["operation"] = diff.Op
+			details["unified_diff"] = analysis.FormatValueDiff(diff.Path, diff.OldValue, diff.NewValue)
 		}
 	}
 
@@ -502,9 +491,7 @@ func (d *ChangeAnomalyDetector) detectHelmReleaseChanges(input DetectorInput, ev
 				Timestamp: event.Timestamp,
 				Summary:   fmt.Sprintf("HelmRelease rolled back from %s to %s", oldVersion, newVersion),
 				Details: map[string]interface{}{
-					"old_version": oldVersion,
-					"new_version": newVersion,
-					"event_type":  event.EventType,
+					"unified_diff": analysis.FormatValueDiff("version", oldVersion, newVersion),
 				},
 			})
 		} else {
@@ -516,9 +503,7 @@ func (d *ChangeAnomalyDetector) detectHelmReleaseChanges(input DetectorInput, ev
 				Timestamp: event.Timestamp,
 				Summary:   fmt.Sprintf("HelmRelease upgraded from %s to %s", oldVersion, newVersion),
 				Details: map[string]interface{}{
-					"old_version": oldVersion,
-					"new_version": newVersion,
-					"event_type":  event.EventType,
+					"unified_diff": analysis.FormatValueDiff("version", oldVersion, newVersion),
 				},
 			})
 		}

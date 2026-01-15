@@ -53,6 +53,7 @@ type ChangeEventInfo struct {
 	ErrorMessage    string   `json:"errorMessage,omitempty"`    // Human-readable error description
 	ContainerIssues []string `json:"containerIssues,omitempty"` // CrashLoopBackOff, ImagePullBackOff, OOMKilled
 	ImpactScore     float64  `json:"impactScore,omitempty"`     // 0.0-1.0 severity score
+	SpecChanges     string   `json:"specChanges,omitempty"`     // Git-style unified diff of spec changes within lookback window
 }
 
 // Edge represents a relationship between resources
@@ -72,6 +73,9 @@ type Metadata struct {
 	QueryExecutionMs int64  `json:"queryExecutionMs"`
 	HasMore          bool   `json:"hasMore"`
 	NextCursor       string `json:"nextCursor,omitempty"`
+	// Cache metadata
+	Cached   bool  `json:"cached,omitempty"`   // True if response was served from cache
+	CacheAge int64 `json:"cacheAgeMs,omitempty"` // Age of cached response in milliseconds
 }
 
 // PaginationCursor represents the decoded pagination cursor

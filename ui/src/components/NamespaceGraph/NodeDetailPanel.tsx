@@ -154,6 +154,61 @@ export const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
                   {node.latestEvent.description}
                 </div>
               )}
+              {/* Error Message (truncated with hover) */}
+              {node.latestEvent.errorMessage && (
+                <div className="group relative">
+                  <div className="text-xs text-red-500 cursor-help">
+                    {node.latestEvent.errorMessage.length > 100
+                      ? `${node.latestEvent.errorMessage.slice(-100)}...`
+                      : node.latestEvent.errorMessage}
+                  </div>
+                  {node.latestEvent.errorMessage.length > 100 && (
+                    <div className="absolute z-50 hidden group-hover:block bottom-full left-0 mb-1 p-2
+                                    bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)]
+                                    rounded shadow-lg max-w-md max-h-48 overflow-auto">
+                      <div className="text-xs text-red-500 whitespace-pre-wrap break-words">
+                        {node.latestEvent.errorMessage}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* Container Issues */}
+              {node.latestEvent.containerIssues && node.latestEvent.containerIssues.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {node.latestEvent.containerIssues.map((issue, idx) => (
+                    <span
+                      key={idx}
+                      className="px-1.5 py-0.5 rounded text-xs bg-amber-500/20 text-amber-500"
+                    >
+                      {issue}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Spec Changes */}
+        {node.latestEvent?.specChanges && (
+          <div className="pt-3 border-t border-[var(--color-border-soft)]">
+            <div className="text-xs text-[var(--color-text-muted)] mb-2">Spec Changes (within lookback)</div>
+            <div className="p-2 rounded bg-[var(--color-surface-elevated)] overflow-x-auto">
+              <pre className="text-xs font-mono whitespace-pre-wrap break-words">
+                {node.latestEvent.specChanges.split('\n').map((line, idx) => {
+                  let lineClass = 'text-[var(--color-text-muted)]';
+                  if (line.startsWith('+')) lineClass = 'text-green-500';
+                  else if (line.startsWith('-')) lineClass = 'text-red-500';
+                  else if (line.startsWith('@@')) lineClass = 'text-blue-400 font-semibold';
+                  return (
+                    <span key={idx} className={lineClass}>
+                      {line}
+                      {idx < node.latestEvent!.specChanges!.split('\n').length - 1 ? '\n' : ''}
+                    </span>
+                  );
+                })}
+              </pre>
             </div>
           </div>
         )}
@@ -170,8 +225,9 @@ export const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
             <div className="space-y-2">
               {anomalies.map((anomaly, idx) => {
                 const severityStyle = SEVERITY_COLORS[anomaly.severity] || SEVERITY_COLORS.low;
+                const hasDetails = anomaly.details && Object.keys(anomaly.details).length > 0;
                 return (
-                  <div 
+                  <div
                     key={idx}
                     className="p-2 rounded bg-[var(--color-surface-elevated)] space-y-2"
                   >
@@ -189,6 +245,19 @@ export const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
                     <div className="text-xs text-[var(--color-text-muted)]">
                       {anomaly.summary}
                     </div>
+                    {/* Anomaly Details */}
+                    {hasDetails && (
+                      <div className="pt-2 mt-2 border-t border-[var(--color-border-soft)] space-y-1">
+                        {Object.entries(anomaly.details).map(([key, value]) => (
+                          <div key={key} className="flex items-start gap-1 text-xs">
+                            <span className="text-[var(--color-text-muted)] flex-shrink-0">{key}:</span>
+                            <span className="font-mono text-[var(--color-text-primary)] break-all">
+                              {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}

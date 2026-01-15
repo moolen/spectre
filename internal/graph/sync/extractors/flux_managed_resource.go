@@ -65,31 +65,58 @@ func (e *FluxManagedResourceExtractor) ExtractRelationships(
 	event models.Event,
 	lookup ResourceLookup,
 ) ([]graph.Edge, error) {
+	e.logger.Debug("Processing %s/%s/%s (UID: %s)",
+		event.Resource.Namespace, event.Resource.Kind, event.Resource.Name, event.Resource.UID)
 
-	// Get resource to access its labels
-	resource, err := lookup.FindResourceByUID(ctx, event.Resource.UID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to lookup resource: %w", err)
+	// Extract labels directly from event data instead of querying the graph
+	// This is more reliable during batch processing where the graph may not be up-to-date
+	labels := extractLabelsFromEvent(event)
+	if labels == nil {
+		e.logger.Debug("Resource %s has no labels in event data", event.Resource.UID)
+		return nil, nil
+	}
+	e.logger.Debug("Resource %s has %d labels from event data", event.Resource.UID, len(labels))
+
+	// Build a ResourceIdentity from event data for use in edge creation
+	resource := &graph.ResourceIdentity{
+		UID:       event.Resource.UID,
+		Kind:      event.Resource.Kind,
+		Namespace: event.Resource.Namespace,
+		Name:      event.Resource.Name,
+		Labels:    labels,
 	}
 
-	if resource.Labels == nil {
+	// IMPORTANT: Skip resources that have owners (via OWNS edges) to avoid creating
+	// transitive MANAGES edges. For example, we want:
+	//   HelmRelease --[MANAGES]--> Deployment --[OWNS]--> ReplicaSet --[OWNS]--> Pod
+	// NOT:
+	//   HelmRelease --[MANAGES]--> Pod (bypassing the ownership chain)
+	if hasOwner, err := e.resourceHasOwner(ctx, resource.UID, lookup); err != nil {
+		e.logger.Debug("Failed to check if resource %s has owner: %v", resource.UID, err)
+		// Continue anyway - better to create duplicate edges than miss valid ones
+	} else if hasOwner {
+		e.logger.Debug("Skipping MANAGES edge for resource %s/%s/%s - it has an owner",
+			resource.Namespace, resource.Kind, resource.Name)
 		return nil, nil
 	}
 
 	// Try HelmRelease labels first
-	if helmReleaseName, hasName := resource.Labels[fluxNameLabel]; hasName {
-		if helmReleaseNamespace, hasNamespace := resource.Labels[fluxNamespaceLabel]; hasNamespace {
+	if helmReleaseName, hasName := labels[fluxNameLabel]; hasName {
+		if helmReleaseNamespace, hasNamespace := labels[fluxNamespaceLabel]; hasNamespace {
 			return e.createHelmReleaseEdge(ctx, resource, helmReleaseName, helmReleaseNamespace, lookup)
 		}
 	}
 
 	// Try Kustomization labels
-	if kustomizationName, hasName := resource.Labels[kustomizeNameLabel]; hasName {
-		if kustomizationNamespace, hasNamespace := resource.Labels[kustomizeNsLabel]; hasNamespace {
+	if kustomizationName, hasName := labels[kustomizeNameLabel]; hasName {
+		if kustomizationNamespace, hasNamespace := labels[kustomizeNsLabel]; hasNamespace {
+			e.logger.Debug("Found Kustomization labels: %s/%s for resource %s",
+				kustomizationNamespace, kustomizationName, resource.UID)
 			return e.createKustomizationEdge(ctx, resource, kustomizationName, kustomizationNamespace, lookup)
 		}
 	}
 
+	e.logger.Debug("No Flux labels found for resource %s", resource.UID)
 	return nil, nil
 }
 
@@ -203,6 +230,36 @@ func (e *FluxManagedResourceExtractor) createKustomizationEdge(
 	return []graph.Edge{edge}, nil
 }
 
+// resourceHasOwner checks if the resource has any incoming OWNS edges
+func (e *FluxManagedResourceExtractor) resourceHasOwner(
+	ctx context.Context,
+	resourceUID string,
+	lookup ResourceLookup,
+) (bool, error) {
+	query := graph.GraphQuery{
+		Query: `
+			MATCH (:ResourceIdentity)-[:OWNS]->(r:ResourceIdentity {uid: $uid})
+			RETURN count(*) > 0 as hasOwner
+		`,
+		Parameters: map[string]interface{}{
+			"uid": resourceUID,
+		},
+	}
+
+	result, err := lookup.QueryGraph(ctx, query)
+	if err != nil {
+		return false, err
+	}
+
+	if len(result.Rows) > 0 && len(result.Rows[0]) > 0 {
+		if hasOwner, ok := result.Rows[0][0].(bool); ok {
+			return hasOwner, nil
+		}
+	}
+
+	return false, nil
+}
+
 // hasFluxLabels checks if the event data contains Flux HelmRelease labels
 func hasFluxLabels(event models.Event) bool {
 	// Quick check using event data without full parsing
@@ -217,4 +274,37 @@ func hasKustomizeLabels(event models.Event) bool {
 	// Look for the Kustomize label keys in the raw JSON data
 	dataStr := string(event.Data)
 	return strings.Contains(dataStr, kustomizeNameLabel) && strings.Contains(dataStr, kustomizeNsLabel)
+}
+
+// extractLabelsFromEvent extracts labels from the event's resource data
+func extractLabelsFromEvent(event models.Event) map[string]string {
+	if len(event.Data) == 0 {
+		return nil
+	}
+
+	var resourceData map[string]interface{}
+	if err := json.Unmarshal(event.Data, &resourceData); err != nil {
+		return nil
+	}
+
+	// Extract metadata.labels
+	metadata, ok := resourceData["metadata"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	labelsRaw, ok := metadata["labels"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Convert to map[string]string
+	labels := make(map[string]string)
+	for key, value := range labelsRaw {
+		if strValue, ok := value.(string); ok {
+			labels[key] = strValue
+		}
+	}
+
+	return labels
 }

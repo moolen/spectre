@@ -71,6 +71,63 @@ func TestParseTimestampForNamespaceGraph(t *testing.T) {
 	}
 }
 
+func TestBucketTimestamp(t *testing.T) {
+	// 30 seconds in nanoseconds
+	bucket := int64(30 * time.Second)
+
+	tests := []struct {
+		name  string
+		input int64
+		want  int64
+	}{
+		{
+			name:  "exact bucket boundary",
+			input: 1704067200000000000, // 2024-01-01T00:00:00Z
+			want:  1704067200000000000,
+		},
+		{
+			name:  "15 seconds into bucket",
+			input: 1704067215000000000, // 2024-01-01T00:00:15Z
+			want:  1704067200000000000, // rounds down to :00
+		},
+		{
+			name:  "29 seconds into bucket",
+			input: 1704067229000000000, // 2024-01-01T00:00:29Z
+			want:  1704067200000000000, // rounds down to :00
+		},
+		{
+			name:  "30 seconds - next bucket",
+			input: 1704067230000000000, // 2024-01-01T00:00:30Z
+			want:  1704067230000000000, // exact boundary
+		},
+		{
+			name:  "45 seconds into minute",
+			input: 1704067245000000000, // 2024-01-01T00:00:45Z
+			want:  1704067230000000000, // rounds down to :30
+		},
+		{
+			name:  "with nanosecond precision",
+			input: 1704067215123456789, // 15s + some nanos
+			want:  1704067200000000000, // rounds down to :00
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := bucketTimestamp(tt.input)
+			if got != tt.want {
+				t.Errorf("bucketTimestamp(%d) = %d, want %d (diff: %dms)",
+					tt.input, got, tt.want, (got-tt.want)/1000000)
+			}
+			// Verify it's a multiple of the bucket size
+			if got%bucket != 0 {
+				t.Errorf("bucketTimestamp(%d) = %d is not a multiple of %d",
+					tt.input, got, bucket)
+			}
+		})
+	}
+}
+
 func TestNamespaceGraphHandlerValidation(t *testing.T) {
 	// Create a handler with nil graphClient (will fail on actual queries but validation should work)
 	handler := &NamespaceGraphHandler{
@@ -158,16 +215,16 @@ func TestNamespaceGraphHandlerParseInput(t *testing.T) {
 			wantNamespace:          "default",
 			wantIncludeAnomalies:   false,
 			wantIncludeCausalPaths: false,
-			wantLimit:              100, // default
-			wantMaxDepth:           3,   // default
+			wantLimit:              50, // default (namespacegraph.DefaultLimit)
+			wantMaxDepth:           1,  // default (namespacegraph.DefaultMaxDepth)
 			wantErr:                false,
 		},
 		{
 			name:          "RFC3339 timestamp",
 			query:         "?namespace=default&timestamp=2024-01-01T00:00:00Z",
 			wantNamespace: "default",
-			wantLimit:     100,
-			wantMaxDepth:  3,
+			wantLimit:     50, // default (namespacegraph.DefaultLimit)
+			wantMaxDepth:  1,  // default (namespacegraph.DefaultMaxDepth)
 			wantErr:       false,
 		},
 		{

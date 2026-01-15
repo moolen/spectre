@@ -157,7 +157,7 @@ curl -X POST http://localhost:8081/mcp/v1 \
     "id": 2
   }'
 
-# Expected: 4 tools (cluster_health, resource_changes, investigate, resource_explorer)
+# Expected: 3 tools (cluster_health, resource_changes, investigate)
 ```
 
 ## Deployment Path 2: Standalone Server
@@ -387,7 +387,7 @@ Use this checklist to confirm your MCP setup is working correctly:
 - [ ] **1. Pod Running**: `kubectl get pods` shows Spectre pod with `2/2` Ready (sidecar) or standalone MCP pod with `1/1` Ready
 - [ ] **2. Health Check**: `curl http://localhost:8081/health` returns `{"status":"healthy"}`
 - [ ] **3. MCP Initialize**: Initialize request returns `serverInfo` and `capabilities`
-- [ ] **4. Tools Available**: `tools/list` returns 4 tools (cluster_health, resource_changes, investigate, resource_explorer)
+- [ ] **4. Tools Available**: `tools/list` returns 3 tools (cluster_health, resource_changes, investigate)
 - [ ] **5. Prompts Available**: `prompts/list` returns 2 prompts (post_mortem_incident_analysis, live_incident_handling)
 - [ ] **6. Tool Execution**: `cluster_health` tool call succeeds and returns cluster data
 - [ ] **7. API Connectivity**: MCP server logs show no errors connecting to Spectre API
@@ -509,14 +509,13 @@ sudo kubefwd svc -n spectre-system -l app.kubernetes.io/name=spectre
 | `mcp.apiUrl` | `"http://localhost:8080"` | Spectre API URL (sidecar uses localhost) |
 | `mcp.logLevel` | `"info"` | Log level (debug, info, warn, error) |
 
-### MCP Tools (4 available)
+### MCP Tools (3 available)
 
 | Tool | Purpose | Use Case |
 |------|---------|----------|
 | `cluster_health` | Cluster overview with status breakdown | "What's the current state?" |
 | `resource_changes` | High-impact changes with correlation | "What changed recently?" |
 | `investigate` | Detailed timeline for specific resource | "Why is this pod failing?" |
-| `resource_explorer` | Browse and discover resources | "List all deployments in namespace X" |
 
 ### MCP Prompts (2 available)
 

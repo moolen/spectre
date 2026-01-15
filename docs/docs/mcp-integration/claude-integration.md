@@ -290,7 +290,6 @@ I have access to the following Spectre MCP tools:
 - cluster_health: Get cluster overview with resource status
 - resource_changes: Identify high-impact changes
 - investigate: Deep dive into specific resources
-- resource_explorer: Browse and discover resources
 
 I also have access to two prompts:
 - post_mortem_incident_analysis

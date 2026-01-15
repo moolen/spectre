@@ -27,7 +27,7 @@ const (
 	CausalPathMaxDepth = 7
 
 	// DefaultLookback is the default lookback window for anomaly/causal analysis
-	DefaultLookback = 10 * time.Minute
+	DefaultLookback = 30 * time.Minute
 
 	// MaxLookback is the maximum allowed lookback window
 	MaxLookback = 24 * time.Hour

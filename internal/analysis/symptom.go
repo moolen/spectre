@@ -9,6 +9,56 @@ import (
 	"github.com/moolen/spectre/internal/graph"
 )
 
+// ErrNoChangeEventInRange is returned when no ChangeEvent is found within the
+// requested time range, but earlier data exists. This allows the handler to
+// return HTTP 200 with a hint about when data is available.
+type ErrNoChangeEventInRange struct {
+	RequestedTimestamp  int64
+	RequestedTime       time.Time
+	FirstEventTimestamp int64
+	FirstEventTime      time.Time
+	DiffSeconds         int64
+	SuggestedTimestamp  int64 // Only set if timestamp is too early
+	TimestampTooEarly   bool
+}
+
+// Error implements the error interface
+func (e *ErrNoChangeEventInRange) Error() string {
+	if e.TimestampTooEarly {
+		return fmt.Sprintf(
+			"no ChangeEvent found within ±5 minutes of timestamp %d (%s). "+
+				"First event for this resource occurred at %s (%d), which is %d seconds later. "+
+				"Try using timestamp: %d",
+			e.RequestedTimestamp, e.RequestedTime.Format(time.RFC3339),
+			e.FirstEventTime.Format(time.RFC3339), e.FirstEventTimestamp,
+			e.DiffSeconds, e.SuggestedTimestamp,
+		)
+	}
+	return fmt.Sprintf(
+		"no ChangeEvent found within ±5 minutes of timestamp %d (%s). "+
+			"First event for this resource occurred at %s (%d), which is %d seconds earlier",
+		e.RequestedTimestamp, e.RequestedTime.Format(time.RFC3339),
+		e.FirstEventTime.Format(time.RFC3339), e.FirstEventTimestamp,
+		e.DiffSeconds,
+	)
+}
+
+// Hint returns a human-readable hint message for the API response
+func (e *ErrNoChangeEventInRange) Hint() string {
+	if e.TimestampTooEarly {
+		return fmt.Sprintf(
+			"No data found at requested time. First event for this resource occurred at %s. "+
+				"Try using end=%d for analysis.",
+			e.FirstEventTime.Format(time.RFC3339), e.SuggestedTimestamp/1_000_000_000,
+		)
+	}
+	return fmt.Sprintf(
+		"No data found at requested time. First event for this resource occurred at %s, "+
+			"which is %d seconds earlier than the requested time.",
+		e.FirstEventTime.Format(time.RFC3339), e.DiffSeconds,
+	)
+}
+
 // extractObservedSymptom extracts facts from the failure event (no inference)
 func (a *RootCauseAnalyzer) extractObservedSymptom(
 	ctx context.Context,
@@ -61,24 +111,26 @@ func (a *RootCauseAnalyzer) extractObservedSymptom(
 				diffSeconds := (firstEventTS - failureTimestamp) / 1_000_000_000
 
 				if diffSeconds > 300 {
-					// Timestamp is too early
-					return nil, fmt.Errorf(
-						"no ChangeEvent found within ±5 minutes of timestamp %d (%s). "+
-							"First event for this resource occurred at %s (%d), which is %d seconds later. "+
-							"Try using timestamp: %d",
-						failureTimestamp, providedTime.Format(time.RFC3339),
-						firstEventTime.Format(time.RFC3339), firstEventTS,
-						diffSeconds, firstEventTS,
-					)
+					// Timestamp is too early - return structured error with hint
+					return nil, &ErrNoChangeEventInRange{
+						RequestedTimestamp:  failureTimestamp,
+						RequestedTime:       providedTime,
+						FirstEventTimestamp: firstEventTS,
+						FirstEventTime:      firstEventTime,
+						DiffSeconds:         diffSeconds,
+						SuggestedTimestamp:  firstEventTS,
+						TimestampTooEarly:   true,
+					}
 				} else if diffSeconds < -300 {
-					// Timestamp is too late
-					return nil, fmt.Errorf(
-						"no ChangeEvent found within ±5 minutes of timestamp %d (%s). "+
-							"First event for this resource occurred at %s (%d), which is %d seconds earlier",
-						failureTimestamp, providedTime.Format(time.RFC3339),
-						firstEventTime.Format(time.RFC3339), firstEventTS,
-						-diffSeconds,
-					)
+					// Timestamp is too late - return structured error with hint
+					return nil, &ErrNoChangeEventInRange{
+						RequestedTimestamp:  failureTimestamp,
+						RequestedTime:       providedTime,
+						FirstEventTimestamp: firstEventTS,
+						FirstEventTime:      firstEventTime,
+						DiffSeconds:         -diffSeconds,
+						TimestampTooEarly:   false,
+					}
 				}
 			}
 		}

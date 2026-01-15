@@ -66,13 +66,30 @@ func (m *mockResourceLookup) FindRecentEvents(ctx context.Context, uid string, w
 }
 
 func (m *mockResourceLookup) QueryGraph(ctx context.Context, query graph.GraphQuery) (*graph.QueryResult, error) {
-	// For testing, return resources in the queried namespace
-	namespace := query.Parameters["namespace"].(string)
-	helmReleaseUID := query.Parameters["helmReleaseUID"].(string)
+	// Handle ownership check query (for FluxManagedResourceExtractor)
+	if _, hasUID := query.Parameters["uid"]; hasUID {
+		// Return false for hasOwner - resources in tests are top-level
+		return &graph.QueryResult{
+			Rows: [][]interface{}{{false}},
+		}, nil
+	}
+
+	// Handle resource query for HelmRelease/Kustomization extractors
+	namespace, hasNamespace := query.Parameters["namespace"].(string)
+	if !hasNamespace {
+		return &graph.QueryResult{Rows: [][]interface{}{}}, nil
+	}
+
+	var excludeUID string
+	if helmReleaseUID, ok := query.Parameters["helmReleaseUID"].(string); ok {
+		excludeUID = helmReleaseUID
+	} else if kustomizationUID, ok := query.Parameters["kustomizationUID"].(string); ok {
+		excludeUID = kustomizationUID
+	}
 
 	var rows [][]interface{}
 	for uid, res := range m.resources {
-		if res.Namespace == namespace && uid != helmReleaseUID {
+		if res.Namespace == namespace && uid != excludeUID {
 			rows = append(rows, []interface{}{
 				map[string]interface{}{
 					"uid":       res.UID,
