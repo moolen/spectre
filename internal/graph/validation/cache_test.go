@@ -175,7 +175,7 @@ func TestCachedResourceLookup_FindByNamespace(t *testing.T) {
 	// Mock query result
 	client.queryResults[`
 			MATCH (r:ResourceIdentity {namespace: $namespace, kind: $kind, name: $name})
-			WHERE r.deleted = false
+			WHERE NOT r.deleted
 			RETURN r
 			LIMIT 1
 		`] = &graph.QueryResult{

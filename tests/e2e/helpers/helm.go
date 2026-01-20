@@ -204,7 +204,12 @@ func (mh *ManifestHelper) ParseYAML(manifest string) ([]map[string]interface{}, 
 func (hd *HelmDeployer) debugDeploymentFailure(releaseName string) {
 	hd.t.Logf("=== DEBUGGING DEPLOYMENT FAILURE FOR: %s ===", releaseName)
 
-	ctx, cancel := context.WithTimeout(hd.t.Context(), 30*time.Second)
+	// Use background context if test context is nil
+	parentCtx := hd.t.Context()
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
 	// Get PVCs

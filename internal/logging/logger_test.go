@@ -13,57 +13,6 @@ import (
 	"time"
 )
 
-// Test helper: captureLogOutput captures log output for testing
-type logCapture struct {
-	mu     sync.Mutex
-	output []string
-	stderr []string
-}
-
-func newLogCapture() *logCapture {
-	return &logCapture{
-		output: make([]string, 0),
-		stderr: make([]string, 0),
-	}
-}
-
-func (lc *logCapture) captureStdout(w io.Writer) func() {
-	old := log.Writer()
-	log.SetOutput(w)
-	return func() {
-		log.SetOutput(old)
-	}
-}
-
-func (lc *logCapture) String() string {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	return strings.Join(lc.output, "\n")
-}
-
-func (lc *logCapture) Lines() []string {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	result := make([]string, len(lc.output))
-	copy(result, lc.output)
-	return result
-}
-
-func (lc *logCapture) StderrLines() []string {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	result := make([]string, len(lc.stderr))
-	copy(result, lc.stderr)
-	return result
-}
-
-func (lc *logCapture) Clear() {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	lc.output = lc.output[:0]
-	lc.stderr = lc.stderr[:0]
-}
-
 // captureOutput captures both stdout and stderr during test execution
 func captureOutput(f func()) (stdout, stderr string) {
 	// Capture stdout via log package
@@ -718,9 +667,9 @@ func TestLevelFiltering(t *testing.T) {
 			// Check the appropriate stream based on log level
 			var hasOutput bool
 			if tt.checkStderr {
-				hasOutput = len(strings.TrimSpace(stderr)) > 0
+				hasOutput = strings.TrimSpace(stderr) != ""
 			} else {
-				hasOutput = len(strings.TrimSpace(stdout)) > 0
+				hasOutput = strings.TrimSpace(stdout) != ""
 			}
 
 			if hasOutput != tt.shouldAppear {
@@ -1024,10 +973,8 @@ func TestGetTimestamp(t *testing.T) {
 				if diff < 0 || diff > time.Second {
 					t.Errorf("GetTimestamp() returned timestamp not within last second: %q (diff: %v)", got, diff)
 				}
-			} else {
-				if got != tt.wantExact {
-					t.Errorf("GetTimestamp() = %q, want %q", got, tt.wantExact)
-				}
+			} else if got != tt.wantExact {
+				t.Errorf("GetTimestamp() = %q, want %q", got, tt.wantExact)
 			}
 		})
 	}
@@ -1074,8 +1021,7 @@ func TestTimestampInActualLog(t *testing.T) {
 	timestamp := stdout[startIdx+1 : endIdx]
 
 	// Verify it's a valid RFC3339 timestamp
-	_, err := time.Parse(time.RFC3339, timestamp)
-	if err != nil {
+	if _, err := time.Parse(time.RFC3339, timestamp); err != nil {
 		t.Errorf("Timestamp in log is not valid RFC3339: %q, error: %v", timestamp, err)
 	}
 

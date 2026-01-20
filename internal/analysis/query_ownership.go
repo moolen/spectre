@@ -93,9 +93,10 @@ func (a *RootCauseAnalyzer) getOwnershipChain(ctx context.Context, symptomUID st
 		seenUIDs[resource.UID] = true
 
 		distance := 0
-		if d, ok := row[1].(int64); ok {
+		switch d := row[1].(type) {
+		case int64:
 			distance = int(d)
-		} else if d, ok := row[1].(float64); ok {
+		case float64:
 			distance = int(d)
 		}
 

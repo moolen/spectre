@@ -12,6 +12,10 @@ type QueryRequest struct {
 
 	// Filters specifies which events to return based on resource dimensions
 	Filters QueryFilters `json:"filters"`
+
+	// Pagination contains optional pagination parameters
+	// If nil, defaults to DefaultPageSize (100)
+	Pagination *PaginationRequest `json:"pagination,omitempty"`
 }
 
 // Validate checks that the query request is well-formed

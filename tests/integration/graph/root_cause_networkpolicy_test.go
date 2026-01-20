@@ -26,7 +26,7 @@ func TestRootCauseEndpoint_NetworkPolicy_SameNamespace(t *testing.T) {
 	// Load the JSONL fixture
 	_, testFile, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(testFile)
-	fixturePath := filepath.Join(testDir, "fixtures", "testrootcause-networkpolicy-samenamespac.jsonl")
+	fixturePath := filepath.Join(testDir, "..", "fixtures", "testrootcause-networkpolicy-samenamespac.jsonl")
 	err = harness.SeedEventsFromAuditLog(ctx, fixturePath)
 	require.NoError(t, err)
 
@@ -71,7 +71,7 @@ func TestRootCauseEndpoint_NetworkPolicy_CrossNamespace(t *testing.T) {
 	// Load the JSONL fixture
 	_, testFile, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(testFile)
-	fixturePath := filepath.Join(testDir, "fixtures", "testrootcause-networkpolicy-crossnamespa.jsonl")
+	fixturePath := filepath.Join(testDir, "..", "fixtures", "testrootcause-networkpolicy-crossnamespa.jsonl")
 	err = harness.SeedEventsFromAuditLog(ctx, fixturePath)
 	require.NoError(t, err)
 

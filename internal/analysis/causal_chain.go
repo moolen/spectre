@@ -9,6 +9,15 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	edgeTypeOwns           = "OWNS"
+	edgeTypeScheduledOn    = "SCHEDULED_ON"
+	edgeTypeGrantsTo       = "GRANTS_TO"
+	edgeTypeBindsRole      = "BINDS_ROLE"
+	edgeTypeReferencesSpec = "REFERENCES_SPEC"
+	edgeTypeIngressRef     = "INGRESS_REF"
+)
+
 // buildCausalGraph constructs the causal graph from symptom to root cause.
 // Uses split queries for better performance and maintainability.
 //
@@ -93,7 +102,7 @@ func (a *RootCauseAnalyzer) buildCausalGraph(
 	g.Go(func() error {
 		start := time.Now()
 		var err error
-		related, err = a.getRelatedResources(gctx, allUIDs)
+		related, err = a.getRelatedResources(gctx, allUIDs, failureTimestamp, lookbackNs)
 		duration := time.Since(start)
 		if err != nil {
 			a.logger.Error("buildCausalGraph: related resources query failed after %v: %v", duration, err)
@@ -219,7 +228,7 @@ func (a *RootCauseAnalyzer) buildSpineNodes(
 		// Determine relationship type for reasoning
 		var relationshipType string
 		if resource.UID != symptom.Resource.UID {
-			relationshipType = "OWNS"
+			relationshipType = edgeTypeOwns
 		} else {
 			relationshipType = "SYMPTOM"
 		}
@@ -407,7 +416,11 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 		}
 	}
 
-	// Process each resource's related resources
+	// Two-pass approach: First create all nodes, then create edges
+	// This ensures nodes exist before we try to create edges to them
+	// (e.g., BINDS_ROLE needs RoleBinding node which is created by GRANTS_TO)
+
+	// PASS 1: Create all nodes
 	for _, resourceUID := range resourcesWithRelated {
 		parentNodeID := nodeMap[resourceUID]
 		if parentNodeID == "" {
@@ -416,24 +429,25 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 		}
 
 		relatedList := related[resourceUID]
-		a.logger.Debug("buildRelatedGraph: processing %d related resources for %s", len(relatedList), resourceUID)
+		a.logger.Debug("buildRelatedGraph: pass 1 - creating nodes for %d related resources of %s", len(relatedList), resourceUID)
 
 		for _, relData := range relatedList {
 			hasChanges := len(relData.Events) > 0
 
 			// Filter: only include certain relationship types without changes
-			// Always include SCHEDULED_ON, GRANTS_TO, REFERENCES_SPEC, and INGRESS_REF
+			// Always include SCHEDULED_ON, GRANTS_TO, BINDS_ROLE, REFERENCES_SPEC, and INGRESS_REF
 			// These are important for understanding configuration dependencies
-			if relData.RelationshipType != "SCHEDULED_ON" &&
-				relData.RelationshipType != "GRANTS_TO" &&
-				relData.RelationshipType != "REFERENCES_SPEC" &&
-				relData.RelationshipType != "INGRESS_REF" &&
+			if relData.RelationshipType != edgeTypeScheduledOn &&
+				relData.RelationshipType != edgeTypeGrantsTo &&
+				relData.RelationshipType != edgeTypeBindsRole &&
+				relData.RelationshipType != edgeTypeReferencesSpec &&
+				relData.RelationshipType != edgeTypeIngressRef &&
 				!hasChanges {
 				a.logger.Debug("buildRelatedGraph: skipping %s (type=%s) - no changes", relData.Resource.Name, relData.RelationshipType)
 				continue
 			}
 
-			if relData.RelationshipType == "REFERENCES_SPEC" || relData.RelationshipType == "INGRESS_REF" {
+			if relData.RelationshipType == edgeTypeReferencesSpec || relData.RelationshipType == edgeTypeIngressRef {
 				a.logger.Debug("buildRelatedGraph: including %s %s/%s (hasChanges=%v)",
 					relData.RelationshipType, relData.Resource.Kind, relData.Resource.Name, hasChanges)
 			}
@@ -452,7 +466,37 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 					resourceIdentityToSymptomResource(relData.Resource),
 					relData.Events,
 				))
+				a.logger.Debug("buildRelatedGraph: created node for %s/%s (type=%s)",
+					relData.Resource.Kind, relData.Resource.Name, relData.RelationshipType)
 			}
+		}
+	}
+
+	// PASS 2: Create all edges (now all nodes exist)
+	for _, resourceUID := range resourcesWithRelated {
+		parentNodeID := nodeMap[resourceUID]
+		if parentNodeID == "" {
+			continue
+		}
+
+		relatedList := related[resourceUID]
+		a.logger.Debug("buildRelatedGraph: pass 2 - creating edges for %d related resources of %s", len(relatedList), resourceUID)
+
+		for _, relData := range relatedList {
+			hasChanges := len(relData.Events) > 0
+
+			// Same filter as pass 1
+			if relData.RelationshipType != edgeTypeScheduledOn &&
+				relData.RelationshipType != edgeTypeGrantsTo &&
+				relData.RelationshipType != edgeTypeBindsRole &&
+				relData.RelationshipType != edgeTypeReferencesSpec &&
+				relData.RelationshipType != edgeTypeIngressRef &&
+				!hasChanges {
+				continue
+			}
+
+			relatedUID := relData.Resource.UID
+			relatedNodeID := nodeMap[relatedUID]
 
 			// Create attachment edge based on relationship type
 			if relData.RelationshipType == "GRANTS_TO" {
@@ -477,7 +521,39 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 							EdgeType:         "ATTACHMENT",
 						})
 						edgeSet[edgeID] = true
+						a.logger.Debug("buildRelatedGraph: created GRANTS_TO edge from RoleBinding %s to ServiceAccount",
+							relData.Resource.Name)
 					}
+				}
+			} else if relData.RelationshipType == "BINDS_ROLE" {
+				// Special case: BINDS_ROLE connects RoleBinding to Role
+				// relData.Resource is the Role, we need to find the RoleBinding node
+				// The RoleBinding node was created in pass 1 from GRANTS_TO processing
+				var roleBindingNodeID string
+				for _, otherRelData := range relatedList {
+					if otherRelData.RelationshipType == "GRANTS_TO" {
+						roleBindingNodeID = nodeMap[otherRelData.Resource.UID]
+						break
+					}
+				}
+
+				if roleBindingNodeID != "" {
+					// Create edge: RoleBinding -> Role
+					edgeID := createAttachmentEdgeID(roleBindingNodeID, relatedNodeID)
+					if !edgeSet[edgeID] {
+						edges = append(edges, GraphEdge{
+							ID:               edgeID,
+							From:             roleBindingNodeID,
+							To:               relatedNodeID,
+							RelationshipType: "BINDS_ROLE",
+							EdgeType:         "ATTACHMENT",
+						})
+						edgeSet[edgeID] = true
+						a.logger.Debug("buildRelatedGraph: created BINDS_ROLE edge from RoleBinding to Role %s/%s",
+							relData.Resource.Kind, relData.Resource.Name)
+					}
+				} else {
+					a.logger.Debug("buildRelatedGraph: skipping BINDS_ROLE edge - RoleBinding node not found")
 				}
 			} else {
 				// Determine edge direction based on relationship type
@@ -487,7 +563,7 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 					// Reverse direction: selector (Service/NetworkPolicy) -> resource (Pod)
 					fromNode = relatedNodeID
 					toNode = parentNodeID
-				} else if relData.RelationshipType == "INGRESS_REF" {
+				} else if relData.RelationshipType == edgeTypeIngressRef {
 					// Ingress -> Service: use the ReferenceTargetUID
 					fromNode = relatedNodeID // Ingress
 					if relData.ReferenceTargetUID != "" {
@@ -511,7 +587,7 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 				if !edgeSet[edgeID] {
 					// Map internal relationship types to canonical ones
 					relType := relData.RelationshipType
-					if relType == "INGRESS_REF" {
+					if relType == edgeTypeIngressRef {
 						relType = "REFERENCES_SPEC"
 					}
 
@@ -632,6 +708,8 @@ func selectPrimaryEvent(events []ChangeEventInfo, failureTimestamp int64) *Chang
 	}
 
 	// Fallback: earliest event
+	// Note: len(events) > 0 is guaranteed by early return check above
+	// #nosec G602 -- Empty slice is handled by early return at function start
 	earliest := &events[0]
 	for i := range events {
 		if events[i].Timestamp.Before(earliest.Timestamp) {

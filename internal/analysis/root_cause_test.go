@@ -279,7 +279,7 @@ func TestGenerateRootCauseExplanation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := generateRootCauseExplanation(tt.rootNode, tt.event, tt.causationType, tt.spineNodes)
+			result := generateRootCauseExplanation(tt.rootNode, tt.causationType, tt.spineNodes)
 
 			// Check that explanation is not empty
 			assert.NotEmpty(t, result)
@@ -543,7 +543,7 @@ func TestIdentifyRootCause(t *testing.T) {
 			},
 			expectedError: false,
 			validate: func(t *testing.T, result *RootCauseHypothesis) {
-				// UPDATE + MANAGES = DeploymentUpdate
+				// Combination of UPDATE and MANAGES edge results in DeploymentUpdate
 				assert.Equal(t, "DeploymentUpdate", result.CausationType)
 			},
 		},

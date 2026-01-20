@@ -66,13 +66,30 @@ func (m *mockResourceLookup) FindRecentEvents(ctx context.Context, uid string, w
 }
 
 func (m *mockResourceLookup) QueryGraph(ctx context.Context, query graph.GraphQuery) (*graph.QueryResult, error) {
-	// For testing, return resources in the queried namespace
-	namespace := query.Parameters["namespace"].(string)
-	helmReleaseUID := query.Parameters["helmReleaseUID"].(string)
+	// Handle ownership check query (for FluxManagedResourceExtractor)
+	if _, hasUID := query.Parameters["uid"]; hasUID {
+		// Return false for hasOwner - resources in tests are top-level
+		return &graph.QueryResult{
+			Rows: [][]interface{}{{false}},
+		}, nil
+	}
+
+	// Handle resource query for HelmRelease/Kustomization extractors
+	namespace, hasNamespace := query.Parameters["namespace"].(string)
+	if !hasNamespace {
+		return &graph.QueryResult{Rows: [][]interface{}{}}, nil
+	}
+
+	var excludeUID string
+	if helmReleaseUID, ok := query.Parameters["helmReleaseUID"].(string); ok {
+		excludeUID = helmReleaseUID
+	} else if kustomizationUID, ok := query.Parameters["kustomizationUID"].(string); ok {
+		excludeUID = kustomizationUID
+	}
 
 	var rows [][]interface{}
 	for uid, res := range m.resources {
-		if res.Namespace == namespace && uid != helmReleaseUID {
+		if res.Namespace == namespace && uid != excludeUID {
 			rows = append(rows, []interface{}{
 				map[string]interface{}{
 					"uid":       res.UID,
@@ -272,7 +289,7 @@ func TestFluxHelmReleaseExtractor_ConfidenceScoring(t *testing.T) {
 			name: "all evidence present",
 			setupLookup: func(m *mockResourceLookup, hrTimestamp int64) {
 				// Resource created 5 seconds after HelmRelease
-				deploymentTime := hrTimestamp + (5 * int64(time.Second.Nanoseconds()))
+				deploymentTime := hrTimestamp + (5 * time.Second.Nanoseconds())
 				m.AddResource("deploy-uid", "Deployment", "default", "frontend", deploymentTime)
 
 				// Add reconcile event
@@ -291,7 +308,7 @@ func TestFluxHelmReleaseExtractor_ConfidenceScoring(t *testing.T) {
 			name: "label match only",
 			setupLookup: func(m *mockResourceLookup, hrTimestamp int64) {
 				// Resource created long ago (no temporal evidence)
-				oldTime := hrTimestamp - (60 * int64(time.Second.Nanoseconds()))
+				oldTime := hrTimestamp - (60 * time.Second.Nanoseconds())
 				m.AddResource("deploy-uid", "Deployment", "default", "frontend", oldTime)
 			},
 			expectedConfidence: struct{ min, max float64 }{min: 0.4, max: 0.6},
@@ -300,7 +317,7 @@ func TestFluxHelmReleaseExtractor_ConfidenceScoring(t *testing.T) {
 			name: "no evidence",
 			setupLookup: func(m *mockResourceLookup, hrTimestamp int64) {
 				// Resource with different name, created long ago
-				oldTime := hrTimestamp - (60 * int64(time.Second.Nanoseconds()))
+				oldTime := hrTimestamp - (60 * time.Second.Nanoseconds())
 				m.AddResource("deploy-uid", "Deployment", "default", "backend", oldTime)
 			},
 			expectedConfidence: struct{ min, max float64 }{min: 0.0, max: 0.2},
@@ -366,7 +383,7 @@ func TestFluxHelmReleaseExtractor_TargetNamespace(t *testing.T) {
 
 	lookup := newMockResourceLookup()
 	hrTimestamp := time.Now().UnixNano()
-	deployTime := hrTimestamp + (3 * int64(time.Second.Nanoseconds()))
+	deployTime := hrTimestamp + (3 * time.Second.Nanoseconds())
 
 	// Add resource in production namespace
 	lookup.AddResource("deploy-uid", "Deployment", "production", "frontend", deployTime)

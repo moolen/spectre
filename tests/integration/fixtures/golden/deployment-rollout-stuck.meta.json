@@ -1,0 +1,40 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "Deployment",
+        "category": "Change",
+        "type": "ImageChange",
+        "min_severity": "medium",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "Pod",
+        "category": "State",
+        "type": "ImagePullBackOff",
+        "min_severity": "high",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "Deployment",
+        "category": "State",
+        "type": "RolloutStuck",
+        "min_severity": "high",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "Deployment",
+      "intermediate_kinds": [
+        "ReplicaSet"
+      ],
+      "symptom_kind": "Pod",
+      "min_confidence": 0.65
+    }
+  },
+  "scenario": {
+    "description": "Deployment rollout stuck due to failing new replicas",
+    "name": "deployment-rollout-stuck"
+  },
+  "timestamp": 1767982762
+}

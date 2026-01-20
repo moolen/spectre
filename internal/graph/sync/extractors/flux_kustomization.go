@@ -139,13 +139,19 @@ func (e *FluxKustomizationExtractor) extractManagedResources(
 		targetNamespace = ns
 	}
 
-	// Query for resources with Kustomize labels
+	// Query for top-level resources with Kustomize labels
+	// IMPORTANT: Exclude resources that have owners (via OWNS edges) to avoid creating
+	// transitive MANAGES edges. For example, we want:
+	//   Kustomization --[MANAGES]--> Deployment --[OWNS]--> ReplicaSet --[OWNS]--> Pod
+	// NOT:
+	//   Kustomization --[MANAGES]--> Pod (bypassing the ownership chain)
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity)
 			WHERE (r.namespace = $namespace OR r.namespace = "")
-			  AND r.deleted = false
+			  AND NOT r.deleted
 			  AND r.uid <> $kustomizationUID
+			  AND NOT EXISTS { MATCH (:ResourceIdentity)-[:OWNS]->(r) }
 			RETURN r
 			LIMIT 500
 		`,

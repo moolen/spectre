@@ -12,6 +12,8 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
+const testEventID1 = "event1"
+
 func TestParseJSONEvents(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -415,7 +417,7 @@ func TestImportFromFile(t *testing.T) {
 	}
 
 	// Verify events are values, not pointers
-	if events[0].ID != "event1" {
+	if events[0].ID != testEventID1 {
 		t.Errorf("Expected event ID 'event1', got %q", events[0].ID)
 	}
 
@@ -466,7 +468,7 @@ func TestImportFromReader(t *testing.T) {
 		t.Errorf("Expected 1 event, got %d", len(events))
 	}
 
-	if events[0].ID != "event1" {
+	if events[0].ID != testEventID1 {
 		t.Errorf("Expected event ID 'event1', got %q", events[0].ID)
 	}
 }
@@ -716,7 +718,7 @@ func TestBackwardCompatibility(t *testing.T) {
 			t.Errorf("Expected 1 event, got %d", len(events))
 		}
 		// Should return values
-		if events[0].ID != "event1" {
+		if events[0].ID != testEventID1 {
 			t.Errorf("Expected event ID 'event1', got %q", events[0].ID)
 		}
 	})

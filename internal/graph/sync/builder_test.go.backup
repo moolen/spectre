@@ -1,0 +1,860 @@
+package sync
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/moolen/spectre/internal/analyzer"
+	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestGraphBuilder_BuildFromEvent(t *testing.T) {
+	builder := NewGraphBuilder()
+	ctx := context.Background()
+
+	t.Run("Pod CREATE event", func(t *testing.T) {
+		event := models.Event{
+			ID:        "event-1",
+			Timestamp: time.Now().UnixNano(),
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				UID:       "pod-123",
+				Kind:      "Pod",
+				Group:     "",
+				Version:   "v1",
+				Namespace: "default",
+				Name:      "test-pod",
+			},
+			Data: createPodJSON("test-pod", "Running"),
+		}
+
+		update, err := builder.BuildFromEvent(ctx, event)
+		require.NoError(t, err)
+		require.NotNil(t, update)
+
+		// Should have ResourceIdentity node
+		assert.Len(t, update.ResourceNodes, 1)
+		assert.Equal(t, "pod-123", update.ResourceNodes[0].UID)
+		assert.Equal(t, "Pod", update.ResourceNodes[0].Kind)
+
+		// Should have ChangeEvent node
+		assert.Len(t, update.EventNodes, 1)
+		assert.Equal(t, "event-1", update.EventNodes[0].ID)
+		assert.Equal(t, "CREATE", update.EventNodes[0].EventType)
+
+		// Should have CHANGED edge
+		assert.Len(t, update.Edges, 1)
+		assert.Equal(t, graph.EdgeTypeChanged, update.Edges[0].Type)
+	})
+
+	t.Run("Deployment UPDATE event", func(t *testing.T) {
+		event := models.Event{
+			ID:        "event-2",
+			Timestamp: time.Now().UnixNano(),
+			Type:      models.EventTypeUpdate,
+			Resource: models.ResourceMetadata{
+				UID:       "deploy-456",
+				Kind:      "Deployment",
+				Group:     "apps",
+				Version:   "v1",
+				Namespace: "default",
+				Name:      "frontend",
+			},
+			Data: createDeploymentJSON("frontend", 3, 3),
+		}
+
+		update, err := builder.BuildFromEvent(ctx, event)
+		require.NoError(t, err)
+
+		assert.Len(t, update.ResourceNodes, 1)
+		assert.Equal(t, "deploy-456", update.ResourceNodes[0].UID)
+		assert.Equal(t, "Deployment", update.ResourceNodes[0].Kind)
+		assert.Equal(t, "apps", update.ResourceNodes[0].APIGroup)
+	})
+
+	t.Run("K8s Event object", func(t *testing.T) {
+		event := models.Event{
+			ID:        "k8s-event-789",
+			Timestamp: time.Now().UnixNano(),
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				UID:               "event-obj-123",
+				Kind:              "Event",
+				Version:           "v1",
+				Namespace:         "default",
+				InvolvedObjectUID: "pod-123",
+			},
+			Data: createK8sEventJSON("FailedScheduling", "No nodes available"),
+		}
+
+		update, err := builder.BuildFromEvent(ctx, event)
+		require.NoError(t, err)
+
+		// Should have K8sEvent node, not ChangeEvent
+		assert.Len(t, update.K8sEventNodes, 1)
+		assert.Len(t, update.EventNodes, 0)
+		assert.Equal(t, "k8s-event-789", update.K8sEventNodes[0].ID)
+		assert.Equal(t, "FailedScheduling", update.K8sEventNodes[0].Reason)
+
+		// Should have EMITTED_EVENT edge
+		assert.Len(t, update.Edges, 1)
+		assert.Equal(t, graph.EdgeTypeEmittedEvent, update.Edges[0].Type)
+		assert.Equal(t, "pod-123", update.Edges[0].FromUID)
+	})
+
+	t.Run("DELETE event", func(t *testing.T) {
+		event := models.Event{
+			ID:        "event-3",
+			Timestamp: time.Now().UnixNano(),
+			Type:      models.EventTypeDelete,
+			Resource: models.ResourceMetadata{
+				UID:       "pod-deleted",
+				Kind:      "Pod",
+				Namespace: "default",
+				Name:      "deleted-pod",
+			},
+		}
+
+		update, err := builder.BuildFromEvent(ctx, event)
+		require.NoError(t, err)
+
+		// Resource should be marked as deleted
+		assert.True(t, update.ResourceNodes[0].Deleted)
+		assert.NotZero(t, update.ResourceNodes[0].DeletedAt)
+
+		// ChangeEvent status should be Terminating
+		assert.Equal(t, "Terminating", update.EventNodes[0].Status)
+	})
+}
+
+func TestGraphBuilder_ExtractOwnership(t *testing.T) {
+	builder := NewGraphBuilder()
+	ctx := context.Background()
+
+	podData := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"ownerReferences": []interface{}{
+				map[string]interface{}{
+					"uid":                "rs-123",
+					"kind":               "ReplicaSet",
+					"name":               "frontend-rs",
+					"controller":         true,
+					"blockOwnerDeletion": true,
+				},
+			},
+		},
+	}
+
+	podJSON, _ := json.Marshal(podData)
+
+	event := models.Event{
+		ID:       "event-1",
+		Resource: models.ResourceMetadata{UID: "pod-123"},
+		Data:     podJSON,
+	}
+
+	edges, err := builder.ExtractRelationships(ctx, event)
+	require.NoError(t, err)
+
+	// Should extract OWNS edge
+	assert.Len(t, edges, 1)
+	assert.Equal(t, graph.EdgeTypeOwns, edges[0].Type)
+	assert.Equal(t, "rs-123", edges[0].FromUID)
+	assert.Equal(t, "pod-123", edges[0].ToUID)
+
+	// Check properties
+	var props graph.OwnsEdge
+	err = json.Unmarshal(edges[0].Properties, &props)
+	require.NoError(t, err)
+	assert.True(t, props.Controller)
+	assert.True(t, props.BlockOwnerDeletion)
+}
+
+func TestGraphBuilder_CalculateImpactScore(t *testing.T) {
+	builder := NewGraphBuilder().(*graphBuilder)
+
+	tests := []struct {
+		name            string
+		status          string
+		containerIssues []string
+		expectedMin     float64
+		expectedMax     float64
+	}{
+		{
+			name:            "Error status",
+			status:          "Error",
+			containerIssues: []string{},
+			expectedMin:     0.8,
+			expectedMax:     0.8,
+		},
+		{
+			name:            "Error with container issues",
+			status:          "Error",
+			containerIssues: []string{"CrashLoopBackOff"},
+			expectedMin:     1.0,
+			expectedMax:     1.0,
+		},
+		{
+			name:            "Warning status",
+			status:          "Warning",
+			containerIssues: []string{},
+			expectedMin:     0.5,
+			expectedMax:     0.5,
+		},
+		{
+			name:            "Ready status",
+			status:          "Ready",
+			containerIssues: []string{},
+			expectedMin:     0.1,
+			expectedMax:     0.1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := builder.calculateImpactScore(tt.status, tt.containerIssues)
+			assert.GreaterOrEqual(t, score, tt.expectedMin)
+			assert.LessOrEqual(t, score, tt.expectedMax)
+		})
+	}
+}
+
+func (m *mockGraphClientWithQuery) Connect(ctx context.Context) error { return nil }
+func (m *mockGraphClientWithQuery) Close() error                      { return nil }
+func (m *mockGraphClientWithQuery) Ping(ctx context.Context) error    { return nil }
+func (m *mockGraphClientWithQuery) CreateNode(ctx context.Context, nodeType graph.NodeType, properties interface{}) error {
+	return nil
+}
+func (m *mockGraphClientWithQuery) CreateEdge(ctx context.Context, edgeType graph.EdgeType, fromUID, toUID string, properties interface{}) error {
+	return nil
+}
+func (m *mockGraphClientWithQuery) GetNode(ctx context.Context, nodeType graph.NodeType, uid string) (*graph.Node, error) {
+	return nil, nil
+}
+func (m *mockGraphClientWithQuery) DeleteNodesByTimestamp(ctx context.Context, nodeType graph.NodeType, timestampField string, cutoffNs int64) (int, error) {
+	return 0, nil
+}
+func (m *mockGraphClientWithQuery) GetGraphStats(ctx context.Context) (*graph.GraphStats, error) {
+	return nil, nil
+}
+func (m *mockGraphClientWithQuery) InitializeSchema(ctx context.Context) error { return nil }
+func (m *mockGraphClientWithQuery) DeleteGraph(ctx context.Context) error      { return nil }
+func (m *mockGraphClientWithQuery) ExecuteQuery(ctx context.Context, query graph.GraphQuery) (*graph.QueryResult, error) {
+	return m.queryResult, nil
+}
+
+func createMockQueryResult(resource map[string]interface{}) *graph.QueryResult {
+	resourceJSON, _ := json.Marshal(resource)
+	return &graph.QueryResult{
+		Columns: []string{"ce.data"},
+		Rows: [][]interface{}{
+			{string(resourceJSON)},
+		},
+	}
+}
+
+func TestGraphBuilder_DetectChanges(t *testing.T) {
+	t.Run("generation increases with spec change - configChanged=true", func(t *testing.T) {
+		// Previous resource with generation 1 and different image
+		previousResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(1),
+			},
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"image": "nginx:1.19",
+					},
+				},
+			},
+		}
+
+		// Current resource with generation 2 and different image
+		currentResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(2),
+			},
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"image": "nginx:1.20",
+					},
+				},
+			},
+			"status": map[string]interface{}{
+				"phase": "Running",
+			},
+		}
+
+		// Create ResourceData
+		currentJSON, _ := json.Marshal(currentResource)
+		currentData, _ := analyzer.ParseResourceData(currentJSON)
+
+		// Mock the query to return previous resource
+		mockClient := &mockGraphClientWithQuery{
+			queryResult: createMockQueryResult(previousResource),
+		}
+		builder := NewGraphBuilderWithClient(mockClient).(*graphBuilder)
+
+		event := models.Event{
+			Resource: models.ResourceMetadata{UID: "test-uid"},
+			Data:     currentJSON,
+		}
+
+		configChanged, statusChanged, replicasChanged := builder.detectChanges(event, currentData)
+
+		assert.True(t, configChanged, "configChanged should be true when generation increases and spec changes")
+		assert.True(t, statusChanged, "statusChanged should be true when status exists")
+		assert.False(t, replicasChanged)
+	})
+
+	t.Run("generation increases but spec unchanged (only metadata changed) - configChanged=false", func(t *testing.T) {
+		// Previous resource with generation 835 but SAME spec
+		previousResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(836),
+				"annotations": map[string]interface{}{
+					"deployment.kubernetes.io/revision": "839",
+				},
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(0),
+				"template": map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"labels": map[string]interface{}{
+							"app": "external-secrets",
+						},
+					},
+				},
+			},
+			"status": map[string]interface{}{
+				"observedGeneration": float64(836),
+			},
+		}
+
+		// Previous resource with generation 835 but SAME spec
+		previousResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(835),
+				"annotations": map[string]interface{}{
+					"deployment.kubernetes.io/revision": "838",
+				},
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(0),
+				"template": map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"labels": map[string]interface{}{
+							"app": "external-secrets",
+						},
+					},
+				},
+			},
+			"status": map[string]interface{}{
+				"observedGeneration": float64(835),
+			},
+		}
+
+		mockClient := &mockGraphClient{
+			queryResult: createMockQueryResult(previousResource),
+		}
+		builder.client = mockClient
+
+		event := models.Event{
+			Resource: models.ResourceMetadata{UID: "test-uid"},
+		}
+
+		configChanged, statusChanged, replicasChanged := builder.detectChanges(ctx, event, currentResource)
+
+		assert.False(t, configChanged, "configChanged should be false when only metadata changed (spec identical)")
+		assert.True(t, statusChanged)
+		assert.False(t, replicasChanged)
+	})
+
+	t.Run("generation unchanged - configChanged=false", func(t *testing.T) {
+		builder := NewGraphBuilder().(*graphBuilder)
+
+		currentResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(5),
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(3),
+			},
+		}
+
+		previousResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(5),
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(3),
+			},
+		}
+
+		mockClient := &mockGraphClient{
+			queryResult: createMockQueryResult(previousResource),
+		}
+		builder.client = mockClient
+
+		event := models.Event{
+			Resource: models.ResourceMetadata{UID: "test-uid"},
+		}
+
+		configChanged, statusChanged, replicasChanged := builder.detectChanges(ctx, event, currentResource)
+
+		assert.False(t, configChanged, "configChanged should be false when generation unchanged")
+		assert.False(t, statusChanged, "statusChanged should be false when no status field")
+		assert.False(t, replicasChanged)
+	})
+
+	t.Run("spec added - configChanged=true", func(t *testing.T) {
+		builder := NewGraphBuilder().(*graphBuilder)
+
+		currentResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(2),
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(3),
+			},
+		}
+
+		previousResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(1),
+			},
+			// No spec field
+		}
+
+		mockClient := &mockGraphClient{
+			queryResult: createMockQueryResult(previousResource),
+		}
+		builder.client = mockClient
+
+		event := models.Event{
+			Resource: models.ResourceMetadata{UID: "test-uid"},
+		}
+
+		configChanged, statusChanged, replicasChanged := builder.detectChanges(ctx, event, currentResource)
+
+		assert.True(t, configChanged, "configChanged should be true when spec is added")
+		assert.False(t, statusChanged)
+		assert.False(t, replicasChanged)
+	})
+
+	t.Run("spec removed - configChanged=true", func(t *testing.T) {
+		builder := NewGraphBuilder().(*graphBuilder)
+
+		currentResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(2),
+			},
+			// No spec field
+		}
+
+		previousResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(1),
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(3),
+			},
+		}
+
+		mockClient := &mockGraphClient{
+			queryResult: createMockQueryResult(previousResource),
+		}
+		builder.client = mockClient
+
+		event := models.Event{
+			Resource: models.ResourceMetadata{UID: "test-uid"},
+		}
+
+		configChanged, statusChanged, replicasChanged := builder.detectChanges(ctx, event, currentResource)
+
+		assert.True(t, configChanged, "configChanged should be true when spec is removed")
+		assert.False(t, statusChanged)
+		assert.False(t, replicasChanged)
+	})
+
+	t.Run("no previous event - configChanged=false", func(t *testing.T) {
+		builder := NewGraphBuilder().(*graphBuilder)
+
+		currentResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(1),
+			},
+			"spec": map[string]interface{}{
+				"replicas": float64(3),
+			},
+		}
+
+		// Empty query result (no previous event)
+		mockClient := &mockGraphClient{
+			queryResult: &graph.QueryResult{Rows: [][]interface{}{}},
+		}
+		builder.client = mockClient
+
+		event := models.Event{
+			Resource: models.ResourceMetadata{UID: "test-uid"},
+		}
+
+		configChanged, statusChanged, replicasChanged := builder.detectChanges(ctx, event, currentResource)
+
+		assert.False(t, configChanged, "configChanged should be false when no previous event exists")
+		assert.False(t, statusChanged)
+		assert.False(t, replicasChanged)
+	})
+
+	t.Run("nested spec changes detected", func(t *testing.T) {
+		builder := NewGraphBuilder().(*graphBuilder)
+
+		currentResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(3),
+			},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "app",
+								"image": "myapp:v2",
+								"env": []interface{}{
+									map[string]interface{}{
+										"name":  "LOG_LEVEL",
+										"value": "debug",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		previousResource := map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"generation": float64(2),
+			},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "app",
+								"image": "myapp:v2",
+								"env": []interface{}{
+									map[string]interface{}{
+										"name":  "LOG_LEVEL",
+										"value": "info",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		mockClient := &mockGraphClient{
+			queryResult: createMockQueryResult(previousResource),
+		}
+		builder.client = mockClient
+
+		event := models.Event{
+			Resource: models.ResourceMetadata{UID: "test-uid"},
+		}
+
+		configChanged, statusChanged, replicasChanged := builder.detectChanges(ctx, event, currentResource)
+
+		assert.True(t, configChanged, "configChanged should be true when nested spec fields change")
+		assert.False(t, statusChanged)
+		assert.False(t, replicasChanged)
+	})
+}
+
+func TestDeepEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        interface{}
+		b        interface{}
+		expected bool
+	}{
+		{
+			name:     "nil values",
+			a:        nil,
+			b:        nil,
+			expected: true,
+		},
+		{
+			name:     "one nil value",
+			a:        nil,
+			b:        "test",
+			expected: false,
+		},
+		{
+			name:     "equal strings",
+			a:        "hello",
+			b:        "hello",
+			expected: true,
+		},
+		{
+			name:     "different strings",
+			a:        "hello",
+			b:        "world",
+			expected: false,
+		},
+		{
+			name:     "equal numbers",
+			a:        float64(42),
+			b:        float64(42),
+			expected: true,
+		},
+		{
+			name:     "different numbers",
+			a:        float64(42),
+			b:        float64(43),
+			expected: false,
+		},
+		{
+			name:     "equal booleans",
+			a:        true,
+			b:        true,
+			expected: true,
+		},
+		{
+			name:     "different booleans",
+			a:        true,
+			b:        false,
+			expected: false,
+		},
+		{
+			name: "equal maps",
+			a: map[string]interface{}{
+				"key1": "value1",
+				"key2": float64(42),
+			},
+			b: map[string]interface{}{
+				"key1": "value1",
+				"key2": float64(42),
+			},
+			expected: true,
+		},
+		{
+			name: "different maps - different values",
+			a: map[string]interface{}{
+				"key1": "value1",
+			},
+			b: map[string]interface{}{
+				"key1": "value2",
+			},
+			expected: false,
+		},
+		{
+			name: "different maps - different keys",
+			a: map[string]interface{}{
+				"key1": "value1",
+			},
+			b: map[string]interface{}{
+				"key2": "value1",
+			},
+			expected: false,
+		},
+		{
+			name: "different maps - different sizes",
+			a: map[string]interface{}{
+				"key1": "value1",
+			},
+			b: map[string]interface{}{
+				"key1": "value1",
+				"key2": "value2",
+			},
+			expected: false,
+		},
+		{
+			name: "equal nested maps",
+			a: map[string]interface{}{
+				"outer": map[string]interface{}{
+					"inner": "value",
+				},
+			},
+			b: map[string]interface{}{
+				"outer": map[string]interface{}{
+					"inner": "value",
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "different nested maps",
+			a: map[string]interface{}{
+				"outer": map[string]interface{}{
+					"inner": "value1",
+				},
+			},
+			b: map[string]interface{}{
+				"outer": map[string]interface{}{
+					"inner": "value2",
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "equal slices",
+			a: []interface{}{
+				"item1",
+				float64(42),
+				true,
+			},
+			b: []interface{}{
+				"item1",
+				float64(42),
+				true,
+			},
+			expected: true,
+		},
+		{
+			name: "different slices - different values",
+			a: []interface{}{
+				"item1",
+				float64(42),
+			},
+			b: []interface{}{
+				"item1",
+				float64(43),
+			},
+			expected: false,
+		},
+		{
+			name: "different slices - different lengths",
+			a: []interface{}{
+				"item1",
+			},
+			b: []interface{}{
+				"item1",
+				"item2",
+			},
+			expected: false,
+		},
+		{
+			name: "complex nested structure - equal",
+			a: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"replicas": float64(3),
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "nginx",
+								"image": "nginx:1.19",
+							},
+						},
+					},
+				},
+			},
+			b: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"replicas": float64(3),
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "nginx",
+								"image": "nginx:1.19",
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "complex nested structure - different",
+			a: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"replicas": float64(3),
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "nginx",
+								"image": "nginx:1.19",
+							},
+						},
+					},
+				},
+			},
+			b: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"replicas": float64(3),
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "nginx",
+								"image": "nginx:1.20", // Different image
+							},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := deepEqual(tt.a, tt.b)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Helper functions
+
+func createPodJSON(name, phase string) json.RawMessage {
+	data := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name": name,
+		},
+		"status": map[string]interface{}{
+			"phase": phase,
+		},
+	}
+	jsonData, _ := json.Marshal(data)
+	return jsonData
+}
+
+func createDeploymentJSON(name string, replicas, readyReplicas int) json.RawMessage {
+	data := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name": name,
+		},
+		"spec": map[string]interface{}{
+			"replicas": replicas,
+		},
+		"status": map[string]interface{}{
+			"replicas":      replicas,
+			"readyReplicas": readyReplicas,
+		},
+	}
+	jsonData, _ := json.Marshal(data)
+	return jsonData
+}
+
+func createK8sEventJSON(reason, message string) json.RawMessage {
+	data := map[string]interface{}{
+		"reason":  reason,
+		"message": message,
+		"type":    "Warning",
+		"count":   1,
+		"source": map[string]interface{}{
+			"component": "scheduler",
+		},
+	}
+	jsonData, _ := json.Marshal(data)
+	return jsonData
+}

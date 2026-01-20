@@ -1,0 +1,24 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "Service",
+        "category": "State",
+        "type": "NoReadyEndpoints",
+        "min_severity": "high",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "Service",
+      "intermediate_kinds": [],
+      "symptom_kind": "Service",
+      "min_confidence": 0.5
+    }
+  },
+  "scenario": {
+    "description": "Service selector changed to not match any pods",
+    "name": "service-selector-change"
+  },
+  "timestamp": 1767982659
+}

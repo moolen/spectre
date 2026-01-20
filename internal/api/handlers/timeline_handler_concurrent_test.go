@@ -14,6 +14,8 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
+const kindEvent = "Event"
+
 // mockConcurrentQueryExecutor allows controlling behavior for concurrent tests
 type mockConcurrentQueryExecutor struct {
 	executeFunc        func(*models.QueryRequest) (*models.QueryResult, error)
@@ -96,13 +98,6 @@ func createTestEvent(id, kind, namespace, name string, timestamp int64) models.E
 	}
 }
 
-// createTestEventWithGroup creates a test event with a resource group
-func createTestEventWithGroup(id, group, kind, namespace, name string, timestamp int64) models.Event {
-	evt := createTestEvent(id, kind, namespace, name, timestamp)
-	evt.Resource.Group = group
-	return evt
-}
-
 // TestExecuteConcurrentQueries_BothQueriesSucceed tests the happy path
 func TestExecuteConcurrentQueries_BothQueriesSucceed(t *testing.T) {
 	logger := logging.GetLogger("test")
@@ -113,7 +108,7 @@ func TestExecuteConcurrentQueries_BothQueriesSucceed(t *testing.T) {
 		executeFunc: func(q *models.QueryRequest) (*models.QueryResult, error) {
 			// Return different results based on query kind
 			kinds := q.Filters.GetKinds()
-			if len(kinds) == 1 && kinds[0] == "Event" {
+			if len(kinds) == 1 && kinds[0] == kindEvent {
 				return &models.QueryResult{
 					Events: []models.Event{
 						createTestEvent("event-1", "Event", "default", "test-event", time.Now().UnixNano()),
@@ -193,7 +188,7 @@ func TestExecuteConcurrentQueries_ResourceQueryFails(t *testing.T) {
 		executeFunc: func(q *models.QueryRequest) (*models.QueryResult, error) {
 			// Check if this is an Event query (uses Kinds slice)
 			kinds := q.Filters.GetKinds()
-			if len(kinds) == 1 && kinds[0] == "Event" {
+			if len(kinds) == 1 && kinds[0] == kindEvent {
 				return &models.QueryResult{
 					Events:          []models.Event{},
 					Count:           0,
@@ -240,7 +235,7 @@ func TestExecuteConcurrentQueries_EventQueryFails(t *testing.T) {
 		executeFunc: func(q *models.QueryRequest) (*models.QueryResult, error) {
 			// Check if this is an Event query (uses Kinds slice)
 			kinds := q.Filters.GetKinds()
-			if len(kinds) == 1 && kinds[0] == "Event" {
+			if len(kinds) == 1 && kinds[0] == kindEvent {
 				return nil, eventErr
 			}
 			return &models.QueryResult{

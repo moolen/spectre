@@ -48,6 +48,13 @@ export function transformResourceDetail(resource: any): K8sResource {
  * Internal function to transform resource object
  */
 function transformResource(resource: any): K8sResource {
+  const events = resource.events?.map(transformK8sEvent) || [];
+  
+  // Debug: Log resources with events
+  if (events.length > 0) {
+    console.log(`[dataTransformer] Resource ${resource.kind}/${resource.name} has ${events.length} events`);
+  }
+  
   return {
     id: resource.id,
     group: resource.group || '',
@@ -56,7 +63,7 @@ function transformResource(resource: any): K8sResource {
     namespace: resource.namespace || '(cluster)', // Cluster-scoped resources have no namespace
     name: resource.name,
     statusSegments: resource.statusSegments?.map(transformStatusSegment) || [],
-    events: resource.events?.map(transformK8sEvent) || [],
+    events,
   };
 }
 

@@ -24,10 +24,28 @@ func NewMockResourceLookup() *MockResourceLookup {
 func (m *MockResourceLookup) AddResource(res *graph.ResourceIdentity) {
 	// Index by UID
 	m.resources[res.UID] = res
-	
+
 	// Also index by namespace/kind/name for FindResourceByNamespace
 	key := res.Namespace + "/" + res.Kind + "/" + res.Name
 	m.resources[key] = res
+}
+
+// SetQueryResult sets the result to return from QueryGraph
+func (m *MockResourceLookup) SetQueryResult(result *graph.QueryResult) {
+	m.queryResult = result
+}
+
+// SetQueryError sets an error to return from QueryGraph
+func (m *MockResourceLookup) SetQueryError(err error) {
+	m.queryError = err
+}
+
+// SetOwnershipResult is a helper to set up the mock to return whether an ownership exists
+func (m *MockResourceLookup) SetOwnershipResult(hasOwnership bool) {
+	m.queryResult = &graph.QueryResult{
+		Columns: []string{"hasOwnership"},
+		Rows:    [][]interface{}{{hasOwnership}},
+	}
 }
 
 func (m *MockResourceLookup) FindResourceByUID(_ context.Context, uid string) (*graph.ResourceIdentity, error) {

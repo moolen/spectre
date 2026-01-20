@@ -1,0 +1,38 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "ConfigMap",
+        "category": "Change",
+        "type": "ConfigChange",
+        "min_severity": "medium",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "Pod",
+        "category": "State",
+        "type": "CrashLoopBackOff",
+        "min_severity": "high",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "Pod",
+        "category": "Event",
+        "type": "BackOff",
+        "min_severity": "medium",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "ConfigMap",
+      "intermediate_kinds": [],
+      "symptom_kind": "Pod",
+      "min_confidence": 0.6
+    }
+  },
+  "scenario": {
+    "description": "CrashLoopBackOff due to ConfigMap change introducing invalid env var",
+    "name": "crashloop-configmap"
+  },
+  "timestamp": 1767982706
+}

@@ -59,7 +59,7 @@ func TestMergeIntoCausalGraph(t *testing.T) {
 		assert.Len(t, result.Nodes, 3, "Should have 3 SPINE nodes")
 		spineCount := 0
 		for _, node := range result.Nodes {
-			if node.NodeType == "SPINE" {
+			if node.NodeType == nodeTypeSpine {
 				spineCount++
 			}
 		}
@@ -68,7 +68,7 @@ func TestMergeIntoCausalGraph(t *testing.T) {
 		// Verify OWNS edges
 		ownsCount := 0
 		for _, edge := range result.Edges {
-			if edge.RelationshipType == "OWNS" {
+			if edge.RelationshipType == edgeTypeOwns {
 				ownsCount++
 			}
 		}
@@ -126,7 +126,7 @@ func TestMergeIntoCausalGraph(t *testing.T) {
 		// Should have MANAGES edge
 		managesCount := 0
 		for _, edge := range result.Edges {
-			if edge.RelationshipType == "MANAGES" {
+			if edge.RelationshipType == edgeTypeManages {
 				managesCount++
 			}
 		}
@@ -274,7 +274,7 @@ func TestMergeIntoCausalGraph(t *testing.T) {
 		// Check step numbers are sequential
 		stepNumbers := make(map[int]bool)
 		for _, node := range result.Nodes {
-			if node.NodeType == "SPINE" {
+			if node.NodeType == nodeTypeSpine {
 				stepNumbers[node.StepNumber] = true
 			}
 		}

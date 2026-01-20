@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
@@ -19,6 +20,7 @@ func RegisterHandlers(
 	graphClient graph.Client,
 	graphPipeline sync.Pipeline,
 	metadataCache *api.MetadataCache,
+	namespaceGraphCache *namespacegraph.Cache,
 	logger *logging.Logger,
 	tracer trace.Tracer,
 	withMethod func(string, http.HandlerFunc) http.HandlerFunc,
@@ -70,10 +72,38 @@ func RegisterHandlers(
 		logger.Info("Registered /v1/timeline/compare endpoint for A/B testing")
 	}
 
-	// Register root cause handler if graph client is available
+	// Register causal graph handler if graph client is available
 	if graphClient != nil {
-		rootCauseHandler := NewRootCauseHandler(graphClient, logger, tracer)
-		router.HandleFunc("/v1/root-cause", withMethod(http.MethodGet, rootCauseHandler.Handle))
+		causalGraphHandler := NewCausalGraphHandler(graphClient, logger, tracer)
+		router.HandleFunc("/v1/causal-graph", withMethod(http.MethodGet, causalGraphHandler.Handle))
+		logger.Info("Registered /v1/causal-graph endpoint")
+	}
+
+	// Register anomaly handler if graph client is available
+	if graphClient != nil {
+		anomalyHandler := NewAnomalyHandler(graphClient, logger, tracer)
+		router.HandleFunc("/v1/anomalies", withMethod(http.MethodGet, anomalyHandler.Handle))
+		logger.Info("Registered /v1/anomalies endpoint")
+	}
+
+	// Register causal paths handler if graph client is available
+	if graphClient != nil {
+		causalPathsHandler := NewCausalPathsHandler(graphClient, logger, tracer)
+		router.HandleFunc("/v1/causal-paths", withMethod(http.MethodGet, causalPathsHandler.Handle))
+		logger.Info("Registered /v1/causal-paths endpoint")
+	}
+
+	// Register namespace graph handler if graph client is available
+	if graphClient != nil {
+		var namespaceGraphHandler *NamespaceGraphHandler
+		if namespaceGraphCache != nil {
+			namespaceGraphHandler = NewNamespaceGraphHandlerWithCache(graphClient, namespaceGraphCache, logger, tracer)
+			logger.Info("Registered /v1/namespace-graph endpoint (with caching)")
+		} else {
+			namespaceGraphHandler = NewNamespaceGraphHandler(graphClient, logger, tracer)
+			logger.Info("Registered /v1/namespace-graph endpoint")
+		}
+		router.HandleFunc("/v1/namespace-graph", withMethod(http.MethodGet, namespaceGraphHandler.Handle))
 	}
 
 	// Register import handler if graph pipeline is available

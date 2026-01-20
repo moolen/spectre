@@ -1,0 +1,33 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "Deployment",
+        "category": "Change",
+        "type": "WorkloadSpecModified",
+        "min_severity": "medium",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "Pod",
+        "category": "State",
+        "type": "Evicted",
+        "min_severity": "high",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "Deployment",
+      "intermediate_kinds": [
+        "ReplicaSet"
+      ],
+      "symptom_kind": "Pod",
+      "min_confidence": 0.8
+    }
+  },
+  "scenario": {
+    "description": "Pod eviction due to ephemeral storage pressure caused by Deployment update",
+    "name": "node-ephemeral-storage-pressure"
+  },
+  "timestamp": 1767982425
+}

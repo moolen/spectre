@@ -27,6 +27,11 @@ type QueryResult struct {
 
 	// QueryEndTime is the end timestamp of the query in nanoseconds (for segment extension)
 	QueryEndTime int64 `json:"-"`
+
+	// K8sEventsByResource maps resource UIDs to their associated Kubernetes events.
+	// This is populated by the graph executor when K8sEvents are fetched via EMITTED_EVENT relationships.
+	// The storage executor does not use this field.
+	K8sEventsByResource map[string][]K8sEvent `json:"-"`
 }
 
 // Validate checks that the query result is well-formed

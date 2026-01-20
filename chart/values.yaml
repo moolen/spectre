@@ -4,7 +4,7 @@ namespace: monitoring
 
 image:
   repository: ghcr.io/moolen/spectre
-  tag: latest
+  tag: test-build
   pullPolicy: IfNotPresent
   pullSecrets: []
 
@@ -22,11 +22,10 @@ revisionHistoryLimit: 5
 
 resources:
   requests:
-    memory: "128Mi"
-    cpu: "100m"
-  limits:
-    memory: "512Mi"
+    memory: "500Mi"
     cpu: "500m"
+  limits:
+    memory: "1400Mi"
 
 # Service configuration
 # Port allocation:
@@ -67,7 +66,6 @@ mcp:
       cpu: "50m"
     limits:
       memory: "256Mi"
-      cpu: "200m"
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
@@ -123,11 +121,10 @@ graph:
     # Resources for FalkorDB container
     resources:
       requests:
-        memory: "256Mi"
-        cpu: "100m"
+        memory: "512Mi"
+        cpu: 1
       limits:
         memory: "1Gi"
-        cpu: "500m"
 
     # Security context
     securityContext:
@@ -149,15 +146,16 @@ graph:
         - ReadWriteOnce
 
     # Health check configuration
+    # Note: FalkorDB can take time to initialize, especially with persistence enabled
     livenessProbe:
       enabled: true
       exec:
         command:
           - redis-cli
           - ping
-      initialDelaySeconds: 10
+      initialDelaySeconds: 60
       periodSeconds: 10
-      timeoutSeconds: 5
+      timeoutSeconds: 15
       failureThreshold: 3
       successThreshold: 1
 
@@ -167,9 +165,9 @@ graph:
         command:
           - redis-cli
           - ping
-      initialDelaySeconds: 5
+      initialDelaySeconds: 45
       periodSeconds: 5
-      timeoutSeconds: 3
+      timeoutSeconds: 15
       failureThreshold: 3
       successThreshold: 1
 

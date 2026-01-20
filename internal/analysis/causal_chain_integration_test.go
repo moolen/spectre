@@ -131,7 +131,10 @@ func TestCausalChainIntegration(t *testing.T) {
 
 	t.Run("getRelatedResources_pod_with_node_and_sa", func(t *testing.T) {
 		cleanupGraph(t, client)
-		now := time.Now().UnixNano()
+		now := time.Now()
+		nowNs := now.UnixNano()
+		failureTimestamp := nowNs
+		lookbackNs := int64(10 * time.Minute)
 
 		// Create Pod, Node, ServiceAccount
 		pod := graph.ResourceIdentity{
@@ -139,24 +142,24 @@ func TestCausalChainIntegration(t *testing.T) {
 			Kind:      "Pod",
 			Namespace: "default",
 			Name:      "my-pod",
-			FirstSeen: now,
-			LastSeen:  now,
+			FirstSeen: nowNs,
+			LastSeen:  nowNs,
 		}
 		node := graph.ResourceIdentity{
 			UID:       "node-uid-001",
 			Kind:      "Node",
 			Namespace: "",
 			Name:      "worker-1",
-			FirstSeen: now,
-			LastSeen:  now,
+			FirstSeen: nowNs,
+			LastSeen:  nowNs,
 		}
 		sa := graph.ResourceIdentity{
 			UID:       "sa-uid-001",
 			Kind:      "ServiceAccount",
 			Namespace: "default",
 			Name:      "my-sa",
-			FirstSeen: now,
-			LastSeen:  now,
+			FirstSeen: nowNs,
+			LastSeen:  nowNs,
 		}
 
 		createResource(t, client, pod)
@@ -169,7 +172,7 @@ func TestCausalChainIntegration(t *testing.T) {
 
 		analyzer := NewRootCauseAnalyzer(client)
 
-		related, err := analyzer.getRelatedResources(ctx, []string{pod.UID})
+		related, err := analyzer.getRelatedResources(ctx, []string{pod.UID}, failureTimestamp, lookbackNs)
 		require.NoError(t, err)
 
 		relList := related[pod.UID]
@@ -220,9 +223,9 @@ func TestCausalChainIntegration(t *testing.T) {
 			StatusChanged: true,
 		}
 		event3 := graph.ChangeEvent{
-			ID:            "event-003",
-			Timestamp:     failureTime.Add(-30 * time.Minute).UnixNano(), // Outside lookback
-			EventType:     "CREATE",
+			ID:        "event-003",
+			Timestamp: failureTime.Add(-30 * time.Minute).UnixNano(), // Outside lookback
+			EventType: "CREATE",
 		}
 
 		createChangeEvent(t, client, pod.UID, event1)

@@ -59,13 +59,14 @@ func TestCausalityEngine_InferCausality(t *testing.T) {
 		// Check link properties
 		found := false
 		for _, link := range links {
-			if link.CauseEventID == "deploy-update" && link.EffectEventID == "pod-delete" {
-				found = true
-				assert.Greater(t, link.Confidence, 0.5)
-				assert.Equal(t, int64(10000), link.LagMs)
-				assert.Contains(t, link.HeuristicUsed, "deployment-rollout")
-				break
+			if link.CauseEventID != "deploy-update" || link.EffectEventID != "pod-delete" {
+				continue
 			}
+			found = true
+			assert.Greater(t, link.Confidence, 0.5)
+			assert.Equal(t, int64(10000), link.LagMs)
+			assert.Contains(t, link.HeuristicUsed, "deployment-rollout")
+			break
 		}
 		assert.True(t, found, "Should find causality link between Deployment update and Pod delete")
 	})

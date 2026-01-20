@@ -1,6 +1,7 @@
 package errors
 
 import (
+	stderrors "errors"
 	"fmt"
 	"net/http"
 
@@ -149,6 +150,20 @@ func ConnectToHTTPCode(code connect.Code) int {
 		return http.StatusNotImplemented
 	case connect.CodeUnavailable:
 		return http.StatusServiceUnavailable
+	case connect.CodeCanceled:
+		return http.StatusRequestTimeout
+	case connect.CodeUnknown:
+		return http.StatusInternalServerError
+	case connect.CodeDeadlineExceeded:
+		return http.StatusGatewayTimeout
+	case connect.CodeFailedPrecondition:
+		return http.StatusBadRequest
+	case connect.CodeAborted:
+		return http.StatusConflict
+	case connect.CodeOutOfRange:
+		return http.StatusBadRequest
+	case connect.CodeDataLoss:
+		return http.StatusInternalServerError
 	default:
 		return http.StatusInternalServerError
 	}
@@ -236,7 +251,8 @@ func NewValidationError(message string, args ...interface{}) *APIError {
 
 // WrapError wraps a standard error as an internal server error
 func WrapError(err error) *APIError {
-	if apiErr, ok := err.(*APIError); ok {
+	var apiErr *APIError
+	if stderrors.As(err, &apiErr) {
 		return apiErr
 	}
 	return NewInternalServerError("Internal server error: %v", err)
@@ -244,12 +260,13 @@ func WrapError(err error) *APIError {
 
 // IsAPIError checks if an error is an APIError
 func IsAPIError(err error) bool {
-	_, ok := err.(*APIError)
-	return ok
+	var apiErr *APIError
+	return stderrors.As(err, &apiErr)
 }
 
 // AsAPIError tries to convert an error to an APIError
 func AsAPIError(err error) (*APIError, bool) {
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := stderrors.As(err, &apiErr)
 	return apiErr, ok
 }

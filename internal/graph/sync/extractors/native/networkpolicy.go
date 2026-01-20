@@ -81,7 +81,7 @@ func (e *NetworkPolicyExtractor) ExtractRelationships(
 				MATCH (p:ResourceIdentity)
 				WHERE p.kind = 'Pod'
 				  AND p.namespace = $namespace
-				  AND p.deleted = false
+				  AND NOT p.deleted
 				RETURN p.uid
 				LIMIT 500
 			`,
@@ -97,7 +97,7 @@ func (e *NetworkPolicyExtractor) ExtractRelationships(
 				MATCH (p:ResourceIdentity)
 				WHERE p.kind = 'Pod'
 				  AND p.namespace = $namespace
-				  AND p.deleted = false
+				  AND NOT p.deleted
 				  AND ` + labelQuery + `
 				RETURN p.uid
 				LIMIT 500

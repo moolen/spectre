@@ -18,15 +18,13 @@ const (
 type EdgeType string
 
 const (
-	EdgeTypeOwns              EdgeType = "OWNS"
-	EdgeTypeChanged           EdgeType = "CHANGED"
-	EdgeTypeTriggeredBy       EdgeType = "TRIGGERED_BY"
-	EdgeTypePrecededBy        EdgeType = "PRECEDED_BY"
-	EdgeTypeSelects           EdgeType = "SELECTS"
-	EdgeTypeScheduledOn       EdgeType = "SCHEDULED_ON"
-	EdgeTypeMounts            EdgeType = "MOUNTS"
+	EdgeTypeOwns               EdgeType = "OWNS"
+	EdgeTypeChanged            EdgeType = "CHANGED"
+	EdgeTypeSelects            EdgeType = "SELECTS"
+	EdgeTypeScheduledOn        EdgeType = "SCHEDULED_ON"
+	EdgeTypeMounts             EdgeType = "MOUNTS"
 	EdgeTypeUsesServiceAccount EdgeType = "USES_SERVICE_ACCOUNT"
-	EdgeTypeEmittedEvent      EdgeType = "EMITTED_EVENT"
+	EdgeTypeEmittedEvent       EdgeType = "EMITTED_EVENT"
 
 	// RBAC relationship types
 	EdgeTypeBindsRole EdgeType = "BINDS_ROLE" // RoleBinding/ClusterRoleBinding → Role/ClusterRole
@@ -35,23 +33,22 @@ const (
 	// Custom Resource relationship types (inferred with confidence)
 	EdgeTypeReferencesSpec  EdgeType = "REFERENCES_SPEC"  // Explicit spec references
 	EdgeTypeManages         EdgeType = "MANAGES"          // Lifecycle management (inferred)
-	EdgeTypeAnnotates       EdgeType = "ANNOTATES"        // Label/annotation linkage
 	EdgeTypeCreatesObserved EdgeType = "CREATES_OBSERVED" // Observed creation correlation
 )
 
 // ResourceIdentity represents a persistent Kubernetes resource node
 type ResourceIdentity struct {
-	UID       string            `json:"uid"`        // K8s UID (primary key)
-	Kind      string            `json:"kind"`       // e.g., "Pod", "Deployment"
-	APIGroup  string            `json:"apiGroup"`   // e.g., "apps", "" for core
-	Version   string            `json:"version"`    // e.g., "v1"
-	Namespace string            `json:"namespace"`  // empty for cluster-scoped
-	Name      string            `json:"name"`       // resource name
-	Labels    map[string]string `json:"labels"`     // resource labels
-	FirstSeen int64             `json:"firstSeen"`  // Unix nanoseconds
-	LastSeen  int64             `json:"lastSeen"`   // Unix nanoseconds
-	Deleted   bool              `json:"deleted"`    // true if resource was deleted
-	DeletedAt int64             `json:"deletedAt"`  // Unix nanoseconds (if deleted)
+	UID       string            `json:"uid"`       // K8s UID (primary key)
+	Kind      string            `json:"kind"`      // e.g., "Pod", "Deployment"
+	APIGroup  string            `json:"apiGroup"`  // e.g., "apps", "" for core
+	Version   string            `json:"version"`   // e.g., "v1"
+	Namespace string            `json:"namespace"` // empty for cluster-scoped
+	Name      string            `json:"name"`      // resource name
+	Labels    map[string]string `json:"labels"`    // resource labels
+	FirstSeen int64             `json:"firstSeen"` // Unix nanoseconds
+	LastSeen  int64             `json:"lastSeen"`  // Unix nanoseconds
+	Deleted   bool              `json:"deleted"`   // true if resource was deleted
+	DeletedAt int64             `json:"deletedAt"` // Unix nanoseconds (if deleted)
 }
 
 // ChangeEvent represents a state change event node
@@ -82,8 +79,8 @@ type K8sEvent struct {
 
 // OwnsEdge represents ownership relationship properties
 type OwnsEdge struct {
-	Controller           bool `json:"controller"`           // true if ownerRef has controller: true
-	BlockOwnerDeletion   bool `json:"blockOwnerDeletion"`   // prevents deletion
+	Controller         bool `json:"controller"`         // true if ownerRef has controller: true
+	BlockOwnerDeletion bool `json:"blockOwnerDeletion"` // prevents deletion
 }
 
 // ChangedEdge represents resource-to-event relationship properties
@@ -153,9 +150,19 @@ const (
 // EvidenceItem represents a piece of evidence for an inferred relationship
 type EvidenceItem struct {
 	Type      EvidenceType `json:"type"`      // Label, Temporal, Annotation, etc.
-	Value     string       `json:"value"`     // Evidence value
+	Value     string       `json:"value"`     // Human-readable evidence description
 	Weight    float64      `json:"weight"`    // How much this evidence contributes to confidence
 	Timestamp int64        `json:"timestamp"` // When evidence was observed
+
+	// Structured fields for evidence validation (optional, used for revalidation)
+	// These provide machine-readable data in addition to the human-readable Value
+	Key        string `json:"key,omitempty"`        // Label/annotation key (for label/annotation evidence)
+	MatchValue string `json:"matchValue,omitempty"` // Expected value to match (for label/annotation evidence)
+	SourceUID  string `json:"sourceUID,omitempty"`  // Source resource UID (for ownership evidence)
+	TargetUID  string `json:"targetUID,omitempty"`  // Target resource UID (for ownership evidence)
+	LagMs      int64  `json:"lagMs,omitempty"`      // Time lag in milliseconds (for temporal evidence)
+	WindowMs   int64  `json:"windowMs,omitempty"`   // Time window in milliseconds (for temporal evidence)
+	Namespace  string `json:"namespace,omitempty"`  // Namespace (for namespace evidence)
 }
 
 // ValidationState tracks the validation state of inferred edges
@@ -245,11 +252,11 @@ type QueryStats struct {
 
 // GraphStats represents overall graph statistics
 type GraphStats struct {
-	NodeCount         int            `json:"nodeCount"`
-	EdgeCount         int            `json:"edgeCount"`
-	NodesByType       map[NodeType]int `json:"nodesByType"`
-	EdgesByType       map[EdgeType]int `json:"edgesByType"`
-	OldestTimestamp   int64          `json:"oldestTimestamp"`   // Unix nanoseconds
-	NewestTimestamp   int64          `json:"newestTimestamp"`   // Unix nanoseconds
-	MemoryUsageBytes  int64          `json:"memoryUsageBytes"`
+	NodeCount        int              `json:"nodeCount"`
+	EdgeCount        int              `json:"edgeCount"`
+	NodesByType      map[NodeType]int `json:"nodesByType"`
+	EdgesByType      map[EdgeType]int `json:"edgesByType"`
+	OldestTimestamp  int64            `json:"oldestTimestamp"` // Unix nanoseconds
+	NewestTimestamp  int64            `json:"newestTimestamp"` // Unix nanoseconds
+	MemoryUsageBytes int64            `json:"memoryUsageBytes"`
 }

@@ -1,0 +1,31 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "StatefulSet",
+        "category": "Change",
+        "type": "ImageChanged",
+        "min_severity": "medium",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "Pod",
+        "category": "State",
+        "type": "ErrImagePull",
+        "min_severity": "high",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "StatefulSet",
+      "intermediate_kinds": [],
+      "symptom_kind": "Pod",
+      "min_confidence": 0.65
+    }
+  },
+  "scenario": {
+    "description": "StatefulSet rollout failure due to invalid image",
+    "name": "statefulset-rollout-failure"
+  },
+  "timestamp": 1767982600
+}

@@ -30,7 +30,7 @@ func ExtractUIDFromRow(row map[string]interface{}) string {
 
 // LabelsMatchSelector checks if resource labels match a selector
 // Returns true if ALL selector labels are present with matching values
-func LabelsMatchSelector(resourceLabels map[string]string, selectorLabels map[string]string) bool {
+func LabelsMatchSelector(resourceLabels, selectorLabels map[string]string) bool {
 	if len(selectorLabels) == 0 {
 		return true // Empty selector matches everything
 	}
@@ -146,7 +146,7 @@ func BuildLabelQuery(labels map[string]string, nodeAlias string) string {
 		nodeAlias = "r"
 	}
 
-	var conditions []string
+	conditions := make([]string, 0, len(labels))
 	for key, value := range labels {
 		// JSON substring matching for labels stored as JSON
 		conditions = append(conditions, nodeAlias+`.labels CONTAINS '"`+key+`":"`+value+`"'`)
@@ -157,7 +157,7 @@ func BuildLabelQuery(labels map[string]string, nodeAlias string) string {
 
 // CalculateTemporalProximityScore calculates a score based on time difference
 // Returns 1.0 for immediate proximity, 0.0 if outside window
-func CalculateTemporalProximityScore(lagMs int64, maxWindowMs int64) float64 {
+func CalculateTemporalProximityScore(lagMs, maxWindowMs int64) float64 {
 	if lagMs < 0 || lagMs > maxWindowMs {
 		return 0.0
 	}

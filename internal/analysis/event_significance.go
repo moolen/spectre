@@ -12,13 +12,16 @@ import (
 // when calculating event significance scores.
 
 const (
+	eventTypeWarning = "Warning"
+	eventTypeError   = "Error"
+
 	// EventWeightCausalSpine is the weight for events on the causal path.
 	// Events on the causal spine are most relevant for root cause analysis.
 	EventWeightCausalSpine = 0.15
 
 	// EventWeightConfigChange is the weight for spec/config modifications.
 	// Configuration changes are high-signal events.
-	EventWeightConfigChange = 0.35
+	EventWeightConfigChange = 0.30
 
 	// EventWeightStatusChange is the weight for status changes.
 	// Status changes are less impactful but still relevant.
@@ -26,11 +29,15 @@ const (
 
 	// EventWeightTemporalProximity is the weight for temporal closeness to failure.
 	// Events closer to the failure are more likely to be relevant.
-	EventWeightTemporalProximity = 0.25
+	EventWeightTemporalProximity = 0.20
 
 	// EventWeightErrorCorrelation is the weight for error pattern matching.
 	// Events that correlate with the error message are important.
-	EventWeightErrorCorrelation = 0.15
+	EventWeightErrorCorrelation = 0.10
+
+	// EventWeightResourcePattern is the weight for detected resource-specific patterns.
+	// Patterns like OOMKills, container crashes, and probe failures are critical indicators.
+	EventWeightResourcePattern = 0.20
 
 	// EventWeightEventType is the weight for event type significance.
 	// DELETE and CREATE events have higher impact than UPDATE.
@@ -60,24 +67,29 @@ var SignificantK8sEventReasons = map[string]float64{
 	"InsufficientCPU":     0.3,
 
 	// Normal operational events with lower significance
-	"Killing":          0.2,
-	"Preempting":       0.2,
-	"SuccessfulCreate": 0.1,
-	"Scheduled":        0.1,
-	"Pulled":           0.05,
-	"Started":          0.05,
-	"Created":          0.05,
+	"Killing":           0.2,
+	"Preempting":        0.2,
+	"SuccessfulCreate":  0.0,
+	"Scheduled":         0.0,
+	"Pulled":            0.0,
+	"Started":           0.0,
+	"Created":           0.0,
+	"ScalingReplicaSet": 0.0,
+	"SuccessfulDelete":  0.0,
+	"SuccessfulUpdate":  0.0,
 }
 
 // CalculateChangeEventSignificance scores a change event based on multiple factors.
 // The score is a weighted combination of:
-// - Causal spine position (35%): Is this event on the causal path?
-// - Config change (25%): Does this event modify the resource spec?
+// - Causal spine position (15%): Is this event on the causal path?
+// - Config change (30%): Does this event modify the resource spec?
 // - Temporal proximity (20%): How close is this event to the failure time?
-// - Error correlation (15%): Does this event correlate with error patterns?
+// - Resource patterns (20%): Does this event contain significant resource-specific patterns?
+// - Error correlation (10%): Does this event correlate with error patterns?
 // - Event type (5%): Is this a DELETE/CREATE vs UPDATE event?
 func CalculateChangeEventSignificance(
 	event *ChangeEventInfo,
+	resourceKind string,
 	isOnCausalSpine bool,
 	failureTime time.Time,
 	errorPatterns []string,
@@ -91,17 +103,31 @@ func CalculateChangeEventSignificance(
 		reasons = append(reasons, "on causal path")
 	}
 
-	// Factor 2: Config change (25%)
+	// Factor 2: Config change (30%)
 	if event.ConfigChanged {
 		score += EventWeightConfigChange
 		reasons = append(reasons, "spec changed")
 	} else if event.StatusChanged {
 		// Status changes are less impactful but still relevant
-		score += EventWeightConfigChange * 0.15
+		score += EventWeightStatusChange
 		reasons = append(reasons, "status changed")
 	}
 
-	// Factor 3: Temporal proximity (20%)
+	// Factor 3: Resource-specific patterns (20%)
+	// Detect significant patterns like OOMKills, container crashes, probe failures
+	patterns := DetectResourcePatterns(event, resourceKind)
+	if len(patterns) > 0 {
+		// Use the highest severity pattern
+		highestPattern := GetHighestSeverityPattern(patterns)
+		if highestPattern != nil {
+			// Scale pattern severity to our weight
+			patternScore := EventWeightResourcePattern * highestPattern.Severity
+			score += patternScore
+			reasons = append(reasons, highestPattern.Description)
+		}
+	}
+
+	// Factor 4: Temporal proximity (20%)
 	if !failureTime.IsZero() {
 		timeDelta := failureTime.Sub(event.Timestamp)
 		if timeDelta < 0 {
@@ -119,7 +145,7 @@ func CalculateChangeEventSignificance(
 		}
 	}
 
-	// Factor 4: Error correlation (15%)
+	// Factor 5: Error correlation (10%)
 	if len(errorPatterns) > 0 && event.Description != "" {
 		descLower := strings.ToLower(event.Description)
 		for _, pattern := range errorPatterns {
@@ -131,7 +157,7 @@ func CalculateChangeEventSignificance(
 		}
 	}
 
-	// Factor 5: Event type significance (5%)
+	// Factor 6: Event type significance (5%)
 	switch event.EventType {
 	case "DELETE":
 		score += EventWeightEventType
@@ -163,11 +189,11 @@ func CalculateK8sEventSignificance(
 	reasons := []string{}
 
 	// Warning events are more significant than Normal events
-	if event.Type == "Warning" {
-		score += 0.3
+	if event.Type == eventTypeWarning {
+		score += 0.2
 		reasons = append(reasons, "warning event")
-	} else if event.Type == "Error" {
-		score += 0.4
+	} else if event.Type == eventTypeError {
+		score += 0.3
 		reasons = append(reasons, "error event")
 	}
 
@@ -250,16 +276,18 @@ func ScoreEvents(
 	failureTime time.Time,
 	errorPatterns []string,
 ) {
+	resourceKind := node.Resource.Kind
+
 	// Score change events
 	if node.ChangeEvent != nil {
 		node.ChangeEvent.Significance = CalculateChangeEventSignificance(
-			node.ChangeEvent, isOnCausalSpine, failureTime, errorPatterns,
+			node.ChangeEvent, resourceKind, isOnCausalSpine, failureTime, errorPatterns,
 		)
 	}
 
 	for i := range node.AllEvents {
 		node.AllEvents[i].Significance = CalculateChangeEventSignificance(
-			&node.AllEvents[i], isOnCausalSpine, failureTime, errorPatterns,
+			&node.AllEvents[i], resourceKind, isOnCausalSpine, failureTime, errorPatterns,
 		)
 	}
 

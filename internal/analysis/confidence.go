@@ -12,13 +12,12 @@ func (a *RootCauseAnalyzer) calculateConfidence(
 	graph CausalGraph,
 	rootCause *RootCauseHypothesis,
 ) ConfidenceScore {
-
 	// Calculate each factor
 	factors := ConfidenceFactors{
 		DirectSpecChange:     calculateSpecChangeFactor(rootCause),
 		TemporalProximity:    calculateTemporalFactor(rootCause.TimeLagMs),
 		RelationshipStrength: calculateRelationshipFactor(graph),
-		ErrorMessageMatch:    calculateErrorMatchFactor(symptom, rootCause),
+		ErrorMessageMatch:    calculateErrorMatchFactor(symptom),
 		ChainCompleteness:    calculateCompletenessFactor(graph),
 	}
 
@@ -94,7 +93,7 @@ func calculateRelationshipFactor(graph CausalGraph) float64 {
 }
 
 // calculateErrorMatchFactor: 1.0 if error mentions config/image, ErrorMatchFactorGeneric if generic, 0.0 if none
-func calculateErrorMatchFactor(symptom *ObservedSymptom, rootCause *RootCauseHypothesis) float64 {
+func calculateErrorMatchFactor(symptom *ObservedSymptom) float64 {
 	errorLower := strings.ToLower(symptom.ErrorMessage)
 
 	// Check if error mentions configuration or image issues
@@ -119,7 +118,7 @@ func calculateCompletenessFactor(graph CausalGraph) float64 {
 	expectedNodes := float64(ChainCompletenessMinNodes)
 	actualNodes := 0.0
 	for _, node := range graph.Nodes {
-		if node.NodeType == "SPINE" {
+		if node.NodeType == nodeTypeSpine {
 			actualNodes++
 		}
 	}

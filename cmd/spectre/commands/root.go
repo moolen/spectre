@@ -78,16 +78,17 @@ func parseLogLevelFlags(flags []string) (string, map[string]string, error) {
 	// Step 1: Parse environment variables first (lower priority)
 	// Look for LOG_LEVEL_* pattern
 	for _, envPair := range os.Environ() {
-		if strings.HasPrefix(envPair, "LOG_LEVEL_") {
-			parts := strings.SplitN(envPair, "=", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			// Convert back: LOG_LEVEL_GRAPH_SYNC=debug -> graph.sync
-			packageName := convertEnvKeyToPackageName(parts[0])
-			level := parts[1]
-			result[packageName] = level
+		if !strings.HasPrefix(envPair, "LOG_LEVEL_") {
+			continue
 		}
+		parts := strings.SplitN(envPair, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		// Convert back: LOG_LEVEL_GRAPH_SYNC=debug -> graph.sync
+		packageName := convertEnvKeyToPackageName(parts[0])
+		level := parts[1]
+		result[packageName] = level
 	}
 
 	// Step 2: Parse CLI flags (override env vars)
@@ -120,7 +121,7 @@ func parseLogLevelFlags(flags []string) (string, map[string]string, error) {
 	// Step 5: Validate all package levels
 	for pkg, level := range result {
 		if err := validateLogLevel(level); err != nil {
-			return "", nil, fmt.Errorf("invalid log level for package %q: %v", pkg, err)
+			return "", nil, fmt.Errorf("invalid log level for package %q: %w", pkg, err)
 		}
 	}
 

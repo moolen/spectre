@@ -27,7 +27,7 @@ func TestRootCauseEndpoint_StatefulSetImageChange(t *testing.T) {
 	// Load the JSONL fixture - resolve path relative to test file
 	_, testFile, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(testFile)
-	fixturePath := filepath.Join(testDir, "fixtures", "testrootcause-statefulsetimagechange-end.jsonl")
+	fixturePath := filepath.Join(testDir, "..", "fixtures", "testrootcause-statefulsetimagechange-end.jsonl")
 	err = harness.SeedEventsFromAuditLog(ctx, fixturePath)
 	require.NoError(t, err)
 

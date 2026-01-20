@@ -130,11 +130,10 @@ You: Run a post-mortem analysis
 
 ### 2. Comprehensive Toolset
 
-**4 Investigation Tools**:
+**3 Investigation Tools**:
 - **cluster_health**: Cluster overview with resource status breakdown
 - **resource_changes**: High-impact change identification with correlation
 - **investigate**: Detailed timeline reconstruction with RCA prompts
-- **resource_explorer**: Resource discovery and browsing across namespaces
 
 **2 Pre-Built Prompts**:
 - **post_mortem_incident_analysis**: 9-step historical incident investigation
@@ -167,7 +166,6 @@ You: Run a post-mortem analysis
 | **cluster_health** | Cluster-wide health snapshot | "What's the current state?" | Minutes to hours |
 | **resource_changes** | Change identification + correlation | "What changed recently?" | 1-6 hours |
 | **investigate** | Deep dive into specific resource | "Why is this pod failing?" | Minutes to days |
-| **resource_explorer** | Resource discovery | "List all errored deployments" | Snapshot (optional time) |
 | **post_mortem_incident_analysis** | Historical incident RCA | "Analyze yesterday's outage" | 15 min - 4 hours |
 | **live_incident_handling** | Real-time triage | "Pods failing RIGHT NOW" | Last 15-30 minutes |
 
@@ -396,7 +394,6 @@ Claude: [Automatically calls cluster_health]
 - [**cluster_health**](./tools-reference/cluster-health.md) - Cluster overview with resource status breakdown
 - [**resource_changes**](./tools-reference/resource-changes.md) - High-impact change identification
 - [**investigate**](./tools-reference/investigate.md) - Detailed resource timeline reconstruction
-- [**resource_explorer**](./tools-reference/resource-explorer.md) - Resource discovery and browsing
 
 ### Prompt References (Workflows)
 

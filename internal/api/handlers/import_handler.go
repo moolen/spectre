@@ -138,14 +138,12 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		logging.Field("timeout", "5m"))
 
 	processStartTime := time.Now()
-	var errors []string
 	if err := h.pipeline.ProcessBatch(ctx, eventValues); err != nil {
 		processDuration := time.Since(processStartTime)
 		h.logger.ErrorWithFields("Event batch processing failed",
 			logging.Field("error", err),
 			logging.Field("event_count", len(eventValues)),
 			logging.Field("process_duration", processDuration))
-		errors = append(errors, fmt.Sprintf("Batch processing failed: %v", err))
 		api.WriteError(w, http.StatusInternalServerError, "INGEST_FAILED", err.Error())
 		return
 	}
@@ -181,7 +179,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		"files_created":  filesCreated, // For compatibility with tests
 		"imported_files": 0,            // Not applicable in graph mode
 		"duration":       duration.String(),
-		"errors":         errors,
+		"errors":         []string{},   // No errors in success path
 	}
 
 	h.logger.Debug("Writing import response to client")

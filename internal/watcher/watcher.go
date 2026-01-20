@@ -165,6 +165,12 @@ func (w *Watcher) Stop(ctx context.Context) error {
 	}
 }
 
+// GetRestConfig returns the Kubernetes REST config used by this watcher.
+// This can be used to create additional Kubernetes clients.
+func (w *Watcher) GetRestConfig() *rest.Config {
+	return w.restConfig
+}
+
 // loadAndStartWatchers loads the config and starts watchers for all resources
 func (w *Watcher) loadAndStartWatchers(ctx context.Context) error {
 	// Load watcher config

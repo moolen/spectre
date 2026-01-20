@@ -73,22 +73,25 @@ func ParseResourceIdentityFromNode(props map[string]interface{}) ResourceIdentit
 	if name, ok := props["name"].(string); ok {
 		resource.Name = name
 	}
-	if firstSeen, ok := props["firstSeen"].(int64); ok {
+	switch firstSeen := props["firstSeen"].(type) {
+	case int64:
 		resource.FirstSeen = firstSeen
-	} else if firstSeen, ok := props["firstSeen"].(float64); ok {
+	case float64:
 		resource.FirstSeen = int64(firstSeen)
 	}
-	if lastSeen, ok := props["lastSeen"].(int64); ok {
+	switch lastSeen := props["lastSeen"].(type) {
+	case int64:
 		resource.LastSeen = lastSeen
-	} else if lastSeen, ok := props["lastSeen"].(float64); ok {
+	case float64:
 		resource.LastSeen = int64(lastSeen)
 	}
 	if deleted, ok := props["deleted"].(bool); ok {
 		resource.Deleted = deleted
 	}
-	if deletedAt, ok := props["deletedAt"].(int64); ok {
+	switch deletedAt := props["deletedAt"].(type) {
+	case int64:
 		resource.DeletedAt = deletedAt
-	} else if deletedAt, ok := props["deletedAt"].(float64); ok {
+	case float64:
 		resource.DeletedAt = int64(deletedAt)
 	}
 
@@ -110,9 +113,10 @@ func ParseChangeEventFromNode(props map[string]interface{}) ChangeEvent {
 	if id, ok := props["id"].(string); ok {
 		event.ID = id
 	}
-	if timestamp, ok := props["timestamp"].(int64); ok {
+	switch timestamp := props["timestamp"].(type) {
+	case int64:
 		event.Timestamp = timestamp
-	} else if timestamp, ok := props["timestamp"].(float64); ok {
+	case float64:
 		event.Timestamp = int64(timestamp)
 	}
 	if eventType, ok := props["eventType"].(string); ok {
@@ -162,9 +166,10 @@ func ParseTriggeredByEdge(props map[string]interface{}) TriggeredByEdge {
 	if confidence, ok := props["confidence"].(float64); ok {
 		edge.Confidence = confidence
 	}
-	if lagMs, ok := props["lagMs"].(int64); ok {
+	switch lagMs := props["lagMs"].(type) {
+	case int64:
 		edge.LagMs = lagMs
-	} else if lagMs, ok := props["lagMs"].(float64); ok {
+	case float64:
 		edge.LagMs = int64(lagMs)
 	}
 	if reason, ok := props["reason"].(string); ok {
@@ -179,22 +184,25 @@ func ParseManagesEdge(props map[string]interface{}) ManagesEdge {
 	edge := ManagesEdge{}
 
 	// Handle confidence as float64 or int64
-	if confidence, ok := props["confidence"].(float64); ok {
+	switch confidence := props["confidence"].(type) {
+	case float64:
 		edge.Confidence = confidence
-	} else if confidence, ok := props["confidence"].(int64); ok {
+	case int64:
 		edge.Confidence = float64(confidence)
-	} else if confidence, ok := props["confidence"].(int); ok {
+	case int:
 		edge.Confidence = float64(confidence)
 	}
-	
-	if firstObserved, ok := props["firstObserved"].(int64); ok {
+
+	switch firstObserved := props["firstObserved"].(type) {
+	case int64:
 		edge.FirstObserved = firstObserved
-	} else if firstObserved, ok := props["firstObserved"].(float64); ok {
+	case float64:
 		edge.FirstObserved = int64(firstObserved)
 	}
-	if lastValidated, ok := props["lastValidated"].(int64); ok {
+	switch lastValidated := props["lastValidated"].(type) {
+	case int64:
 		edge.LastValidated = lastValidated
-	} else if lastValidated, ok := props["lastValidated"].(float64); ok {
+	case float64:
 		edge.LastValidated = int64(lastValidated)
 	}
 	if validationState, ok := props["validationState"].(string); ok {
@@ -219,9 +227,10 @@ func ParseK8sEventFromNode(props map[string]interface{}) K8sEvent {
 	if id, ok := props["id"].(string); ok {
 		event.ID = id
 	}
-	if timestamp, ok := props["timestamp"].(int64); ok {
+	switch timestamp := props["timestamp"].(type) {
+	case int64:
 		event.Timestamp = timestamp
-	} else if timestamp, ok := props["timestamp"].(float64); ok {
+	case float64:
 		event.Timestamp = int64(timestamp)
 	}
 	if reason, ok := props["reason"].(string); ok {
@@ -233,9 +242,10 @@ func ParseK8sEventFromNode(props map[string]interface{}) K8sEvent {
 	if eventType, ok := props["type"].(string); ok {
 		event.Type = eventType
 	}
-	if count, ok := props["count"].(int64); ok {
+	switch count := props["count"].(type) {
+	case int64:
 		event.Count = int(count)
-	} else if count, ok := props["count"].(float64); ok {
+	case float64:
 		event.Count = int(count)
 	}
 	if source, ok := props["source"].(string); ok {

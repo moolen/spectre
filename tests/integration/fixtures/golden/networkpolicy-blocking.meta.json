@@ -1,0 +1,16 @@
+{
+  "expected": {
+    "anomalies": [],
+    "causal_path": {
+      "root_kind": "",
+      "intermediate_kinds": [],
+      "symptom_kind": "",
+      "min_confidence": 0
+    }
+  },
+  "scenario": {
+    "description": "Pod unable to connect due to NetworkPolicy blocking traffic",
+    "name": "networkpolicy-blocking"
+  },
+  "timestamp": 1767982680
+}

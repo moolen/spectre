@@ -160,27 +160,7 @@ Context: [incident_description] (if provided)
 
 **Purpose**: Deep dive into root cause candidates
 
-### Step 5: Explore Related Resources
-
-**Tool called**: `resource_explorer` (optional, as needed)
-
-**Parameters**:
-```json
-{
-  "kind": "<related_kind>",
-  "namespace": "<namespace>",
-  "status": "Error"
-}
-```
-
-**What it provides**:
-- Broader context of related failures
-- Resource inventory at incident time
-- Cross-resource impact patterns
-
-**Purpose**: Identify cascading failures or dependencies
-
-### Step 6: Build Chronological Timeline
+### Step 5: Build Chronological Timeline
 
 **LLM synthesizes** tool results into timeline:
 
@@ -195,7 +175,7 @@ Context: [incident_description] (if provided)
 
 **Purpose**: Visualize incident progression with exact timing
 
-### Step 7: Root Cause Analysis
+### Step 6: Root Cause Analysis
 
 **LLM analyzes** investigation_prompts and tool results:
 
@@ -213,7 +193,7 @@ Contributing Factors:
 
 **Purpose**: Identify primary cause and contributing factors
 
-### Step 8: Impact Assessment & Recommendations
+### Step 7: Impact Assessment & Recommendations
 
 **LLM documents**:
 
@@ -497,7 +477,6 @@ Recommendations:
 - [cluster_health Tool](../tools-reference/cluster-health.md) - Cluster overview (used by prompt)
 - [resource_changes Tool](../tools-reference/resource-changes.md) - Change identification (used by prompt)
 - [investigate Tool](../tools-reference/investigate.md) - Resource deep dive (used by prompt)
-- [resource_explorer Tool](../tools-reference/resource-explorer.md) - Resource discovery (used by prompt)
 - [MCP Configuration](../../configuration/mcp-configuration.md) - MCP server setup
 
 <!-- Source: internal/mcp/handler.go, README.md lines 204-254 -->

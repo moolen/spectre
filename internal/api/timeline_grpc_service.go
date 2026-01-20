@@ -127,10 +127,12 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 // sendMetadata sends the metadata chunk with count and query stats
 func (s *TimelineGRPCService) sendMetadata(stream pb.TimelineService_GetTimelineServer, result *models.QueryResult, totalCount int) error {
 	metadata := &pb.TimelineMetadata{
+		// Timeline event counts are bounded by database size and query limits
+		// #nosec G115 -- Event counts are bounded by practical query limits
 		TotalCount:           int32(totalCount),
-		FilesSearched:        int32(result.FilesSearched),
-		SegmentsScanned:      int32(result.SegmentsScanned),
-		SegmentsSkipped:      int32(result.SegmentsSkipped),
+		FilesSearched:        result.FilesSearched,
+		SegmentsScanned:      result.SegmentsScanned,
+		SegmentsSkipped:      result.SegmentsSkipped,
 		QueryExecutionTimeMs: int64(result.ExecutionTimeMs),
 	}
 

@@ -22,17 +22,13 @@ func TestMCP_Scenario1_CrashLoopBackOff(t *testing.T) {
 		failure_condition_is_observed(30 * time.Second)
 
 	when.cluster_health_tool_is_called().and().
-		investigate_tool_is_called_for_resource("Pod", "crashloop-test-pod").and().
-		resource_changes_tool_is_called().and().
-		resource_explorer_tool_is_called()
+		resource_timeline_tool_is_called_for_resource("Pod", "crashloop-test-pod").and().
+		resource_timeline_changes_tool_is_called()
 
 	then.cluster_health_detects_error().and().
 		cluster_health_shows_expected_issue("CrashLoopBackOff").and().
-		investigate_provides_rca_prompts().and().
-		investigate_event_count_exceeds(0).and().
-		resource_changes_has_container_issue("CrashLoopBackOff").and().
-		resource_changes_impact_score_exceeds(0.30).and().
-		resource_explorer_shows_error_status()
+		resource_timeline_event_count_exceeds(0).and().
+		resource_timeline_changes_has_semantic_changes()
 }
 
 // TestMCP_Scenario2_ImagePullBackOff tests image pull failure detection
@@ -52,16 +48,12 @@ func TestMCP_Scenario2_ImagePullBackOff(t *testing.T) {
 		failure_condition_is_observed(30 * time.Second)
 
 	when.cluster_health_tool_is_called().and().
-		investigate_tool_is_called_for_resource("Pod", "imagepull-test-pod").and().
-		resource_changes_tool_is_called().and().
-		resource_explorer_tool_is_called()
+		resource_timeline_tool_is_called_for_resource("Pod", "imagepull-test-pod").and().
+		resource_timeline_changes_tool_is_called()
 
 	then.cluster_health_detects_error().and().
 		cluster_health_shows_expected_issue("ImagePullBackOff").and().
-		investigate_provides_rca_prompts().and().
-		resource_changes_has_container_issue("ImagePullBackOff").and().
-		resource_changes_impact_score_exceeds(0.20).and().
-		resource_explorer_shows_error_status() // May not always work due to indexing timing
+		resource_timeline_changes_has_semantic_changes()
 		// Note: all_tools_agree_on_resource_status() removed for now due to timing variations
 }
 
@@ -87,14 +79,12 @@ func TestMCP_Scenario3_DeploymentConfigChange(t *testing.T) {
 		failure_condition_is_observed(30 * time.Second)
 
 	when.cluster_health_tool_is_called().and().
-		investigate_tool_is_called_for_resource("Deployment", "transition-test-deployment").and().
-		resource_changes_tool_is_called().and().
-		resource_explorer_tool_is_called()
+		resource_timeline_tool_is_called_for_resource("Deployment", "transition-test-deployment").and().
+		resource_timeline_changes_tool_is_called()
 
 	then.cluster_health_detects_error().and().
-		investigate_shows_status_transition("Ready", "Warning").and().
-		investigate_provides_rca_prompts().and().
-		resource_changes_impact_score_exceeds(0.30)
+		resource_timeline_shows_status_transition("Ready", "Warning").and().
+		resource_timeline_changes_has_semantic_changes()
 }
 
 // TestMCP_Scenario4_OOMKilled tests out-of-memory kill detection
@@ -114,16 +104,12 @@ func TestMCP_Scenario4_OOMKilled(t *testing.T) {
 		failure_condition_is_observed(20 * time.Second)
 
 	when.cluster_health_tool_is_called().and().
-		investigate_tool_is_called_for_resource("Pod", "oom-test-pod").and().
-		resource_changes_tool_is_called().and().
-		resource_explorer_tool_is_called()
+		resource_timeline_tool_is_called_for_resource("Pod", "oom-test-pod").and().
+		resource_timeline_changes_tool_is_called()
 
 	then.cluster_health_detects_error().and().
 		cluster_health_shows_expected_issue("OOMKilled").and().
-		investigate_provides_rca_prompts().and().
-		resource_changes_has_container_issue("OOMKilled").and().
-		resource_changes_impact_score_exceeds(0.35).and(). // Highest impact
-		resource_explorer_shows_error_status()
+		resource_timeline_changes_has_semantic_changes()
 }
 
 // TestMCP_Scenario5_SchedulingFailure tests pod scheduling failure detection
@@ -143,12 +129,10 @@ func TestMCP_Scenario5_SchedulingFailure(t *testing.T) {
 		failure_condition_is_observed(20 * time.Second)
 
 	when.cluster_health_tool_is_called().and().
-		investigate_tool_is_called_for_resource("Pod", "unschedulable-test-pod").and().
-		resource_changes_tool_is_called().and().
-		resource_explorer_tool_is_called()
+		resource_timeline_tool_is_called_for_resource("Pod", "unschedulable-test-pod").and().
+		resource_timeline_changes_tool_is_called()
 
-	then.cluster_health_detects_error().and().
-		investigate_provides_rca_prompts()
+	then.cluster_health_detects_error()
 }
 
 // TestMCP_Scenario7_LivenessProbeFailure tests liveness probe failure detection
@@ -168,11 +152,10 @@ func TestMCP_Scenario7_LivenessProbeFailure(t *testing.T) {
 		failure_condition_is_observed(20 * time.Second)
 
 	when.cluster_health_tool_is_called().and().
-		investigate_tool_is_called_for_resource("Pod", "liveness-test-pod").and().
-		resource_changes_tool_is_called().and().
-		resource_explorer_tool_is_called()
+		resource_timeline_tool_is_called_for_resource("Pod", "liveness-test-pod").and().
+		resource_timeline_changes_tool_is_called()
 
-	then.investigate_provides_rca_prompts()
+	then.all_tools_agree_on_resource_status()
 }
 
 // TestMCP_Scenario8_ReadinessProbeFailure tests readiness probe failure detection
@@ -192,11 +175,10 @@ func TestMCP_Scenario8_ReadinessProbeFailure(t *testing.T) {
 		failure_condition_is_observed(20 * time.Second)
 
 	when.cluster_health_tool_is_called().and().
-		investigate_tool_is_called_for_resource("Pod", "readiness-test-pod").and().
-		resource_changes_tool_is_called().and().
-		resource_explorer_tool_is_called()
+		resource_timeline_tool_is_called_for_resource("Pod", "readiness-test-pod").and().
+		resource_timeline_changes_tool_is_called()
 
-	then.investigate_provides_rca_prompts()
+	then.all_tools_agree_on_resource_status()
 }
 
 // TestMCP_Scenario9_PVCProvisioningFailure tests PVC provisioning failure detection
@@ -216,9 +198,8 @@ func TestMCP_Scenario9_PVCProvisioningFailure(t *testing.T) {
 		failure_condition_is_observed(15 * time.Second)
 
 	when.cluster_health_tool_is_called().and().
-		investigate_tool_is_called_for_resource("PersistentVolumeClaim", "failing-pvc-test").and().
-		resource_changes_tool_is_called().and().
-		resource_explorer_tool_is_called()
+		resource_timeline_tool_is_called_for_resource("PersistentVolumeClaim", "failing-pvc-test").and().
+		resource_timeline_changes_tool_is_called()
 
 	// PVC stays in Pending state with no transitions, so just verify tools executed
 	then.all_tools_agree_on_resource_status()

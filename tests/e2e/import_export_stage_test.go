@@ -23,6 +23,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const kindPod = "Pod"
+
 type ImportExportStage struct {
 	t         *testing.T
 	require   *require.Assertions
@@ -240,7 +242,7 @@ func (s *ImportExportStage) generated_test_events_with_kubernetes_events() *Impo
 			s.events = append(s.events, updateEvent)
 
 			// For Pod resources, create Kubernetes Events that reference them
-			if kind == "Pod" {
+			if kind == kindPod {
 				s.involvedPodUIDs = append(s.involvedPodUIDs, resourceUID)
 
 				// Create a Kubernetes Event for this Pod
@@ -1001,7 +1003,7 @@ func (s *ImportExportStage) specific_kubernetes_event_is_present() *ImportExport
 			if timelineResp.Count > 0 {
 				// Check if Pods have Events attached
 				for _, r := range timelineResp.Resources {
-					if r.Kind == "Pod" && len(r.Events) > 0 {
+					if r.Kind == kindPod && len(r.Events) > 0 {
 						s.t.Logf("✓ Found Pod %s/%s with %d attached Kubernetes Events via timeline", r.Namespace, r.Name, len(r.Events))
 						timelineSuccess = true
 					}

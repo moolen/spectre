@@ -13,11 +13,6 @@ func WriteJSON(w io.Writer, data interface{}) error {
 	return encoder.Encode(data)
 }
 
-// writeJSON is a compatibility alias for WriteJSON
-func writeJSON(w io.Writer, data interface{}) error {
-	return WriteJSON(w, data)
-}
-
 // WriteError sends an error response
 func WriteError(w http.ResponseWriter, statusCode int, errorCode, message string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -29,11 +24,6 @@ func WriteError(w http.ResponseWriter, statusCode int, errorCode, message string
 	}
 
 	_ = WriteJSON(w, response)
-}
-
-// writeError is a compatibility alias for WriteError
-func writeError(w http.ResponseWriter, statusCode int, errorCode, message string) {
-	WriteError(w, statusCode, errorCode, message)
 }
 
 // ResponseFormatter formats API responses

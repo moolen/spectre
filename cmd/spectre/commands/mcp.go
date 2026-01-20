@@ -6,12 +6,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/mcp"
 	"github.com/spf13/cobra"
@@ -22,11 +20,6 @@ var (
 	httpAddr        string
 	transportType   string
 	mcpEndpointPath string
-	// Graph configuration
-	mcpGraphEnabled bool
-	mcpGraphHost    string
-	mcpGraphPort    int
-	mcpGraphName    string
 )
 
 var mcpCmd = &cobra.Command{
@@ -48,12 +41,6 @@ func init() {
 	mcpCmd.Flags().StringVar(&httpAddr, "http-addr", getEnv("MCP_HTTP_ADDR", ":8082"), "HTTP server address (host:port)")
 	mcpCmd.Flags().StringVar(&transportType, "transport", "http", "Transport type: http or stdio")
 	mcpCmd.Flags().StringVar(&mcpEndpointPath, "mcp-endpoint", getEnv("MCP_ENDPOINT", "/mcp"), "HTTP endpoint path for MCP requests")
-
-	// Graph reasoning layer configuration
-	mcpCmd.Flags().BoolVar(&mcpGraphEnabled, "graph-enabled", getEnvBool("GRAPH_ENABLED", false), "Enable graph-based reasoning tools")
-	mcpCmd.Flags().StringVar(&mcpGraphHost, "graph-host", getEnv("GRAPH_HOST", "localhost"), "FalkorDB host")
-	mcpCmd.Flags().IntVar(&mcpGraphPort, "graph-port", getEnvInt("GRAPH_PORT", 6379), "FalkorDB port")
-	mcpCmd.Flags().StringVar(&mcpGraphName, "graph-name", getEnv("GRAPH_NAME", "spectre"), "FalkorDB graph name")
 }
 
 func runMCP(cmd *cobra.Command, args []string) {
@@ -65,36 +52,12 @@ func runMCP(cmd *cobra.Command, args []string) {
 	logger.Info("Starting Spectre MCP Server (transport: %s)", transportType)
 	logger.Info("Connecting to Spectre API at %s", spectreURL)
 
-	// Create Spectre MCP server with optional graph support
-	var spectreServer *mcp.SpectreServer
-	var err error
-
-	if mcpGraphEnabled {
-		logger.Info("Graph reasoning layer enabled - configuring graph tools")
-		graphConfig := &graph.ClientConfig{
-			Host:         mcpGraphHost,
-			Port:         mcpGraphPort,
-			GraphName:    mcpGraphName,
-			MaxRetries:   3,
-			DialTimeout:  5 * time.Second,
-			ReadTimeout:  3 * time.Second,
-			WriteTimeout: 3 * time.Second,
-			PoolSize:     10,
-		}
-
-		spectreServer, err = mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
-			SpectreURL:  spectreURL,
-			Version:     Version,
-			GraphConfig: graphConfig,
-			Logger:      logger,
-		})
-	} else {
-		spectreServer, err = mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
-			SpectreURL: spectreURL,
-			Version:    Version,
-			Logger:     logger,
-		})
-	}
+	// Create Spectre MCP server
+	spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
+		SpectreURL: spectreURL,
+		Version:    Version,
+		Logger:     logger,
+	})
 
 	if err != nil {
 		logger.Fatal("Failed to create MCP server: %v", err)
@@ -183,11 +146,12 @@ func runMCP(cmd *cobra.Command, args []string) {
 			// Use a timeout context for shutdown (don't hang forever)
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer shutdownCancel()
-			
+
 			if err := streamableServer.Shutdown(shutdownCtx); err != nil {
 				logger.Error("Error during shutdown: %v", err)
 				// Force exit if graceful shutdown fails
-				os.Exit(1)
+				shutdownCancel() // Call explicitly before exit
+				os.Exit(1) //nolint:gocritic // shutdownCancel() is explicitly called on line 153
 			}
 		case err := <-errCh:
 			logger.Error("Server error: %v", err)
@@ -211,24 +175,6 @@ func runMCP(cmd *cobra.Command, args []string) {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
-	}
-	return defaultValue
-}
-
-// getEnvBool returns environment variable value as bool or default
-func getEnvBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		return value == "true" || value == "1" || value == "yes"
-	}
-	return defaultValue
-}
-
-// getEnvInt returns environment variable value as int or default
-func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intVal, err := strconv.Atoi(value); err == nil {
-			return intVal
-		}
 	}
 	return defaultValue
 }

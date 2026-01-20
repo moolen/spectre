@@ -29,8 +29,8 @@ func TestCalculateChangeEventSignificance(t *testing.T) {
 			isOnCausalSpine: true,
 			failureTime:     now,
 			errorPatterns:   nil,
-			minScore:        0.7,
-			maxScore:        1.0,
+			minScore:        0.60, // Score includes causal spine, config change, and temporal proximity
+			maxScore:        0.70,
 			expectReasons:   []string{"on causal path", "spec changed", "within 5min of failure"},
 		},
 		{
@@ -132,8 +132,8 @@ func TestCalculateChangeEventSignificance(t *testing.T) {
 			isOnCausalSpine: true,
 			failureTime:     now,
 			errorPatterns:   []string{"oom", "killed"},
-			minScore:        0.9,
-			maxScore:        1.0,
+			minScore:        0.75, // Score includes causal path, config change, temporal proximity, error pattern, and deletion
+			maxScore:        0.85,
 			expectReasons:   []string{"on causal path", "spec changed", "within 5min of failure", "matches error pattern", "resource deleted"},
 		},
 		{
@@ -157,6 +157,7 @@ func TestCalculateChangeEventSignificance(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := CalculateChangeEventSignificance(
 				tt.event,
+				"Pod", // Default to Pod for testing
 				tt.isOnCausalSpine,
 				tt.failureTime,
 				tt.errorPatterns,
@@ -224,7 +225,7 @@ func TestCalculateK8sEventSignificance(t *testing.T) {
 			},
 			isOnCausalSpine: false,
 			failureTime:     now,
-			minScore:        0.8,
+			minScore:        0.79, // 0.2 (warning) + 0.5 (ImagePullBackOff) + 0.1 (within 5min) = 0.8, use 0.79 for float precision
 			maxScore:        1.0,
 			expectReasons:   []string{"warning event", "ImagePullBackOff"},
 		},
@@ -254,8 +255,8 @@ func TestCalculateK8sEventSignificance(t *testing.T) {
 			},
 			isOnCausalSpine: false,
 			failureTime:     now,
-			minScore:        0.1,
-			maxScore:        0.3,
+			minScore:        0.0, // Scheduled has 0.0 boost, only gets temporal proximity
+			maxScore:        0.2,
 			expectReasons:   []string{"Scheduled"},
 		},
 		{
@@ -314,8 +315,8 @@ func TestCalculateK8sEventSignificance(t *testing.T) {
 			},
 			isOnCausalSpine: false,
 			failureTime:     now,
-			minScore:        0.7,
-			maxScore:        0.9,
+			minScore:        0.60, // 0.2 (warning) + 0.4 (Unhealthy) + 0.05 (within 30min) = 0.65
+			maxScore:        0.70,
 			expectReasons:   []string{"warning event", "Unhealthy"},
 		},
 		{
@@ -624,7 +625,8 @@ func TestScoreNormalization(t *testing.T) {
 
 	result := CalculateChangeEventSignificance(
 		event,
-		true, // on causal spine
+		"Pod", // resource kind
+		true,  // on causal spine
 		now,
 		[]string{"image", "config", "memory", "oom"},
 	)

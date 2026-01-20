@@ -51,6 +51,8 @@ func (r *FileReader) ReadFile(path string) (io.ReadCloser, error) {
 	}
 
 	// Open the file
+	// path is user-provided for import/export operations
+	// #nosec G304 -- Import/export file path is intentionally user-configurable
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %s: %w", path, err)

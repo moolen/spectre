@@ -183,7 +183,7 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	
 	// Generate filename with timestamp
 	filename := fmt.Sprintf("export-%d-%d.json.gz", from, to)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, filename))
 
 	// Write gzipped JSON response
 	gzipWriter := gzip.NewWriter(w)

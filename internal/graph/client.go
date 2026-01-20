@@ -73,9 +73,9 @@ func DefaultClientConfig() ClientConfig {
 		Password:     "",
 		GraphName:    "spectre",
 		MaxRetries:   3,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
+		DialTimeout:  30 * time.Second,
+		ReadTimeout:  120 * time.Second,
+		WriteTimeout: 120 * time.Second,
 		PoolSize:     10,
 
 		// Query cache defaults
@@ -126,10 +126,16 @@ func (c *falkorClient) Connect(ctx context.Context) error {
 
 	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
 
-	// Create connection options
+	// Create connection options with timeouts
+	// Note: falkordb.ConnectionOption is an alias for redis.Options
 	connOpts := &falkordb.ConnectionOption{
-		Addr:     addr,
-		Password: c.config.Password,
+		Addr:         addr,
+		Password:     c.config.Password,
+		DialTimeout:  c.config.DialTimeout,
+		ReadTimeout:  c.config.ReadTimeout,
+		WriteTimeout: c.config.WriteTimeout,
+		PoolSize:     c.config.PoolSize,
+		MaxRetries:   c.config.MaxRetries,
 	}
 
 	// Create FalkorDB client
@@ -401,10 +407,11 @@ func (c *falkorClient) GetGraphStats(ctx context.Context) (*GraphStats, error) {
 	for _, row := range nodeResult.Rows {
 		if len(row) >= 2 {
 			if nodeType, ok := row[0].(string); ok {
-				if count, ok := row[1].(int64); ok {
+				switch count := row[1].(type) {
+				case int64:
 					stats.NodesByType[NodeType(nodeType)] = int(count)
 					stats.NodeCount += int(count)
-				} else if count, ok := row[1].(float64); ok {
+				case float64:
 					stats.NodesByType[NodeType(nodeType)] = int(count)
 					stats.NodeCount += int(count)
 				}
@@ -417,10 +424,11 @@ func (c *falkorClient) GetGraphStats(ctx context.Context) (*GraphStats, error) {
 	for _, row := range edgeResult.Rows {
 		if len(row) >= 2 {
 			if edgeType, ok := row[0].(string); ok {
-				if count, ok := row[1].(int64); ok {
+				switch count := row[1].(type) {
+				case int64:
 					stats.EdgesByType[EdgeType(edgeType)] = int(count)
 					stats.EdgeCount += int(count)
-				} else if count, ok := row[1].(float64); ok {
+				case float64:
 					stats.EdgesByType[EdgeType(edgeType)] = int(count)
 					stats.EdgeCount += int(count)
 				}
@@ -431,15 +439,17 @@ func (c *falkorClient) GetGraphStats(ctx context.Context) (*GraphStats, error) {
 	// Parse timestamps
 	// Expected format: [[oldest_timestamp, newest_timestamp]]
 	if len(timestampResult.Rows) > 0 && len(timestampResult.Rows[0]) >= 2 {
-		if oldest, ok := timestampResult.Rows[0][0].(int64); ok {
+		switch oldest := timestampResult.Rows[0][0].(type) {
+		case int64:
 			stats.OldestTimestamp = oldest
-		} else if oldest, ok := timestampResult.Rows[0][0].(float64); ok {
+		case float64:
 			stats.OldestTimestamp = int64(oldest)
 		}
 
-		if newest, ok := timestampResult.Rows[0][1].(int64); ok {
+		switch newest := timestampResult.Rows[0][1].(type) {
+		case int64:
 			stats.NewestTimestamp = newest
-		} else if newest, ok := timestampResult.Rows[0][1].(float64); ok {
+		case float64:
 			stats.NewestTimestamp = int64(newest)
 		}
 	}
@@ -462,12 +472,15 @@ func (c *falkorClient) InitializeSchema(ctx context.Context) error {
 	// 2. ChangeEvent.timestamp (time-range queries)
 	// 3. ChangeEvent.id (idempotency)
 	// 4. K8sEvent.timestamp
+	// 5. Composite indexes for namespace graph queries
 
 	indexes := []string{
+		// Primary indexes
 		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.uid)",
 		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.kind)",
 		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.namespace)",
 		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.deleted)",
+		"CREATE INDEX FOR (n:ResourceIdentity) ON (n.firstSeen)",
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.id)",
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.timestamp)",
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.status)",
@@ -520,7 +533,7 @@ func buildPropertiesString(props map[string]interface{}) string {
 		return ""
 	}
 
-	var parts []string
+	parts := make([]string, 0, len(props))
 	for key, value := range props {
 		var valueStr string
 		switch v := value.(type) {
@@ -612,10 +625,12 @@ func replaceCypherParameters(query string, params map[string]interface{}) string
 // parseGraphQueryResult parses the result from GRAPH.QUERY command
 // FalkorDB returns results in a specific format:
 // [
-//   [header1, header2, ...],           // Column names
-//   [row1_col1, row1_col2, ...],      // Data rows
-//   [row2_col1, row2_col2, ...],
-//   [statistics]                       // Query statistics
+//
+//	[header1, header2, ...],           // Column names
+//	[row1_col1, row1_col2, ...],      // Data rows
+//	[row2_col1, row2_col2, ...],
+//	[statistics]                       // Query statistics
+//
 // ]
 func parseGraphQueryResult(result interface{}) (*QueryResult, error) {
 	// FalkorDB returns an array
@@ -685,17 +700,17 @@ func parseQueryStats(statsArray []interface{}) QueryStats {
 		if statStr, ok := stat.(string); ok {
 			// Parse different stat types
 			if strings.Contains(statStr, "Nodes created:") {
-				fmt.Sscanf(statStr, "Nodes created: %d", &stats.NodesCreated)
+				_, _ = fmt.Sscanf(statStr, "Nodes created: %d", &stats.NodesCreated)
 			} else if strings.Contains(statStr, "Nodes deleted:") {
-				fmt.Sscanf(statStr, "Nodes deleted: %d", &stats.NodesDeleted)
+				_, _ = fmt.Sscanf(statStr, "Nodes deleted: %d", &stats.NodesDeleted)
 			} else if strings.Contains(statStr, "Relationships created:") {
-				fmt.Sscanf(statStr, "Relationships created: %d", &stats.RelationshipsCreated)
+				_, _ = fmt.Sscanf(statStr, "Relationships created: %d", &stats.RelationshipsCreated)
 			} else if strings.Contains(statStr, "Relationships deleted:") {
-				fmt.Sscanf(statStr, "Relationships deleted: %d", &stats.RelationshipsDeleted)
+				_, _ = fmt.Sscanf(statStr, "Relationships deleted: %d", &stats.RelationshipsDeleted)
 			} else if strings.Contains(statStr, "Properties set:") {
-				fmt.Sscanf(statStr, "Properties set: %d", &stats.PropertiesSet)
+				_, _ = fmt.Sscanf(statStr, "Properties set: %d", &stats.PropertiesSet)
 			} else if strings.Contains(statStr, "Labels added:") {
-				fmt.Sscanf(statStr, "Labels added: %d", &stats.LabelsAdded)
+				_, _ = fmt.Sscanf(statStr, "Labels added: %d", &stats.LabelsAdded)
 			}
 		}
 	}

@@ -17,8 +17,8 @@ func TestUITimelinePageNavigation(t *testing.T) {
 		browser_is_initialized().and().
 		navigated_to_root()
 
-	then.time_range_picker_is_visible().and().
-		page_contains_text("Select Time Range")
+	then.filter_bar_is_visible().and().
+		page_has_content()
 }
 
 // TestUITimelineDataLoading tests that the timeline loads and displays data

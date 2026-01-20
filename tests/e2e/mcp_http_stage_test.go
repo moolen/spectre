@@ -154,11 +154,9 @@ func (s *MCPHTTPStage) tools_are_listed() *MCPHTTPStage {
 
 func (s *MCPHTTPStage) four_tools_are_available() *MCPHTTPStage {
 	s.Require.NotNil(s.tools, "tools must be listed first")
-	// Should have 6 tools with graph enabled (default in Helm)
-	// but allow 4 if graph is disabled
+	// Should have 5 tools (base tools including causal_paths)
 	toolCount := len(s.tools)
-	s.Assert.True(toolCount == 4 || toolCount == 6, 
-		"should have 4 tools (base) or 6 tools (with graph), got %d", toolCount)
+	s.Assert.Equal(5, toolCount, "should have 5 tools, got %d", toolCount)
 	s.T.Logf("Available tools count: %d", toolCount)
 	return s
 }
@@ -166,45 +164,24 @@ func (s *MCPHTTPStage) four_tools_are_available() *MCPHTTPStage {
 func (s *MCPHTTPStage) expected_tools_are_present() *MCPHTTPStage {
 	s.Require.NotNil(s.tools, "tools must be listed first")
 
-	// Base tools that should always be present
+	// Base tools that should always be present (including causal_paths which now uses HTTP API)
 	baseTools := map[string]bool{
-		"cluster_health":    false,
-		"resource_changes":  false,
-		"investigate":       false,
-		"resource_explorer": false,
-	}
-
-	// Graph tools are conditional (only present if graph.enabled=true)
-	graphTools := map[string]bool{
-		"find_root_cause":       false,
-		"calculate_blast_radius": false,
+		"cluster_health":            false,
+		"resource_timeline_changes": false,
+		"resource_timeline":         false,
+		"detect_anomalies":          false,
+		"causal_paths":              false,
 	}
 
 	for _, tool := range s.tools {
 		if _, expected := baseTools[tool.Name]; expected {
 			baseTools[tool.Name] = true
 		}
-		if _, expected := graphTools[tool.Name]; expected {
-			graphTools[tool.Name] = true
-		}
 	}
 
 	// Assert all base tools are present
 	for toolName, found := range baseTools {
 		s.Assert.True(found, "expected base tool %s to be present", toolName)
-	}
-
-	// Graph tools should be present with default Helm config, but are optional
-	hasGraphTools := false
-	for toolName, found := range graphTools {
-		if found {
-			hasGraphTools = true
-			s.T.Logf("✓ Graph tool %s is available", toolName)
-		}
-	}
-	
-	if !hasGraphTools {
-		s.T.Log("ℹ Graph tools not available (graph.enabled=false)")
 	}
 
 	return s

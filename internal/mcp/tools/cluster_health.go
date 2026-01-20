@@ -60,7 +60,7 @@ type ResourceStatusCount struct {
 
 // Issue represents a resource with persistent issues
 type Issue struct {
-	ResourceID        string `json:"resource_id"`
+	ResourceUID       string `json:"resource_uid"` // UID for use with other tools (resource_timeline_changes, detect_anomalies, causal_paths)
 	Kind              string `json:"kind"`
 	Namespace         string `json:"namespace"`
 	Name              string `json:"name"`
@@ -77,6 +77,7 @@ type ClusterHealthOutput struct {
 	TotalResources       int                   `json:"total_resources"`
 	ResourcesByKind      []ResourceStatusCount `json:"resources_by_kind"`
 	TopIssues            []Issue               `json:"top_issues,omitempty"`
+	IssueResourceUIDs    []string              `json:"issue_resource_uids,omitempty"` // UIDs of all resources with issues (for easy use with other tools)
 	ErrorResourceCount   int                   `json:"error_resource_count"`
 	WarningResourceCount int                   `json:"warning_resource_count"`
 	HealthyResourceCount int                   `json:"healthy_resource_count"`
@@ -118,7 +119,7 @@ func (t *ClusterHealthTool) Execute(ctx context.Context, input json.RawMessage) 
 		filters["namespace"] = params.Namespace
 	}
 
-	response, err := t.client.QueryTimeline(startTime, endTime, filters)
+	response, err := t.client.QueryTimeline(startTime, endTime, filters, 10000) // Large page size to get all resources
 	if err != nil {
 		return nil, fmt.Errorf("failed to query timeline: %w", err)
 	}
@@ -186,7 +187,7 @@ func analyzeHealth(response *client.TimelineResponse, maxResources int) *Cluster
 		// Track issues
 		if currentStatus == statusError || currentStatus == statusWarning {
 			issues = append(issues, Issue{
-				ResourceID:        resource.ID,
+				ResourceUID:       resource.ID,
 				Kind:              resource.Kind,
 				Namespace:         resource.Namespace,
 				Name:              resource.Name,
@@ -252,6 +253,12 @@ func analyzeHealth(response *client.TimelineResponse, maxResources int) *Cluster
 		}
 		return issues[i].EventCount > issues[j].EventCount
 	})
+
+	// Collect all issue UIDs (before truncating to top 10)
+	output.IssueResourceUIDs = make([]string, 0, len(issues))
+	for _, issue := range issues {
+		output.IssueResourceUIDs = append(output.IssueResourceUIDs, issue.ResourceUID)
+	}
 
 	if len(issues) > 10 {
 		output.TopIssues = issues[:10]

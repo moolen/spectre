@@ -17,6 +17,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const selectorDetailPanel = "[class*=\"DetailPanel\"]"
+
 type UIStage struct {
 	t           *testing.T
 	require     *require.Assertions
@@ -436,7 +438,7 @@ func (s *UIStage) resource_label_is_clicked() *UIStage {
 	// Verify the click worked by checking if detail panel opened (this confirms the handler fired)
 	// Note: We DON'T close the detail panel here because closing it calls setSelectedPoint(null),
 	// which would clear the highlighting. The highlighting test needs selectedPoint to remain set.
-	detailPanelSelector := "[class*=\"DetailPanel\"]"
+	detailPanelSelector := selectorDetailPanel
 	detailPanels := s.browserTest.Page.Locator(detailPanelSelector)
 	panelCount, _ := detailPanels.Count()
 	if panelCount > 0 {
@@ -611,7 +613,7 @@ func (s *UIStage) theme_is_switched_to(theme string) *UIStage {
 }
 
 func (s *UIStage) detail_panel_is_visible() *UIStage {
-	detailPanelSelector := "[class*=\"DetailPanel\"]"
+	detailPanelSelector := selectorDetailPanel
 	detailPanels := s.browserTest.Page.Locator(detailPanelSelector)
 	var panelCount int
 	var err error
@@ -629,7 +631,7 @@ func (s *UIStage) detail_panel_is_visible() *UIStage {
 }
 
 func (s *UIStage) detail_panel_is_not_visible() *UIStage {
-	detailPanelSelector := "[class*=\"DetailPanel\"]"
+	detailPanelSelector := selectorDetailPanel
 	detailPanels := s.browserTest.Page.Locator(detailPanelSelector)
 	panelCount, err := detailPanels.Count()
 	s.require.NoError(err)
@@ -659,7 +661,7 @@ func (s *UIStage) timeline_segment_is_highlighted() *UIStage {
 	selectedPointSet, err := s.browserTest.Page.Evaluate(`() => {
 		// Try to access React state - this is a bit hacky but helps debug
 		// Check if there's a selectedPoint by looking for detail panel or checking DOM
-		const detailPanel = document.querySelector('[class*="DetailPanel"]');
+		const detailPanel = document.querySelector('selectorDetailPanel');
 		return detailPanel !== null;
 	}`, nil)
 	if err == nil {
@@ -788,14 +790,6 @@ func (s *UIStage) timeline_segment_is_highlighted() *UIStage {
 	return s
 }
 
-func (s *UIStage) time_range_picker_is_visible() *UIStage {
-	timeRangePicker := s.browserTest.Page.Locator("[class*=\"test-TimeRange\"]")
-	visible, err := timeRangePicker.IsVisible()
-	s.require.NoError(err, "failed to check time range picker visibility")
-	s.require.True(visible, "time range picker should be visible")
-	return s
-}
-
 func (s *UIStage) filter_bar_is_visible() *UIStage {
 	filterBarSelector := "[class*=\"FilterBar\"], [class*=\"filter\"]"
 	filterBar := s.browserTest.Page.Locator(filterBarSelector)
@@ -803,14 +797,6 @@ func (s *UIStage) filter_bar_is_visible() *UIStage {
 	if err == nil && visible {
 		s.t.Log("✓ Filter bar visible")
 	}
-	return s
-}
-
-func (s *UIStage) page_contains_text(text string) *UIStage {
-	body := s.browserTest.Page.Locator("body")
-	bodyText, err := body.TextContent()
-	s.require.NoError(err, "failed to get body text content")
-	s.require.Contains(bodyText, text, "body should contain '%s'", text)
 	return s
 }
 
@@ -1020,7 +1006,8 @@ func (s *UIStage) pod_with_image_pull_error_exists(deploymentName string) *UISta
 			continue
 		}
 
-		for _, pod := range pods.Items {
+		for i := range pods.Items {
+			pod := &pods.Items[i]
 			// Check container statuses
 			for _, containerStatus := range pod.Status.ContainerStatuses {
 				if containerStatus.State.Waiting != nil {
@@ -1412,8 +1399,8 @@ func (s *UIStage) waitForDeploymentReady(ctx context.Context, namespace, name st
 }
 
 func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findInString(s, substr)))
+	return len(s) >= len(substr) && (s == substr || substr == "" ||
+		(s != "" && substr != "" && findInString(s, substr)))
 }
 
 func findInString(s, substr string) bool {

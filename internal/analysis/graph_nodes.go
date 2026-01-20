@@ -60,11 +60,6 @@ func createNodeID(resourceUID string) string {
 	return fmt.Sprintf("node-%s", resourceUID)
 }
 
-// createEdgeID generates a consistent edge ID from node IDs
-func createEdgeID(fromNodeID, toNodeID string) string {
-	return fmt.Sprintf("edge-%s-%s", fromNodeID, toNodeID)
-}
-
 // createSpineEdgeID generates an edge ID for SPINE edges
 func createSpineEdgeID(fromUID, toUID string) string {
 	return fmt.Sprintf("edge-spine-%s-%s", fromUID, toUID)

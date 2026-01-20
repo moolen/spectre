@@ -1,4 +1,4 @@
-.PHONY: help build build-ui build-mcp run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down test-graph test-graph-integration test-integration test-graph-integration-coverage test-graph-integration-single
+.PHONY: help build build-ui build-mcp run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down test-graph test-graph-integration test-integration test-graph-integration-coverage test-graph-integration-single golden-generator test-golden
 
 # Default target
 help:
@@ -17,7 +17,11 @@ help:
 	@echo "  test           - Run all tests (Go + UI)"
 	@echo "  test-go        - Run Go tests only"
 	@echo "  test-ui        - Run UI tests only"
+	@echo "  golden-generator - Build the golden fixture generator"
+	@echo "  generate-golden-fixtures - Generate golden test fixtures from Kind cluster"
+	@echo "  test-golden    - Run golden fixture tests"
 	@echo "  clean-test-clusters - Delete persistent test Kind clusters"
+	@echo "  clean-golden-cluster - Delete golden test Kind cluster"
 	@echo ""
 	@echo "Graph Layer:"
 	@echo "  graph-up       - Start FalkorDB for development"
@@ -85,12 +89,14 @@ run: build build-ui
 # Run Go tests only
 test-go:
 	@echo "Running Go tests..."
-	@go test -v -cover -count 1 -timeout 60m ./...
+	script -q -e -c "go test -v -cover -count 1 -timeout 60m ./..." /dev/null
 
-# Run UI tests only
+# Run UI tests only (unit tests + component tests)
 test-ui:
-	@echo "Running UI tests..."
+	@echo "Running UI unit tests..."
 	@cd ui && npm ci --prefer-offline --no-audit --no-fund 2>/dev/null && npm run test
+	@echo "Running UI component tests..."
+	@cd ui && npx playwright install chromium --with-deps && npm run test:ct
 
 # Run all tests (Go + UI)
 test: test-go test-ui
@@ -102,6 +108,30 @@ clean-test-clusters:
 	@kind delete cluster --name spectre-e2e-shared 2>/dev/null || true
 	@kind delete cluster --name spectre-ui-e2e-shared 2>/dev/null || true
 	@echo "✓ Test clusters cleaned up"
+
+# Build golden fixture generator
+golden-generator:
+	@echo "Building golden fixture generator..."
+	@go build ./tests/integration/golden/cmd/golden-generator/
+	@echo "✓ Golden fixture generator built (./golden-generator)"
+
+# Generate golden test fixtures
+generate-golden-fixtures:
+	@echo "Generating golden test fixtures..."
+	@./golden-generator --cluster spectre-golden --output tests/integration/fixtures/golden
+	@echo "✓ Golden fixtures generated"
+
+# Run golden tests
+test-golden:
+	@echo "Running golden tests..."
+	@go test -v -tags integration -timeout 30m ./tests/integration/api -run TestGoldenScenarios
+	@echo "✓ Golden tests completed"
+
+# Clean up golden cluster
+clean-golden-cluster:
+	@echo "Cleaning up golden cluster..."
+	@kind delete cluster --name spectre-golden 2>/dev/null || true
+	@echo "✓ Golden cluster cleaned up"
 
 # Clean build artifacts
 clean:

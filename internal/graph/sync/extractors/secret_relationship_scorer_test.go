@@ -259,7 +259,7 @@ func TestSecretRelationshipScorer_TemporalProximity(t *testing.T) {
 		{
 			name:              "at window boundary (60s lag)",
 			secretLastSeenLag: 60000,
-			expectedMin:       0.0, // 0.8 * 0.0 = 0.0
+			expectedMin:       0.0, // lag factor reduces score to zero
 			expectedMax:       0.01,
 		},
 		{
@@ -525,8 +525,8 @@ func TestSecretRelationshipScorer_ZeroConfidence(t *testing.T) {
 
 	secret := &graph.ResourceIdentity{
 		UID:       "secret-456",
-		Name:      "different-name", // No name match
-		Namespace: "other-namespace", // No namespace match
+		Name:      "different-name",                              // No name match
+		Namespace: "other-namespace",                             // No namespace match
 		LastSeen:  sourceEvent.Timestamp - (120 * 1_000_000_000), // 120s before (outside window)
 	}
 
@@ -612,5 +612,177 @@ func TestCreateExternalSecretScorerConfig(t *testing.T) {
 
 	if config.LabelKey != "external-secrets.io/name" {
 		t.Errorf("Expected LabelKey 'external-secrets.io/name', got '%s'", config.LabelKey)
+	}
+}
+
+func TestSecretRelationshipScorer_OwnerReference(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	tests := []struct {
+		name             string
+		hasOwnership     bool
+		expectConfidence float64
+		expectEvidence   graph.EvidenceType
+	}{
+		{
+			name:             "OWNS edge exists - 100% confidence",
+			hasOwnership:     true,
+			expectConfidence: 1.0,
+			expectEvidence:   graph.EvidenceTypeOwnership,
+		},
+		{
+			name:             "No OWNS edge - falls back to heuristics",
+			hasOwnership:     false,
+			expectConfidence: 0.0, // No other evidence in this test
+			expectEvidence:   "",  // No evidence expected
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookup := NewMockResourceLookup()
+			lookup.SetOwnershipResult(tt.hasOwnership)
+
+			config := SecretRelationshipScorerConfig{
+				OwnerReferenceWeight: 1.0,
+				CheckOwnerReferences: true,
+			}
+
+			scorer := NewSecretRelationshipScorer(config, lookup, func(format string, args ...interface{}) {})
+
+			event := models.Event{
+				Resource: models.ResourceMetadata{
+					UID:       "source-uid",
+					Name:      "my-source",
+					Namespace: "default",
+				},
+				Timestamp: now,
+			}
+
+			secret := &graph.ResourceIdentity{
+				UID:       "secret-uid",
+				Name:      "my-secret",
+				Namespace: "default",
+				LastSeen:  now,
+			}
+
+			confidence, evidence := scorer.ScoreRelationship(
+				context.Background(),
+				event,
+				nil, // sourceData
+				secret,
+				"my-secret", // targetSecretName
+			)
+
+			if confidence != tt.expectConfidence {
+				t.Errorf("Expected confidence %.2f, got %.2f", tt.expectConfidence, confidence)
+			}
+
+			if tt.expectEvidence != "" {
+				if len(evidence) == 0 {
+					t.Error("Expected evidence, got none")
+				} else if evidence[0].Type != tt.expectEvidence {
+					t.Errorf("Expected evidence type %s, got %s", tt.expectEvidence, evidence[0].Type)
+				}
+			} else if len(evidence) > 0 {
+				t.Errorf("Expected no evidence, got %d items", len(evidence))
+			}
+		})
+	}
+}
+
+func TestSecretRelationshipScorer_OwnerReferenceQueryError(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	lookup := NewMockResourceLookup()
+	lookup.SetQueryError(context.DeadlineExceeded)
+
+	config := SecretRelationshipScorerConfig{
+		OwnerReferenceWeight: 1.0,
+		CheckOwnerReferences: true,
+		NameMatchWeight:      0.5, // Enable fallback
+	}
+
+	scorer := NewSecretRelationshipScorer(config, lookup, func(format string, args ...interface{}) {})
+
+	event := models.Event{
+		Resource: models.ResourceMetadata{
+			UID:       "source-uid",
+			Name:      "my-source",
+			Namespace: "default",
+		},
+		Timestamp: now,
+	}
+
+	secret := &graph.ResourceIdentity{
+		UID:       "secret-uid",
+		Name:      "my-secret",
+		Namespace: "default",
+		LastSeen:  now,
+	}
+
+	// Query fails, should fall back to heuristic (name match)
+	confidence, evidence := scorer.ScoreRelationship(
+		context.Background(),
+		event,
+		nil,
+		secret,
+		"my-secret", // Matches secret name
+	)
+
+	// Should get name match confidence since ownership query failed
+	if confidence != 0.5 {
+		t.Errorf("Expected fallback confidence 0.5 (name match), got %.2f", confidence)
+	}
+
+	if len(evidence) != 1 {
+		t.Errorf("Expected 1 evidence item (name match), got %d", len(evidence))
+	}
+}
+
+func TestSecretRelationshipScorer_OwnerReferenceNilLookup(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	config := SecretRelationshipScorerConfig{
+		OwnerReferenceWeight: 1.0,
+		CheckOwnerReferences: true,
+		NameMatchWeight:      0.5,
+	}
+
+	// Create scorer with nil lookup
+	scorer := NewSecretRelationshipScorer(config, nil, func(format string, args ...interface{}) {})
+
+	event := models.Event{
+		Resource: models.ResourceMetadata{
+			UID:       "source-uid",
+			Name:      "my-source",
+			Namespace: "default",
+		},
+		Timestamp: now,
+	}
+
+	secret := &graph.ResourceIdentity{
+		UID:       "secret-uid",
+		Name:      "my-secret",
+		Namespace: "default",
+		LastSeen:  now,
+	}
+
+	// Should gracefully fall back to heuristics when lookup is nil
+	confidence, evidence := scorer.ScoreRelationship(
+		context.Background(),
+		event,
+		nil,
+		secret,
+		"my-secret",
+	)
+
+	// Should get name match confidence
+	if confidence != 0.5 {
+		t.Errorf("Expected fallback confidence 0.5 (name match), got %.2f", confidence)
+	}
+
+	if len(evidence) != 1 {
+		t.Errorf("Expected 1 evidence item, got %d", len(evidence))
 	}
 }

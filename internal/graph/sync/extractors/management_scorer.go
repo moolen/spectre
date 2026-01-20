@@ -19,10 +19,10 @@ type ManagementScorerConfig struct {
 	LabelTemplates map[string]string
 
 	// Scoring weights for heuristic fallback (when perfect label match fails)
-	NamePrefixWeight  float64 // Weight for resource name prefix matching manager name
-	NamespaceWeight   float64 // Weight for namespace match
-	TemporalWeight    float64 // Weight for temporal proximity (resource created near manager reconcile)
-	ReconcileWeight   float64 // Weight for reconcile event correlation (only used if CheckReconcileEvents=true)
+	NamePrefixWeight float64 // Weight for resource name prefix matching manager name
+	NamespaceWeight  float64 // Weight for namespace match
+	TemporalWeight   float64 // Weight for temporal proximity (resource created near manager reconcile)
+	ReconcileWeight  float64 // Weight for reconcile event correlation (only used if CheckReconcileEvents=true)
 
 	// Temporal proximity configuration
 	TemporalWindowMs int64 // Max milliseconds between manager event and resource creation for correlation
@@ -37,10 +37,10 @@ type ManagementScorerConfig struct {
 // Scoring algorithm:
 // 1. Check for perfect label match (both name and namespace labels) → 1.0 confidence
 // 2. Fall back to heuristic scoring based on:
-//    - Name prefix match (e.g., "frontend" HelmRelease manages "frontend-deployment")
-//    - Namespace match (resource in expected namespace)
-//    - Temporal proximity (resource created shortly after manager reconcile)
-//    - Reconcile events (optional, checks if manager recently reconciled)
+//   - Name prefix match (e.g., "frontend" HelmRelease manages "frontend-deployment")
+//   - Namespace match (resource in expected namespace)
+//   - Temporal proximity (resource created shortly after manager reconcile)
+//   - Reconcile events (optional, checks if manager recently reconciled)
 type ManagementScorer struct {
 	config ManagementScorerConfig
 	lookup ResourceLookup
@@ -108,22 +108,29 @@ func (s *ManagementScorer) ScoreRelationship(
 	if s.checkNamePrefixMatch(candidate, managerName) {
 		earnedWeight += s.config.NamePrefixWeight
 		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeLabel,
-			Value:     fmt.Sprintf("name prefix matches: %s", managerName),
-			Weight:    s.config.NamePrefixWeight,
-			Timestamp: time.Now().UnixNano(),
+			Type:       graph.EvidenceTypeLabel,
+			Value:      fmt.Sprintf("name prefix matches: %s", managerName),
+			Weight:     s.config.NamePrefixWeight,
+			Timestamp:  time.Now().UnixNano(),
+			Key:        "name",
+			MatchValue: managerName,
 		})
 	}
 
 	// Evidence 2: Namespace match
 	totalWeight += s.config.NamespaceWeight
+	effectiveNamespace := targetNamespace
+	if effectiveNamespace == "" {
+		effectiveNamespace = managerNamespace
+	}
 	if candidate.Namespace == targetNamespace || (targetNamespace == "" && candidate.Namespace == managerNamespace) {
 		earnedWeight += s.config.NamespaceWeight
 		evidence = append(evidence, graph.EvidenceItem{
 			Type:      graph.EvidenceTypeNamespace,
-			Value:     targetNamespace,
+			Value:     effectiveNamespace,
 			Weight:    s.config.NamespaceWeight,
 			Timestamp: time.Now().UnixNano(),
+			Namespace: effectiveNamespace,
 		})
 	}
 
@@ -141,13 +148,15 @@ func (s *ManagementScorer) ScoreRelationship(
 			Value:     fmt.Sprintf("created %dms after reconcile", lagMs),
 			Weight:    weight,
 			Timestamp: time.Now().UnixNano(),
+			LagMs:     lagMs,
+			WindowMs:  s.config.TemporalWindowMs,
 		})
 	}
 
 	// Evidence 4: Reconcile event correlation (optional)
 	if s.config.CheckReconcileEvents {
 		totalWeight += s.config.ReconcileWeight
-		windowNs := int64(60 * time.Second.Nanoseconds())
+		windowNs := 60 * time.Second.Nanoseconds()
 		managerEvents, err := s.lookup.FindRecentEvents(ctx, managerEvent.Resource.UID, windowNs)
 		if err == nil && len(managerEvents) > 0 {
 			// Check for reconcile success
@@ -211,10 +220,12 @@ func (s *ManagementScorer) checkPerfectLabelMatch(
 
 		// Both labels match
 		*evidence = append(*evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeLabel,
-			Value:     fmt.Sprintf("Labels match: %s=%s, %s=%s", nameLabelKey, managerName, namespaceLabelKey, managerNamespace),
-			Weight:    1.0,
-			Timestamp: time.Now().UnixNano(),
+			Type:       graph.EvidenceTypeLabel,
+			Value:      fmt.Sprintf("Labels match: %s=%s, %s=%s", nameLabelKey, managerName, namespaceLabelKey, managerNamespace),
+			Weight:     1.0,
+			Timestamp:  time.Now().UnixNano(),
+			Key:        nameLabelKey,
+			MatchValue: managerName,
 		})
 		s.logger("Found perfect label match (name+namespace) - 100%% confidence: candidateUID=%s", candidate.UID)
 		return true
@@ -222,10 +233,12 @@ func (s *ManagementScorer) checkPerfectLabelMatch(
 
 	// Only name label is configured and it matches
 	*evidence = append(*evidence, graph.EvidenceItem{
-		Type:      graph.EvidenceTypeLabel,
-		Value:     fmt.Sprintf("Label matches: %s=%s", nameLabelKey, managerName),
-		Weight:    1.0,
-		Timestamp: time.Now().UnixNano(),
+		Type:       graph.EvidenceTypeLabel,
+		Value:      fmt.Sprintf("Label matches: %s=%s", nameLabelKey, managerName),
+		Weight:     1.0,
+		Timestamp:  time.Now().UnixNano(),
+		Key:        nameLabelKey,
+		MatchValue: managerName,
 	})
 	s.logger("Found perfect label match (name only) - 100%% confidence: candidateUID=%s", candidate.UID)
 	return true
@@ -233,7 +246,8 @@ func (s *ManagementScorer) checkPerfectLabelMatch(
 
 // checkNamePrefixMatch checks if the candidate resource name starts with the manager name.
 // This is a common pattern where managed resources are named like:
-//   Manager: "frontend" → Managed: "frontend", "frontend-deployment", "frontend-svc"
+//
+//	Manager: "frontend" → Managed: "frontend", "frontend-deployment", "frontend-svc"
 func (s *ManagementScorer) checkNamePrefixMatch(
 	candidate *graph.ResourceIdentity,
 	managerName string,

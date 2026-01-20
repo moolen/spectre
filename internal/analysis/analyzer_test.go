@@ -426,7 +426,7 @@ func TestEmptyGraphHandling(t *testing.T) {
 		DirectSpecChange:     calculateSpecChangeFactor(&rootCause),
 		TemporalProximity:    calculateTemporalFactor(rootCause.TimeLagMs),
 		RelationshipStrength: calculateRelationshipFactor(symptomOnlyGraph),
-		ErrorMessageMatch:    calculateErrorMatchFactor(&symptom, &rootCause),
+		ErrorMessageMatch:    calculateErrorMatchFactor(&symptom),
 		ChainCompleteness:    calculateCompletenessFactor(symptomOnlyGraph),
 	}
 

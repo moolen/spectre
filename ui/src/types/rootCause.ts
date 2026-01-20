@@ -150,6 +150,48 @@ export interface RootCauseAnalysisV2 {
 }
 
 /**
+ * Anomaly Detection Types
+ * Matches backend schema from internal/analysis/anomaly/types.go
+ */
+
+export type AnomalyCategory = 'event' | 'state' | 'change' | 'frequency';
+export type Severity = 'low' | 'medium' | 'high' | 'critical';
+
+export interface AnomalyNode {
+  uid: string;
+  kind: string;
+  namespace: string;
+  name: string;
+}
+
+export interface Anomaly {
+  node: AnomalyNode;
+  category: AnomalyCategory;
+  type: string;
+  severity: Severity;
+  timestamp: string; // ISO timestamp
+  summary: string;
+  details: Record<string, unknown>;
+}
+
+export interface TimeWindow {
+  start: string; // ISO timestamp
+  end: string; // ISO timestamp
+}
+
+export interface AnomalyResponseMetadata {
+  resourceUID: string;
+  timeWindow: TimeWindow;
+  nodesAnalyzed: number;
+  executionTimeMs?: number;
+}
+
+export interface AnomalyResponse {
+  anomalies: Anomaly[];
+  metadata: AnomalyResponseMetadata;
+}
+
+/**
  * UI-specific state for root cause visualization
  */
 export interface RootCauseState {
@@ -161,4 +203,59 @@ export interface RootCauseState {
     resource: SymptomResource;
     step: CausalStep;
   }>;
+}
+
+/**
+ * Causal Paths API Types
+ * Matches backend schema from internal/analysis/causal_paths/types.go
+ */
+
+export interface CausalPathsResponse {
+  paths: CausalPath[];
+  metadata: CausalPathsMetadata;
+}
+
+export interface CausalPath {
+  id: string;
+  candidateRoot: PathNode;
+  firstAnomalyAt: string; // ISO timestamp
+  steps: PathStep[];
+  confidenceScore: number; // 0.0-1.0
+  explanation: string;
+  ranking: PathRanking;
+}
+
+export interface PathStep {
+  node: PathNode;
+  edge?: PathEdge; // nil for root node
+}
+
+export interface PathNode {
+  id: string;
+  resource: SymptomResource;
+  anomalies: Anomaly[];
+  primaryEvent?: ChangeEventInfo;
+}
+
+export interface PathEdge {
+  id: string;
+  relationshipType: string;
+  edgeCategory: 'CAUSE_INTRODUCING' | 'MATERIALIZATION';
+  causalWeight: number;
+}
+
+export interface PathRanking {
+  temporalScore: number; // 0.0-1.0
+  effectiveCausalDistance: number;
+  maxAnomalySeverity: string;
+  severityScore: number; // 0.0-1.0
+}
+
+export interface CausalPathsMetadata {
+  queryExecutionMs: number;
+  algorithmVersion: string;
+  executedAt: string; // ISO timestamp
+  nodesExplored: number;
+  pathsDiscovered: number;
+  pathsReturned: number;
 }

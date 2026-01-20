@@ -19,17 +19,29 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
+const (
+	kindPod         = "Pod"
+	kindReplicaSet  = "ReplicaSet"
+	kindConfigMap   = "ConfigMap"
+	kindClusterRole = "ClusterRole"
+	kindDeployment  = "Deployment"
+)
+
 // graphBuilder implements the GraphBuilder interface
 type graphBuilder struct {
 	logger            *logging.Logger
 	client            graph.Client // Graph client for querying existing nodes
 	extractorRegistry *extractors.ExtractorRegistry
+	// batchCache stores events from the current batch for change detection
+	// Key: resource UID, Value: list of events for that resource (ordered by timestamp)
+	batchCache map[string][]models.Event
 }
 
 // NewGraphBuilder creates a new graph builder
 func NewGraphBuilder() GraphBuilder {
 	return &graphBuilder{
-		logger: logging.GetLogger("graph.sync.builder"),
+		logger:     logging.GetLogger("graph.sync.builder"),
+		batchCache: make(map[string][]models.Event),
 	}
 }
 
@@ -42,9 +54,10 @@ func NewGraphBuilderWithClient(client graph.Client) GraphBuilder {
 	registry := extractors.NewExtractorRegistry(lookup)
 
 	// Register native K8s extractors (priority 50-99)
-	registry.Register(native.NewServiceExtractor())       // Service→Pod SELECTS
-	registry.Register(native.NewIngressExtractor())       // Ingress→Service REFERENCES_SPEC
-	registry.Register(native.NewNetworkPolicyExtractor()) // NetworkPolicy→Pod SELECTS
+	registry.Register(native.NewServiceExtractor())         // Service→Pod SELECTS
+	registry.Register(native.NewIngressExtractor())         // Ingress→Service REFERENCES_SPEC
+	registry.Register(native.NewNetworkPolicyExtractor())   // NetworkPolicy→Pod SELECTS
+	registry.Register(native.NewPodConfigSecretExtractor()) // Pod→ConfigMap/Secret REFERENCES_SPEC
 
 	// Register CRD extractors (priority 100+)
 	registry.Register(extractors.NewRBACExtractor())
@@ -70,7 +83,23 @@ func NewGraphBuilderWithClient(client graph.Client) GraphBuilder {
 		logger:            logging.GetLogger("graph.sync.builder"),
 		client:            client,
 		extractorRegistry: registry,
+		batchCache:        make(map[string][]models.Event),
 	}
+}
+
+// SetBatchCache sets the batch cache with events from the current batch
+// This allows detectChanges to find previous events from the same batch
+func (b *graphBuilder) SetBatchCache(events []models.Event) {
+	b.batchCache = make(map[string][]models.Event)
+	for _, event := range events {
+		uid := event.Resource.UID
+		b.batchCache[uid] = append(b.batchCache[uid], event)
+	}
+}
+
+// ClearBatchCache clears the batch cache after processing is complete
+func (b *graphBuilder) ClearBatchCache() {
+	b.batchCache = make(map[string][]models.Event)
 }
 
 // BuildResourceNodes creates just the resource and event nodes (Phase 1 of two-phase processing)
@@ -92,10 +121,7 @@ func (b *graphBuilder) BuildResourceNodes(event models.Event) (*GraphUpdate, err
 
 	// Create ChangeEvent node (unless this is a K8s Event object)
 	if event.Resource.Kind != "Event" {
-		changeEventNode, err := b.buildChangeEventNode(event)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build change event: %w", err)
-		}
+		changeEventNode := b.buildChangeEventNode(event)
 		update.EventNodes = append(update.EventNodes, changeEventNode)
 
 		// Create CHANGED edge (Resource → ChangeEvent)
@@ -205,26 +231,26 @@ func (b *graphBuilder) ExtractRelationships(ctx context.Context, event models.Ev
 
 	// Extract selector relationships (for Services, Deployments, etc.)
 	// Services and Deployments select Pods based on label selectors
-	if event.Resource.Kind == "Service" || event.Resource.Kind == "Deployment" || event.Resource.Kind == "ReplicaSet" || event.Resource.Kind == "StatefulSet" || event.Resource.Kind == "DaemonSet" {
+	if event.Resource.Kind == "Service" || event.Resource.Kind == kindDeployment || event.Resource.Kind == kindReplicaSet || event.Resource.Kind == "StatefulSet" || event.Resource.Kind == "DaemonSet" {
 		selectsEdges := b.extractSelectorRelationships(event.Resource.UID, event.Resource.Kind, resourceData)
 		edges = append(edges, selectsEdges...)
 	}
 
 	// Extract scheduling relationships (Pod → Node)
-	if event.Resource.Kind == "Pod" {
+	if event.Resource.Kind == kindPod {
 		if schedEdge := b.extractSchedulingRelationship(event.Resource.UID, resourceData); schedEdge != nil {
 			edges = append(edges, *schedEdge)
 		}
 	}
 
 	// Extract volume relationships (Pod → PVC)
-	if event.Resource.Kind == "Pod" {
+	if event.Resource.Kind == kindPod {
 		volumeEdges := b.extractVolumeRelationships(event.Resource.UID, resourceData)
 		edges = append(edges, volumeEdges...)
 	}
 
 	// Extract ServiceAccount relationship
-	if event.Resource.Kind == "Pod" {
+	if event.Resource.Kind == kindPod {
 		if saEdge := b.extractServiceAccountRelationship(event.Resource.UID, resourceData); saEdge != nil {
 			edges = append(edges, *saEdge)
 		}
@@ -371,7 +397,7 @@ func (b *graphBuilder) extractInvolvedObjectMetadata(event models.Event) *graph.
 }
 
 // buildChangeEventNode creates a ChangeEvent node from an event
-func (b *graphBuilder) buildChangeEventNode(event models.Event) (graph.ChangeEvent, error) {
+func (b *graphBuilder) buildChangeEventNode(event models.Event) graph.ChangeEvent {
 	// Parse resource data to extract status and errors
 	var resourceData *analyzer.ResourceData
 	var err error
@@ -397,10 +423,12 @@ func (b *graphBuilder) buildChangeEventNode(event models.Event) (graph.ChangeEve
 
 	// Extract container issues
 	containerIssues := []string{}
-	if len(event.Data) > 0 && event.Resource.Kind == "Pod" {
+	if len(event.Data) > 0 && event.Resource.Kind == kindPod {
 		if issues, err := analyzer.GetContainerIssuesFromJSON(event.Data); err == nil && len(issues) > 0 {
 			for _, issue := range issues {
-				containerIssues = append(containerIssues, issue.Reason)
+				// Use IssueType (normalized) instead of Reason (actual waiting reason)
+				// This ensures we get "ImagePullBackOff" whether the actual reason is "ErrImagePull" or "ImagePullBackOff"
+				containerIssues = append(containerIssues, issue.IssueType)
 			}
 		}
 	}
@@ -410,9 +438,15 @@ func (b *graphBuilder) buildChangeEventNode(event models.Event) (graph.ChangeEve
 	statusChanged := false
 	replicasChanged := false
 
-	if event.Type == models.EventTypeUpdate {
+	switch event.Type {
+	case models.EventTypeUpdate:
 		// For UPDATE events, compare with previous state to detect what changed
 		configChanged, statusChanged, replicasChanged = b.detectChanges(event, resourceData)
+	case models.EventTypeCreate, models.EventTypeDelete:
+		// For CREATE and DELETE events, no change detection needed
+		// Variables already initialized to false
+	default:
+		// Unknown event type, keep defaults
 	}
 
 	return graph.ChangeEvent{
@@ -427,7 +461,7 @@ func (b *graphBuilder) buildChangeEventNode(event models.Event) (graph.ChangeEve
 		ReplicasChanged: replicasChanged,
 		ImpactScore:     b.calculateImpactScore(status, containerIssues),
 		Data:            string(event.Data), // Store full resource data for timeline reconstruction
-	}, nil
+	}
 }
 
 // detectChanges compares current event with previous event to detect what changed
@@ -440,47 +474,81 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 		return configChanged, statusChanged, replicasChanged
 	}
 
-	// Query for the previous event for this resource, including its data
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	b.logger.Debug("Querying for previous event: resourceUID=%s, timestamp=%d", event.Resource.UID, event.Timestamp)
-
-	query := graph.GraphQuery{
-		Query: `
-			MATCH (r:ResourceIdentity {uid: $resourceUID})-[:CHANGED]->(ce:ChangeEvent)
-			WHERE ce.timestamp < $currentTimestamp
-			  AND ce.eventType IN ["CREATE", "UPDATE"]
-			RETURN ce.data, ce.timestamp
-			ORDER BY ce.timestamp DESC
-			LIMIT 1
-		`,
-		Parameters: map[string]interface{}{
-			"resourceUID":      event.Resource.UID,
-			"currentTimestamp": event.Timestamp,
-		},
+	// First, check the batch cache for previous events from the same batch
+	var previousEventData []byte
+	if cachedEvents, exists := b.batchCache[event.Resource.UID]; exists && len(cachedEvents) > 0 {
+		// Find the most recent event before the current one
+		for i := len(cachedEvents) - 1; i >= 0; i-- {
+			cached := cachedEvents[i]
+			if cached.Timestamp < event.Timestamp && (cached.Type == models.EventTypeCreate || cached.Type == models.EventTypeUpdate) {
+				previousEventData = cached.Data
+				b.logger.Debug("Found previous event in batch cache: resourceUID=%s, cachedTimestamp=%d, currentTimestamp=%d",
+					event.Resource.UID, cached.Timestamp, event.Timestamp)
+				break
+			}
+		}
 	}
 
-	result, err := b.client.ExecuteQuery(ctx, query)
-	if err != nil {
-		b.logger.Debug("Failed to query previous event for resource %s: %v", event.Resource.UID, err)
-		// For first event (CREATE), or if we can't determine, assume nothing changed from previous
+	// If not found in cache, query the database
+	if previousEventData == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		b.logger.Debug("Querying database for previous event: resourceUID=%s, timestamp=%d", event.Resource.UID, event.Timestamp)
+
+		query := graph.GraphQuery{
+			Query: `
+				MATCH (r:ResourceIdentity {uid: $resourceUID})-[:CHANGED]->(ce:ChangeEvent)
+				WHERE ce.timestamp < $currentTimestamp
+				  AND ce.eventType IN ["CREATE", "UPDATE"]
+				RETURN ce.data, ce.timestamp
+				ORDER BY ce.timestamp DESC
+				LIMIT 1
+			`,
+			Parameters: map[string]interface{}{
+				"resourceUID":      event.Resource.UID,
+				"currentTimestamp": event.Timestamp,
+			},
+		}
+
+		result, err := b.client.ExecuteQuery(ctx, query)
+		if err != nil {
+			b.logger.Debug("Failed to query previous event for resource %s: %v", event.Resource.UID, err)
+			// For first event (CREATE), or if we can't determine, assume nothing changed from previous
+			if currentData != nil {
+				statusChanged = true // Conservative: assume status might have changed
+			}
+			return configChanged, statusChanged, replicasChanged
+		}
+
+		if len(result.Rows) == 0 {
+			b.logger.Debug("No previous event found in database for resource %s (this is likely the first event)", event.Resource.UID)
+			// For first event (CREATE), or if we can't determine, assume nothing changed from previous
+			if currentData != nil {
+				statusChanged = true // Conservative: assume status might have changed
+			}
+			return configChanged, statusChanged, replicasChanged
+		}
+
+		// Extract data from DB result
+		if len(result.Rows) > 0 && len(result.Rows[0]) > 0 {
+			if dataValue := result.Rows[0][0]; dataValue != nil {
+				if dataStr, ok := dataValue.(string); ok && dataStr != "" {
+					previousEventData = []byte(dataStr)
+					b.logger.Debug("Previous event found in database for resource %s", event.Resource.UID)
+				}
+			}
+		}
+	}
+
+	// If still no previous event data found, this is the first event
+	if previousEventData == nil {
+		b.logger.Debug("No previous event data available for resource %s", event.Resource.UID)
 		if currentData != nil {
 			statusChanged = true // Conservative: assume status might have changed
 		}
 		return configChanged, statusChanged, replicasChanged
 	}
-
-	if len(result.Rows) == 0 {
-		b.logger.Debug("No previous event found for resource %s (this is likely the first event)", event.Resource.UID)
-		// For first event (CREATE), or if we can't determine, assume nothing changed from previous
-		if currentData != nil {
-			statusChanged = true // Conservative: assume status might have changed
-		}
-		return configChanged, statusChanged, replicasChanged
-	}
-
-	b.logger.Debug("Previous event found for resource %s", event.Resource.UID)
 
 	// Previous event exists - now we need to compare spec vs status
 	// Parse current event data
@@ -496,26 +564,13 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 		return configChanged, statusChanged, replicasChanged
 	}
 
-	// Parse previous event data with null/empty checks
+	// Parse previous event data
 	var previousResource map[string]interface{}
-
-	// Check if result row exists and has at least one element
-	if len(result.Rows) > 0 && len(result.Rows[0]) > 0 {
-		// First column is the data (ce.data)
-		if dataValue := result.Rows[0][0]; dataValue != nil {
-			if dataStr, ok := dataValue.(string); ok && dataStr != "" {
-				if err := json.Unmarshal([]byte(dataStr), &previousResource); err != nil {
-					b.logger.Debug("Failed to parse previous event data for resource %s: %v", event.Resource.UID, err)
-					// Continue with empty previousResource - we'll handle this gracefully
-				} else {
-					b.logger.Debug("Successfully parsed previous event data for resource %s", event.Resource.UID)
-				}
-			} else {
-				b.logger.Debug("Previous event data is empty or not a string for resource %s", event.Resource.UID)
-			}
-		} else {
-			b.logger.Debug("Previous event data is nil for resource %s", event.Resource.UID)
-		}
+	if err := json.Unmarshal(previousEventData, &previousResource); err != nil {
+		b.logger.Debug("Failed to parse previous event data for resource %s: %v", event.Resource.UID, err)
+		// Continue with empty previousResource - we'll handle this gracefully
+	} else {
+		b.logger.Debug("Successfully parsed previous event data for resource %s", event.Resource.UID)
 	}
 
 	// Extract generations from both current and previous events
@@ -538,11 +593,117 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 
 	b.logger.Debug("Generation comparison for resource %s: current=%v, previous=%v", event.Resource.UID, currentGeneration, previousGeneration)
 
-	// Config change detection: compare generations
-	// Generation increments when spec changes, so if current > previous, config changed
-	if currentGeneration > previousGeneration {
-		configChanged = true
-		b.logger.Debug("Config change detected for resource %s: generation increased from %v to %v", event.Resource.UID, previousGeneration, currentGeneration)
+	// Config change detection: Different strategies for different resource types
+	// - ConfigMap/Secret: Compare 'data' field (they don't have 'spec')
+	// - Other resources: Compare 'spec' field and verify generation increased
+
+	isConfigMapOrSecret := event.Resource.Kind == kindConfigMap || event.Resource.Kind == "Secret"
+	isRBACResource := event.Resource.Kind == "Role" || event.Resource.Kind == kindClusterRole ||
+		event.Resource.Kind == "RoleBinding" || event.Resource.Kind == "ClusterRoleBinding"
+
+	if isConfigMapOrSecret {
+		// ConfigMaps and Secrets don't have a spec field - they have a data field
+		// Also, their generation might not always increment, so we check data directly
+		currentData, currentHasData := currentResource["data"]
+		previousData, previousHasData := previousResource["data"]
+
+		if currentHasData != previousHasData {
+			// Data field was added or removed
+			configChanged = true
+			b.logger.Debug("Config change detected for %s %s: data added/removed", event.Resource.Kind, event.Resource.UID)
+		} else if currentHasData && previousHasData {
+			// Both have data - compare them
+			if !deepEqual(currentData, previousData) {
+				configChanged = true
+				b.logger.Debug("Config change detected for %s %s: data differs", event.Resource.Kind, event.Resource.UID)
+			}
+		}
+
+		// Also check binaryData for ConfigMaps
+		if event.Resource.Kind == kindConfigMap {
+			currentBinaryData, currentHasBinaryData := currentResource["binaryData"]
+			previousBinaryData, previousHasBinaryData := previousResource["binaryData"]
+
+			if currentHasBinaryData != previousHasBinaryData {
+				configChanged = true
+				b.logger.Debug("Config change detected for ConfigMap %s: binaryData added/removed", event.Resource.UID)
+			} else if currentHasBinaryData && previousHasBinaryData {
+				if !deepEqual(currentBinaryData, previousBinaryData) {
+					configChanged = true
+					b.logger.Debug("Config change detected for ConfigMap %s: binaryData differs", event.Resource.UID)
+				}
+			}
+		}
+	} else if isRBACResource {
+		// RBAC resources (Role, ClusterRole, RoleBinding, ClusterRoleBinding) don't have a spec field
+		// - Role/ClusterRole: have 'rules' array
+		// - RoleBinding/ClusterRoleBinding: have 'roleRef' and 'subjects'
+		if event.Resource.Kind == "Role" || event.Resource.Kind == kindClusterRole {
+			// Compare 'rules' field
+			currentRules, currentHasRules := currentResource["rules"]
+			previousRules, previousHasRules := previousResource["rules"]
+
+			if currentHasRules != previousHasRules {
+				configChanged = true
+				b.logger.Debug("Config change detected for %s %s: rules added/removed", event.Resource.Kind, event.Resource.UID)
+			} else if currentHasRules && previousHasRules {
+				if !deepEqual(currentRules, previousRules) {
+					configChanged = true
+					b.logger.Debug("Config change detected for %s %s: rules differs", event.Resource.Kind, event.Resource.UID)
+				}
+			}
+		} else {
+			// RoleBinding/ClusterRoleBinding: compare 'roleRef' and 'subjects'
+			currentRoleRef, currentHasRoleRef := currentResource["roleRef"]
+			previousRoleRef, previousHasRoleRef := previousResource["roleRef"]
+			currentSubjects, currentHasSubjects := currentResource["subjects"]
+			previousSubjects, previousHasSubjects := previousResource["subjects"]
+
+			if currentHasRoleRef != previousHasRoleRef {
+				configChanged = true
+				b.logger.Debug("Config change detected for %s %s: roleRef added/removed", event.Resource.Kind, event.Resource.UID)
+			} else if currentHasRoleRef && previousHasRoleRef {
+				if !deepEqual(currentRoleRef, previousRoleRef) {
+					configChanged = true
+					b.logger.Debug("Config change detected for %s %s: roleRef differs", event.Resource.Kind, event.Resource.UID)
+				}
+			}
+
+			if !configChanged {
+				if currentHasSubjects != previousHasSubjects {
+					configChanged = true
+					b.logger.Debug("Config change detected for %s %s: subjects added/removed", event.Resource.Kind, event.Resource.UID)
+				} else if currentHasSubjects && previousHasSubjects {
+					if !deepEqual(currentSubjects, previousSubjects) {
+						configChanged = true
+						b.logger.Debug("Config change detected for %s %s: subjects differs", event.Resource.Kind, event.Resource.UID)
+					}
+				}
+			}
+		}
+	} else if currentGeneration > previousGeneration {
+		// For resources with spec: Generation increments when spec changes
+		// but sometimes only metadata changes, so verify spec actually differs
+		currentSpec, currentHasSpec := currentResource["spec"]
+		previousSpec, previousHasSpec := previousResource["spec"]
+
+		// Only mark as config changed if:
+		// 1. Spec exists and differs from previous spec
+		// 2. Or spec was added/removed
+		if currentHasSpec != previousHasSpec {
+			// Spec was added or removed - definitely a config change
+			configChanged = true
+			b.logger.Debug("Config change detected for resource %s: spec added/removed", event.Resource.UID)
+		} else if currentHasSpec && previousHasSpec {
+			// Both have spec - compare them
+			if !deepEqual(currentSpec, previousSpec) {
+				configChanged = true
+				b.logger.Debug("Config change detected for resource %s: spec differs (generation increased from %v to %v)", event.Resource.UID, previousGeneration, currentGeneration)
+			} else {
+				// Generation increased but spec is identical - likely only metadata changed
+				b.logger.Debug("No config change for resource %s: generation increased but spec is identical (only metadata changed)", event.Resource.UID)
+			}
+		}
 	} else {
 		b.logger.Debug("No config change detected for resource %s: current generation %v is not greater than previous %v", event.Resource.UID, currentGeneration, previousGeneration)
 	}
@@ -735,7 +896,7 @@ func (b *graphBuilder) extractSelectorRelationships(selectorUID, kind string, re
 			}
 		}
 
-	case "Deployment", "ReplicaSet", "StatefulSet", "DaemonSet":
+	case kindDeployment, kindReplicaSet, "StatefulSet", "DaemonSet":
 		// These resources use spec.selector.matchLabels
 		if selectorRaw, ok := spec["selector"].(map[string]interface{}); ok {
 			if matchLabels, ok := selectorRaw["matchLabels"].(map[string]interface{}); ok {
@@ -782,23 +943,11 @@ func (b *graphBuilder) extractSelectorRelationships(selectorUID, kind string, re
 	return edges
 }
 
-// findPodsMatchingLabels queries the graph for Pods with labels matching the selector
+// findPodsMatchingLabels queries the graph for Pods with labels matching the selector.
+// It queries all Pods in the namespace and filters by label selector in-memory.
+// In-memory filtering is used because Cypher JSON substring matching is unreliable
+// with special characters in label keys (e.g., 'app.kubernetes.io/name').
 func (b *graphBuilder) findPodsMatchingLabels(ctx context.Context, selector map[string]string, namespace string) ([]string, error) {
-	// Build a Cypher query to find Pods with matching labels
-	// For simplicity, we'll query for Pods and check if all selector labels match
-	// Note: This requires labels to be stored in the graph - which happens via metadata
-
-	// Build WHERE clause for label matching
-	// We need to check the Pod's metadata.labels matches all selector labels
-	// Since labels are stored as JSON in the Pod resource data, we'll query for Pods
-	// in the namespace and return their UIDs, then we'd need to check labels
-
-	// For now, we'll use a simpler approach: query all Pods in namespace
-	// and rely on the fact that labels are part of the resource name/metadata
-	// This is a limitation - proper implementation would require storing labels separately
-
-	// Simplified query: Find all Pods in the namespace
-	// In a production system, you'd want to denormalize labels into node properties
 	var query graph.GraphQuery
 
 	if namespace != "" {
@@ -806,7 +955,7 @@ func (b *graphBuilder) findPodsMatchingLabels(ctx context.Context, selector map[
 			Query: `
 				MATCH (p:ResourceIdentity {kind: $kind, namespace: $namespace})
 				WHERE NOT p.deleted
-				RETURN p.uid as uid
+				RETURN p.uid as uid, p.labels as labels
 				LIMIT 100
 			`,
 			Parameters: map[string]interface{}{
@@ -819,7 +968,7 @@ func (b *graphBuilder) findPodsMatchingLabels(ctx context.Context, selector map[
 			Query: `
 				MATCH (p:ResourceIdentity {kind: $kind})
 				WHERE NOT p.deleted
-				RETURN p.uid as uid
+				RETURN p.uid as uid, p.labels as labels
 				LIMIT 100
 			`,
 			Parameters: map[string]interface{}{
@@ -833,24 +982,31 @@ func (b *graphBuilder) findPodsMatchingLabels(ctx context.Context, selector map[
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
 
-	// Extract UIDs from result
+	// Extract UIDs and filter by label selector in-memory
 	var podUIDs []string
 	for _, row := range result.Rows {
-		if len(row) > 0 {
-			if uid, ok := row[0].(string); ok {
-				podUIDs = append(podUIDs, uid)
-			}
+		if len(row) < 2 {
+			continue
+		}
+
+		uid, ok := row[0].(string)
+		if !ok {
+			continue
+		}
+
+		// Parse pod labels from JSON string
+		var podLabels map[string]string
+		if labelsStr, ok := row[1].(string); ok && labelsStr != "" {
+			_ = json.Unmarshal([]byte(labelsStr), &podLabels)
+		}
+
+		// Only include pods whose labels match the selector
+		if extractors.LabelsMatchSelector(podLabels, selector) {
+			podUIDs = append(podUIDs, uid)
 		}
 	}
 
-	// NOTE: This returns all Pods in the namespace without label filtering
-	// Label filtering is now implemented in the custom extractors
-	// (e.g., NetworkPolicyExtractor, ServiceExtractor) which query labels properly
-	//
-	// For now, we return all Pods in the namespace as potential matches
-	// The graph will be eventually consistent as Pods get created/updated
-
-	b.logger.Debug("Found %d Pod matches in namespace %s", len(podUIDs), namespace)
+	b.logger.Debug("Found %d Pod matches in namespace %s for selector %v", len(podUIDs), namespace, selector)
 
 	return podUIDs, nil
 }
@@ -1219,4 +1375,69 @@ func (b *graphBuilder) calculateImpactScore(status string, containerIssues []str
 	}
 
 	return score
+}
+
+// deepEqual performs a deep comparison of two interface{} values
+// Returns true if both values are structurally equal
+func deepEqual(a, b interface{}) bool {
+	// Handle nil cases
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Try type assertions for common types
+	switch aVal := a.(type) {
+	case map[string]interface{}:
+		bMap, ok := b.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		if len(aVal) != len(bMap) {
+			return false
+		}
+		for key, aValue := range aVal {
+			bValue, exists := bMap[key]
+			if !exists {
+				return false
+			}
+			if !deepEqual(aValue, bValue) {
+				return false
+			}
+		}
+		return true
+
+	case []interface{}:
+		bSlice, ok := b.([]interface{})
+		if !ok {
+			return false
+		}
+		if len(aVal) != len(bSlice) {
+			return false
+		}
+		for i, aValue := range aVal {
+			if !deepEqual(aValue, bSlice[i]) {
+				return false
+			}
+		}
+		return true
+
+	case string:
+		bStr, ok := b.(string)
+		return ok && aVal == bStr
+
+	case float64:
+		bNum, ok := b.(float64)
+		return ok && aVal == bNum
+
+	case bool:
+		bBool, ok := b.(bool)
+		return ok && aVal == bBool
+
+	default:
+		// For other types, use simple equality
+		return a == b
+	}
 }

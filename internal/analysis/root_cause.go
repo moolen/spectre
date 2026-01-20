@@ -4,6 +4,11 @@ import (
 	"fmt"
 )
 
+const (
+	nodeTypeSpine   = "SPINE"
+	eventTypeCreate = "CREATE"
+)
+
 // identifyRootCause extracts the root cause from the causal graph
 func (a *RootCauseAnalyzer) identifyRootCause(
 	graph CausalGraph,
@@ -16,7 +21,7 @@ func (a *RootCauseAnalyzer) identifyRootCause(
 	// Find SPINE nodes sorted by step number
 	spineNodes := []GraphNode{}
 	for _, node := range graph.Nodes {
-		if node.NodeType == "SPINE" {
+		if node.NodeType == nodeTypeSpine {
 			spineNodes = append(spineNodes, node)
 		}
 	}
@@ -64,7 +69,7 @@ func (a *RootCauseAnalyzer) identifyRootCause(
 	causationType := classifyCausationType(rootEvent, relationshipType)
 
 	// Generate explanation
-	explanation := generateRootCauseExplanation(rootNode, rootEvent, causationType, spineNodes)
+	explanation := generateRootCauseExplanation(rootNode, causationType, spineNodes)
 
 	// Calculate time lag
 	timeLagMs := (failureTimestamp - rootEvent.Timestamp.UnixNano()) / 1_000_000
@@ -91,10 +96,10 @@ func classifyCausationType(event *ChangeEventInfo, relationshipType string) stri
 		return "ConfigChange"
 	}
 	switch event.EventType {
-	case "CREATE":
+	case eventTypeCreate:
 		return "ResourceCreation"
 	case "UPDATE":
-		if relationshipType == "MANAGES" {
+		if relationshipType == edgeTypeManages {
 			return "DeploymentUpdate"
 		}
 		return "ResourceUpdate"
@@ -108,7 +113,6 @@ func classifyCausationType(event *ChangeEventInfo, relationshipType string) stri
 // generateRootCauseExplanation creates a human-readable explanation
 func generateRootCauseExplanation(
 	rootNode GraphNode,
-	event *ChangeEventInfo,
 	causationType string,
 	spineNodes []GraphNode,
 ) string {

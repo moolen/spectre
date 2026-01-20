@@ -62,7 +62,7 @@ func TestFluxHelmReleaseExtractorIntegration(t *testing.T) {
 	t.Run("extract_managed_resources_with_confidence", func(t *testing.T) {
 		// Setup: Add a Deployment to the mock graph that was created after HelmRelease
 		hrTimestamp := time.Now().UnixNano()
-		deploymentTimestamp := hrTimestamp + (5 * int64(time.Second.Nanoseconds()))
+		deploymentTimestamp := hrTimestamp + (5 * time.Second.Nanoseconds())
 
 		mockClient.AddResource("deployment-uid-123", "Deployment", "default", "frontend", deploymentTimestamp)
 

@@ -138,8 +138,20 @@ replicaCount: 1
 
 resources:
   requests:
-    memory: "256Mi"
-    cpu: "500m"
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+
+# Reduced MCP sidecar resources for CI
+mcp:
+  enabled: true
+  resources:
+    requests:
+      memory: "32Mi"
+      cpu: "25m"
+    limits:
+      memory: "128Mi"
 
 service:
   type: ClusterIP
@@ -168,9 +180,18 @@ graph:
   enabled: true
   falkordb:
     sidecar: true
+    # Reduced resources for CI environments
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
     persistence:
       # Use empty storageClassName for immediate binding in test environments
       storageClassName: ""
+      # Smaller PVC size for CI
+      size: 1Gi
 
 # Metadata cache configuration for tests
 # Use a very short refresh period to avoid race conditions in E2E tests

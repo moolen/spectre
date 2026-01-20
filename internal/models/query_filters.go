@@ -9,10 +9,12 @@ type QueryFilters struct {
 	Version string `json:"version"`
 
 	// Kind is the resource kind filter ("" means match all)
+	//
 	// Deprecated: Use Kinds for multi-value filtering
 	Kind string `json:"kind"`
 
 	// Namespace is the Kubernetes namespace filter ("" means match all)
+	//
 	// Deprecated: Use Namespaces for multi-value filtering
 	Namespace string `json:"namespace"`
 

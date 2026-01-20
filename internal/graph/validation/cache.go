@@ -115,7 +115,7 @@ func (c *CachedResourceLookup) FindResourceByNamespace(ctx context.Context, name
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity {namespace: $namespace, kind: $kind, name: $name})
-			WHERE r.deleted = false
+			WHERE NOT r.deleted
 			RETURN r
 			LIMIT 1
 		`,

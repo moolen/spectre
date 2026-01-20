@@ -299,6 +299,8 @@ func (s *pathSource) Load(logger *logging.Logger) ([]models.Event, error) {
 	case fileio.PathTypeFile:
 		logger.Debug("Path is a file, using file import")
 		return FromFile(s.path).Load(logger)
+	case fileio.PathTypeUnknown:
+		return nil, fmt.Errorf("unknown path type for %s", s.path)
 	default:
 		return nil, fmt.Errorf("unknown path type for %s", s.path)
 	}

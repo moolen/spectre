@@ -43,10 +43,10 @@ type SecretRelationshipScorerConfig struct {
 // Scoring algorithm:
 // 1. Check for perfect OwnerReference match → 1.0 confidence (short-circuit)
 // 2. Fall back to accumulating heuristic evidence:
-//    - Name match (exact or pattern-based)
-//    - Annotation/Label match
-//    - Temporal proximity (Secret created shortly after source reconcile)
-//    - Namespace match
+//   - Name match (exact or pattern-based)
+//   - Annotation/Label match
+//   - Temporal proximity (Secret created shortly after source reconcile)
+//   - Namespace match
 type SecretRelationshipScorer struct {
 	config SecretRelationshipScorerConfig
 	lookup ResourceLookup
@@ -89,12 +89,14 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 
 	// STAGE 1: Check for perfect OwnerReference match (100% confidence)
 	if s.config.CheckOwnerReferences {
-		if s.checkOwnerReference(secret, sourceEvent.Resource.UID) {
+		if s.checkOwnerReference(ctx, secret, sourceEvent.Resource.UID) {
 			evidence = append(evidence, graph.EvidenceItem{
 				Type:      graph.EvidenceTypeOwnership,
 				Value:     "Secret has ownerReference to source resource",
 				Weight:    1.0,
 				Timestamp: time.Now().UnixNano(),
+				SourceUID: sourceEvent.Resource.UID,
+				TargetUID: secret.UID,
 			})
 			s.logger("Found perfect OwnerReference match - 100%% confidence: secretUID=%s", secret.UID)
 			return 1.0, evidence
@@ -108,10 +110,12 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 	if s.config.NameMatchWeight > 0 && secret.Name == targetSecretName {
 		totalScore += s.config.NameMatchWeight
 		evidence = append(evidence, graph.EvidenceItem{
-			Type:      graph.EvidenceTypeLabel,
-			Value:     fmt.Sprintf("Secret name matches: %s", targetSecretName),
-			Weight:    s.config.NameMatchWeight,
-			Timestamp: time.Now().UnixNano(),
+			Type:       graph.EvidenceTypeLabel,
+			Value:      fmt.Sprintf("Secret name matches: %s", targetSecretName),
+			Weight:     s.config.NameMatchWeight,
+			Timestamp:  time.Now().UnixNano(),
+			Key:        "name",
+			MatchValue: targetSecretName,
 		})
 	}
 
@@ -123,10 +127,12 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 			if secret.Name == expectedName {
 				totalScore += s.config.NameMatchWeight
 				evidence = append(evidence, graph.EvidenceItem{
-					Type:      graph.EvidenceTypeLabel,
-					Value:     fmt.Sprintf("Secret name matches pattern %s: %s", pattern, expectedName),
-					Weight:    s.config.NameMatchWeight,
-					Timestamp: time.Now().UnixNano(),
+					Type:       graph.EvidenceTypeLabel,
+					Value:      fmt.Sprintf("Secret name matches pattern %s: %s", pattern, expectedName),
+					Weight:     s.config.NameMatchWeight,
+					Timestamp:  time.Now().UnixNano(),
+					Key:        "name",
+					MatchValue: expectedName,
 				})
 				break
 			}
@@ -140,10 +146,12 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 			if annotationValue, ok := secret.Labels[s.config.AnnotationKey]; ok && annotationValue == sourceEvent.Resource.Name {
 				totalScore += s.config.AnnotationMatchWeight
 				evidence = append(evidence, graph.EvidenceItem{
-					Type:      graph.EvidenceTypeAnnotation,
-					Value:     fmt.Sprintf("Annotation %s=%s", s.config.AnnotationKey, annotationValue),
-					Weight:    s.config.AnnotationMatchWeight,
-					Timestamp: time.Now().UnixNano(),
+					Type:       graph.EvidenceTypeAnnotation,
+					Value:      fmt.Sprintf("Annotation %s=%s", s.config.AnnotationKey, annotationValue),
+					Weight:     s.config.AnnotationMatchWeight,
+					Timestamp:  time.Now().UnixNano(),
+					Key:        s.config.AnnotationKey,
+					MatchValue: annotationValue,
 				})
 			}
 		}
@@ -155,10 +163,12 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 			if labelValue, ok := secret.Labels[s.config.LabelKey]; ok && labelValue == sourceEvent.Resource.Name {
 				totalScore += s.config.LabelMatchWeight
 				evidence = append(evidence, graph.EvidenceItem{
-					Type:      graph.EvidenceTypeLabel,
-					Value:     fmt.Sprintf("Label %s=%s", s.config.LabelKey, labelValue),
-					Weight:    s.config.LabelMatchWeight,
-					Timestamp: time.Now().UnixNano(),
+					Type:       graph.EvidenceTypeLabel,
+					Value:      fmt.Sprintf("Label %s=%s", s.config.LabelKey, labelValue),
+					Weight:     s.config.LabelMatchWeight,
+					Timestamp:  time.Now().UnixNano(),
+					Key:        s.config.LabelKey,
+					MatchValue: labelValue,
 				})
 			}
 		}
@@ -194,6 +204,8 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 					Value:     fmt.Sprintf("Secret observed within %dms of source event", AbsInt64(lagMs)),
 					Weight:    weight,
 					Timestamp: time.Now().UnixNano(),
+					LagMs:     lagMs,
+					WindowMs:  s.config.TemporalWindowMs,
 				})
 			}
 		}
@@ -207,6 +219,7 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 			Value:     secret.Namespace,
 			Weight:    s.config.NamespaceWeight,
 			Timestamp: time.Now().UnixNano(),
+			Namespace: secret.Namespace,
 		})
 	}
 
@@ -219,24 +232,56 @@ func (s *SecretRelationshipScorer) ScoreRelationship(
 	return confidence, evidence
 }
 
-// checkOwnerReference checks if the secret has an ownerReference to the source resource.
-// NOTE: Currently returns false (stub) - full implementation requires querying
-// the actual Secret resource's ownerReferences field, which is not available in
-// ResourceIdentity. Future enhancement: extend ResourceLookup to fetch full resources.
+// checkOwnerReference checks if the secret has an ownerReference to the source resource
+// by querying the existing OWNS edges in the graph. When resources are processed,
+// ownerReferences are converted to OWNS edges, so we can check if one exists.
 func (s *SecretRelationshipScorer) checkOwnerReference(
+	ctx context.Context,
 	secret *graph.ResourceIdentity,
 	sourceUID string,
 ) bool {
-	// Stub: In a full implementation, we would:
-	// 1. Query the full Secret resource (not just ResourceIdentity)
-	// 2. Check secret.metadata.ownerReferences[] for matching UID
-	// 3. Return true if found
+	if s.lookup == nil {
+		return false
+	}
+
+	// Query for existing OWNS edge from source to secret
+	query := graph.GraphQuery{
+		Query: `
+			MATCH (owner:ResourceIdentity {uid: $ownerUID})-[:OWNS]->(owned:ResourceIdentity {uid: $secretUID})
+			RETURN count(*) > 0 as hasOwnership
+		`,
+		Parameters: map[string]interface{}{
+			"ownerUID":  sourceUID,
+			"secretUID": secret.UID,
+		},
+	}
+
+	result, err := s.lookup.QueryGraph(ctx, query)
+	if err != nil {
+		s.logger("Failed to check ownerReference via OWNS edge: %v", err)
+		return false
+	}
+
+	if result == nil || len(result.Rows) == 0 || len(result.Rows[0]) == 0 {
+		return false
+	}
+
+	// FalkorDB returns boolean results in various formats
+	switch v := result.Rows[0][0].(type) {
+	case bool:
+		return v
+	case int64:
+		return v > 0
+	case float64:
+		return v > 0
+	}
+
 	return false
 }
 
 // calculateTemporalProximity calculates a proximity score based on time difference.
 // Returns 1.0 for immediate proximity (lagMs=0), decreasing linearly to 0.0 at window boundary.
-func (s *SecretRelationshipScorer) calculateTemporalProximity(lagMs int64, windowMs int64) float64 {
+func (s *SecretRelationshipScorer) calculateTemporalProximity(lagMs, windowMs int64) float64 {
 	if windowMs == 0 {
 		return 0.0
 	}

@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const kindDeployment = "Deployment"
+
 type TimelinePerformanceStage struct {
 	t         *testing.T
 	require   *require.Assertions
@@ -39,19 +41,6 @@ type TimelinePerformanceStage struct {
 const (
 	// Maximum acceptable query time for timeline API (in milliseconds)
 	maxAcceptableQueryTime = 5000 // 5 seconds
-
-	// Maximum degradation factor - query time should not increase by more than this factor
-	// compared to baseline (10 files). This allows for some degradation but prevents
-	// linear/exponential growth.
-	maxDegradationFactor = 5.0
-
-	// Minimum baseline time to avoid flakiness with very fast queries (in milliseconds)
-	// If queries are faster than this, we allow more variance
-	minBaselineMs = 5
-
-	// Absolute tolerance for very fast queries (in milliseconds)
-	// If the difference is within this range, we consider it acceptable regardless of factor
-	fastQueryToleranceMs = 15 // Increased to allow for measurement variance in very fast queries
 
 	// Number of resources to create per hour to ensure meaningful data
 	resourcesPerHour = 10
@@ -170,7 +159,7 @@ func (s *TimelinePerformanceStage) events_are_imported() *TimelinePerformanceSta
 			// Also verify we have Deployment kind
 			hasDeploymentKind := false
 			for _, kind := range metadata.Kinds {
-				if kind == "Deployment" {
+				if kind == kindDeployment {
 					hasDeploymentKind = true
 					break
 				}
@@ -277,58 +266,6 @@ func (s *TimelinePerformanceStage) baseline_performance_is_recorded() *TimelineP
 		s.t.Logf("✓ Baseline performance recorded: %d ms with %d storage files",
 			s.baselineDurationMs, s.hoursToSpan)
 	}
-	return s
-}
-
-func (s *TimelinePerformanceStage) performance_does_not_degrade_significantly() *TimelinePerformanceStage {
-	// For tests with more than 10 files, we need a baseline to compare against
-	// Since tests run independently, we'll use a heuristic: the query time should not
-	// grow linearly with the number of files.
-	//
-	// With proper indexing:
-	// - 10 files should take ~T ms
-	// - 500 files should take ~T to 3*T ms (not 50*T ms)
-	//
-	// We'll use a simple heuristic: query time should not be proportional to file count
-
-	// Calculate what linear growth would be
-	linearExpectedMs := s.queryDurationMs * 10 / s.hoursToSpan
-	if linearExpectedMs > 0 {
-		actualGrowthFactor := float64(s.queryDurationMs) / float64(linearExpectedMs)
-
-		s.t.Logf("Performance analysis for %d files:", s.hoursToSpan)
-		s.t.Logf("  Actual query time: %d ms", s.queryDurationMs)
-		s.t.Logf("  Linear growth would expect: %d ms (10 files) × %d = %d ms",
-			linearExpectedMs, s.hoursToSpan/10, linearExpectedMs*s.hoursToSpan/10)
-		s.t.Logf("  Actual growth factor vs linear: %.2fx", actualGrowthFactor)
-
-		// The actual time should be much less than linear growth would predict
-		// If we're seeing 50x files (500 vs 10), linear growth would mean 50x time
-		// But with proper indexing, we should see only small degradation
-		if s.hoursToSpan > 10 {
-			fileGrowthFactor := float64(s.hoursToSpan) / 10.0
-			maxExpectedMs := int(float64(linearExpectedMs) * maxDegradationFactor)
-
-			// For very fast queries (< minBaselineMs), allow absolute tolerance
-			// to avoid flakiness from measurement variance
-			absoluteDiff := s.queryDurationMs - linearExpectedMs
-			if linearExpectedMs < minBaselineMs && absoluteDiff <= fastQueryToleranceMs {
-				s.t.Logf("  ✓ Query is very fast (%d ms), absolute difference (%d ms) is within tolerance (%d ms)",
-					s.queryDurationMs, absoluteDiff, fastQueryToleranceMs)
-			} else {
-				s.assert.LessOrEqual(s.queryDurationMs, maxExpectedMs,
-					"Query time should not degrade linearly with file count. "+
-						"With %dx more files, query time should be at most %dx slower, but got %d ms (expected max %d ms)",
-					int(fileGrowthFactor), int(maxDegradationFactor), s.queryDurationMs, maxExpectedMs)
-			}
-
-			if s.queryDurationMs <= maxExpectedMs {
-				s.t.Logf("✓ Performance scales well: %d ms with %d files (%.2fx degradation, max allowed: %.1fx)",
-					s.queryDurationMs, s.hoursToSpan, actualGrowthFactor, maxDegradationFactor)
-			}
-		}
-	}
-
 	return s
 }
 

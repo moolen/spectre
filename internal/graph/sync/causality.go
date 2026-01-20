@@ -3,12 +3,13 @@ package sync
 import (
 	"context"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
+
+const kindNode = "Node"
 
 // causalityEngine implements the CausalityEngine interface
 type causalityEngine struct {
@@ -117,8 +118,9 @@ func (e *causalityEngine) GetHeuristics() []CausalityHeuristic {
 
 // registerDefaultHeuristics registers the default causality heuristics
 func (e *causalityEngine) registerDefaultHeuristics() {
-	// Heuristic 1: Deployment update → Pod changes
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	e.heuristics = append(e.heuristics,
+		// Heuristic 1: Deployment update → Pod changes
+		CausalityHeuristic{
 		Name:        "deployment-rollout",
 		Description: "Deployment update triggered Pod changes",
 		MinLagMs:    0,
@@ -128,7 +130,7 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 			// Cause: Deployment UPDATE
 			// Effect: Pod CREATE/DELETE
 			if cause.Resource.Kind == "Deployment" && cause.Type == models.EventTypeUpdate {
-				if effect.Resource.Kind == "Pod" &&
+				if effect.Resource.Kind == kindPod &&
 					(effect.Type == models.EventTypeCreate || effect.Type == models.EventTypeDelete) {
 					// Check if they're in the same namespace
 					return cause.Resource.Namespace == effect.Resource.Namespace
@@ -136,10 +138,9 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 			}
 			return false
 		},
-	})
-
+	},
 	// Heuristic 2: Deployment update → ReplicaSet changes
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	CausalityHeuristic{
 		Name:        "deployment-replicaset",
 		Description: "Deployment update triggered ReplicaSet changes",
 		MinLagMs:    0,
@@ -157,10 +158,9 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 			}
 			return false
 		},
-	})
-
+	},
 	// Heuristic 3: ReplicaSet update → Pod changes
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	CausalityHeuristic{
 		Name:        "replicaset-scaling",
 		Description: "ReplicaSet update triggered Pod changes",
 		MinLagMs:    0,
@@ -168,25 +168,24 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 		Confidence:  0.85,
 		Apply: func(cause, effect models.Event) bool {
 			if cause.Resource.Kind == "ReplicaSet" && cause.Type == models.EventTypeUpdate {
-				if effect.Resource.Kind == "Pod" &&
+				if effect.Resource.Kind == kindPod &&
 					(effect.Type == models.EventTypeCreate || effect.Type == models.EventTypeDelete || effect.Type == models.EventTypeUpdate) {
 					return cause.Resource.Namespace == effect.Resource.Namespace
 				}
 			}
 			return false
 		},
-	})
-
+	},
 	// Heuristic 4: Node issues → Pod evictions
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	CausalityHeuristic{
 		Name:        "node-pressure-eviction",
 		Description: "Node pressure triggered Pod eviction",
 		MinLagMs:    0,
 		MaxLagMs:    180_000, // 3 minutes
 		Confidence:  0.7,
 		Apply: func(cause, effect models.Event) bool {
-			if cause.Resource.Kind == "Node" && cause.Type == models.EventTypeUpdate {
-				if effect.Resource.Kind == "Pod" && effect.Type == models.EventTypeDelete {
+			if cause.Resource.Kind == kindNode && cause.Type == models.EventTypeUpdate {
+				if effect.Resource.Kind == kindPod && effect.Type == models.EventTypeDelete {
 					// Would need to check Node status for pressure conditions
 					// For now, just check timing and resource types
 					return true
@@ -194,10 +193,9 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 			}
 			return false
 		},
-	})
-
+	},
 	// Heuristic 5: ConfigMap/Secret update → Pod restart
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	CausalityHeuristic{
 		Name:        "config-change-restart",
 		Description: "ConfigMap/Secret update triggered Pod restart",
 		MinLagMs:    0,
@@ -206,17 +204,16 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 		Apply: func(cause, effect models.Event) bool {
 			if (cause.Resource.Kind == "ConfigMap" || cause.Resource.Kind == "Secret") &&
 				cause.Type == models.EventTypeUpdate {
-				if effect.Resource.Kind == "Pod" &&
+				if effect.Resource.Kind == kindPod &&
 					(effect.Type == models.EventTypeUpdate || effect.Type == models.EventTypeDelete) {
 					return cause.Resource.Namespace == effect.Resource.Namespace
 				}
 			}
 			return false
 		},
-	})
-
+	},
 	// Heuristic 6: PVC pending → Pod stuck in Pending
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	CausalityHeuristic{
 		Name:        "pvc-pending",
 		Description: "PVC pending state caused Pod to remain Pending",
 		MinLagMs:    0,
@@ -224,17 +221,16 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 		Confidence:  0.8,
 		Apply: func(cause, effect models.Event) bool {
 			if cause.Resource.Kind == "PersistentVolumeClaim" {
-				if effect.Resource.Kind == "Pod" && effect.Type == models.EventTypeUpdate {
+				if effect.Resource.Kind == kindPod && effect.Type == models.EventTypeUpdate {
 					// Would need to check PVC status and Pod status
 					return cause.Resource.Namespace == effect.Resource.Namespace
 				}
 			}
 			return false
 		},
-	})
-
+	},
 	// Heuristic 7: Same resource status transitions
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	CausalityHeuristic{
 		Name:        "same-resource-transition",
 		Description: "Status transition within same resource",
 		MinLagMs:    100,     // At least 100ms apart
@@ -249,10 +245,9 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 			}
 			return false
 		},
-	})
-
+	},
 	// Heuristic 8: Error propagation (same error message in related resources)
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	CausalityHeuristic{
 		Name:        "error-propagation",
 		Description: "Error propagated between related resources",
 		MinLagMs:    0,
@@ -266,10 +261,9 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 			}
 			return false
 		},
-	})
-
+	},
 	// Heuristic 9: Namespace deletion → Resource deletion
-	e.heuristics = append(e.heuristics, CausalityHeuristic{
+	CausalityHeuristic{
 		Name:        "namespace-cascade-delete",
 		Description: "Namespace deletion triggered resource deletion",
 		MinLagMs:    0,
@@ -285,64 +279,4 @@ func (e *causalityEngine) registerDefaultHeuristics() {
 			return false
 		},
 	})
-}
-
-// adjustConfidenceByLag adjusts confidence score based on time lag
-// Shorter lags get higher confidence
-func adjustConfidenceByLag(baseConfidence float64, lagMs int64) float64 {
-	if lagMs < 1000 { // <1s
-		return baseConfidence * 1.0
-	} else if lagMs < 5000 { // <5s
-		return baseConfidence * 0.95
-	} else if lagMs < 30000 { // <30s
-		return baseConfidence * 0.9
-	} else if lagMs < 60000 { // <1m
-		return baseConfidence * 0.85
-	} else {
-		return baseConfidence * 0.8
-	}
-}
-
-// isOwnershipRelated checks if two resources might be related by ownership
-// This is a heuristic based on naming conventions and resource types
-func isOwnershipRelated(cause, effect models.Event) bool {
-	// Common ownership patterns in Kubernetes
-	ownershipPairs := map[string][]string{
-		"Deployment":  {"ReplicaSet", "Pod"},
-		"ReplicaSet":  {"Pod"},
-		"StatefulSet": {"Pod", "PersistentVolumeClaim"},
-		"DaemonSet":   {"Pod"},
-		"Job":         {"Pod"},
-		"CronJob":     {"Job"},
-	}
-
-	if ownedKinds, ok := ownershipPairs[cause.Resource.Kind]; ok {
-		for _, ownedKind := range ownedKinds {
-			if effect.Resource.Kind == ownedKind {
-				// Check namespace match
-				if cause.Resource.Namespace == effect.Resource.Namespace {
-					// Check name prefix (e.g., "frontend-deployment" owns "frontend-deployment-abc123")
-					if strings.HasPrefix(effect.Resource.Name, cause.Resource.Name+"-") {
-						return true
-					}
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-// hasContainerError checks if an event contains container-related errors
-func hasContainerError(event models.Event) bool {
-	// Would need to parse event data
-	// For now, return false (will be implemented when we have error extraction)
-	return false
-}
-
-// getErrorSeverity estimates error severity from event
-func getErrorSeverity(event models.Event) string {
-	// Would analyze event data to determine severity
-	// Returns: "critical", "high", "medium", "low"
-	return "unknown"
 }

@@ -54,7 +54,6 @@ func (e *FluxHelmReleaseExtractor) ExtractRelationships(
 	event models.Event,
 	lookup ResourceLookup,
 ) ([]graph.Edge, error) {
-
 	e.Logger().Debug("ExtractRelationships called (namespace=%s, name=%s)", event.Resource.Namespace, event.Resource.Name)
 
 	edges := []graph.Edge{}
@@ -72,13 +71,9 @@ func (e *FluxHelmReleaseExtractor) ExtractRelationships(
 	}
 
 	// 1. Extract explicit spec references (REFERENCES_SPEC)
-	refEdges, err := e.extractSpecReferences(ctx, event.Resource, spec, lookup)
-	if err != nil {
-		e.Logger().Warn("Failed to extract spec references (error=%v)", err)
-	} else {
-		e.Logger().Debug("Extracted spec reference edges (count=%d)", len(refEdges))
-		edges = append(edges, refEdges...)
-	}
+	refEdges := e.extractSpecReferences(ctx, event.Resource, spec, lookup)
+	e.Logger().Debug("Extracted spec reference edges (count=%d)", len(refEdges))
+	edges = append(edges, refEdges...)
 
 	// 2. Extract managed resources (MANAGES) - only on CREATE/UPDATE
 	if event.Type != models.EventTypeDelete {
@@ -101,8 +96,7 @@ func (e *FluxHelmReleaseExtractor) extractSpecReferences(
 	resource models.ResourceMetadata,
 	spec map[string]interface{},
 	lookup ResourceLookup,
-) ([]graph.Edge, error) {
-
+) []graph.Edge {
 	edges := []graph.Edge{}
 
 	e.Logger().Debug("Extracting spec references (namespace=%s, name=%s)", resource.Namespace, resource.Name)
@@ -235,7 +229,7 @@ func (e *FluxHelmReleaseExtractor) extractSpecReferences(
 		}
 	}
 
-	return edges, nil
+	return edges
 }
 
 // extractManagedResources infers MANAGES edges by finding resources with Flux labels
@@ -245,7 +239,6 @@ func (e *FluxHelmReleaseExtractor) extractManagedResources(
 	helmRelease map[string]interface{},
 	lookup ResourceLookup,
 ) ([]graph.Edge, error) {
-
 	edges := []graph.Edge{}
 
 	releaseName := event.Resource.Name
@@ -259,14 +252,20 @@ func (e *FluxHelmReleaseExtractor) extractManagedResources(
 		}
 	}
 
-	// Find resources in target namespace or cluster-scoped (excluding the HelmRelease itself)
+	// Find top-level resources in target namespace or cluster-scoped (excluding the HelmRelease itself)
 	// Cluster-scoped resources (ClusterRoles, ClusterRoleBindings, CRDs, etc.) have empty namespace
+	// IMPORTANT: Exclude resources that have owners (via OWNS edges) to avoid creating
+	// transitive MANAGES edges. For example, we want:
+	//   HelmRelease --[MANAGES]--> Deployment --[OWNS]--> ReplicaSet --[OWNS]--> Pod
+	// NOT:
+	//   HelmRelease --[MANAGES]--> Pod (bypassing the ownership chain)
 	query := graph.GraphQuery{
 		Query: `
 			MATCH (r:ResourceIdentity)
 			WHERE (r.namespace = $namespace OR r.namespace = "")
-			  AND r.deleted = false
+			  AND NOT r.deleted
 			  AND r.uid <> $helmReleaseUID
+			  AND NOT EXISTS { MATCH (:ResourceIdentity)-[:OWNS]->(r) }
 			RETURN r
 			LIMIT 500
 		`,

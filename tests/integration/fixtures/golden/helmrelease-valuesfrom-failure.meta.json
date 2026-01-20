@@ -1,0 +1,34 @@
+{
+  "expected": {
+    "anomalies": [
+      {
+        "node_kind": "ConfigMap",
+        "category": "Change",
+        "type": "ResourceDeleted",
+        "min_severity": "medium",
+        "summary_match": ""
+      },
+      {
+        "node_kind": "HelmRelease",
+        "category": "State",
+        "type": "ErrorStatus",
+        "min_severity": "high",
+        "summary_match": ""
+      }
+    ],
+    "causal_path": {
+      "root_kind": "HelmRelease",
+      "intermediate_kinds": [
+        "Deployment",
+        "ReplicaSet"
+      ],
+      "symptom_kind": "Pod",
+      "min_confidence": 0.65
+    }
+  },
+  "scenario": {
+    "description": "HelmRelease failure due to missing ConfigMap referenced in valuesFrom",
+    "name": "helmrelease-valuesfrom-failure"
+  },
+  "timestamp": 1767982810
+}

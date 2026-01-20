@@ -26,7 +26,7 @@ func TestRootCauseEndpoint_FluxKustomization(t *testing.T) {
 	// Load the JSONL fixture
 	_, testFile, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(testFile)
-	fixturePath := filepath.Join(testDir, "fixtures", "testrootcause-fluxkustomization-endpoint.jsonl")
+	fixturePath := filepath.Join(testDir, "..", "fixtures", "testrootcause-fluxkustomization-endpoint.jsonl")
 	err = harness.SeedEventsFromAuditLog(ctx, fixturePath)
 	require.NoError(t, err)
 
