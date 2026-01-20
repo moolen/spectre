@@ -11,14 +11,14 @@
 ## Current Position
 
 **Phase:** 1 of 5 (Plugin Infrastructure Foundation)
-**Plan:** 2 of 4 complete
+**Plan:** 3 of 4 complete
 **Status:** In progress
-**Last activity:** 2026-01-20 - Completed 01-02-PLAN.md
+**Last activity:** 2026-01-20 - Completed 01-03-PLAN.md
 
 **Progress:**
 ```
-[█████░░░░░] 50% Phase 1 (2/4 plans)
-[██░░░░░░░░] 25% Overall (2/8 plans across all phases)
+[███████░░░] 75% Phase 1 (3/4 plans)
+[███░░░░░░░] 38% Overall (3/8 plans across all phases)
 ```
 
 ## Performance Metrics
@@ -27,7 +27,7 @@
 |--------|---------|--------|--------|
 | Requirements Complete | ~6/31 | 31/31 | In Progress |
 | Phases Complete | 0/5 | 5/5 | In Progress |
-| Plans Complete | 2/4 | 4/4 (Phase 1) | In Progress |
+| Plans Complete | 3/4 | 4/4 (Phase 1) | In Progress |
 | Blockers | 0 | 0 | On Track |
 
 ## Accumulated Context
@@ -47,6 +47,10 @@
 | Koanf v2 requires UnmarshalWithConf with Tag: "yaml" | 01-02 | Default Unmarshal doesn't respect yaml struct tags - fields come back empty |
 | Both registries use sync.RWMutex for thread safety | 01-02 | Concurrent reads (Get/List) while ensuring safe writes (Register) |
 | Registry.Register errors on duplicate names and empty strings | 01-02 | Prevents ambiguity in instance lookup and invalid identifiers |
+| IntegrationWatcherConfig naming to avoid conflict with K8s WatcherConfig | 01-03 | Maintains clear separation between integration and K8s resource watching |
+| 500ms default debounce prevents editor save storms | 01-03 | Multiple rapid file changes coalesced into single reload |
+| fsnotify directly instead of Koanf file provider | 01-03 | Better control over event handling, debouncing, and error resilience |
+| Invalid configs after initial load logged but don't crash watcher | 01-03 | Resilience - one bad edit doesn't break system. Initial load still fails fast |
 | Atomic pointer swap pattern for race-free config reload | Roadmap | Planned for config loader implementation |
 | Log processing package is integration-agnostic | Roadmap | Reusable beyond VictoriaLogs |
 | Template mining uses Drain algorithm with pre-tokenization masking | Roadmap | Standard approach for log template extraction |
@@ -63,8 +67,8 @@
 - [x] Implement factory registry for in-tree integration discovery (01-02 complete)
 - [x] Implement integration instance registry (01-02 complete)
 - [x] Implement config loader with Koanf (01-02 complete)
-- [ ] Integrate with existing MCP server (01-03)
-- [ ] Complete Phase 1 plans (2 remaining: 01-03, 01-04)
+- [x] Implement config file watcher with debouncing (01-03 complete)
+- [ ] Complete Phase 1 plans (1 remaining: 01-04)
 
 ### Known Blockers
 
@@ -81,29 +85,31 @@ None currently.
 
 ## Session Continuity
 
-**Last session:** 2026-01-20T23:51:48Z
-**Stopped at:** Completed 01-02-PLAN.md
+**Last session:** 2026-01-20T23:57:30Z
+**Stopped at:** Completed 01-03-PLAN.md
 **Resume file:** None
 
 **What just happened:**
-- Plan 01-02 executed successfully (3 tasks, 3 commits, 4 min duration)
-- Factory registry for compile-time integration type discovery (PLUG-01) with RegisterFactory/GetFactory
-- Instance registry for runtime integration management with Register/Get/List/Remove
-- Config loader using Koanf v2.3.0 to read and validate YAML integration files
-- All tests passing including concurrent access verification
-- Two auto-fixes: missing fmt import (bug) and Koanf UnmarshalWithConf for yaml tags (blocking)
+- Plan 01-03 executed successfully (2 tasks, 2 commits, 3 min duration)
+- IntegrationWatcher with fsnotify for file change detection
+- Debouncing (500ms default) coalesces rapid file changes into single reload
+- ReloadCallback pattern for notifying on validated config changes
+- Graceful Start/Stop lifecycle with context cancellation and 5s timeout
+- Invalid configs logged but don't crash watcher (resilience after initial load)
+- Comprehensive test suite (8 tests) with no race conditions
+- Two auto-fixes: unused koanf import/field (blocking) and WatcherConfig naming conflict (blocking)
 
 **What's next:**
-- Execute Plan 01-03: MCP server integration
-- Execute Plan 01-04: (check plan file for details)
+- Execute Plan 01-04: Integration Manager (orchestrates lifecycle of all integration instances)
+- This is the final plan for Phase 1 - will tie together interface, registries, config loader, and watcher
 
 **Context for next agent:**
-- Factory registry is global (defaultRegistry) - use RegisterFactory/GetFactory convenience functions
-- Koanf v2 requires UnmarshalWithConf with Tag: "yaml" for struct tag support
-- Both registries use sync.RWMutex - maintain thread-safe patterns
-- Integration interface from 01-01 is stable - don't modify without careful consideration
-- Config schema v1 is locked - future changes require migration support
-- Degraded health state is key design feature - preserve resilience pattern
+- IntegrationWatcher provides foundation for hot-reload - use ReloadCallback to orchestrate instance restarts
+- Watcher is resilient: invalid configs after initial load are logged but don't crash the system
+- 500ms debounce is already tuned - don't change without good reason
+- IntegrationWatcherConfig naming avoids conflict with K8s WatcherConfig in same package
+- Factory registry, instance registry, config loader, and watcher are all independent - manager will coordinate them
+- Degraded health state is key design feature - preserve resilience pattern in manager implementation
 
 ---
 
