@@ -29,7 +29,7 @@ func TestCalculateChangeEventSignificance(t *testing.T) {
 			isOnCausalSpine: true,
 			failureTime:     now,
 			errorPatterns:   nil,
-			minScore:        0.60, // Adjusted: causal_spine(0.15) + config(0.30) + temporal(0.20) = 0.65
+			minScore:        0.60, // Score includes causal spine, config change, and temporal proximity
 			maxScore:        0.70,
 			expectReasons:   []string{"on causal path", "spec changed", "within 5min of failure"},
 		},
@@ -132,7 +132,7 @@ func TestCalculateChangeEventSignificance(t *testing.T) {
 			isOnCausalSpine: true,
 			failureTime:     now,
 			errorPatterns:   []string{"oom", "killed"},
-			minScore:        0.75, // Adjusted: causal(0.15) + config(0.30) + temporal(0.20) + error(0.10) + delete(0.05) = 0.80
+			minScore:        0.75, // Score includes causal path, config change, temporal proximity, error pattern, and deletion
 			maxScore:        0.85,
 			expectReasons:   []string{"on causal path", "spec changed", "within 5min of failure", "matches error pattern", "resource deleted"},
 		},

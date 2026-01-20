@@ -65,9 +65,9 @@ func (r *PathRanker) calculateRanking(path CausalPath, symptomFirstFailure time.
 	maxSeverity, severityScore := r.calculateSeverityScore(path)
 
 	// Generate human-readable explanations
-	temporalExplanation := r.generateTemporalExplanation(path.FirstAnomalyAt, symptomFirstFailure, temporalScore)
+	temporalExplanation := r.generateTemporalExplanation(path.FirstAnomalyAt, symptomFirstFailure)
 	distanceExplanation := r.generateDistanceExplanation(effectiveDistance, path)
-	severityExplanation := r.generateSeverityExplanation(maxSeverity, severityScore)
+	severityExplanation := r.generateSeverityExplanation(maxSeverity)
 	rankingExplanation := r.generateRankingExplanation(temporalExplanation, distanceExplanation, severityExplanation, temporalScore, effectiveDistance, severityScore)
 
 	return PathRanking{
@@ -254,7 +254,7 @@ func (r *PathRanker) calculateSeverityScore(path CausalPath) (string, float64) {
 }
 
 // generateTemporalExplanation creates a human-readable explanation of the temporal score
-func (r *PathRanker) generateTemporalExplanation(anomalyTime, failureTime time.Time, score float64) string {
+func (r *PathRanker) generateTemporalExplanation(anomalyTime, failureTime time.Time) string {
 	if anomalyTime.After(failureTime) {
 		return "anomaly occurred after failure (cannot be cause)"
 	}
@@ -312,7 +312,7 @@ func (r *PathRanker) generateDistanceExplanation(distance int, path CausalPath) 
 }
 
 // generateSeverityExplanation creates a human-readable explanation of the severity
-func (r *PathRanker) generateSeverityExplanation(severity string, score float64) string {
+func (r *PathRanker) generateSeverityExplanation(severity string) string {
 	switch severity {
 	case string(anomaly.SeverityCritical):
 		return "critical severity anomaly detected"

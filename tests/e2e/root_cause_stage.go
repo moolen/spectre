@@ -21,12 +21,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
+const kindHelmRelease = "HelmRelease"
+
 type RootCauseScenarioStage struct {
-	t         *testing.T
-	require   *require.Assertions
-	assert    *assert.Assertions
-	testCtx   *helpers.TestContext
-	mcpClient *helpers.MCPClient
+	t       *testing.T
+	require *require.Assertions
+	assert  *assert.Assertions
+	testCtx *helpers.TestContext
 
 	// Test state
 	helmReleaseName  string
@@ -100,14 +101,6 @@ func (s *RootCauseScenarioStage) a_test_environment_with_flux() *RootCauseScenar
 	return s
 }
 
-func (s *RootCauseScenarioStage) flux_is_installed() *RootCauseScenarioStage {
-	startTime := time.Now()
-	err := helpers.EnsureFluxInstalled(s.t, s.testCtx.K8sClient, s.testCtx.Cluster.GetContext())
-	s.require.NoError(err, "Failed to ensure Flux is installed")
-	s.t.Logf("✓ Flux installation check completed (took %v)", time.Since(startTime))
-	return s
-}
-
 func (s *RootCauseScenarioStage) spectre_is_deployed() *RootCauseScenarioStage {
 	startTime := time.Now()
 	// Spectre is already deployed by SetupE2ETest
@@ -129,159 +122,6 @@ func (s *RootCauseScenarioStage) spectre_is_deployed() *RootCauseScenarioStage {
 	s.require.NoError(err, "Spectre deployment not ready")
 
 	s.t.Logf("✓ Spectre is deployed and ready (took %v)", time.Since(startTime))
-	return s
-}
-
-func (s *RootCauseScenarioStage) mcp_client_is_connected() *RootCauseScenarioStage {
-	startTime := time.Now()
-	// Create port-forward for MCP server
-	serviceName := s.testCtx.ReleaseName + "-spectre"
-	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetContext(), s.testCtx.Namespace, serviceName, 8082)
-	s.require.NoError(err, "Failed to create MCP port-forward")
-
-	err = mcpPortForward.WaitForReady(30 * time.Second)
-	s.require.NoError(err, "MCP server not reachable via port-forward")
-
-	s.mcpClient = helpers.NewMCPClient(s.t, mcpPortForward.GetURL())
-	s.t.Logf("✓ MCP client connected (took %v)", time.Since(startTime))
-
-	return s
-}
-
-// ==================== HelmRelease Deployment Stages ====================
-
-func (s *RootCauseScenarioStage) helmrelease_is_deployed(fixture string) *RootCauseScenarioStage {
-	startTime := time.Now()
-	fixtureContent := s.loadFixture(fixture)
-
-	// Apply the manifest
-	s.applyManifest(fixtureContent)
-
-	// Extract HelmRelease name and namespace
-	s.extractHelmReleaseInfo(fixtureContent)
-
-	// Track namespace for cleanup
-	if !contains(s.namespacesToCleanup, s.helmReleaseNs) {
-		s.namespacesToCleanup = append(s.namespacesToCleanup, s.helmReleaseNs)
-	}
-
-	s.t.Logf("✓ Deployed HelmRelease: %s/%s (took %v)", s.helmReleaseNs, s.helmReleaseName, time.Since(startTime))
-	return s
-}
-
-func (s *RootCauseScenarioStage) wait_for_healthy_deployment(timeout time.Duration) *RootCauseScenarioStage {
-	startTime := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	// First wait for HelmRelease to be ready
-	err := helpers.WaitForHelmReleaseReady(ctx, s.t, s.testCtx.Cluster.GetContext(), s.helmReleaseNs, s.helmReleaseName, timeout)
-	s.require.NoError(err, "HelmRelease did not become ready")
-
-	// Wait for pods to be running
-	s.t.Logf("Waiting for pods to be running in namespace %s...", s.helmReleaseNs)
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		pods, err := s.testCtx.K8sClient.Clientset.CoreV1().Pods(s.helmReleaseNs).List(ctx, metav1.ListOptions{})
-		if err == nil && len(pods.Items) > 0 {
-			allRunning := true
-			for _, pod := range pods.Items {
-				if pod.Status.Phase != corev1.PodRunning {
-					allRunning = false
-					break
-				}
-			}
-			if allRunning {
-				s.t.Logf("✓ All pods are running in namespace %s (total wait: %v)", s.helmReleaseNs, time.Since(startTime))
-				return s
-			}
-		}
-		time.Sleep(3 * time.Second)
-	}
-
-	s.require.Fail("Timeout waiting for pods to be running")
-	return s
-}
-
-func (s *RootCauseScenarioStage) helmrelease_is_updated(fixture string) *RootCauseScenarioStage {
-	fixtureContent := s.loadFixture(fixture)
-
-	// Apply the updated manifest
-	s.applyManifest(fixtureContent)
-
-	// Wait for reconciliation
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	err := helpers.WaitForHelmReleaseReconciled(ctx, s.t, s.testCtx.Cluster.GetContext(), s.helmReleaseNs, s.helmReleaseName, 90*time.Second)
-	s.require.NoError(err, "HelmRelease did not reconcile after update")
-
-	s.t.Logf("✓ HelmRelease %s/%s updated and reconciled", s.helmReleaseNs, s.helmReleaseName)
-	return s
-}
-
-// ==================== Direct Deployment Stages ====================
-
-func (s *RootCauseScenarioStage) deployment_is_deployed(fixture string) *RootCauseScenarioStage {
-	fixtureContent := s.loadFixture(fixture)
-
-	// Apply the manifest
-	s.applyManifest(fixtureContent)
-
-	// Extract deployment info
-	s.extractDeploymentInfo(fixtureContent)
-
-	// Track namespace for cleanup
-	if !contains(s.namespacesToCleanup, s.deploymentNs) {
-		s.namespacesToCleanup = append(s.namespacesToCleanup, s.deploymentNs)
-	}
-
-	s.t.Logf("✓ Deployed Deployment: %s/%s", s.deploymentNs, s.deploymentName)
-	return s
-}
-
-func (s *RootCauseScenarioStage) wait_for_healthy_pods(timeout time.Duration) *RootCauseScenarioStage {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	ns := s.deploymentNs
-	if ns == "" {
-		ns = s.helmReleaseNs
-	}
-
-	s.t.Logf("Waiting for pods to be running in namespace %s...", ns)
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		pods, err := s.testCtx.K8sClient.Clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
-		if err == nil && len(pods.Items) > 0 {
-			allRunning := true
-			for _, pod := range pods.Items {
-				if pod.Status.Phase != corev1.PodRunning {
-					allRunning = false
-					break
-				}
-			}
-			if allRunning {
-				s.t.Logf("✓ All pods are running in namespace %s", ns)
-				return s
-			}
-		}
-		time.Sleep(3 * time.Second)
-	}
-
-	s.require.Fail("Timeout waiting for pods to be running")
-	return s
-}
-
-func (s *RootCauseScenarioStage) deployment_is_updated(fixture string) *RootCauseScenarioStage {
-	fixtureContent := s.loadFixture(fixture)
-
-	// Apply the updated manifest
-	s.applyManifest(fixtureContent)
-
-	s.t.Logf("✓ Deployment %s/%s updated", s.deploymentNs, s.deploymentName)
 	return s
 }
 
@@ -717,7 +557,7 @@ func (s *RootCauseScenarioStage) waitForHelmRepositoryReady(namespace, name stri
 				s.testCtx.Cluster.GetContext(), name, namespace)
 			statusStatus, _ := helpers.RunCommand(statusCmd)
 
-			if len(statusMsg) > 0 || len(statusStatus) > 0 {
+			if statusMsg != "" || statusStatus != "" {
 				s.t.Logf("HelmRepository %s/%s status=%s, message=%s",
 					namespace, name,
 					strings.TrimSpace(statusStatus),
@@ -753,7 +593,8 @@ func (s *RootCauseScenarioStage) waitForPodsRunningInNamespace(namespace string,
 		pods, err := s.testCtx.K8sClient.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 		if err == nil && len(pods.Items) > 0 {
 			allRunning := true
-			for _, pod := range pods.Items {
+			for i := range pods.Items {
+				pod := &pods.Items[i]
 				if pod.Status.Phase != corev1.PodRunning {
 					allRunning = false
 					break
@@ -769,42 +610,6 @@ func (s *RootCauseScenarioStage) waitForPodsRunningInNamespace(namespace string,
 }
 
 // ==================== StatefulSet Stages ====================
-
-func (s *RootCauseScenarioStage) statefulset_watching_is_enabled() *RootCauseScenarioStage {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	configMapName := fmt.Sprintf("%s-spectre", s.testCtx.Namespace)
-	watcherConfig := `resources:
-  - group: ""
-    version: "v1"
-    kind: "Pod"
-  - group: "apps"
-    version: "v1"
-    kind: "Deployment"
-  - group: "apps"
-    version: "v1"
-    kind: "StatefulSet"
-  - group: "apps"
-    version: "v1"
-    kind: "ReplicaSet"
-  - group: ""
-    version: "v1"
-    kind: "Event"`
-
-	err := s.testCtx.K8sClient.UpdateConfigMap(ctx, s.testCtx.Namespace, configMapName, map[string]string{
-		"watcher.yaml": watcherConfig,
-	})
-	s.require.NoError(err, "Failed to update watcher ConfigMap")
-
-	// Wait for config to propagate and Spectre to reload
-	// ConfigMap changes can take up to 60s to propagate in Kubernetes
-	s.t.Log("Waiting 60 seconds for config propagation and hot-reload...")
-	time.Sleep(60 * time.Second)
-
-	s.t.Logf("✓ StatefulSet watching enabled")
-	return s
-}
 
 func (s *RootCauseScenarioStage) statefulset_is_deployed(fixture string) *RootCauseScenarioStage {
 	startTime := time.Now()
@@ -918,7 +723,8 @@ func (s *RootCauseScenarioStage) waitForStatefulSetReady(namespace, name string,
 						})
 						if err == nil && len(pods.Items) > 0 {
 							allRunning := true
-							for _, pod := range pods.Items {
+							for i := range pods.Items {
+								pod := &pods.Items[i]
 								if pod.Status.Phase != corev1.PodRunning {
 									allRunning = false
 									break
@@ -1186,7 +992,7 @@ spec:
 	return s
 }
 
-func (s *RootCauseScenarioStage) ingress_referencing_service_is_created(ingressName string, serviceName string) *RootCauseScenarioStage {
+func (s *RootCauseScenarioStage) ingress_referencing_service_is_created(ingressName, serviceName string) *RootCauseScenarioStage {
 	startTime := time.Now()
 
 	// Ingress is created in the same namespace as the service
@@ -1233,7 +1039,8 @@ func (s *RootCauseScenarioStage) running_pod_is_identified() *RootCauseScenarioS
 	s.require.NoError(err, "Failed to list pods")
 	s.require.NotEmpty(pods.Items, "No pods found in namespace %s", ns)
 
-	for _, pod := range pods.Items {
+	for i := range pods.Items {
+		pod := &pods.Items[i]
 		if pod.Status.Phase == corev1.PodRunning {
 			s.failedPodUID = string(pod.UID)
 			s.failedPodName = pod.Name
@@ -1336,21 +1143,24 @@ func (s *RootCauseScenarioStage) wait_for_pod_failure(symptom string, timeout ti
 			continue
 		}
 
-		for _, pod := range pods.Items {
+		for i := range pods.Items {
+			pod := &pods.Items[i]
 			// Check container statuses for the symptom
 			for _, containerStatus := range pod.Status.ContainerStatuses {
-				if containerStatus.State.Waiting != nil {
-					if strings.Contains(containerStatus.State.Waiting.Reason, symptom) {
-						s.failedPodUID = string(pod.UID)
-						s.failedPodName = pod.Name
-						s.t.Logf("✓ Found failed pod: %s (UID: %s) with symptom: %s (waited %v)",
-							s.failedPodName, s.failedPodUID, symptom, time.Since(startTime))
-
-						// Set failure timestamp after detecting failure
-						s.failureTimestamp = time.Now().UnixNano()
-						return s
-					}
+				if containerStatus.State.Waiting == nil {
+					continue
 				}
+				if !strings.Contains(containerStatus.State.Waiting.Reason, symptom) {
+					continue
+				}
+				s.failedPodUID = string(pod.UID)
+				s.failedPodName = pod.Name
+				s.t.Logf("✓ Found failed pod: %s (UID: %s) with symptom: %s (waited %v)",
+					s.failedPodName, s.failedPodUID, symptom, time.Since(startTime))
+
+				// Set failure timestamp after detecting failure
+				s.failureTimestamp = time.Now().UnixNano()
+				return s
 			}
 		}
 
@@ -1360,7 +1170,8 @@ func (s *RootCauseScenarioStage) wait_for_pod_failure(symptom string, timeout ti
 	// List pods for debugging
 	pods, _ := s.testCtx.K8sClient.Clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
 	s.t.Logf("Current pods in namespace %s:", ns)
-	for _, pod := range pods.Items {
+	for i := range pods.Items {
+		pod := &pods.Items[i]
 		s.t.Logf("  - %s: Phase=%s", pod.Name, pod.Status.Phase)
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Waiting != nil {
@@ -1533,230 +1344,19 @@ func (s *RootCauseScenarioStage) root_cause_endpoint_is_called_with_lookback(loo
 	// Log causal graph for debugging
 	s.t.Log("Causal graph:")
 	s.t.Logf("  Nodes: %d", len(rca.Incident.Graph.Nodes))
-	for i, node := range rca.Incident.Graph.Nodes {
+	for i := range rca.Incident.Graph.Nodes {
+		node := &rca.Incident.Graph.Nodes[i]
 		s.t.Logf("  Node %d: %s/%s (type: %s, step: %d)", i+1, node.Resource.Kind, node.Resource.Name, node.NodeType, node.StepNumber)
 	}
 	s.t.Logf("  Edges: %d", len(rca.Incident.Graph.Edges))
-	for i, edge := range rca.Incident.Graph.Edges {
+	for i := range rca.Incident.Graph.Edges {
+		edge := &rca.Incident.Graph.Edges[i]
 		s.t.Logf("  Edge %d: %s -[%s]-> %s", i+1, edge.From, edge.RelationshipType, edge.To)
 	}
 
 	return s
 }
 
-func (s *RootCauseScenarioStage) find_root_cause_tool_is_called() *RootCauseScenarioStage {
-	startTime := time.Now()
-
-	// Call MCP tool (renamed from find_root_cause to causal_paths)
-	request := map[string]interface{}{
-		"resourceUID":      s.failedPodUID,
-		"failureTimestamp": s.failureTimestamp,
-	}
-
-	s.t.Logf("Calling causal_paths with resourceUID=%s, timestamp=%d",
-		s.failedPodUID, s.failureTimestamp)
-
-	callStart := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	response, err := s.mcpClient.CallTool(ctx, "causal_paths", request)
-	s.require.NoError(err, "MCP tool call should succeed")
-	s.t.Logf("MCP tool call completed (took %v)", time.Since(callStart))
-
-	// Extract content from response
-	// MCP tools/call response has structure: { "content": [ { "type": "text", "text": "..." } ] }
-	parseStart := time.Now()
-	contentArray, ok := response["content"].([]interface{})
-	s.require.True(ok, "Response should have 'content' array")
-	s.require.NotEmpty(contentArray, "Content array should not be empty")
-
-	firstContent, ok := contentArray[0].(map[string]interface{})
-	s.require.True(ok, "First content should be a map")
-
-	textContent, ok := firstContent["text"].(string)
-	s.require.True(ok, "First content should have 'text' field")
-
-	// Log the raw response for debugging
-	s.t.Logf("Raw MCP response text (first 500 chars): %s", truncateString(textContent, 500))
-
-	// Parse the JSON text content into CausalPathsResponse
-	var causalPaths causalpaths.CausalPathsResponse
-	err = json.Unmarshal([]byte(textContent), &causalPaths)
-	s.require.NoError(err, "Response should be valid CausalPathsResponse. Raw text: %s", truncateString(textContent, 200))
-
-	s.causalPathsResp = &causalPaths
-
-	// Log summary
-	if len(causalPaths.Paths) > 0 {
-		rootCause := causalPaths.Paths[0].CandidateRoot
-		s.t.Logf("✓ Causal paths discovery completed: Root cause is %s '%s' (total time: %v, parse time: %v)",
-			rootCause.Resource.Kind, rootCause.Resource.Name,
-			time.Since(startTime), time.Since(parseStart))
-	} else {
-		s.t.Logf("✓ Causal paths discovery completed: No paths found (total time: %v)", time.Since(startTime))
-	}
-
-	// Log paths for debugging
-	s.t.Logf("Causal paths: %d paths discovered, %d returned",
-		causalPaths.Metadata.PathsDiscovered, causalPaths.Metadata.PathsReturned)
-	for i, path := range causalPaths.Paths {
-		s.t.Logf("  Path %d: confidence=%.2f, root=%s/%s", i+1, path.ConfidenceScore,
-			path.CandidateRoot.Resource.Kind, path.CandidateRoot.Resource.Name)
-		for j, step := range path.Steps {
-			edgeInfo := ""
-			if step.Edge != nil {
-				edgeInfo = " via " + step.Edge.RelationshipType
-			}
-			s.t.Logf("    Step %d: %s/%s%s", j+1, step.Node.Resource.Kind, step.Node.Resource.Name, edgeInfo)
-		}
-	}
-
-	return s
-}
-
-// ==================== Assertion Stages ====================
-
-func (s *RootCauseScenarioStage) root_cause_is_helmrelease() *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-	rootCause := s.causalPathsResp.Paths[0].CandidateRoot
-	s.assert.Equal("HelmRelease", rootCause.Resource.Kind,
-		"Root cause should be HelmRelease")
-	s.assert.Equal(s.helmReleaseName, rootCause.Resource.Name,
-		"Root cause should be the deployed HelmRelease")
-	return s
-}
-
-func (s *RootCauseScenarioStage) root_cause_is_deployment() *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-	rootCause := s.causalPathsResp.Paths[0].CandidateRoot
-	s.assert.Equal("Deployment", rootCause.Resource.Kind,
-		"Root cause should be Deployment")
-	return s
-}
-
-func (s *RootCauseScenarioStage) causal_chain_includes_all_steps(expectedSteps int) *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-	// Count steps in the first path
-	actualSteps := len(s.causalPathsResp.Paths[0].Steps)
-	s.assert.Equal(expectedSteps, actualSteps,
-		"Causal path should have %d steps, got %d", expectedSteps, actualSteps)
-	return s
-}
-
-func (s *RootCauseScenarioStage) causal_chain_has_step(resourceKind, relType, targetKind string) *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-
-	// Find a node with the given resource kind
-	foundNode := helpers.FindCausalPathNodeByKind(s.causalPathsResp, resourceKind)
-	if foundNode == nil {
-		s.assert.Fail("Node with kind %s not found in causal paths", resourceKind)
-		return s
-	}
-
-	// If no target kind specified, just check that the node exists
-	if targetKind == "" {
-		return s
-	}
-
-	// Check if there's an edge from resourceKind to targetKind via relType
-	helpers.RequireCausalPathsHasEdgeBetweenKinds(s.t, s.causalPathsResp, resourceKind, relType, targetKind)
-	return s
-}
-
-func (s *RootCauseScenarioStage) confidence_score_exceeds(threshold float64) *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-	confidence := s.causalPathsResp.Paths[0].ConfidenceScore
-	s.assert.GreaterOrEqual(confidence, threshold,
-		"Confidence score should be >= %.2f (got %.2f)", threshold, confidence)
-	return s
-}
-
-func (s *RootCauseScenarioStage) confidence_score_in_range(min, max float64) *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-	confidence := s.causalPathsResp.Paths[0].ConfidenceScore
-	s.assert.GreaterOrEqual(confidence, min,
-		"Confidence score should be >= %.2f", min)
-	s.assert.LessOrEqual(confidence, max,
-		"Confidence score should be <= %.2f", max)
-	return s
-}
-
-func (s *RootCauseScenarioStage) confidence_factors_are_valid() *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-
-	// Check the ranking factors in the first path
-	ranking := s.causalPathsResp.Paths[0].Ranking
-
-	s.assert.GreaterOrEqual(ranking.TemporalScore, 0.0)
-	s.assert.LessOrEqual(ranking.TemporalScore, 1.0)
-
-	s.assert.GreaterOrEqual(ranking.SeverityScore, 0.0)
-	s.assert.LessOrEqual(ranking.SeverityScore, 1.0)
-
-	s.assert.GreaterOrEqual(ranking.EffectiveCausalDistance, 0)
-
-	return s
-}
-
-func (s *RootCauseScenarioStage) supporting_evidence_includes_flux_labels() *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-
-	// Check that explanation mentions MANAGES relationship (Flux pattern)
-	explanation := s.causalPathsResp.Paths[0].Explanation
-	foundFluxEvidence := strings.Contains(explanation, "MANAGES") ||
-		strings.Contains(explanation, "HelmRelease") ||
-		strings.Contains(explanation, "Kustomization")
-
-	// Also check if any edge in the path has MANAGES relationship
-	for _, step := range s.causalPathsResp.Paths[0].Steps {
-		if step.Edge != nil && step.Edge.RelationshipType == "MANAGES" {
-			foundFluxEvidence = true
-			break
-		}
-	}
-
-	s.assert.True(foundFluxEvidence, "Causal path should include Flux-managed relationship")
-	return s
-}
-
-func (s *RootCauseScenarioStage) temporal_proximity_is_high() *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-
-	temporalScore := s.causalPathsResp.Paths[0].Ranking.TemporalScore
-	s.assert.GreaterOrEqual(temporalScore, 0.5,
-		"Temporal score should be >= 0.5")
-	return s
-}
-
-func (s *RootCauseScenarioStage) observed_symptom_is(symptomType string) *RootCauseScenarioStage {
-	s.require.NotNil(s.causalPathsResp, "Causal paths response should not be nil")
-	s.require.NotEmpty(s.causalPathsResp.Paths, "Should have at least one causal path")
-
-	// The symptom is the last step in the path
-	steps := s.causalPathsResp.Paths[0].Steps
-	if len(steps) > 0 {
-		symptomNode := steps[len(steps)-1].Node
-		// Check if any anomaly matches the expected type
-		foundSymptom := false
-		for _, anomaly := range symptomNode.Anomalies {
-			if anomaly.Type == symptomType {
-				foundSymptom = true
-				break
-			}
-		}
-		s.assert.True(foundSymptom, "Observed symptom should be %s", symptomType)
-	}
-	return s
-}
 
 func (s *RootCauseScenarioStage) assert_graph_has_required_kinds() *RootCauseScenarioStage {
 	// Use rcaResponse if available (new endpoint), fall back to causalPathsResp (legacy)
@@ -1965,7 +1565,7 @@ func (s *RootCauseScenarioStage) assert_helmrelease_has_change_events() *RootCau
 		// Find HelmRelease node
 		var helmReleaseNode *analysis.GraphNode
 		for i := range s.rcaResponse.Incident.Graph.Nodes {
-			if s.rcaResponse.Incident.Graph.Nodes[i].Resource.Kind == "HelmRelease" {
+			if s.rcaResponse.Incident.Graph.Nodes[i].Resource.Kind == kindHelmRelease {
 				helmReleaseNode = &s.rcaResponse.Incident.Graph.Nodes[i]
 				break
 			}
@@ -2025,7 +1625,7 @@ func (s *RootCauseScenarioStage) assert_helmrelease_has_config_change_before(bef
 		// Find HelmRelease node
 		var helmReleaseNode *analysis.GraphNode
 		for i := range s.rcaResponse.Incident.Graph.Nodes {
-			if s.rcaResponse.Incident.Graph.Nodes[i].Resource.Kind == "HelmRelease" {
+			if s.rcaResponse.Incident.Graph.Nodes[i].Resource.Kind == kindHelmRelease {
 				helmReleaseNode = &s.rcaResponse.Incident.Graph.Nodes[i]
 				break
 			}
@@ -2164,8 +1764,8 @@ func deleteResource(kubeContext, kind, name, namespace string) error {
 func (s *RootCauseScenarioStage) loadFixture(name string) string {
 	// Try to find the fixture file - check multiple possible locations
 	possiblePaths := []string{
-		filepath.Join("tests/e2e/fixtures", name),
-		filepath.Join("e2e/fixtures", name),
+		filepath.Join("tests", "e2e", "fixtures", name),
+		filepath.Join("e2e", "fixtures", name),
 		filepath.Join("fixtures", name),
 	}
 
@@ -2186,56 +1786,6 @@ func (s *RootCauseScenarioStage) loadFixture(name string) string {
 	return string(content)
 }
 
-func (s *RootCauseScenarioStage) applyManifest(manifestContent string) {
-	// Write to temp file
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("manifest-%d.yaml", time.Now().UnixNano()))
-	err := os.WriteFile(tmpFile, []byte(manifestContent), 0644)
-	s.require.NoError(err, "Failed to write temp manifest")
-	defer os.Remove(tmpFile)
-
-	// Apply with kubectl using the correct context
-	kubeContext := s.testCtx.Cluster.GetContext()
-	cmd := fmt.Sprintf("kubectl --context=%s apply -f %s", kubeContext, tmpFile)
-	output, err := helpers.RunCommand(cmd)
-	s.require.NoError(err, "Failed to apply manifest: %s\nOutput: %s", cmd, output)
-}
-
-func (s *RootCauseScenarioStage) extractHelmReleaseInfo(manifestContent string) {
-	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(manifestContent), 4096)
-
-	for {
-		var obj unstructured.Unstructured
-		err := decoder.Decode(&obj)
-		if err != nil {
-			break
-		}
-
-		if obj.GetKind() == "HelmRelease" {
-			s.helmReleaseName = obj.GetName()
-			s.helmReleaseNs = obj.GetNamespace()
-			return
-		}
-	}
-}
-
-func (s *RootCauseScenarioStage) extractDeploymentInfo(manifestContent string) {
-	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(manifestContent), 4096)
-
-	for {
-		var obj unstructured.Unstructured
-		err := decoder.Decode(&obj)
-		if err != nil {
-			break
-		}
-
-		if obj.GetKind() == "Deployment" {
-			s.deploymentName = obj.GetName()
-			s.deploymentNs = obj.GetNamespace()
-			return
-		}
-	}
-}
-
 func (s *RootCauseScenarioStage) cleanup() {
 	ctx := context.Background()
 
@@ -2250,20 +1800,4 @@ func (s *RootCauseScenarioStage) cleanup() {
 		s.t.Logf("Cleaning up namespace: %s", ns)
 		_ = s.testCtx.K8sClient.DeleteNamespace(ctx, ns)
 	}
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }

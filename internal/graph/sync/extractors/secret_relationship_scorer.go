@@ -281,7 +281,7 @@ func (s *SecretRelationshipScorer) checkOwnerReference(
 
 // calculateTemporalProximity calculates a proximity score based on time difference.
 // Returns 1.0 for immediate proximity (lagMs=0), decreasing linearly to 0.0 at window boundary.
-func (s *SecretRelationshipScorer) calculateTemporalProximity(lagMs int64, windowMs int64) float64 {
+func (s *SecretRelationshipScorer) calculateTemporalProximity(lagMs, windowMs int64) float64 {
 	if windowMs == 0 {
 		return 0.0
 	}

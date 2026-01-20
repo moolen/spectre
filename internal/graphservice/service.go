@@ -18,7 +18,6 @@ type Service struct {
 	schema         *graph.Schema
 	pipeline       sync.Pipeline
 	listener       sync.EventListener
-	rebuilder      *sync.Rebuilder
 	changeDetector *sync.NamespaceChangeDetector
 	logger         *logging.Logger
 
@@ -107,6 +106,8 @@ func (s *Service) Initialize(ctx context.Context) error {
 	pingSucceeded := false
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
+			// Exponential backoff calculation - attempt is bounded by maxRetries (20)
+			// #nosec G115 -- attempt-1 is bounded by maxRetries and will never overflow
 			backoff := initialBackoff * time.Duration(1<<uint(attempt-1))
 			if backoff > maxBackoff {
 				backoff = maxBackoff

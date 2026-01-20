@@ -19,6 +19,14 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
+const (
+	kindPod         = "Pod"
+	kindReplicaSet  = "ReplicaSet"
+	kindConfigMap   = "ConfigMap"
+	kindClusterRole = "ClusterRole"
+	kindDeployment  = "Deployment"
+)
+
 // graphBuilder implements the GraphBuilder interface
 type graphBuilder struct {
 	logger            *logging.Logger
@@ -113,10 +121,7 @@ func (b *graphBuilder) BuildResourceNodes(event models.Event) (*GraphUpdate, err
 
 	// Create ChangeEvent node (unless this is a K8s Event object)
 	if event.Resource.Kind != "Event" {
-		changeEventNode, err := b.buildChangeEventNode(event)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build change event: %w", err)
-		}
+		changeEventNode := b.buildChangeEventNode(event)
 		update.EventNodes = append(update.EventNodes, changeEventNode)
 
 		// Create CHANGED edge (Resource → ChangeEvent)
@@ -226,26 +231,26 @@ func (b *graphBuilder) ExtractRelationships(ctx context.Context, event models.Ev
 
 	// Extract selector relationships (for Services, Deployments, etc.)
 	// Services and Deployments select Pods based on label selectors
-	if event.Resource.Kind == "Service" || event.Resource.Kind == "Deployment" || event.Resource.Kind == "ReplicaSet" || event.Resource.Kind == "StatefulSet" || event.Resource.Kind == "DaemonSet" {
+	if event.Resource.Kind == "Service" || event.Resource.Kind == kindDeployment || event.Resource.Kind == kindReplicaSet || event.Resource.Kind == "StatefulSet" || event.Resource.Kind == "DaemonSet" {
 		selectsEdges := b.extractSelectorRelationships(event.Resource.UID, event.Resource.Kind, resourceData)
 		edges = append(edges, selectsEdges...)
 	}
 
 	// Extract scheduling relationships (Pod → Node)
-	if event.Resource.Kind == "Pod" {
+	if event.Resource.Kind == kindPod {
 		if schedEdge := b.extractSchedulingRelationship(event.Resource.UID, resourceData); schedEdge != nil {
 			edges = append(edges, *schedEdge)
 		}
 	}
 
 	// Extract volume relationships (Pod → PVC)
-	if event.Resource.Kind == "Pod" {
+	if event.Resource.Kind == kindPod {
 		volumeEdges := b.extractVolumeRelationships(event.Resource.UID, resourceData)
 		edges = append(edges, volumeEdges...)
 	}
 
 	// Extract ServiceAccount relationship
-	if event.Resource.Kind == "Pod" {
+	if event.Resource.Kind == kindPod {
 		if saEdge := b.extractServiceAccountRelationship(event.Resource.UID, resourceData); saEdge != nil {
 			edges = append(edges, *saEdge)
 		}
@@ -392,7 +397,7 @@ func (b *graphBuilder) extractInvolvedObjectMetadata(event models.Event) *graph.
 }
 
 // buildChangeEventNode creates a ChangeEvent node from an event
-func (b *graphBuilder) buildChangeEventNode(event models.Event) (graph.ChangeEvent, error) {
+func (b *graphBuilder) buildChangeEventNode(event models.Event) graph.ChangeEvent {
 	// Parse resource data to extract status and errors
 	var resourceData *analyzer.ResourceData
 	var err error
@@ -418,7 +423,7 @@ func (b *graphBuilder) buildChangeEventNode(event models.Event) (graph.ChangeEve
 
 	// Extract container issues
 	containerIssues := []string{}
-	if len(event.Data) > 0 && event.Resource.Kind == "Pod" {
+	if len(event.Data) > 0 && event.Resource.Kind == kindPod {
 		if issues, err := analyzer.GetContainerIssuesFromJSON(event.Data); err == nil && len(issues) > 0 {
 			for _, issue := range issues {
 				// Use IssueType (normalized) instead of Reason (actual waiting reason)
@@ -437,6 +442,11 @@ func (b *graphBuilder) buildChangeEventNode(event models.Event) (graph.ChangeEve
 	case models.EventTypeUpdate:
 		// For UPDATE events, compare with previous state to detect what changed
 		configChanged, statusChanged, replicasChanged = b.detectChanges(event, resourceData)
+	case models.EventTypeCreate, models.EventTypeDelete:
+		// For CREATE and DELETE events, no change detection needed
+		// Variables already initialized to false
+	default:
+		// Unknown event type, keep defaults
 	}
 
 	return graph.ChangeEvent{
@@ -451,7 +461,7 @@ func (b *graphBuilder) buildChangeEventNode(event models.Event) (graph.ChangeEve
 		ReplicasChanged: replicasChanged,
 		ImpactScore:     b.calculateImpactScore(status, containerIssues),
 		Data:            string(event.Data), // Store full resource data for timeline reconstruction
-	}, nil
+	}
 }
 
 // detectChanges compares current event with previous event to detect what changed
@@ -587,8 +597,8 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 	// - ConfigMap/Secret: Compare 'data' field (they don't have 'spec')
 	// - Other resources: Compare 'spec' field and verify generation increased
 
-	isConfigMapOrSecret := event.Resource.Kind == "ConfigMap" || event.Resource.Kind == "Secret"
-	isRBACResource := event.Resource.Kind == "Role" || event.Resource.Kind == "ClusterRole" ||
+	isConfigMapOrSecret := event.Resource.Kind == kindConfigMap || event.Resource.Kind == "Secret"
+	isRBACResource := event.Resource.Kind == "Role" || event.Resource.Kind == kindClusterRole ||
 		event.Resource.Kind == "RoleBinding" || event.Resource.Kind == "ClusterRoleBinding"
 
 	if isConfigMapOrSecret {
@@ -610,7 +620,7 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 		}
 
 		// Also check binaryData for ConfigMaps
-		if event.Resource.Kind == "ConfigMap" {
+		if event.Resource.Kind == kindConfigMap {
 			currentBinaryData, currentHasBinaryData := currentResource["binaryData"]
 			previousBinaryData, previousHasBinaryData := previousResource["binaryData"]
 
@@ -628,7 +638,7 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 		// RBAC resources (Role, ClusterRole, RoleBinding, ClusterRoleBinding) don't have a spec field
 		// - Role/ClusterRole: have 'rules' array
 		// - RoleBinding/ClusterRoleBinding: have 'roleRef' and 'subjects'
-		if event.Resource.Kind == "Role" || event.Resource.Kind == "ClusterRole" {
+		if event.Resource.Kind == "Role" || event.Resource.Kind == kindClusterRole {
 			// Compare 'rules' field
 			currentRules, currentHasRules := currentResource["rules"]
 			previousRules, previousHasRules := previousResource["rules"]
@@ -886,7 +896,7 @@ func (b *graphBuilder) extractSelectorRelationships(selectorUID, kind string, re
 			}
 		}
 
-	case "Deployment", "ReplicaSet", "StatefulSet", "DaemonSet":
+	case kindDeployment, kindReplicaSet, "StatefulSet", "DaemonSet":
 		// These resources use spec.selector.matchLabels
 		if selectorRaw, ok := spec["selector"].(map[string]interface{}); ok {
 			if matchLabels, ok := selectorRaw["matchLabels"].(map[string]interface{}); ok {

@@ -12,6 +12,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const reasonEvicted = "Evicted"
+
 // NodeEphemeralStoragePressure scenario: Pod eviction due to ephemeral storage pressure
 // caused by a Deployment update that changes the container command to write excessive data.
 type NodeEphemeralStoragePressure struct{}
@@ -92,7 +94,8 @@ func (s *NodeEphemeralStoragePressure) Setup(ctx context.Context, client kuberne
 		if err != nil {
 			return false, err
 		}
-		for _, pod := range pods.Items {
+		for i := range pods.Items {
+			pod := &pods.Items[i]
 			if pod.Status.Phase == corev1.PodRunning {
 				fmt.Printf("[DEBUG] Initial pod %s is running\n", pod.Name)
 				return true, nil
@@ -180,13 +183,13 @@ func (s *NodeEphemeralStoragePressure) WaitCondition(ctx context.Context, client
 			}
 
 			// Pod is evicted when reason is "Evicted"
-			if pod.Status.Reason == "Evicted" {
+			if pod.Status.Reason == reasonEvicted {
 				fmt.Printf("[DEBUG] ✓ Pod %s is evicted (reason: Evicted)\n", pod.Name)
 				return true, nil
 			}
 
 			// Also check for pod phase indicating eviction
-			if pod.Status.Phase == corev1.PodFailed && pod.Status.Reason == "Evicted" {
+			if pod.Status.Phase == corev1.PodFailed && pod.Status.Reason == reasonEvicted {
 				fmt.Printf("[DEBUG] ✓ Pod %s is evicted (phase: Failed, reason: Evicted)\n", pod.Name)
 				return true, nil
 			}
@@ -212,9 +215,10 @@ func (s *NodeEphemeralStoragePressure) WaitCondition(ctx context.Context, client
 			})
 			if err == nil && len(events.Items) > 0 {
 				fmt.Printf("[DEBUG]   Recent events for pod:\n")
-				for _, event := range events.Items {
+				for j := range events.Items {
+					event := &events.Items[j]
 					fmt.Printf("[DEBUG]     %s: %s - %s\n", event.Type, event.Reason, event.Message)
-					if event.Reason == "Evicted" || event.Reason == "Eviction" {
+					if event.Reason == reasonEvicted || event.Reason == "Eviction" {
 						fmt.Printf("[DEBUG]   ✓ Eviction event found!\n")
 						return true, nil
 					}

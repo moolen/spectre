@@ -9,6 +9,8 @@ import (
 	"github.com/moolen/spectre/internal/graph"
 )
 
+const reasonOOMKilled = "OOMKilled"
+
 // ErrNoChangeEventInRange is returned when no ChangeEvent is found within the
 // requested time range, but earlier data exists. This allows the handler to
 // return HTTP 200 with a hint about when data is available.
@@ -189,7 +191,7 @@ func (a *RootCauseAnalyzer) extractObservedSymptom(
 }
 
 // classifySymptomType determines the symptom category from observed facts
-func classifySymptomType(status string, errorMessage string, containerIssues []string) string {
+func classifySymptomType(status, errorMessage string, containerIssues []string) string {
 	// Check container issues first (most specific)
 	for _, issue := range containerIssues {
 		switch issue {
@@ -197,8 +199,8 @@ func classifySymptomType(status string, errorMessage string, containerIssues []s
 			return "ImagePullError"
 		case "CrashLoopBackOff":
 			return "CrashLoop"
-		case "OOMKilled":
-			return "OOMKilled"
+		case reasonOOMKilled:
+			return reasonOOMKilled
 		case "ContainerCreating":
 			return "ContainerStartup"
 		}
@@ -213,7 +215,7 @@ func classifySymptomType(status string, errorMessage string, containerIssues []s
 		return "CrashLoop"
 	}
 	if strings.Contains(errorLower, "oom") || strings.Contains(errorLower, "out of memory") {
-		return "OOMKilled"
+		return reasonOOMKilled
 	}
 	if strings.Contains(errorLower, "evicted") {
 		return "Evicted"

@@ -12,6 +12,9 @@ import (
 // when calculating event significance scores.
 
 const (
+	eventTypeWarning = "Warning"
+	eventTypeError   = "Error"
+
 	// EventWeightCausalSpine is the weight for events on the causal path.
 	// Events on the causal spine are most relevant for root cause analysis.
 	EventWeightCausalSpine = 0.15
@@ -186,10 +189,10 @@ func CalculateK8sEventSignificance(
 	reasons := []string{}
 
 	// Warning events are more significant than Normal events
-	if event.Type == "Warning" {
+	if event.Type == eventTypeWarning {
 		score += 0.2
 		reasons = append(reasons, "warning event")
-	} else if event.Type == "Error" {
+	} else if event.Type == eventTypeError {
 		score += 0.3
 		reasons = append(reasons, "error event")
 	}

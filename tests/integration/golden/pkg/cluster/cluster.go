@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/testcontainers/testcontainers-go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -210,9 +209,8 @@ func (c *Cluster) WaitForReady(ctx context.Context) error {
 
 // EventCapture manages event capture from a cluster
 type EventCapture struct {
-	container testcontainers.Container
-	ctx       context.Context
-	filepath  string
+	ctx      context.Context
+	filepath string
 }
 
 // StartEventCapture starts capturing events from the cluster (uses DinD)

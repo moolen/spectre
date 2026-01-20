@@ -1,7 +1,7 @@
 package apiserver
 
 import (
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- MD5 used only for ETag generation, not cryptography
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 )
+
+const pathIndexHTML = "/index.html"
 
 // cachedFile represents a single cached static file
 type cachedFile struct {
@@ -66,17 +68,21 @@ func (c *staticFileCache) loadAndCache(path string) (*cachedFile, error) {
 	}
 
 	// Load file from disk
+	// filePath is constructed from sanitized uiDir (hardcoded base) + cleaned path
 	filePath := filepath.Join(c.uiDir, path)
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return nil, err
 	}
 
+	// #nosec G304 -- Path is sanitized via filepath.Clean and constrained to uiDir
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	content, err := io.ReadAll(file)
 	if err != nil {
@@ -84,6 +90,7 @@ func (c *staticFileCache) loadAndCache(path string) (*cachedFile, error) {
 	}
 
 	// Generate ETag from content hash
+	// #nosec G401 -- MD5 used only for ETag generation (cache validation), not cryptography
 	hash := md5.Sum(content)
 	etag := fmt.Sprintf(`"%x"`, hash)
 
@@ -136,11 +143,14 @@ func (c *staticFileCache) maybeReload(path string, cachedModTime time.Time) {
 	}()
 
 	// Load file from disk
+	// #nosec G304 -- Path is sanitized via filepath.Clean and constrained to uiDir
 	file, err := os.Open(filePath)
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	content, err := io.ReadAll(file)
 	if err != nil {
@@ -148,6 +158,7 @@ func (c *staticFileCache) maybeReload(path string, cachedModTime time.Time) {
 	}
 
 	// Generate new ETag
+	// #nosec G401 -- MD5 used only for ETag generation (cache validation), not cryptography
 	hash := md5.Sum(content)
 	etag := fmt.Sprintf(`"%x"`, hash)
 
@@ -221,7 +232,7 @@ func (s *Server) serveStaticUI(w http.ResponseWriter, r *http.Request) {
 	// Handle root and SPA routes
 	originalPath := path
 	if path == "/" || path == "/timeline" {
-		path = "/index.html"
+		path = pathIndexHTML
 	}
 
 	// Try to serve the file from cache
@@ -234,11 +245,11 @@ func (s *Server) serveStaticUI(w http.ResponseWriter, r *http.Request) {
 
 	// For SPA routing, serve index.html for non-existent files that aren't assets
 	if !isAssetPath(originalPath) {
-		cached, err := s.staticCache.get("/index.html")
+		cached, err := s.staticCache.get(pathIndexHTML)
 		if err == nil {
 			// Serve index.html with no-cache headers
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			s.serveCachedFile(w, r, cached, "/index.html")
+			s.serveCachedFile(w, r, cached, "pathIndexHTML")
 			return
 		}
 	}
@@ -259,10 +270,10 @@ func (s *Server) serveCachedFile(w http.ResponseWriter, r *http.Request, cached 
 	w.Header().Set("Last-Modified", cached.modTime.UTC().Format(http.TimeFormat))
 
 	// Set cache headers for assets (but not for index.html)
-	if path != "/index.html" && isAssetPath(path) {
+	if path != pathIndexHTML && isAssetPath(path) {
 		// Cache assets for 1 year (immutable if using hash-based filenames)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	} else if path == "/index.html" {
+	} else if path == pathIndexHTML {
 		// Never cache index.html
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	}
@@ -287,7 +298,7 @@ func (s *Server) serveCachedFile(w http.ResponseWriter, r *http.Request, cached 
 
 	// Write content
 	w.WriteHeader(http.StatusOK)
-	w.Write(cached.content)
+	_, _ = w.Write(cached.content)
 }
 
 // isAssetPath checks if a path looks like an asset (JS, CSS, image, etc.)

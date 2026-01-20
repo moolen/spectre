@@ -14,6 +14,8 @@ import (
 	"github.com/moolen/spectre/internal/logging"
 )
 
+const edgeTypeManages = "MANAGES"
+
 // containsIgnoreCase checks if s contains substr (case insensitive)
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
@@ -120,7 +122,7 @@ func (d *PathDiscoverer) DiscoverCausalPaths(ctx context.Context, input CausalPa
 		return nil, fmt.Errorf("symptom node not found: %s", input.ResourceUID)
 	}
 
-	symptomFirstFailure := d.identifyFirstFailure(symptomNode, nodeAnomalies[symptomNode.ID], input.FailureTimestamp)
+	symptomFirstFailure := d.identifyFirstFailure(nodeAnomalies[symptomNode.ID], input.FailureTimestamp)
 	d.logger.Debug("DiscoverCausalPaths: symptom first failure time: %v", symptomFirstFailure)
 
 	// Step 6: DFS traversal upstream from symptom
@@ -235,7 +237,7 @@ func (d *PathDiscoverer) buildUpstreamAdjacency(graph analysis.CausalGraph) map[
 		//    For upstream traversal: REVERSE (ServiceAccount -> RoleBinding)
 
 		// Special handling for MANAGES and GRANTS_TO edges
-		if edge.RelationshipType == "MANAGES" || edge.RelationshipType == "GRANTS_TO" {
+		if edge.RelationshipType == edgeTypeManages || edge.RelationshipType == "GRANTS_TO" {
 			// MANAGES is stored as manager -> managed, but we need managed -> manager for upstream
 			// GRANTS_TO is stored as RoleBinding -> SA, but we need SA -> RoleBinding for upstream
 			d.logger.Debug("buildUpstreamAdjacency: MANAGES/GRANTS_TO edge: adding adjacency[%s] -> %s", edge.To, edge.From)
@@ -321,7 +323,6 @@ func (d *PathDiscoverer) findSymptomNode(graph analysis.CausalGraph, resourceUID
 
 // identifyFirstFailure determines the first failure timestamp for the symptom
 func (d *PathDiscoverer) identifyFirstFailure(
-	symptomNode *analysis.GraphNode,
 	symptomAnomalies []anomaly.Anomaly,
 	fallbackTimestamp int64,
 ) time.Time {
@@ -406,7 +407,7 @@ func (d *PathDiscoverer) traverseUpstream(
 			currentNode := nodeMap[entry.CurrentNodeID]
 			currentAnomalies := nodeAnomalies[entry.CurrentNodeID]
 			if currentNode != nil && HasCauseIntroducingAnomaly(currentAnomalies, symptomFirstFailure) {
-				path := d.buildCausalPath(entry.Path, currentNode, nodeMap, nodeAnomalies)
+				path := d.buildCausalPath(entry.Path, nodeMap, nodeAnomalies)
 				paths = append(paths, path)
 			}
 			continue
@@ -500,7 +501,7 @@ func (d *PathDiscoverer) traverseUpstream(
 
 			if shouldStop {
 				// STOP: Found candidate root cause
-				path := d.buildCausalPath(newPath, upstreamNode, nodeMap, nodeAnomalies)
+				path := d.buildCausalPath(newPath, nodeMap, nodeAnomalies)
 				paths = append(paths, path)
 				// Don't explore further from this node
 				continue
@@ -510,7 +511,7 @@ func (d *PathDiscoverer) traverseUpstream(
 			// if it has definitive anomalies. The deeper REFERENCES_SPEC target (ConfigMap)
 			// may or may not be a better root cause.
 			if isDefinitiveStopCandidate && hasUpstreamReferencesSpec {
-				path := d.buildCausalPath(newPath, upstreamNode, nodeMap, nodeAnomalies)
+				path := d.buildCausalPath(newPath, nodeMap, nodeAnomalies)
 				paths = append(paths, path)
 				// Continue exploring to find deeper root causes via REFERENCES_SPEC
 			}
@@ -519,7 +520,7 @@ func (d *PathDiscoverer) traverseUpstream(
 			// record a path but also continue exploring to find deeper root causes
 			if hasCauseAnomaly && !hasDefinitiveCauseAnomaly && (isCauseEdge || (isMaterializationEdge && entry.Depth > 0)) {
 				// Record this as a candidate path (may not be the deepest root cause)
-				path := d.buildCausalPath(newPath, upstreamNode, nodeMap, nodeAnomalies)
+				path := d.buildCausalPath(newPath, nodeMap, nodeAnomalies)
 				paths = append(paths, path)
 				// Continue exploring - don't stop here
 			}
@@ -527,7 +528,7 @@ func (d *PathDiscoverer) traverseUpstream(
 			// Determine if we should continue traversal
 			// IMPORTANT: If we recorded this node as a candidate but want to continue exploring
 			// via REFERENCES_SPEC, we MUST force continue even if shouldContinueTraversal returns false
-			shouldContinue := d.shouldContinueTraversal(upstreamNode, upstreamAnomalies, edgeCategory)
+			shouldContinue := d.shouldContinueTraversal(upstreamAnomalies, edgeCategory)
 
 			// Force continue if this is a definitive stop candidate but has REFERENCES_SPEC upstream
 			// This ensures we explore the ConfigMap/Secret that might be the true root cause
@@ -562,7 +563,7 @@ func (d *PathDiscoverer) traverseUpstream(
 // This indicates the node is managed by a higher-level resource (e.g., HelmRelease, Kustomization)
 func (d *PathDiscoverer) hasManagesEdgeUpstream(nodeID string, adjacency map[string][]upstreamEdge) bool {
 	for _, upstream := range adjacency[nodeID] {
-		if upstream.Edge != nil && upstream.Edge.RelationshipType == "MANAGES" {
+		if upstream.Edge != nil && upstream.Edge.RelationshipType == edgeTypeManages {
 			return true
 		}
 	}
@@ -695,7 +696,6 @@ func (d *PathDiscoverer) extractSymptomNode(path CausalPath) PathNode {
 
 // shouldContinueTraversal determines if traversal should continue through this node
 func (d *PathDiscoverer) shouldContinueTraversal(
-	node *analysis.GraphNode,
 	nodeAnomalies []anomaly.Anomaly,
 	edgeCategory string,
 ) bool {
@@ -723,7 +723,6 @@ func (d *PathDiscoverer) shouldContinueTraversal(
 // buildCausalPath constructs a CausalPath from the traversal path
 func (d *PathDiscoverer) buildCausalPath(
 	path []pathElement,
-	rootNode *analysis.GraphNode,
 	nodeMap map[string]*analysis.GraphNode,
 	nodeAnomalies map[string][]anomaly.Anomaly,
 ) CausalPath {
@@ -1096,7 +1095,7 @@ func (d *PathDiscoverer) querySelectsTargets(ctx context.Context, serviceUID str
 		return nil, fmt.Errorf("failed to query SELECTS targets: %w", err)
 	}
 
-	var targets []selectsTarget
+	targets := make([]selectsTarget, 0, len(result.Rows))
 	for _, row := range result.Rows {
 		if len(row) < 4 {
 			continue
@@ -1204,11 +1203,11 @@ func (d *PathDiscoverer) appendServiceToPath(
 	}
 
 	// Append Service to existing path
-	newSteps := append(path.Steps, serviceStep)
+	path.Steps = append(path.Steps, serviceStep)
 
 	// Regenerate path ID with Service included
 	var pathStr string
-	for _, step := range newSteps {
+	for _, step := range path.Steps {
 		pathStr += step.Node.ID
 		if step.Edge != nil {
 			pathStr += "-" + step.Edge.RelationshipType + "-"
@@ -1221,7 +1220,7 @@ func (d *PathDiscoverer) appendServiceToPath(
 		ID:             pathID,
 		CandidateRoot:  path.CandidateRoot,
 		FirstAnomalyAt: path.FirstAnomalyAt,
-		Steps:          newSteps,
+		Steps:          path.Steps,
 	}
 }
 

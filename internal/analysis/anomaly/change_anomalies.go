@@ -8,6 +8,13 @@ import (
 	"github.com/moolen/spectre/internal/analysis"
 )
 
+const (
+	kindConfigMap   = "ConfigMap"
+	kindDeployment  = "Deployment"
+	kindHelmRelease = "HelmRelease"
+	kindReplicaSet  = "ReplicaSet"
+)
+
 // ChangeAnomalyDetector detects resource mutations and changes
 type ChangeAnomalyDetector struct{}
 
@@ -41,7 +48,7 @@ func (d *ChangeAnomalyDetector) Detect(input DetectorInput) []Anomaly {
 
 				// Generate appropriate summary based on resource type
 				var summary string
-				if kind == "ConfigMap" || kind == "Secret" {
+				if kind == "ConfigMap" || kind == kindSecret {
 					summary = fmt.Sprintf("%s data modified", kind)
 				} else {
 					summary = fmt.Sprintf("%s configuration modified", kind)
@@ -81,7 +88,7 @@ func (d *ChangeAnomalyDetector) Detect(input DetectorInput) []Anomaly {
 
 			// Generate appropriate summary based on resource type
 			var summary string
-			if kind == "ConfigMap" || kind == "Secret" {
+			if kind == kindConfigMap || kind == kindSecret {
 				summary = fmt.Sprintf("%s data modified", kind)
 			} else {
 				summary = fmt.Sprintf("%s configuration modified", kind)
@@ -104,7 +111,7 @@ func (d *ChangeAnomalyDetector) Detect(input DetectorInput) []Anomaly {
 			anomalies = append(anomalies, d.detectSpecificChanges(input, event)...)
 
 			// Check for HelmRelease-specific changes (upgrade, rollback, values changed)
-			if kind == "HelmRelease" {
+			if kind == kindHelmRelease {
 				anomalies = append(anomalies, d.detectHelmReleaseChanges(input, event)...)
 			}
 		}
@@ -144,11 +151,11 @@ func (d *ChangeAnomalyDetector) classifyConfigChange(kind string) (string, Sever
 	var anomalyType string
 
 	switch kind {
-	case "ConfigMap":
+	case kindConfigMap:
 		anomalyType = "ConfigChange"
 	case "Secret":
 		anomalyType = "SecretChange"
-	case "HelmRelease":
+	case kindHelmRelease:
 		// Default to HelmReleaseUpdated - specific types (HelmUpgrade, HelmRollback, ValuesChanged)
 		// are detected separately in detectHelmReleaseChanges
 		anomalyType = "HelmReleaseUpdated"
@@ -162,7 +169,7 @@ func (d *ChangeAnomalyDetector) classifyConfigChange(kind string) (string, Sever
 		anomalyType = "RoleBindingModified"
 	case "ClusterRoleBinding":
 		anomalyType = "ClusterRoleBindingModified"
-	case "Deployment", "StatefulSet", "DaemonSet":
+	case kindDeployment, "StatefulSet", "DaemonSet":
 		anomalyType = "WorkloadSpecModified"
 	default:
 		anomalyType = "SpecModified"
@@ -305,18 +312,6 @@ func extractChangedFields(diffs []analysis.EventDiff) []string {
 	return fields
 }
 
-func extractReplicaChangeDetails(diffs []analysis.EventDiff) map[string]interface{} {
-	details := make(map[string]interface{})
-
-	for _, diff := range diffs {
-		if strings.Contains(diff.Path, "replicas") || strings.Contains(diff.Path, "Replicas") {
-			details["unified_diff"] = analysis.FormatValueDiff(diff.Path, diff.OldValue, diff.NewValue)
-		}
-	}
-
-	return details
-}
-
 // isOnlyReplicaChange checks if the only changes are to replica fields
 func isOnlyReplicaChange(changedFields []string) bool {
 	if len(changedFields) == 0 {
@@ -357,7 +352,7 @@ func areAllStatusChanges(changedFields []string) bool {
 // - status.* (reconciliation state)
 func isReplicaSetRoutineChange(kind string, changedFields []string) bool {
 	// Only applies to ReplicaSets
-	if kind != "ReplicaSet" {
+	if kind != kindReplicaSet {
 		return false
 	}
 
@@ -394,7 +389,7 @@ func isReplicaSetRoutineChange(kind string, changedFields []string) bool {
 // created with a misconfiguration, their descendant Pods will fail
 func isWorkloadKind(kind string) bool {
 	switch kind {
-	case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob":
+	case kindDeployment, "StatefulSet", "DaemonSet", kindReplicaSet, "Job", "CronJob":
 		return true
 	default:
 		return false
@@ -469,7 +464,7 @@ func (d *ChangeAnomalyDetector) detectHelmReleaseChanges(input DetectorInput, ev
 			Node:      NodeFromGraphNode(input.Node),
 			Category:  CategoryChange,
 			Type:      "ValuesChanged",
-			Severity:  GetSeverity(CategoryChange, "ValuesChanged", "HelmRelease"),
+			Severity:  GetSeverity(CategoryChange, "ValuesChanged", kindHelmRelease),
 			Timestamp: event.Timestamp,
 			Summary:   "HelmRelease values configuration changed",
 			Details: map[string]interface{}{
@@ -487,7 +482,7 @@ func (d *ChangeAnomalyDetector) detectHelmReleaseChanges(input DetectorInput, ev
 				Node:      NodeFromGraphNode(input.Node),
 				Category:  CategoryChange,
 				Type:      "HelmRollback",
-				Severity:  GetSeverity(CategoryChange, "HelmRollback", "HelmRelease"),
+				Severity:  GetSeverity(CategoryChange, "HelmRollback", kindHelmRelease),
 				Timestamp: event.Timestamp,
 				Summary:   fmt.Sprintf("HelmRelease rolled back from %s to %s", oldVersion, newVersion),
 				Details: map[string]interface{}{
@@ -499,7 +494,7 @@ func (d *ChangeAnomalyDetector) detectHelmReleaseChanges(input DetectorInput, ev
 				Node:      NodeFromGraphNode(input.Node),
 				Category:  CategoryChange,
 				Type:      "HelmUpgrade",
-				Severity:  GetSeverity(CategoryChange, "HelmUpgrade", "HelmRelease"),
+				Severity:  GetSeverity(CategoryChange, "HelmUpgrade", kindHelmRelease),
 				Timestamp: event.Timestamp,
 				Summary:   fmt.Sprintf("HelmRelease upgraded from %s to %s", oldVersion, newVersion),
 				Details: map[string]interface{}{

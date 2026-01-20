@@ -68,14 +68,14 @@ func LoadAuditLogFiltered(filePath string, filter func(models.Event) bool) ([]mo
 }
 
 // LoadAuditLogByResource filters events by resource kind
-func LoadAuditLogByResource(filePath string, kind string) ([]models.Event, error) {
+func LoadAuditLogByResource(filePath, kind string) ([]models.Event, error) {
 	return LoadAuditLogFiltered(filePath, func(e models.Event) bool {
 		return e.Resource.Kind == kind
 	})
 }
 
 // LoadAuditLogByNamespace filters events by namespace
-func LoadAuditLogByNamespace(filePath string, namespace string) ([]models.Event, error) {
+func LoadAuditLogByNamespace(filePath, namespace string) ([]models.Event, error) {
 	return LoadAuditLogFiltered(filePath, func(e models.Event) bool {
 		return e.Resource.Namespace == namespace
 	})

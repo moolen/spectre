@@ -15,6 +15,8 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 )
 
+const conditionValueTrue = "True"
+
 // TestCluster represents a Kind cluster instance for testing.
 type TestCluster struct {
 	Provider *cluster.Provider
@@ -192,10 +194,11 @@ func isClusterHealthy(t *testing.T, tc *TestCluster) bool {
 	}
 
 	// Check if all nodes are ready
-	for _, node := range nodes.Items {
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
 		ready := false
 		for _, condition := range node.Status.Conditions {
-			if condition.Type == "Ready" && condition.Status == "True" {
+			if condition.Type == "Ready" && condition.Status == conditionValueTrue {
 				ready = true
 				break
 			}

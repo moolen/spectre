@@ -63,11 +63,11 @@ func TestFluxKustomizationExtractor_ExtractSpecReferences(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name               string
-		kustomizationData  map[string]interface{}
-		mockResources      map[string]*graph.ResourceIdentity // resources to add to mock lookup
-		expectedEdgeTypes  []graph.EdgeType
-		expectedMinEdges   int
+		name              string
+		kustomizationData map[string]interface{}
+		mockResources     map[string]*graph.ResourceIdentity // resources to add to mock lookup
+		expectedEdgeTypes []graph.EdgeType
+		expectedMinEdges  int
 	}{
 		{
 			name: "Kustomization with sourceRef",
@@ -233,11 +233,11 @@ func TestFluxKustomizationExtractor_ExtractManagedResources(t *testing.T) {
 	extractor := NewFluxKustomizationExtractor()
 
 	tests := []struct {
-		name              string
-		queryResult       *graph.QueryResult
-		resourceLabels    map[string]string
-		expectedMANAGES   int
-		minConfidence     float64
+		name            string
+		queryResult     *graph.QueryResult
+		resourceLabels  map[string]string
+		expectedMANAGES int
+		minConfidence   float64
 	}{
 		{
 			name: "resource with perfect Kustomize labels",
@@ -309,18 +309,19 @@ func TestFluxKustomizationExtractor_ExtractManagedResources(t *testing.T) {
 			// Count MANAGES edges
 			managesCount := 0
 			for _, edge := range edges {
-				if edge.Type == graph.EdgeTypeManages {
-					managesCount++
+				if edge.Type != graph.EdgeTypeManages {
+					continue
+				}
+				managesCount++
 
-					// Verify confidence
-					var props graph.ManagesEdge
-					err := json.Unmarshal(edge.Properties, &props)
-					assert.NoError(t, err)
+				// Verify confidence
+				var props graph.ManagesEdge
+				err := json.Unmarshal(edge.Properties, &props)
+				assert.NoError(t, err)
 
-					if tt.minConfidence > 0 {
-						assert.GreaterOrEqual(t, props.Confidence, tt.minConfidence)
-						assert.NotEmpty(t, props.Evidence)
-					}
+				if tt.minConfidence > 0 {
+					assert.GreaterOrEqual(t, props.Confidence, tt.minConfidence)
+					assert.NotEmpty(t, props.Evidence)
 				}
 			}
 

@@ -241,7 +241,7 @@ func (e *ArgoCDApplicationExtractor) extractManagedResources(
 			RETURN r.uid
 		`,
 		Parameters: map[string]interface{}{
-			"labelQuery": fmt.Sprintf(`"%s":"%s"`, argoCDInstanceLabel, appName),
+			"labelQuery": fmt.Sprintf(`%q:%q`, argoCDInstanceLabel, appName),
 		},
 	}
 

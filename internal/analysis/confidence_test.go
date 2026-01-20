@@ -320,7 +320,7 @@ func TestCalculateErrorMatchFactor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			factor := calculateErrorMatchFactor(tt.symptom, tt.rootCause)
+			factor := calculateErrorMatchFactor(tt.symptom)
 			assert.Equal(t, tt.expectedFactor, factor)
 		})
 	}

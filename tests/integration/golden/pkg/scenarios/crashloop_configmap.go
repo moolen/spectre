@@ -10,6 +10,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const reasonCrashLoopBackOff = "CrashLoopBackOff"
+
 // CrashLoopConfigMap scenario: Pod crashes due to invalid ConfigMap
 type CrashLoopConfigMap struct{}
 
@@ -117,7 +119,7 @@ func (s *CrashLoopConfigMap) WaitCondition(ctx context.Context, client kubernete
 			return false
 		}
 		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+			if cs.State.Waiting != nil && cs.State.Waiting.Reason == reasonCrashLoopBackOff {
 				return true
 			}
 		}
@@ -140,7 +142,7 @@ func (s *CrashLoopConfigMap) ExpectedAnomalies() []ExpectedAnomaly {
 		{
 			NodeKind:    "Pod",
 			Category:    "State",
-			Type:        "CrashLoopBackOff",
+			Type:        reasonCrashLoopBackOff,
 			MinSeverity: "high",
 		},
 		{

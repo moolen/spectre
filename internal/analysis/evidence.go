@@ -8,6 +8,8 @@ import (
 	"github.com/moolen/spectre/internal/graph"
 )
 
+const edgeTypeManages = "MANAGES"
+
 // collectSupportingEvidence consolidates evidence from the causal graph
 func (a *RootCauseAnalyzer) collectSupportingEvidence(
 	graph CausalGraph,
@@ -18,7 +20,7 @@ func (a *RootCauseAnalyzer) collectSupportingEvidence(
 
 	// RELATIONSHIP evidence (MANAGES edges)
 	for _, edge := range graph.Edges {
-		if edge.RelationshipType == "MANAGES" && !seenTypes["MANAGES"] {
+		if edge.RelationshipType == edgeTypeManages && !seenTypes["MANAGES"] {
 			// Find the nodes
 			var fromNode, toNode *GraphNode
 			for i := range graph.Nodes {

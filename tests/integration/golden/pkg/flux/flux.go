@@ -16,6 +16,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+const conditionReady = "Ready"
+
 // InstallFlux installs Flux CD using the flux-install.yaml manifest
 func InstallFlux(ctx context.Context, client kubernetes.Interface, kubeconfigPath string) error {
 	// Check if Flux is already installed
@@ -29,7 +31,7 @@ func InstallFlux(ctx context.Context, client kubernetes.Interface, kubeconfigPat
 
 	// Find project root and flux manifest
 	projectRoot := findProjectRoot()
-	fluxManifest := filepath.Join(projectRoot, "hack/demo/flux/flux-install.yaml")
+	fluxManifest := filepath.Join(projectRoot, "hack", "demo", "flux", "flux-install.yaml")
 	if _, err := os.Stat(fluxManifest); err != nil {
 		return fmt.Errorf("flux manifest not found at %s: %w", fluxManifest, err)
 	}
@@ -80,7 +82,7 @@ func WaitForFluxReady(ctx context.Context, client kubernetes.Interface, timeout 
 }
 
 // CreateHelmRepository creates a HelmRepository resource
-func CreateHelmRepository(ctx context.Context, kubeconfigPath string, namespace, name, url string) error {
+func CreateHelmRepository(ctx context.Context, kubeconfigPath, namespace, name, url string) error {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err
@@ -117,7 +119,7 @@ func CreateHelmRepository(ctx context.Context, kubeconfigPath string, namespace,
 }
 
 // CreateOCIRepository creates an OCIRepository resource
-func CreateOCIRepository(ctx context.Context, kubeconfigPath string, namespace, name, url string) error {
+func CreateOCIRepository(ctx context.Context, kubeconfigPath, namespace, name, url string) error {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err
@@ -154,7 +156,7 @@ func CreateOCIRepository(ctx context.Context, kubeconfigPath string, namespace, 
 }
 
 // WaitForSourceReady waits for a Flux source (OCIRepository, HelmRepository, etc) to be ready
-func WaitForSourceReady(ctx context.Context, kubeconfigPath string, namespace, resourceType, name string, timeout time.Duration) error {
+func WaitForSourceReady(ctx context.Context, kubeconfigPath, namespace, resourceType, name string, timeout time.Duration) error {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err
@@ -211,7 +213,7 @@ func WaitForSourceReady(ctx context.Context, kubeconfigPath string, namespace, r
 				condTypeStr, _, _ := unstructured.NestedString(condMap, "type")
 				condStatusStr, _, _ := unstructured.NestedString(condMap, "status")
 
-				if condTypeStr == "Ready" && condStatusStr == "True" {
+				if condTypeStr == conditionReady && condStatusStr == "True" {
 					fmt.Printf("%s %s/%s is ready\n", resourceType, namespace, name)
 					return nil
 				}
@@ -225,7 +227,7 @@ func WaitForSourceReady(ctx context.Context, kubeconfigPath string, namespace, r
 }
 
 // CreateHelmRelease creates a HelmRelease resource
-func CreateHelmRelease(ctx context.Context, kubeconfigPath string, namespace, name string, spec map[string]interface{}) error {
+func CreateHelmRelease(ctx context.Context, kubeconfigPath, namespace, name string, spec map[string]interface{}) error {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err
@@ -259,7 +261,7 @@ func CreateHelmRelease(ctx context.Context, kubeconfigPath string, namespace, na
 }
 
 // UpdateHelmRelease updates a HelmRelease resource
-func UpdateHelmRelease(ctx context.Context, kubeconfigPath string, namespace, name string, spec map[string]interface{}) error {
+func UpdateHelmRelease(ctx context.Context, kubeconfigPath, namespace, name string, spec map[string]interface{}) error {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err
@@ -290,7 +292,7 @@ func UpdateHelmRelease(ctx context.Context, kubeconfigPath string, namespace, na
 }
 
 // WaitForHelmReleaseReconciled waits for a HelmRelease to be reconciled (observedGeneration > 0)
-func WaitForHelmReleaseReconciled(ctx context.Context, kubeconfigPath string, namespace, name string, timeout time.Duration) error {
+func WaitForHelmReleaseReconciled(ctx context.Context, kubeconfigPath, namespace, name string, timeout time.Duration) error {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err
@@ -336,7 +338,7 @@ func WaitForHelmReleaseReconciled(ctx context.Context, kubeconfigPath string, na
 				condType, _, _ := unstructured.NestedString(condMap, "type")
 				condStatus, _, _ := unstructured.NestedString(condMap, "status")
 
-				if condType == "Ready" && condStatus == "True" {
+				if condType == conditionReady && condStatus == "True" {
 					fmt.Printf("HelmRelease %s/%s reconciled successfully (Ready=True)\n", namespace, name)
 					return nil
 				}
@@ -350,7 +352,7 @@ func WaitForHelmReleaseReconciled(ctx context.Context, kubeconfigPath string, na
 						condType, _, _ := unstructured.NestedString(condMap, "type")
 						condStatus, _, _ := unstructured.NestedString(condMap, "status")
 						condReason, _, _ := unstructured.NestedString(condMap, "reason")
-						if condType == "Ready" || condType == "Reconciling" {
+						if condType == conditionReady || condType == "Reconciling" {
 							fmt.Printf("HelmRelease %s/%s: %s=%s (%s)\n", namespace, name, condType, condStatus, condReason)
 						}
 					}
@@ -369,7 +371,7 @@ func WaitForHelmReleaseReconciled(ctx context.Context, kubeconfigPath string, na
 }
 
 // WaitForHelmReleaseCondition waits for a specific condition on the HelmRelease
-func WaitForHelmReleaseCondition(ctx context.Context, kubeconfigPath string, namespace, name string, conditionType string, conditionStatus string, timeout time.Duration) error {
+func WaitForHelmReleaseCondition(ctx context.Context, kubeconfigPath, namespace, name, conditionType, conditionStatus string, timeout time.Duration) error {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		return err

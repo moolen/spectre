@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const kindPod = "Pod"
+
 // FrequencyAnomalyDetector detects high-frequency patterns indicating instability
 type FrequencyAnomalyDetector struct{}
 
@@ -44,7 +46,7 @@ func (d *FrequencyAnomalyDetector) Detect(input DetectorInput) []Anomaly {
 	}
 
 	// Pod-specific: restart count
-	if input.Node.Resource.Kind == "Pod" {
+	if input.Node.Resource.Kind == kindPod {
 		restartCount := d.extractRestartCount(input)
 		if restartCount > 3 {
 			anomalies = append(anomalies, Anomaly{
@@ -108,8 +110,8 @@ func (d *FrequencyAnomalyDetector) extractRestartCount(input DetectorInput) int 
 		// Also check in full snapshot for containerStatuses
 		if event.FullSnapshot != nil {
 			if status, ok := event.FullSnapshot["status"].(map[string]interface{}); ok {
-				maxRestarts = max(maxRestarts, d.extractRestartCountFromStatus(status, "containerStatuses"))
-				maxRestarts = max(maxRestarts, d.extractRestartCountFromStatus(status, "initContainerStatuses"))
+				maxRestarts = maxInt(maxRestarts, d.extractRestartCountFromStatus(status, "containerStatuses"))
+				maxRestarts = maxInt(maxRestarts, d.extractRestartCountFromStatus(status, "initContainerStatuses"))
 			}
 		}
 	}
@@ -135,40 +137,7 @@ func (d *FrequencyAnomalyDetector) extractRestartCountFromStatus(status map[stri
 	return maxRestarts
 }
 
-func (d *FrequencyAnomalyDetector) isControllerKind(kind string) bool {
-	controllerKinds := []string{
-		"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet",
-		"HelmRelease", "Kustomization", "Application",
-	}
-
-	for _, ck := range controllerKinds {
-		if kind == ck {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (d *FrequencyAnomalyDetector) countReconciles(input DetectorInput) int {
-	reconcileCount := 0
-
-	for _, event := range input.AllEvents {
-		// Skip events outside time window
-		if event.Timestamp.Before(input.TimeWindow.Start) || event.Timestamp.After(input.TimeWindow.End) {
-			continue
-		}
-
-		// Count UPDATE events as potential reconciles
-		if event.EventType == "UPDATE" {
-			reconcileCount++
-		}
-	}
-
-	return reconcileCount
-}
-
-func max(a, b int) int {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}

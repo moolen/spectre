@@ -183,7 +183,7 @@ func (e *ExplanationBuilder) describeSymptomAnomaly(a *anomaly.Anomaly) string {
 	switch a.Type {
 	case "CrashLoopBackOff":
 		return "entered CrashLoopBackOff"
-	case "ImagePullBackOff":
+	case reasonImagePullBackOff:
 		return "failed to pull container image"
 	case "OOMKilled":
 		return "was OOM killed"

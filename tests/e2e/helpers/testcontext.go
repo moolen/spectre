@@ -13,13 +13,13 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
+	auditLogPath          = "/tmp/audit-logs/audit.jsonl"
+	containerNameSpectre  = "spectre"
 	defaultNamespace      = "monitoring"
 	defaultServicePort    = 8080
 	helmValuesFixturePath = "tests/e2e/fixtures/helm-values-test.yaml"
@@ -189,8 +189,7 @@ func setupE2ETestWithCustomValues(t *testing.T, valuesFilePath string, preDeploy
 			if err == nil && len(pods.Items) > 0 {
 				// Use the first pod (typically there's only one)
 				pod := pods.Items[0]
-				auditLogPath := "/tmp/audit-logs/audit.jsonl"
-				containerName := "spectre"
+				containerName := containerNameSpectre
 
 				// Create test name for file (sanitize test name)
 				testName := sanitizeName(t.Name())
@@ -284,7 +283,6 @@ func setupE2ETestWithCustomValues(t *testing.T, valuesFilePath string, preDeploy
 
 	// Enable audit log for e2e tests
 	// Create an emptyDir volume for audit logs
-	auditLogPath := "/tmp/audit-logs/audit.jsonl"
 	if extraVolumes, ok := values["extraVolumes"].([]interface{}); ok {
 		values["extraVolumes"] = append(extraVolumes, map[string]interface{}{
 			"name":     "audit-logs",
@@ -395,15 +393,6 @@ func mergeMaps(maps ...map[string]interface{}) map[string]interface{} {
 	return result
 }
 
-func ensureNamespace(ctx context.Context, client *K8sClient, name string) error {
-	if _, err := client.Clientset.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{}); err == nil {
-		return nil
-	} else if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get namespace %s: %w", name, err)
-	}
-	return client.CreateNamespace(ctx, name)
-}
-
 func ensureHelmRelease(t *testing.T, context, namespace, releaseName string, values map[string]interface{}) error {
 	helm, err := NewHelmDeployer(t, context, namespace)
 	if err != nil {
@@ -465,7 +454,7 @@ func loadHelmValuesFromFile(relativePath string) (map[string]interface{}, string
 }
 
 func extractImageReference(values map[string]interface{}) string {
-	repo := "spectre"
+	repo := containerNameSpectre
 	tag := "latest"
 
 	if imageSection, ok := values["image"].(map[string]interface{}); ok {
@@ -632,19 +621,6 @@ func sanitizeName(input string) string {
 		return name[:40]
 	}
 	return name
-}
-
-func newClusterName(testName string) string {
-	base := sanitizeName(testName)
-	if len(base) > 8 {
-		base = base[:8]
-	}
-	if base == "" {
-		base = "test"
-	}
-
-	suffix := time.Now().UnixNano() % 1_000_000
-	return fmt.Sprintf("%s-%06d", base, suffix)
 }
 
 // SetCachedHelmValues stores Helm values for reuse across tests

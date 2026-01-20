@@ -150,7 +150,8 @@ func runMCP(cmd *cobra.Command, args []string) {
 			if err := streamableServer.Shutdown(shutdownCtx); err != nil {
 				logger.Error("Error during shutdown: %v", err)
 				// Force exit if graceful shutdown fails
-				os.Exit(1)
+				shutdownCancel() // Call explicitly before exit
+				os.Exit(1) //nolint:gocritic // shutdownCancel() is explicitly called on line 153
 			}
 		case err := <-errCh:
 			logger.Error("Server error: %v", err)

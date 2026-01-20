@@ -247,7 +247,8 @@ func (s *ServiceEndpointMismatch) WaitCondition(ctx context.Context, client kube
 					currentGen, observedGen, deployment.Status.ReadyReplicas, deployment.Status.UnavailableReplicas)
 			}
 
-			for _, pod := range pods.Items {
+			for i := range pods.Items {
+				pod := &pods.Items[i]
 				if gen, ok := pod.Labels["pod-template-generation"]; ok {
 					fmt.Printf("[DEBUG]   Pod %s: phase=%s, reason=%s, generation=%s\n",
 						pod.Name, pod.Status.Phase, pod.Status.Reason, gen)
@@ -302,7 +303,8 @@ func (s *ServiceEndpointMismatch) WaitCondition(ctx context.Context, client kube
 			})
 			if err == nil {
 				fmt.Printf("[DEBUG] Found %d ReplicaSet(s):\n", len(replicaSets.Items))
-				for _, rs := range replicaSets.Items {
+				for i := range replicaSets.Items {
+					rs := &replicaSets.Items[i]
 					fmt.Printf("[DEBUG]   RS %s: replicas=%d, readyReplicas=%d, availableReplicas=%d, generation=%d\n",
 						rs.Name, rs.Status.Replicas, rs.Status.ReadyReplicas, rs.Status.AvailableReplicas, rs.Generation)
 				}
@@ -314,7 +316,8 @@ func (s *ServiceEndpointMismatch) WaitCondition(ctx context.Context, client kube
 			})
 			if err == nil {
 				fmt.Printf("[DEBUG] Recent deployment events:\n")
-				for _, event := range events.Items {
+				for i := range events.Items {
+					event := &events.Items[i]
 					fmt.Printf("[DEBUG]   %s: %s - %s\n", event.Type, event.Reason, event.Message)
 				}
 			}

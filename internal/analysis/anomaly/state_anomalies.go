@@ -9,6 +9,15 @@ import (
 	"github.com/moolen/spectre/internal/analysis"
 )
 
+const (
+	statusError            = "Error"
+	conditionFalse         = "False"
+	conditionReady         = "Ready"
+	kindStatefulSet        = "StatefulSet"
+	kindSecret             = "Secret"
+	reasonImagePullBackOff = "ImagePullBackOff"
+)
+
 // StateAnomalyDetector detects abnormal resource states
 type StateAnomalyDetector struct{}
 
@@ -38,7 +47,7 @@ func (d *StateAnomalyDetector) Detect(input DetectorInput) []Anomaly {
 
 		// Check status field
 		switch event.Status {
-		case "Error":
+		case statusError:
 			anomalies = append(anomalies, Anomaly{
 				Node:      NodeFromGraphNode(input.Node),
 				Category:  CategoryState,
@@ -68,11 +77,11 @@ func (d *StateAnomalyDetector) Detect(input DetectorInput) []Anomaly {
 
 	// Kind-specific state checks
 	switch input.Node.Resource.Kind {
-	case "Pod":
+	case kindPod:
 		anomalies = append(anomalies, d.detectPodStateAnomalies(input)...)
 	case "Node":
 		anomalies = append(anomalies, d.detectNodeStateAnomalies(input)...)
-	case "Deployment":
+	case kindDeployment:
 		anomalies = append(anomalies, d.detectDeploymentStateAnomalies(input)...)
 	case "Service":
 		anomalies = append(anomalies, d.detectServiceStateAnomalies(input)...)
@@ -80,9 +89,9 @@ func (d *StateAnomalyDetector) Detect(input DetectorInput) []Anomaly {
 		anomalies = append(anomalies, d.detectEndpointSliceStateAnomalies(input)...)
 	case "Ingress":
 		anomalies = append(anomalies, d.detectIngressStateAnomalies(input)...)
-	case "StatefulSet":
+	case kindStatefulSet:
 		anomalies = append(anomalies, d.detectStatefulSetStateAnomalies(input)...)
-	case "ConfigMap", "Secret":
+	case "ConfigMap", kindSecret:
 		anomalies = append(anomalies, d.detectConfigResourceStateAnomalies(input)...)
 	case "HelmRelease":
 		anomalies = append(anomalies, d.detectHelmReleaseStateAnomalies(input)...)
@@ -174,7 +183,7 @@ func (d *StateAnomalyDetector) detectPodStateAnomalies(input DetectorInput) []An
 		if resourceData != nil {
 			if status, ok := resourceData["status"].(map[string]interface{}); ok {
 				// Check for Failed phase
-				if phase, ok := status["phase"].(string); ok && strings.ToLower(phase) == "failed" {
+				if phase, ok := status["phase"].(string); ok && strings.EqualFold(phase, "failed") {
 					anomalies = append(anomalies, Anomaly{
 						Node:      NodeFromGraphNode(input.Node),
 						Category:  CategoryState,
@@ -190,7 +199,7 @@ func (d *StateAnomalyDetector) detectPodStateAnomalies(input DetectorInput) []An
 
 				// Check for Evicted reason
 				if reason, ok := status["reason"].(string); ok {
-					if strings.ToLower(reason) == "evicted" {
+					if strings.EqualFold(reason, "evicted") {
 						anomalies = append(anomalies, Anomaly{
 							Node:      NodeFromGraphNode(input.Node),
 							Category:  CategoryState,
@@ -214,7 +223,7 @@ func (d *StateAnomalyDetector) detectPodStateAnomalies(input DetectorInput) []An
 							condReason, _ := condition["reason"].(string)
 
 							// Check for PodScheduled = False with Unschedulable reason
-							if condType == "PodScheduled" && condStatus == "False" && condReason == "Unschedulable" {
+							if condType == "PodScheduled" && condStatus == conditionFalse && condReason == "Unschedulable" {
 								anomalies = append(anomalies, Anomaly{
 									Node:      NodeFromGraphNode(input.Node),
 									Category:  CategoryState,
@@ -275,7 +284,7 @@ func (d *StateAnomalyDetector) detectNodeStateAnomalies(input DetectorInput) []A
 							condStatus, _ := condition["status"].(string)
 
 							// Check for NotReady
-							if condType == "Ready" && condStatus == "False" {
+							if condType == conditionReady && condStatus == conditionFalse {
 								anomalies = append(anomalies, Anomaly{
 									Node:      NodeFromGraphNode(input.Node),
 									Category:  CategoryState,
@@ -413,7 +422,7 @@ func (d *StateAnomalyDetector) extractIssuesFromStatus(resourceData map[string]i
 							if reason, ok := waiting["reason"].(string); ok {
 								issues = append(issues, reason)
 								// Also mark as init container failure for specific reasons
-								if reason == "CrashLoopBackOff" || reason == "Error" || reason == "ImagePullBackOff" || reason == "ErrImagePull" {
+								if reason == "CrashLoopBackOff" || reason == statusError || reason == "ImagePullBackOff" || reason == "ErrImagePull" {
 									issues = append(issues, "InitContainerFailed")
 								}
 							}
@@ -428,7 +437,7 @@ func (d *StateAnomalyDetector) extractIssuesFromStatus(resourceData map[string]i
 								issues = append(issues, "InitContainerFailed")
 							}
 							// Error reason also indicates failure
-							if reason, ok := terminated["reason"].(string); ok && reason == "Error" {
+							if reason, ok := terminated["reason"].(string); ok && reason == statusError {
 								issues = append(issues, "InitContainerFailed")
 							}
 						}
@@ -489,7 +498,7 @@ func (d *StateAnomalyDetector) detectDeploymentStateAnomalies(input DetectorInpu
 							condReason, _ := condition["reason"].(string)
 
 							// Check for ProgressDeadlineExceeded
-							if condType == "Progressing" && condStatus == "False" && condReason == "ProgressDeadlineExceeded" {
+							if condType == "Progressing" && condStatus == conditionFalse && condReason == "ProgressDeadlineExceeded" {
 								anomalies = append(anomalies, Anomaly{
 									Node:      NodeFromGraphNode(input.Node),
 									Category:  CategoryState,
@@ -791,7 +800,7 @@ func (d *StateAnomalyDetector) detectHelmReleaseStateAnomalies(input DetectorInp
 			condMessage, _ := cond["message"].(string)
 
 			// Detect Ready=False (general failure state)
-			if condType == "Ready" && condStatus == "False" {
+			if condType == conditionReady && condStatus == conditionFalse {
 				anomalies = append(anomalies, Anomaly{
 					Node:      NodeFromGraphNode(input.Node),
 					Category:  CategoryState,
@@ -809,7 +818,7 @@ func (d *StateAnomalyDetector) detectHelmReleaseStateAnomalies(input DetectorInp
 			}
 
 			// Detect Released=False (Helm install/upgrade failed)
-			if condType == "Released" && condStatus == "False" {
+			if condType == "Released" && condStatus == conditionFalse {
 				anomalies = append(anomalies, Anomaly{
 					Node:      NodeFromGraphNode(input.Node),
 					Category:  CategoryState,
@@ -878,7 +887,7 @@ func (d *StateAnomalyDetector) detectKustomizationStateAnomalies(input DetectorI
 			condMessage, _ := cond["message"].(string)
 
 			// Detect Ready=False (general failure state)
-			if condType == "Ready" && condStatus == "False" {
+			if condType == conditionReady && condStatus == conditionFalse {
 				anomalies = append(anomalies, Anomaly{
 					Node:      NodeFromGraphNode(input.Node),
 					Category:  CategoryState,
@@ -896,7 +905,7 @@ func (d *StateAnomalyDetector) detectKustomizationStateAnomalies(input DetectorI
 			}
 
 			// Detect Reconciling=False with failure reasons (build/apply failed)
-			if condType == "Reconciling" && condStatus == "False" {
+			if condType == "Reconciling" && condStatus == conditionFalse {
 				// Check if it's actually a failure reason, not just successful reconciliation complete
 				failureReasons := []string{"BuildFailed", "ArtifactFailed", "DependencyNotReady", "ReconciliationFailed"}
 				for _, failReason := range failureReasons {
@@ -982,7 +991,7 @@ func (d *StateAnomalyDetector) detectPVCStateAnomalies(input DetectorInput) []An
 					condMessage, _ := cond["message"].(string)
 
 					// Check for specific failure conditions
-					if condStatus == "False" || condType == "Resizing" && condStatus == "True" {
+					if condStatus == conditionFalse || condType == "Resizing" && condStatus == "True" {
 						if condReason != "" {
 							pendingReason = condReason
 						}

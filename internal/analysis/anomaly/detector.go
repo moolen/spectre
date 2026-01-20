@@ -446,8 +446,8 @@ func (d *AnomalyDetector) detectSecretMissingAnomalies(
 func (d *AnomalyDetector) checkPodSpecForMissingReferences(
 	podNode *analysis.GraphNode,
 	nodeByID map[string]*analysis.GraphNode,
-	timeWindow TimeWindow,
-	anomalies *[]Anomaly,
+	_ TimeWindow,
+	_ *[]Anomaly,
 ) {
 	if len(podNode.AllEvents) == 0 {
 		return
@@ -655,7 +655,7 @@ func (d *AnomalyDetector) detectServiceAccountMissingAnomalies(
 	}
 
 	// Also check Pod spec for serviceAccountName that might not have edges
-	d.checkPodSpecForMissingServiceAccount(podNode, nodeByID, timeWindow, &anomalies)
+	d.checkPodSpecForMissingServiceAccount(podNode, nodeByID)
 
 	return anomalies
 }
@@ -664,8 +664,6 @@ func (d *AnomalyDetector) detectServiceAccountMissingAnomalies(
 func (d *AnomalyDetector) checkPodSpecForMissingServiceAccount(
 	podNode *analysis.GraphNode,
 	nodeByID map[string]*analysis.GraphNode,
-	timeWindow TimeWindow,
-	anomalies *[]Anomaly,
 ) {
 	if len(podNode.AllEvents) == 0 {
 		return

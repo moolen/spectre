@@ -296,7 +296,8 @@ func (s *RBACViolation) WaitCondition(ctx context.Context, client kubernetes.Int
 			})
 			if err == nil && len(events.Items) > 0 {
 				fmt.Printf("[DEBUG]   Recent events for pod:\n")
-				for _, event := range events.Items {
+				for j := range events.Items {
+					event := &events.Items[j]
 					fmt.Printf("[DEBUG]     %s: %s - %s\n", event.Type, event.Reason, event.Message)
 				}
 			}

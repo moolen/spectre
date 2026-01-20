@@ -72,7 +72,7 @@ func SetPackageLogLevels(levels map[string]string) error {
 	for pkg, levelStr := range levels {
 		level, err := parseLevel(levelStr)
 		if err != nil {
-			return fmt.Errorf("invalid log level for package %q: %v", pkg, err)
+			return fmt.Errorf("invalid log level for package %q: %w", pkg, err)
 		}
 		packageLogLevels[pkg] = level
 	}

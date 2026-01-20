@@ -201,7 +201,7 @@ func TestManagementScorer_TemporalProximity(t *testing.T) {
 			managerTime:   baseTime,
 			resourceTime:  baseTime,
 			wantTemporal:  true,
-			minConfidence: 0.6, // namespace (0.3) + temporal (0.3) = 0.6
+			minConfidence: 0.6, // namespace and temporal confidence combined
 		},
 		{
 			name:          "Created 10s later",

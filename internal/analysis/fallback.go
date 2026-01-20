@@ -59,13 +59,3 @@ func createSymptomOnlyRootCause(symptom *ObservedSymptom) *RootCauseHypothesis {
 func isGraphEmpty(graph CausalGraph) bool {
 	return len(graph.Nodes) == 0
 }
-
-// hasValidSpineNodes checks if the graph has at least one SPINE node with events
-func hasValidSpineNodes(graph CausalGraph) bool {
-	for _, node := range graph.Nodes {
-		if node.NodeType == "SPINE" && node.ChangeEvent != nil {
-			return true
-		}
-	}
-	return false
-}

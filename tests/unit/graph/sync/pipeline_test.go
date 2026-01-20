@@ -16,10 +16,9 @@ import (
 type mockGraphClient struct {
 	mu              sync.RWMutex
 	nodes           map[string]*graph.Node // UID -> Node
-	edges           []mockEdge
-	queries         []graph.GraphQuery
-	queryResults    map[string]*graph.QueryResult // query string -> result
-	shouldFailQuery bool
+	edges        []mockEdge
+	queries      []graph.GraphQuery
+	queryResults map[string]*graph.QueryResult // query string -> result
 }
 
 type mockEdge struct {
@@ -185,40 +184,6 @@ func (m *mockGraphClient) InitializeSchema(ctx context.Context) error {
 
 func (m *mockGraphClient) DeleteGraph(ctx context.Context) error {
 	return nil
-}
-
-// setQueryResult allows tests to set predefined results for specific queries
-func (m *mockGraphClient) setQueryResult(query string, result *graph.QueryResult) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.queryResults[query] = result
-}
-
-// getEdgeCount returns the number of edges of a specific type
-func (m *mockGraphClient) getEdgeCount(edgeType graph.EdgeType) int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	count := 0
-	for _, edge := range m.edges {
-		if edge.edgeType == edgeType {
-			count++
-		}
-	}
-	return count
-}
-
-// hasEdge checks if an edge exists between two nodes
-func (m *mockGraphClient) hasEdge(fromUID, toUID string, edgeType graph.EdgeType) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, edge := range m.edges {
-		if edge.fromUID == fromUID && edge.toUID == toUID && edge.edgeType == edgeType {
-			return true
-		}
-	}
-	return false
 }
 
 // TestTwoPhaseBatchProcessing tests that ProcessBatch correctly processes events in two phases

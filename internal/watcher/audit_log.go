@@ -30,7 +30,10 @@ type FileAuditLogWriter struct {
 // NewFileAuditLogWriter creates a new file-based audit log writer
 func NewFileAuditLogWriter(filePath string) (*FileAuditLogWriter, error) {
 	// Open file for appending (create if doesn't exist)
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Use restrictive permissions for audit log file
+	// filePath is user-provided configuration for watcher audit log
+	// #nosec G304 -- Audit log path is intentionally configurable by user
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open audit log file: %w", err)
 	}

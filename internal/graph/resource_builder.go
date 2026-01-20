@@ -56,12 +56,10 @@ func (rb *ResourceBuilder) BuildStatusSegments(events []ChangeEvent, queryStartN
 				Status:    event.Status,
 				Message:   event.ErrorMessage,
 			}
-		} else {
+		} else if event.ErrorMessage != "" {
 			// Same status - extend current segment
 			// Update message if more recent event has one
-			if event.ErrorMessage != "" {
-				currentSegment.Message = event.ErrorMessage
-			}
+			currentSegment.Message = event.ErrorMessage
 		}
 	}
 
@@ -139,8 +137,10 @@ func (rb *ResourceBuilder) convertK8sEvents(events []K8sEvent) []models.K8sEvent
 			Reason:    event.Reason,
 			Message:   event.Message,
 			Type:      event.Type,
-			Count:     int32(event.Count),
-			Source:    event.Source,
+			// K8s event counts are typically small (< 1000 for repeated events)
+			// #nosec G115 -- Event count from K8s API fits in int32
+			Count:  int32(event.Count),
+			Source: event.Source,
 		})
 	}
 

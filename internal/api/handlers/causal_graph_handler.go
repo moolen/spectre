@@ -141,10 +141,10 @@ func (h *CausalGraphHandler) parseInput(r *http.Request) (analysis.AnalyzeInput,
 			// Otherwise, assume it's already in nanoseconds
 			if failureTimestamp < 946684800 {
 				// Seconds to nanoseconds
-				failureTimestamp = failureTimestamp * 1_000_000_000
+				failureTimestamp *= 1_000_000_000
 			} else if failureTimestamp < 946684800000000000 {
 				// Milliseconds to nanoseconds
-				failureTimestamp = failureTimestamp * 1_000_000
+				failureTimestamp *= 1_000_000
 			}
 			// else: already in nanoseconds, use as-is
 		}

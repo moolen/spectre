@@ -223,7 +223,8 @@ func (s *ServiceSelectorChange) WaitCondition(ctx context.Context, client kubern
 		})
 		if err == nil {
 			readyPods := 0
-			for _, pod := range pods.Items {
+			for i := range pods.Items {
+				pod := &pods.Items[i]
 				for _, cond := range pod.Status.Conditions {
 					if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
 						readyPods++

@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const levelFatal = "FATAL"
+
 // writeLog is the unified internal logging function that handles all output
 // It formats the message with optional fields and routes to appropriate stream:
 // - DEBUG/INFO/WARN: stdout (via log.Println)
@@ -26,7 +28,7 @@ func (l *Logger) writeLog(level, msg string, fields map[string]interface{}) {
 	// Route output based on severity level
 	// ERROR and FATAL go to stderr only
 	// All other levels (DEBUG/INFO/WARN) go to stdout
-	if level == strError || level == "FATAL" {
+	if level == strError || level == levelFatal {
 		fmt.Fprintf(os.Stderr, "%s\n", logMsg)
 	} else {
 		log.Println(logMsg)

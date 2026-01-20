@@ -42,7 +42,7 @@ func EnsureFluxInstalled(t *testing.T, k8sClient *K8sClient, kubeContext string)
 		return fmt.Errorf("could not find project root (no go.mod found)")
 	}
 
-	fluxManifest := filepath.Join(projectRoot, "hack/demo/flux/flux-install.yaml")
+	fluxManifest := filepath.Join(projectRoot, "hack", "demo", "flux", "flux-install.yaml")
 	if _, err := os.Stat(fluxManifest); err != nil {
 		return fmt.Errorf("flux manifest not found at %s: %w", fluxManifest, err)
 	}

@@ -229,13 +229,13 @@ func (r *EdgeRevalidator) parseEdgeProperties(edgeData map[string]interface{}) (
 // applyConfidenceDecay applies time-based confidence decay
 func (r *EdgeRevalidator) applyConfidenceDecay(edge *graph.ManagesEdge, ageNs int64) (bool, float64) {
 	originalConfidence := edge.Confidence
-	newConfidence := originalConfidence
 
 	// Don't decay edges with 100% confidence (explicit relationships)
 	if originalConfidence >= 1.0 {
 		return false, originalConfidence
 	}
 
+	var newConfidence float64
 	// Apply 24-hour decay
 	if ageNs > r.decayInterval24h.Nanoseconds() {
 		newConfidence = originalConfidence * r.decayFactor24h

@@ -253,9 +253,10 @@ func (f *ResourceFetcher) FetchLatestEvents(
 		event := &ChangeEventInfo{}
 
 		// Parse timestamp
-		if ts, ok := row[1].(int64); ok {
+		switch ts := row[1].(type) {
+		case int64:
 			event.Timestamp = ts
-		} else if ts, ok := row[1].(float64); ok {
+		case float64:
 			event.Timestamp = int64(ts)
 		}
 
@@ -379,9 +380,10 @@ func (f *ResourceFetcher) FetchSpecChanges(
 		}
 
 		// Parse latest timestamp
-		if ts, ok := row[3].(int64); ok {
+		switch ts := row[3].(type) {
+		case int64:
 			sc.LatestTimestamp = ts
-		} else if ts, ok := row[3].(float64); ok {
+		case float64:
 			sc.LatestTimestamp = int64(ts)
 		}
 
@@ -428,22 +430,25 @@ func parseResourceResults(result *graph.QueryResult) []resourceResult {
 				}
 			}
 		}
-		if firstSeen, ok := row[6].(int64); ok {
+		switch firstSeen := row[6].(type) {
+		case int64:
 			r.FirstSeen = firstSeen
-		} else if firstSeen, ok := row[6].(float64); ok {
+		case float64:
 			r.FirstSeen = int64(firstSeen)
 		}
-		if lastSeen, ok := row[7].(int64); ok {
+		switch lastSeen := row[7].(type) {
+		case int64:
 			r.LastSeen = lastSeen
-		} else if lastSeen, ok := row[7].(float64); ok {
+		case float64:
 			r.LastSeen = int64(lastSeen)
 		}
 		if deleted, ok := row[8].(bool); ok {
 			r.Deleted = deleted
 		}
-		if deletedAt, ok := row[9].(int64); ok {
+		switch deletedAt := row[9].(type) {
+		case int64:
 			r.DeletedAt = deletedAt
-		} else if deletedAt, ok := row[9].(float64); ok {
+		case float64:
 			r.DeletedAt = int64(deletedAt)
 		}
 

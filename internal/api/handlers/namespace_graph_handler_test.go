@@ -163,7 +163,7 @@ func TestNamespaceGraphHandlerValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/v1/namespace-graph"+tt.query, nil)
+			req := httptest.NewRequest(http.MethodGet, "/v1/namespace-graph"+tt.query, http.NoBody)
 			w := httptest.NewRecorder()
 
 			// parseInput should catch validation errors
@@ -241,7 +241,7 @@ func TestNamespaceGraphHandlerParseInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/v1/namespace-graph"+tt.query, nil)
+			req := httptest.NewRequest(http.MethodGet, "/v1/namespace-graph"+tt.query, http.NoBody)
 
 			input, err := handler.parseInput(req)
 			if (err != nil) != tt.wantErr {

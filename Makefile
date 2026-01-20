@@ -89,7 +89,7 @@ run: build build-ui
 # Run Go tests only
 test-go:
 	@echo "Running Go tests..."
-	@go test -v -cover -count 1 -timeout 60m ./...
+	script -q -e -c "go test -v -cover -count 1 -timeout 60m ./..." /dev/null
 
 # Run UI tests only (unit tests + component tests)
 test-ui:

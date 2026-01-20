@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
-	"github.com/moolen/spectre/internal/models"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -196,24 +195,4 @@ func (h *TestHarness) Cleanup(ctx context.Context) error {
 		return fmt.Errorf("cleanup errors: %v", errs)
 	}
 	return nil
-}
-
-// extractTimestampAndPodUID extracts the timestamp from the last event and pod UID from events
-func extractTimestampAndPodUID(events []models.Event) (int64, string) {
-	var lastTimestamp int64
-	var podUID string
-
-	for _, event := range events {
-		// Track the last timestamp
-		if event.Timestamp > lastTimestamp {
-			lastTimestamp = event.Timestamp
-		}
-
-		// Extract pod UID if this is a Pod resource
-		if event.Resource.Kind == "Pod" {
-			podUID = event.Resource.UID
-		}
-	}
-
-	return lastTimestamp, podUID
 }

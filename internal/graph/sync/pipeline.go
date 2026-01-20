@@ -391,6 +391,13 @@ func (p *pipeline) createEdge(ctx context.Context, edge graph.Edge) error {
 		}
 		query = graph.CreateSelectsEdgeQuery(edge.FromUID, edge.ToUID, props)
 
+	case graph.EdgeTypeMounts:
+		var props graph.MountsEdge
+		if err := json.Unmarshal(edge.Properties, &props); err != nil {
+			return err
+		}
+		query = graph.CreateMountsEdgeQuery(edge.FromUID, edge.ToUID, props)
+
 	default:
 		return fmt.Errorf("unsupported edge type: %s", edge.Type)
 	}

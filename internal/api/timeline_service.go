@@ -62,7 +62,7 @@ func (s *TimelineService) GetActiveExecutor() QueryExecutor {
 		s.logger.Warn("Graph executor requested but not available, falling back to storage")
 		return s.storageExecutor
 	case TimelineQuerySourceStorage:
-		fallthrough
+		return s.storageExecutor
 	default:
 		return s.storageExecutor
 	}
@@ -365,12 +365,10 @@ func (s *TimelineService) BuildTimelineResponse(queryResult, eventResult *models
 				if len(errorMessages) > 0 {
 					segment.Message = strings.Join(errorMessages, "; ")
 				}
-			} else {
+			} else if strings.EqualFold(event.Resource.Kind, "Pod") {
 				// Log warning if data is missing for pod resources (needed for container issue detection)
-				if strings.EqualFold(event.Resource.Kind, "Pod") {
-					s.logger.Warn("Pod event missing ResourceData in timeline service: %s/%s (event ID: %s, has %d events total)",
-						event.Resource.Namespace, event.Resource.Name, event.ID, len(events))
-				}
+				s.logger.Warn("Pod event missing ResourceData in timeline service: %s/%s (event ID: %s, has %d events total)",
+					event.Resource.Namespace, event.Resource.Name, event.ID, len(events))
 			}
 
 			segments = append(segments, segment)

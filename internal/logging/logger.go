@@ -169,7 +169,7 @@ var (
 // packageLevels is a map of package patterns to level strings.
 // Example: {"graph.*": "DEBUG", "controller": "WARN"}
 func Initialize(levelStr string, packageLevels ...map[string]string) error {
-	level := INFO
+	var level LogLevel
 	switch strings.ToUpper(levelStr) {
 	case "DEBUG":
 		level = DEBUG
@@ -205,7 +205,7 @@ func Initialize(levelStr string, packageLevels ...map[string]string) error {
 func GetLogger(name string) *Logger {
 	initOnce.Do(func() {
 		if globalLogger == nil {
-			Initialize("info")
+			_ = Initialize("info")
 		}
 	})
 	return &Logger{

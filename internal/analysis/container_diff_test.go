@@ -20,7 +20,7 @@ func TestContainerDiff(t *testing.T) {
 		}
 	}`
 
-	new := `{
+	newJSON := `{
 		"spec": {
 			"template": {
 				"spec": {
@@ -32,7 +32,7 @@ func TestContainerDiff(t *testing.T) {
 		}
 	}`
 
-	diffs, err := analysis.ComputeJSONDiff([]byte(old), []byte(new))
+	diffs, err := analysis.ComputeJSONDiff([]byte(old), []byte(newJSON))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestContainerAddedAndRemoved(t *testing.T) {
 		}
 	}`
 
-	new := `{
+	newJSON := `{
 		"spec": {
 			"containers": [
 				{"name": "app", "image": "nginx:1.20"},
@@ -89,7 +89,7 @@ func TestContainerAddedAndRemoved(t *testing.T) {
 		}
 	}`
 
-	diffs, err := analysis.ComputeJSONDiff([]byte(old), []byte(new))
+	diffs, err := analysis.ComputeJSONDiff([]byte(old), []byte(newJSON))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,13 +133,13 @@ func TestArrayDiffByIndex(t *testing.T) {
 		}
 	}`
 
-	new := `{
+	newJSON := `{
 		"spec": {
 			"args": ["--verbose", "--port=9090", "--debug"]
 		}
 	}`
 
-	diffs, err := analysis.ComputeJSONDiff([]byte(old), []byte(new))
+	diffs, err := analysis.ComputeJSONDiff([]byte(old), []byte(newJSON))
 	if err != nil {
 		t.Fatal(err)
 	}

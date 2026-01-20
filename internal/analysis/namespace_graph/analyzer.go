@@ -88,11 +88,11 @@ func (a *Analyzer) Analyze(ctx context.Context, input AnalyzeInput) (*NamespaceG
 	a.logger.Debug("Fetched %d cluster-scoped resources", len(clusterScopedResources))
 
 	// Combine all resources
-	allResources := append(namespacedResources, clusterScopedResources...)
+	namespacedResources = append(namespacedResources, clusterScopedResources...)
 
 	// Collect all UIDs for relationship query
-	allUIDs := make([]string, len(allResources))
-	for i, r := range allResources {
+	allUIDs := make([]string, len(namespacedResources))
+	for i, r := range namespacedResources {
 		allUIDs[i] = r.UID
 	}
 
@@ -141,29 +141,20 @@ func (a *Analyzer) Analyze(ctx context.Context, input AnalyzeInput) (*NamespaceG
 	a.logger.Info("Fetched %d relationships for %d resources", len(edgeResults), len(allUIDs))
 
 	// Step 5: Build graph response
-	nodes := a.buildNodes(allResources, latestEvents)
+	nodes := a.buildNodes(namespacedResources, latestEvents)
 	edges := a.buildEdges(edgeResults)
 
 	// Step 6: Full-fledged anomaly detection (runs per-resource anomaly analysis)
 	var anomalies []anomaly.Anomaly
 	if input.IncludeAnomalies {
-		anomalies, err = a.detectAnomalies(ctx, allResources, input)
-		if err != nil {
-			a.logger.Warn("Failed to detect anomalies: %v", err)
-			// Continue without anomalies
-			anomalies = nil
-		}
+		anomalies = a.detectAnomalies(ctx, namespacedResources, input)
 		a.logger.Debug("Detected %d anomalies", len(anomalies))
 	}
 
 	// Step 7: Optional causal path discovery (only if anomalies found and requested)
 	var causalPaths []causalpaths.CausalPath
 	if input.IncludeCausalPaths && len(anomalies) > 0 {
-		causalPaths, err = a.discoverCausalPaths(ctx, anomalies, input)
-		if err != nil {
-			a.logger.Warn("Failed to discover causal paths: %v", err)
-			// Continue without causal paths
-		}
+		causalPaths = a.discoverCausalPaths(ctx, anomalies, input)
 		a.logger.Debug("Discovered %d causal paths", len(causalPaths))
 	}
 
@@ -258,7 +249,7 @@ func (a *Analyzer) detectAnomalies(
 	ctx context.Context,
 	resources []resourceResult,
 	input AnalyzeInput,
-) ([]anomaly.Anomaly, error) {
+) []anomaly.Anomaly {
 	var allAnomalies []anomaly.Anomaly
 	seen := make(map[string]bool) // Deduplicate by anomaly key
 
@@ -311,7 +302,7 @@ func (a *Analyzer) detectAnomalies(
 		}
 	}
 
-	return allAnomalies, nil
+	return allAnomalies
 }
 
 // discoverCausalPaths runs causal path discovery for anomalous resources
@@ -319,7 +310,7 @@ func (a *Analyzer) discoverCausalPaths(
 	ctx context.Context,
 	anomalies []anomaly.Anomaly,
 	input AnalyzeInput,
-) ([]causalpaths.CausalPath, error) {
+) []causalpaths.CausalPath {
 	var allPaths []causalpaths.CausalPath
 	seen := make(map[string]bool) // Deduplicate by path ID
 
@@ -364,5 +355,5 @@ func (a *Analyzer) discoverCausalPaths(
 		}
 	}
 
-	return allPaths, nil
+	return allPaths
 }

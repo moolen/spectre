@@ -87,11 +87,11 @@ func (a *RootCauseAnalyzer) getManagers(ctx context.Context, resourceUIDs []stri
 // - SELECTS: Services/NetworkPolicies selecting resources
 // - GRANTS_TO: RoleBindings granting permissions to ServiceAccounts
 // - BINDS_ROLE: RoleBindings binding to Roles/ClusterRoles
-// - INGRESS_REF: Ingresses referencing Services
+// - edgeTypeIngressRef: Ingresses referencing Services
 //
 // The failureTimestamp and lookbackNs parameters are used to include deleted resources
 // that were deleted within the time window (important for root cause analysis).
-func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUIDs []string, failureTimestamp int64, lookbackNs int64) (map[string][]RelatedResourceData, error) {
+func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUIDs []string, failureTimestamp, lookbackNs int64) (map[string][]RelatedResourceData, error) {
 	if len(resourceUIDs) == 0 {
 		return make(map[string][]RelatedResourceData), nil
 	}
@@ -144,7 +144,7 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 			       sa, 'USES_SERVICE_ACCOUNT' as usesSAType,
 			       selector, 'SELECTS' as selectsType,
 			       rb, 'GRANTS_TO' as grantsToType,
-			       ingress, 'INGRESS_REF' as ingressRefType,
+			       ingress, 'edgeTypeIngressRef' as ingressRefType,
 			       role, 'BINDS_ROLE' as bindsRoleType
 		`,
 		Parameters: map[string]interface{}{
@@ -225,7 +225,7 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 		addRelated(9, "GRANTS_TO")            // rb (RoleBinding)
 		addRelated(13, "BINDS_ROLE")          // role (Role/ClusterRole bound by RoleBinding)
 
-		// Special handling for INGRESS_REF to also capture the Service UID
+		// Special handling for edgeTypeIngressRef to also capture the Service UID
 		if row[11] != nil {
 			ingressProps, err := graph.ParseNodeFromResult(row[11])
 			if err == nil && ingressProps != nil && len(ingressProps) > 0 {
@@ -243,7 +243,7 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 				// Check for duplicates
 				isDuplicate := false
 				for _, existing := range related[resourceUID] {
-					if existing.Resource.UID == ingress.UID && existing.RelationshipType == "INGRESS_REF" {
+					if existing.Resource.UID == ingress.UID && existing.RelationshipType == edgeTypeIngressRef {
 						isDuplicate = true
 						break
 					}
@@ -252,12 +252,12 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 				if !isDuplicate {
 					related[resourceUID] = append(related[resourceUID], RelatedResourceData{
 						Resource:           ingress,
-						RelationshipType:   "INGRESS_REF",
+						RelationshipType:   edgeTypeIngressRef,
 						Events:             []ChangeEventInfo{},
 						ReferenceTargetUID: serviceUID,
 					})
-					a.logger.Debug("getRelatedResources: SUCCESS adding %s/%s (type=INGRESS_REF, target=%s) to resource %s",
-						ingress.Kind, ingress.Name, serviceUID, resourceUID)
+					a.logger.Debug("getRelatedResources: SUCCESS adding %s/%s (type=%s, target=%s) to resource %s",
+						ingress.Kind, ingress.Name, edgeTypeIngressRef, serviceUID, resourceUID)
 				}
 			}
 		}

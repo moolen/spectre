@@ -65,7 +65,7 @@ func (d *EventAnomalyDetector) Detect(input DetectorInput) []Anomaly {
 	}
 
 	// Process Warning events
-	var anomalies []Anomaly
+	anomalies := make([]Anomaly, 0, len(warningEvents))
 	seenEventReasons := make(map[string]bool) // Track to avoid duplicates with same reason
 
 	for _, event := range warningEvents {

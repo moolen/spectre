@@ -67,10 +67,6 @@ func int64Ptr(i int64) *int64 {
 	return &i
 }
 
-func createDeployment(namespace, name, image string, command []string) *corev1.ObjectFieldSelector {
-	return nil // placeholder to avoid import issues; will be implemented in helpers
-}
-
 // CreateSimpleDeployment creates a basic deployment
 func CreateSimpleDeployment(namespace, name, image string, command []string) map[string]interface{} {
 	labels := map[string]interface{}{

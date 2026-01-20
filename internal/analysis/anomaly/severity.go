@@ -98,7 +98,7 @@ var severityRules = []SeverityRule{
 
 // GetSeverity returns the deterministic severity for an anomaly type
 // If kind is provided, kind-specific rules are checked first before generic rules
-func GetSeverity(category AnomalyCategory, anomalyType string, kind string) Severity {
+func GetSeverity(category AnomalyCategory, anomalyType, kind string) Severity {
 	// First pass: check for kind-specific rules
 	if kind != "" {
 		for _, rule := range severityRules {

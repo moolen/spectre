@@ -321,12 +321,10 @@ func (th *TimelineHandler) buildTimelineResponse(queryResult, eventResult *model
 				if len(errorMessages) > 0 {
 					segment.Message = strings.Join(errorMessages, "; ")
 				}
-			} else {
+			} else if strings.EqualFold(event.Resource.Kind, "Pod") {
 				// Log warning if data is missing for pod resources (needed for container issue detection)
-				if strings.EqualFold(event.Resource.Kind, "Pod") {
-					th.logger.Warn("Pod event missing ResourceData in timeline handler: %s/%s (event ID: %s, has %d events total)",
-						event.Resource.Namespace, event.Resource.Name, event.ID, len(events))
-				}
+				th.logger.Warn("Pod event missing ResourceData in timeline handler: %s/%s (event ID: %s, has %d events total)",
+					event.Resource.Namespace, event.Resource.Name, event.ID, len(events))
 			}
 
 			segments = append(segments, segment)
@@ -630,7 +628,7 @@ func (th *TimelineHandler) getActiveExecutor() api.QueryExecutor {
 		th.logger.Warn("Graph executor requested but not available, falling back to storage")
 		return th.storageExecutor
 	case TimelineQuerySourceStorage:
-		fallthrough
+		return th.storageExecutor
 	default:
 		return th.storageExecutor
 	}

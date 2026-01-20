@@ -288,7 +288,7 @@ func estimateResultSize(result *QueryResult) int64 {
 }
 
 // logCacheAccess logs cache access for debugging
-func (qc *QueryCache) logCacheAccess(key string, hit bool, expired bool) {
+func (qc *QueryCache) logCacheAccess(key string, hit, expired bool) {
 	hits := atomic.LoadUint64(&qc.hits)
 	misses := atomic.LoadUint64(&qc.misses)
 	total := hits + misses

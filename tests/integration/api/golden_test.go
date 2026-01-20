@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const kindPod = "Pod"
+
 // GoldenMetadata represents the expected test metadata from .meta.json files
 type GoldenMetadata struct {
 	Scenario  ScenarioInfo    `json:"scenario"`
@@ -58,7 +60,10 @@ type ExpectedCausalPath struct {
 
 // TestGoldenScenarios runs tests against all golden fixtures generated from real scenarios
 func TestGoldenScenarios(t *testing.T) {
-	_, testFile, _, _ := runtime.Caller(0)
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to get caller information")
+	}
 	testDir := filepath.Dir(testFile)
 	goldenDir := filepath.Join(testDir, "..", "fixtures", "golden")
 
@@ -97,9 +102,6 @@ func TestGoldenScenarios(t *testing.T) {
 
 	// Run tests for each scenario
 	for scenarioName, metaFile := range scenarios {
-		scenarioName := scenarioName // capture for closure
-		metaFile := metaFile
-
 		t.Run(scenarioName, func(t *testing.T) {
 			t.Parallel() // Run scenarios in parallel
 			runGoldenScenario(t, goldenDir, scenarioName, metaFile)
@@ -134,12 +136,12 @@ func runGoldenScenario(t *testing.T, goldenDir, scenarioName, metaFile string) {
 	// If expected causal path has symptom_kind != "Pod", use that kind
 	var timestamp int64
 	var resourceUID string
-	symptomKind := "Pod" // Default
-	if metadata.Expected.CausalPath != nil && metadata.Expected.CausalPath.SymptomKind != "" && metadata.Expected.CausalPath.SymptomKind != "Pod" {
+	symptomKind := kindPod // Default
+	if metadata.Expected.CausalPath != nil && metadata.Expected.CausalPath.SymptomKind != "" && metadata.Expected.CausalPath.SymptomKind != kindPod {
 		symptomKind = metadata.Expected.CausalPath.SymptomKind
 	}
 
-	if symptomKind != "Pod" {
+	if symptomKind != kindPod {
 		// Extract UID for the specific symptom kind (e.g., Service)
 		var err error
 		timestamp, resourceUID, err = ExtractTimestampAndResourceUIDFromFile(fixtureFile, symptomKind)
@@ -190,7 +192,7 @@ func testGoldenAnomalies(t *testing.T, harness *TestHarness, resourceUID string,
 	endSec := (timestamp / 1_000_000_000) + 1
 	startSec := endSec - 600 // 10 minutes
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/anomalies", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/anomalies", http.NoBody)
 	q := req.URL.Query()
 	q.Set("resourceUID", resourceUID)
 	q.Set("start", strconv.FormatInt(startSec, 10))
@@ -227,7 +229,7 @@ func testGoldenCausalPaths(t *testing.T, harness *TestHarness, resourceUID strin
 	logger := logging.GetLogger("test")
 	handler := handlers.NewCausalPathsHandler(harness.GetClient(), logger, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/causal-paths", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/causal-paths", http.NoBody)
 	q := req.URL.Query()
 	q.Set("resourceUID", resourceUID)
 	// Use timestamp+1ns to ensure we capture events at the exact failure timestamp

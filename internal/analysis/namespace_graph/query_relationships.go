@@ -88,11 +88,12 @@ func parseEdgeResults(result *graph.QueryResult) []edgeResult {
 		if relType, ok := row[2].(string); ok {
 			e.RelationshipType = relType
 		}
-		if edgeID, ok := row[3].(int64); ok {
+		switch edgeID := row[3].(type) {
+		case int64:
 			e.EdgeID = fmt.Sprintf("%d", edgeID)
-		} else if edgeID, ok := row[3].(float64); ok {
+		case float64:
 			e.EdgeID = fmt.Sprintf("%.0f", edgeID)
-		} else if edgeID, ok := row[3].(string); ok {
+		case string:
 			e.EdgeID = edgeID
 		}
 

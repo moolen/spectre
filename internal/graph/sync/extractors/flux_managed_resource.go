@@ -120,39 +120,40 @@ func (e *FluxManagedResourceExtractor) ExtractRelationships(
 	return nil, nil
 }
 
-// createHelmReleaseEdge creates a MANAGES edge from HelmRelease to resource
-func (e *FluxManagedResourceExtractor) createHelmReleaseEdge(
+// createFluxManagesEdge creates a MANAGES edge from a Flux controller to a managed resource
+func (e *FluxManagedResourceExtractor) createFluxManagesEdge(
 	ctx context.Context,
 	resource *graph.ResourceIdentity,
-	helmReleaseName, helmReleaseNamespace string,
+	controllerKind, controllerName, controllerNamespace string,
+	nameLabel, namespaceLabel string,
 	lookup ResourceLookup,
 ) ([]graph.Edge, error) {
-	// Find the HelmRelease that manages this resource
-	helmRelease, err := lookup.FindResourceByNamespace(ctx, helmReleaseNamespace, "HelmRelease", helmReleaseName)
+	// Find the Flux controller that manages this resource
+	controller, err := lookup.FindResourceByNamespace(ctx, controllerNamespace, controllerKind, controllerName)
 	if err != nil {
-		e.logger.Debug("HelmRelease %s/%s not found for managed resource %s/%s: %v",
-			helmReleaseNamespace, helmReleaseName, resource.Namespace, resource.Name, err)
-		return nil, nil // Not an error - HelmRelease might not be synced yet
+		e.logger.Debug("%s %s/%s not found for managed resource %s/%s: %v",
+			controllerKind, controllerNamespace, controllerName, resource.Namespace, resource.Name, err)
+		return nil, nil // Not an error - controller might not be synced yet
 	}
 
-	if helmRelease == nil {
-		e.logger.Debug("HelmRelease %s/%s not found for managed resource %s/%s",
-			helmReleaseNamespace, helmReleaseName, resource.Namespace, resource.Name)
-		return nil, nil // HelmRelease not synced yet
+	if controller == nil {
+		e.logger.Debug("%s %s/%s not found for managed resource %s/%s",
+			controllerKind, controllerNamespace, controllerName, resource.Namespace, resource.Name)
+		return nil, nil // Controller not synced yet
 	}
 
-	// Create MANAGES edge from HelmRelease to this resource
+	// Create MANAGES edge from Flux controller to this resource
 	timestamp := time.Now().UnixNano()
 	props := graph.ManagesEdge{
 		Confidence: 1.0, // Perfect confidence from Flux labels
 		Evidence: []graph.EvidenceItem{
 			{
 				Type:       graph.EvidenceTypeLabel,
-				Value:      fmt.Sprintf("Flux HelmRelease labels: %s=%s, %s=%s", fluxNameLabel, helmReleaseName, fluxNamespaceLabel, helmReleaseNamespace),
+				Value:      fmt.Sprintf("Flux %s labels: %s=%s, %s=%s", controllerKind, nameLabel, controllerName, namespaceLabel, controllerNamespace),
 				Weight:     1.0,
 				Timestamp:  timestamp,
-				Key:        fluxNameLabel,
-				MatchValue: helmReleaseName,
+				Key:        nameLabel,
+				MatchValue: controllerName,
 			},
 		},
 		FirstObserved:   timestamp,
@@ -164,15 +165,26 @@ func (e *FluxManagedResourceExtractor) createHelmReleaseEdge(
 
 	edge := graph.Edge{
 		Type:       graph.EdgeTypeManages,
-		FromUID:    helmRelease.UID,
+		FromUID:    controller.UID,
 		ToUID:      resource.UID,
 		Properties: propsJSON,
 	}
 
-	e.logger.Debug("Created MANAGES edge from HelmRelease %s/%s to %s %s/%s (UID: %s)",
-		helmReleaseNamespace, helmReleaseName, resource.Kind, resource.Namespace, resource.Name, resource.UID)
+	e.logger.Debug("Created MANAGES edge from %s %s/%s to %s %s/%s (UID: %s)",
+		controllerKind, controllerNamespace, controllerName, resource.Kind, resource.Namespace, resource.Name, resource.UID)
 
 	return []graph.Edge{edge}, nil
+}
+
+// createHelmReleaseEdge creates a MANAGES edge from HelmRelease to resource
+func (e *FluxManagedResourceExtractor) createHelmReleaseEdge(
+	ctx context.Context,
+	resource *graph.ResourceIdentity,
+	helmReleaseName, helmReleaseNamespace string,
+	lookup ResourceLookup,
+) ([]graph.Edge, error) {
+	return e.createFluxManagesEdge(ctx, resource, "HelmRelease", helmReleaseName, helmReleaseNamespace,
+		fluxNameLabel, fluxNamespaceLabel, lookup)
 }
 
 // createKustomizationEdge creates a MANAGES edge from Kustomization to resource
@@ -182,52 +194,8 @@ func (e *FluxManagedResourceExtractor) createKustomizationEdge(
 	kustomizationName, kustomizationNamespace string,
 	lookup ResourceLookup,
 ) ([]graph.Edge, error) {
-	// Find the Kustomization that manages this resource
-	kustomization, err := lookup.FindResourceByNamespace(ctx, kustomizationNamespace, "Kustomization", kustomizationName)
-	if err != nil {
-		e.logger.Debug("Kustomization %s/%s not found for managed resource %s/%s: %v",
-			kustomizationNamespace, kustomizationName, resource.Namespace, resource.Name, err)
-		return nil, nil // Not an error - Kustomization might not be synced yet
-	}
-
-	if kustomization == nil {
-		e.logger.Debug("Kustomization %s/%s not found for managed resource %s/%s",
-			kustomizationNamespace, kustomizationName, resource.Namespace, resource.Name)
-		return nil, nil // Kustomization not synced yet
-	}
-
-	// Create MANAGES edge from Kustomization to this resource
-	timestamp := time.Now().UnixNano()
-	props := graph.ManagesEdge{
-		Confidence: 1.0, // Perfect confidence from Kustomize labels
-		Evidence: []graph.EvidenceItem{
-			{
-				Type:       graph.EvidenceTypeLabel,
-				Value:      fmt.Sprintf("Flux Kustomization labels: %s=%s, %s=%s", kustomizeNameLabel, kustomizationName, kustomizeNsLabel, kustomizationNamespace),
-				Weight:     1.0,
-				Timestamp:  timestamp,
-				Key:        kustomizeNameLabel,
-				MatchValue: kustomizationName,
-			},
-		},
-		FirstObserved:   timestamp,
-		LastValidated:   timestamp,
-		ValidationState: graph.ValidationStateValid,
-	}
-
-	propsJSON, _ := json.Marshal(props)
-
-	edge := graph.Edge{
-		Type:       graph.EdgeTypeManages,
-		FromUID:    kustomization.UID,
-		ToUID:      resource.UID,
-		Properties: propsJSON,
-	}
-
-	e.logger.Debug("Created MANAGES edge from Kustomization %s/%s to %s %s/%s (UID: %s)",
-		kustomizationNamespace, kustomizationName, resource.Kind, resource.Namespace, resource.Name, resource.UID)
-
-	return []graph.Edge{edge}, nil
+	return e.createFluxManagesEdge(ctx, resource, "Kustomization", kustomizationName, kustomizationNamespace,
+		kustomizeNameLabel, kustomizeNsLabel, lookup)
 }
 
 // resourceHasOwner checks if the resource has any incoming OWNS edges

@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const fieldNameReason = "reason"
+
 // ============================================================================
 // RESOURCE-AWARE PATTERN DETECTION
 // ============================================================================
@@ -145,7 +147,7 @@ func analyzeContainerStateDiff(diff EventDiff) []DetectedPattern {
 	}
 
 	// Detect terminated state with reason
-	if stateType == "terminated" && stateField == "reason" {
+	if stateType == "terminated" && stateField == fieldNameReason {
 		if reason, ok := diff.NewValue.(string); ok {
 			pattern := analyzeTerminationReason(reason, containerType, containerIdx, diff.Path)
 			if pattern != nil {
@@ -155,7 +157,7 @@ func analyzeContainerStateDiff(diff EventDiff) []DetectedPattern {
 	}
 
 	// Detect waiting state with failure reasons
-	if stateType == "waiting" && stateField == "reason" {
+	if stateType == "waiting" && stateField == fieldNameReason {
 		if reason, ok := diff.NewValue.(string); ok {
 			pattern := analyzeWaitingReason(reason, containerType, containerIdx, diff.Path)
 			if pattern != nil {
@@ -302,7 +304,7 @@ func analyzeProbeFailures(diff EventDiff) []DetectedPattern {
 	conditionField := matches[2]
 
 	// Look for probe failures in condition reasons
-	if conditionField == "reason" {
+	if conditionField == fieldNameReason {
 		if reason, ok := diff.NewValue.(string); ok {
 			reasonLower := strings.ToLower(reason)
 

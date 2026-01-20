@@ -222,7 +222,7 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 func (a *RootCauseAnalyzer) applyDiffFormat(graph *CausalGraph, failureTime time.Time, errorPatterns []string) {
 	for i := range graph.Nodes {
 		node := &graph.Nodes[i]
-		isOnSpine := node.NodeType == "SPINE"
+		isOnSpine := node.NodeType == nodeTypeSpine
 
 		// Score all events
 		ScoreEvents(node, isOnSpine, failureTime, errorPatterns)

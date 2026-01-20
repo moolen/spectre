@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -349,7 +350,7 @@ func (s *MCPFailureScenarioStage) cluster_health_shows_expected_issue(issueType 
 		currentStatus, _ := issueMap["current_status"].(string)
 		
 		// Check if the error message contains the issue type OR status indicates error
-		if errorMsg != "" && (issueType == "" || containsSubstring(errorMsg, issueType)) {
+		if errorMsg != "" && (issueType == "" || strings.Contains(errorMsg, issueType)) {
 			found = true
 			s.t.Logf("✓ Found expected issue: %s", errorMsg)
 			break
@@ -472,94 +473,6 @@ func (s *MCPFailureScenarioStage) resource_timeline_changes_has_semantic_changes
 	return s
 }
 
-func (s *MCPFailureScenarioStage) resource_timeline_changes_has_status_transitions() *MCPFailureScenarioStage {
-	s.require.NotNil(s.resourceTimelineChangesResult, "resource_timeline_changes must be called first")
-
-	// Check if result contains an error
-	if isError, ok := s.resourceTimelineChangesResult["isError"].(bool); ok && isError {
-		content := s.extractContent(s.resourceTimelineChangesResult)
-		s.t.Logf("⚠ resource_timeline_changes returned error: %s", content)
-		return s
-	}
-
-	content := s.extractContent(s.resourceTimelineChangesResult)
-	var changesData map[string]interface{}
-	err := json.Unmarshal([]byte(content), &changesData)
-	s.require.NoError(err, "failed to parse resource_timeline_changes JSON")
-
-	resources, ok := changesData["resources"].([]interface{})
-	s.require.True(ok, "resources should be present")
-
-	found := false
-	for _, res := range resources {
-		resMap := res.(map[string]interface{})
-		statusSummary, ok := resMap["status_summary"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		transitions, ok := statusSummary["transitions"].([]interface{})
-		if ok && len(transitions) > 0 {
-			found = true
-			s.t.Logf("✓ Found %d status transitions", len(transitions))
-			break
-		}
-	}
-
-	s.assert.True(found, "Expected to find status transitions")
-	return s
-}
-
-func (s *MCPFailureScenarioStage) resource_timeline_changes_has_changes_for_category(category string) *MCPFailureScenarioStage {
-	s.require.NotNil(s.resourceTimelineChangesResult, "resource_timeline_changes must be called first")
-
-	// Check if result contains an error
-	if isError, ok := s.resourceTimelineChangesResult["isError"].(bool); ok && isError {
-		content := s.extractContent(s.resourceTimelineChangesResult)
-		s.t.Logf("⚠ resource_timeline_changes returned error: %s", content)
-		return s
-	}
-
-	content := s.extractContent(s.resourceTimelineChangesResult)
-	var changesData map[string]interface{}
-	err := json.Unmarshal([]byte(content), &changesData)
-	s.require.NoError(err, "failed to parse resource_timeline_changes JSON")
-
-	resources, ok := changesData["resources"].([]interface{})
-	s.require.True(ok, "resources should be present")
-
-	found := false
-	for _, res := range resources {
-		resMap := res.(map[string]interface{})
-		// New format uses unified_diff and change_count instead of changes array
-		if changeCount, ok := resMap["change_count"].(float64); ok && changeCount > 0 {
-			found = true
-			s.t.Logf("✓ Found resource with %d changes (category checking not available in new format)", int(changeCount))
-			break
-		}
-		// Legacy format with changes array
-		changes, ok := resMap["changes"].([]interface{})
-		if !ok {
-			continue
-		}
-
-		for _, change := range changes {
-			changeMap := change.(map[string]interface{})
-			if changeMap["category"] == category {
-				found = true
-				s.t.Logf("✓ Found change with category: %s", category)
-				break
-			}
-		}
-		if found {
-			break
-		}
-	}
-
-	s.assert.True(found, "Expected to find changes (category: %s)", category)
-	return s
-}
-
 func (s *MCPFailureScenarioStage) all_tools_agree_on_resource_status() *MCPFailureScenarioStage {
 	// This is a complex assertion that checks consistency across all tools
 	// For simplicity, we'll just verify that all tools returned non-empty results
@@ -590,17 +503,4 @@ func (s *MCPFailureScenarioStage) extractContent(result map[string]interface{}) 
 	}
 
 	return text
-}
-
-func stringContains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

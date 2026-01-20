@@ -129,6 +129,8 @@ func (c *SpectreClient) PingWithRetry(logger Logger) error {
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
+			// Exponential backoff calculation - attempt is bounded by maxRetries (20)
+			// #nosec G115 -- attempt-1 is bounded by maxRetries and will never overflow
 			backoff := initialBackoff * time.Duration(1<<uint(attempt-1))
 			if backoff > maxBackoff {
 				backoff = maxBackoff

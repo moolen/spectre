@@ -9,6 +9,15 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	edgeTypeOwns           = "OWNS"
+	edgeTypeScheduledOn    = "SCHEDULED_ON"
+	edgeTypeGrantsTo       = "GRANTS_TO"
+	edgeTypeBindsRole      = "BINDS_ROLE"
+	edgeTypeReferencesSpec = "REFERENCES_SPEC"
+	edgeTypeIngressRef     = "INGRESS_REF"
+)
+
 // buildCausalGraph constructs the causal graph from symptom to root cause.
 // Uses split queries for better performance and maintainability.
 //
@@ -219,7 +228,7 @@ func (a *RootCauseAnalyzer) buildSpineNodes(
 		// Determine relationship type for reasoning
 		var relationshipType string
 		if resource.UID != symptom.Resource.UID {
-			relationshipType = "OWNS"
+			relationshipType = edgeTypeOwns
 		} else {
 			relationshipType = "SYMPTOM"
 		}
@@ -428,17 +437,17 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 			// Filter: only include certain relationship types without changes
 			// Always include SCHEDULED_ON, GRANTS_TO, BINDS_ROLE, REFERENCES_SPEC, and INGRESS_REF
 			// These are important for understanding configuration dependencies
-			if relData.RelationshipType != "SCHEDULED_ON" &&
-				relData.RelationshipType != "GRANTS_TO" &&
-				relData.RelationshipType != "BINDS_ROLE" &&
-				relData.RelationshipType != "REFERENCES_SPEC" &&
-				relData.RelationshipType != "INGRESS_REF" &&
+			if relData.RelationshipType != edgeTypeScheduledOn &&
+				relData.RelationshipType != edgeTypeGrantsTo &&
+				relData.RelationshipType != edgeTypeBindsRole &&
+				relData.RelationshipType != edgeTypeReferencesSpec &&
+				relData.RelationshipType != edgeTypeIngressRef &&
 				!hasChanges {
 				a.logger.Debug("buildRelatedGraph: skipping %s (type=%s) - no changes", relData.Resource.Name, relData.RelationshipType)
 				continue
 			}
 
-			if relData.RelationshipType == "REFERENCES_SPEC" || relData.RelationshipType == "INGRESS_REF" {
+			if relData.RelationshipType == edgeTypeReferencesSpec || relData.RelationshipType == edgeTypeIngressRef {
 				a.logger.Debug("buildRelatedGraph: including %s %s/%s (hasChanges=%v)",
 					relData.RelationshipType, relData.Resource.Kind, relData.Resource.Name, hasChanges)
 			}
@@ -477,11 +486,11 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 			hasChanges := len(relData.Events) > 0
 
 			// Same filter as pass 1
-			if relData.RelationshipType != "SCHEDULED_ON" &&
-				relData.RelationshipType != "GRANTS_TO" &&
-				relData.RelationshipType != "BINDS_ROLE" &&
-				relData.RelationshipType != "REFERENCES_SPEC" &&
-				relData.RelationshipType != "INGRESS_REF" &&
+			if relData.RelationshipType != edgeTypeScheduledOn &&
+				relData.RelationshipType != edgeTypeGrantsTo &&
+				relData.RelationshipType != edgeTypeBindsRole &&
+				relData.RelationshipType != edgeTypeReferencesSpec &&
+				relData.RelationshipType != edgeTypeIngressRef &&
 				!hasChanges {
 				continue
 			}
@@ -554,7 +563,7 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 					// Reverse direction: selector (Service/NetworkPolicy) -> resource (Pod)
 					fromNode = relatedNodeID
 					toNode = parentNodeID
-				} else if relData.RelationshipType == "INGRESS_REF" {
+				} else if relData.RelationshipType == edgeTypeIngressRef {
 					// Ingress -> Service: use the ReferenceTargetUID
 					fromNode = relatedNodeID // Ingress
 					if relData.ReferenceTargetUID != "" {
@@ -578,7 +587,7 @@ func (a *RootCauseAnalyzer) buildRelatedGraph(
 				if !edgeSet[edgeID] {
 					// Map internal relationship types to canonical ones
 					relType := relData.RelationshipType
-					if relType == "INGRESS_REF" {
+					if relType == edgeTypeIngressRef {
 						relType = "REFERENCES_SPEC"
 					}
 
@@ -699,6 +708,8 @@ func selectPrimaryEvent(events []ChangeEventInfo, failureTimestamp int64) *Chang
 	}
 
 	// Fallback: earliest event
+	// Note: len(events) > 0 is guaranteed by early return check above
+	// #nosec G602 -- Empty slice is handled by early return at function start
 	earliest := &events[0]
 	for i := range events {
 		if events[i].Timestamp.Before(earliest.Timestamp) {

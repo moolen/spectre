@@ -156,7 +156,7 @@ func (s *ManagementScorer) ScoreRelationship(
 	// Evidence 4: Reconcile event correlation (optional)
 	if s.config.CheckReconcileEvents {
 		totalWeight += s.config.ReconcileWeight
-		windowNs := int64(60 * time.Second.Nanoseconds())
+		windowNs := 60 * time.Second.Nanoseconds()
 		managerEvents, err := s.lookup.FindRecentEvents(ctx, managerEvent.Resource.UID, windowNs)
 		if err == nil && len(managerEvents) > 0 {
 			// Check for reconcile success

@@ -283,10 +283,12 @@ func (s *TimelineConnectService) GetTimeline(
 // sendMetadata sends the metadata chunk with count, query stats, and pagination info
 func (s *TimelineConnectService) sendMetadata(stream *connect.ServerStream[pb.TimelineChunk], result *models.QueryResult, totalCount int, pagination *models.PaginationResponse) error {
 	metadata := &pb.TimelineMetadata{
+		// Timeline event counts are bounded by database size and query limits (typically < millions)
+		// #nosec G115 -- Event counts are bounded by practical query limits
 		TotalCount:           int32(totalCount),
-		FilesSearched:        int32(result.FilesSearched),
-		SegmentsScanned:      int32(result.SegmentsScanned),
-		SegmentsSkipped:      int32(result.SegmentsSkipped),
+		FilesSearched:        result.FilesSearched,
+		SegmentsScanned:      result.SegmentsScanned,
+		SegmentsSkipped:      result.SegmentsSkipped,
 		QueryExecutionTimeMs: int64(result.ExecutionTimeMs),
 		// Pagination fields
 		NextCursor: "",
@@ -297,6 +299,7 @@ func (s *TimelineConnectService) sendMetadata(stream *connect.ServerStream[pb.Ti
 	if pagination != nil {
 		metadata.NextCursor = pagination.NextCursor
 		metadata.HasMore = pagination.HasMore
+		// #nosec G115 -- Page size is bounded by API limits (typically 100-10000)
 		metadata.PageSize = int32(pagination.PageSize)
 	}
 

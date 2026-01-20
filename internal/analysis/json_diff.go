@@ -47,7 +47,7 @@ func ParseJSONToMap(data []byte) (map[string]any, error) {
 }
 
 // diffMaps recursively computes differences between two maps.
-func diffMaps(prefix string, old, new map[string]any) []EventDiff {
+func diffMaps(prefix string, old, newMap map[string]any) []EventDiff {
 	var diffs []EventDiff
 
 	// Track keys we've seen
@@ -57,7 +57,7 @@ func diffMaps(prefix string, old, new map[string]any) []EventDiff {
 	for k, oldVal := range old {
 		seen[k] = true
 		path := joinPath(prefix, k)
-		newVal, exists := new[k]
+		newVal, exists := newMap[k]
 
 		if !exists {
 			// Key removed
@@ -92,7 +92,7 @@ func diffMaps(prefix string, old, new map[string]any) []EventDiff {
 	}
 
 	// Check for added keys in new
-	for k, newVal := range new {
+	for k, newVal := range newMap {
 		if !seen[k] {
 			path := joinPath(prefix, k)
 			diffs = append(diffs, EventDiff{
@@ -109,7 +109,7 @@ func diffMaps(prefix string, old, new map[string]any) []EventDiff {
 // diffArrays computes differences between two arrays.
 // It attempts to match elements by a key field (e.g., "name" for containers)
 // and produces element-level diffs.
-func diffArrays(prefix string, old, new []any) []EventDiff {
+func diffArrays(prefix string, old, newArr []any) []EventDiff {
 	var diffs []EventDiff
 
 	// Try to identify elements by common key fields
@@ -118,7 +118,7 @@ func diffArrays(prefix string, old, new []any) []EventDiff {
 	// Find a suitable key field
 	keyField := ""
 	for _, field := range keyFields {
-		if arrayHasKeyField(old, field) && arrayHasKeyField(new, field) {
+		if arrayHasKeyField(old, field) && arrayHasKeyField(newArr, field) {
 			keyField = field
 			break
 		}
@@ -127,7 +127,7 @@ func diffArrays(prefix string, old, new []any) []EventDiff {
 	if keyField != "" {
 		// Match elements by key field
 		oldByKey := indexArrayByKey(old, keyField)
-		newByKey := indexArrayByKey(new, keyField)
+		newByKey := indexArrayByKey(newArr, keyField)
 
 		// Track seen keys
 		seen := make(map[string]bool)
@@ -177,8 +177,8 @@ func diffArrays(prefix string, old, new []any) []EventDiff {
 	} else {
 		// No key field found - diff by index
 		maxLen := len(old)
-		if len(new) > maxLen {
-			maxLen = len(new)
+		if len(newArr) > maxLen {
+			maxLen = len(newArr)
 		}
 
 		for i := 0; i < maxLen; i++ {
@@ -188,20 +188,20 @@ func diffArrays(prefix string, old, new []any) []EventDiff {
 				// Element added
 				diffs = append(diffs, EventDiff{
 					Path:     elemPath,
-					NewValue: simplifyValue(new[i]),
+					NewValue: simplifyValue(newArr[i]),
 					Op:       "add",
 				})
-			} else if i >= len(new) {
+			} else if i >= len(newArr) {
 				// Element removed
 				diffs = append(diffs, EventDiff{
 					Path:     elemPath,
 					OldValue: simplifyValue(old[i]),
 					Op:       "remove",
 				})
-			} else if !deepEqual(old[i], new[i]) {
+			} else if !deepEqual(old[i], newArr[i]) {
 				// Element changed
 				oldMap, oldIsMap := old[i].(map[string]any)
-				newMap, newIsMap := new[i].(map[string]any)
+				newMap, newIsMap := newArr[i].(map[string]any)
 
 				if oldIsMap && newIsMap {
 					diffs = append(diffs, diffMaps(elemPath, oldMap, newMap)...)
@@ -209,7 +209,7 @@ func diffArrays(prefix string, old, new []any) []EventDiff {
 					diffs = append(diffs, EventDiff{
 						Path:     elemPath,
 						OldValue: simplifyValue(old[i]),
-						NewValue: simplifyValue(new[i]),
+						NewValue: simplifyValue(newArr[i]),
 						Op:       "replace",
 					})
 				}
@@ -330,12 +330,12 @@ func FilterNoisyPaths(diffs []EventDiff) []EventDiff {
 // keeping only meaningful configuration changes.
 func FilterSpecOnly(diffs []EventDiff) []EventDiff {
 	excludePrefixes := []string{
-		"status",                       // All status fields
-		"metadata.managedFields",       // Auto-managed
-		"metadata.resourceVersion",     // Auto-incremented
-		"metadata.generation",          // Auto-incremented
-		"metadata.uid",                 // Immutable
-		"metadata.creationTimestamp",   // Immutable
+		"status",                     // All status fields
+		"metadata.managedFields",     // Auto-managed
+		"metadata.resourceVersion",   // Auto-incremented
+		"metadata.generation",        // Auto-incremented
+		"metadata.uid",               // Immutable
+		"metadata.creationTimestamp", // Immutable
 	}
 
 	var filtered []EventDiff
@@ -633,18 +633,20 @@ func writeConditionFields(sb *strings.Builder, prefix string, cond map[string]an
 	orderedFields := []string{"status", "reason", "message", "lastTransitionTime"}
 
 	for _, field := range orderedFields {
-		if val, ok := cond[field]; ok {
-			sb.WriteString(prefix)
-			sb.WriteString(field)
-			sb.WriteString(": ")
-			sb.WriteString(formatValue(val))
-			sb.WriteString("\n")
+		val, ok := cond[field]
+		if !ok {
+			continue
 		}
+		sb.WriteString(prefix)
+		sb.WriteString(field)
+		sb.WriteString(": ")
+		sb.WriteString(formatValue(val))
+		sb.WriteString("\n")
 	}
 }
 
 // getConditionChanges returns the diff lines for changed fields between two conditions.
-func getConditionChanges(old, new map[string]any) []string {
+func getConditionChanges(old, newCond map[string]any) []string {
 	var changes []string
 
 	// Fields to compare (in order)
@@ -652,15 +654,16 @@ func getConditionChanges(old, new map[string]any) []string {
 
 	for _, field := range fields {
 		oldVal, oldOk := old[field]
-		newVal, newOk := new[field]
+		newVal, newOk := newCond[field]
 
 		if !oldOk && newOk {
 			changes = append(changes, "+  "+field+": "+formatValue(newVal))
 		} else if oldOk && !newOk {
 			changes = append(changes, "-  "+field+": "+formatValue(oldVal))
 		} else if oldOk && newOk && !deepEqual(oldVal, newVal) {
-			changes = append(changes, "-  "+field+": "+formatValue(oldVal))
-			changes = append(changes, "+  "+field+": "+formatValue(newVal))
+			changes = append(changes,
+				"-  "+field+": "+formatValue(oldVal),
+				"+  "+field+": "+formatValue(newVal))
 		}
 	}
 

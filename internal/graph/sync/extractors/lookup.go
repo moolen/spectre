@@ -112,11 +112,7 @@ func (l *graphClientLookup) FindRecentEvents(ctx context.Context, uid string, wi
 			continue
 		}
 
-		event, err := parseChangeEvent(eventData)
-		if err != nil {
-			continue // Skip malformed events
-		}
-
+		event := parseChangeEvent(eventData)
 		events = append(events, *event)
 	}
 
@@ -163,15 +159,17 @@ func parseResourceIdentity(data interface{}) (*graph.ResourceIdentity, error) {
 	}
 
 	// Handle numeric fields (may be float64 or int64)
-	if firstSeen, ok := props["firstSeen"].(float64); ok {
+	switch firstSeen := props["firstSeen"].(type) {
+	case float64:
 		resource.FirstSeen = int64(firstSeen)
-	} else if firstSeen, ok := props["firstSeen"].(int64); ok {
+	case int64:
 		resource.FirstSeen = firstSeen
 	}
 
-	if lastSeen, ok := props["lastSeen"].(float64); ok {
+	switch lastSeen := props["lastSeen"].(type) {
+	case float64:
 		resource.LastSeen = int64(lastSeen)
-	} else if lastSeen, ok := props["lastSeen"].(int64); ok {
+	case int64:
 		resource.LastSeen = lastSeen
 	}
 
@@ -179,9 +177,10 @@ func parseResourceIdentity(data interface{}) (*graph.ResourceIdentity, error) {
 		resource.Deleted = deleted
 	}
 
-	if deletedAt, ok := props["deletedAt"].(float64); ok {
+	switch deletedAt := props["deletedAt"].(type) {
+	case float64:
 		resource.DeletedAt = int64(deletedAt)
-	} else if deletedAt, ok := props["deletedAt"].(int64); ok {
+	case int64:
 		resource.DeletedAt = deletedAt
 	}
 
@@ -196,16 +195,17 @@ func parseResourceIdentity(data interface{}) (*graph.ResourceIdentity, error) {
 	return resource, nil
 }
 
-func parseChangeEvent(data map[string]interface{}) (*graph.ChangeEvent, error) {
+func parseChangeEvent(data map[string]interface{}) *graph.ChangeEvent {
 	event := &graph.ChangeEvent{}
 
 	if id, ok := data["id"].(string); ok {
 		event.ID = id
 	}
 
-	if timestamp, ok := data["timestamp"].(float64); ok {
+	switch timestamp := data["timestamp"].(type) {
+	case float64:
 		event.Timestamp = int64(timestamp)
-	} else if timestamp, ok := data["timestamp"].(int64); ok {
+	case int64:
 		event.Timestamp = timestamp
 	}
 
@@ -245,7 +245,7 @@ func parseChangeEvent(data map[string]interface{}) (*graph.ChangeEvent, error) {
 		event.ImpactScore = impactScore
 	}
 
-	return event, nil
+	return event
 }
 
 // ExtractUID extracts UID from a query result row
@@ -292,15 +292,17 @@ func ParseManagesEdge(edgeData map[string]interface{}) (*graph.ManagesEdge, erro
 		}
 	}
 
-	if firstObserved, ok := edgeData["firstObserved"].(float64); ok {
+	switch firstObserved := edgeData["firstObserved"].(type) {
+	case float64:
 		edge.FirstObserved = int64(firstObserved)
-	} else if firstObserved, ok := edgeData["firstObserved"].(int64); ok {
+	case int64:
 		edge.FirstObserved = firstObserved
 	}
 
-	if lastValidated, ok := edgeData["lastValidated"].(float64); ok {
+	switch lastValidated := edgeData["lastValidated"].(type) {
+	case float64:
 		edge.LastValidated = int64(lastValidated)
-	} else if lastValidated, ok := edgeData["lastValidated"].(int64); ok {
+	case int64:
 		edge.LastValidated = lastValidated
 	}
 

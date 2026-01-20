@@ -68,7 +68,7 @@ func LoadAuditLogFiltered(filePath string, filter func(models.Event) bool) ([]mo
 }
 
 // ExtractTimestampAndResourceUIDFromFile extracts the timestamp and UID for a specific resource kind
-func ExtractTimestampAndResourceUIDFromFile(jsonlPath string, targetKind string) (int64, string, error) {
+func ExtractTimestampAndResourceUIDFromFile(jsonlPath, targetKind string) (int64, string, error) {
 	file, err := os.Open(jsonlPath)
 	if err != nil {
 		return 0, "", err

@@ -10,6 +10,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const reasonErrImagePull = "ErrImagePull"
+
 // CrashLoopPullSecret scenario: Pod fails due to missing image pull secret
 type CrashLoopPullSecret struct{}
 
@@ -77,7 +79,8 @@ func (s *CrashLoopPullSecret) WaitCondition(ctx context.Context, client kubernet
 		for _, cs := range pod.Status.ContainerStatuses {
 			if cs.State.Waiting != nil {
 				reason := cs.State.Waiting.Reason
-				if reason == "ImagePullBackOff" || reason == "ErrImagePull" {
+				//nolint:goconst // Test validation strings
+				if reason == "ImagePullBackOff" || reason == reasonErrImagePull {
 					return true
 				}
 			}

@@ -259,7 +259,7 @@ func TestSecretRelationshipScorer_TemporalProximity(t *testing.T) {
 		{
 			name:              "at window boundary (60s lag)",
 			secretLastSeenLag: 60000,
-			expectedMin:       0.0, // 0.8 * 0.0 = 0.0
+			expectedMin:       0.0, // lag factor reduces score to zero
 			expectedMax:       0.01,
 		},
 		{

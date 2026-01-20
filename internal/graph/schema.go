@@ -509,7 +509,7 @@ func FindRootCauseQuery(resourceUID string, failureTimestamp int64, maxDepth int
 }
 
 // CalculateBlastRadiusQuery finds all resources affected by a change
-func CalculateBlastRadiusQuery(resourceUID string, changeTimestamp int64, timeWindowMs int64, relationshipTypes []string) GraphQuery {
+func CalculateBlastRadiusQuery(resourceUID string, changeTimestamp, timeWindowMs int64, relationshipTypes []string) GraphQuery {
 	// Convert relationship types to Cypher pattern
 	relPattern := ""
 	if len(relationshipTypes) > 0 {
@@ -682,6 +682,25 @@ func CreateCreatesObservedEdgeQuery(sourceUID, targetUID string, props CreatesOb
 			"observedLagMs":    props.ObservedLagMs,
 			"reconcileEventId": props.ReconcileEventID,
 			"evidence":         props.Evidence,
+		},
+	}
+}
+
+// CreateMountsEdgeQuery creates a MOUNTS edge between a Pod and a PVC
+func CreateMountsEdgeQuery(podUID, pvcUID string, props MountsEdge) GraphQuery {
+	return GraphQuery{
+		Query: `
+			MATCH (pod:ResourceIdentity {uid: $podUID})
+			MATCH (pvc:ResourceIdentity {uid: $pvcUID})
+			MERGE (pod)-[r:MOUNTS]->(pvc)
+			SET r.volumeName = $volumeName,
+				r.mountPath = $mountPath
+		`,
+		Parameters: map[string]interface{}{
+			"podUID":     podUID,
+			"pvcUID":     pvcUID,
+			"volumeName": props.VolumeName,
+			"mountPath":  props.MountPath,
 		},
 	}
 }

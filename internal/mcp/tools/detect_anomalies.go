@@ -123,7 +123,7 @@ func (t *DetectAnomaliesTool) Execute(ctx context.Context, input json.RawMessage
 }
 
 // executeByUID performs anomaly detection for a single resource by UID
-func (t *DetectAnomaliesTool) executeByUID(ctx context.Context, resourceUID string, startTime, endTime int64) (*DetectAnomaliesOutput, error) {
+func (t *DetectAnomaliesTool) executeByUID(_ context.Context, resourceUID string, startTime, endTime int64) (*DetectAnomaliesOutput, error) {
 	response, err := t.client.DetectAnomalies(resourceUID, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect anomalies: %w", err)
@@ -135,7 +135,7 @@ func (t *DetectAnomaliesTool) executeByUID(ctx context.Context, resourceUID stri
 }
 
 // executeByNamespaceKind discovers resources by namespace/kind and runs anomaly detection on each
-func (t *DetectAnomaliesTool) executeByNamespaceKind(ctx context.Context, namespace, kind string, startTime, endTime int64, maxResults int) (*DetectAnomaliesOutput, error) {
+func (t *DetectAnomaliesTool) executeByNamespaceKind(_ context.Context, namespace, kind string, startTime, endTime int64, maxResults int) (*DetectAnomaliesOutput, error) {
 	// Apply default limit: 10 (default), max 50
 	if maxResults <= 0 {
 		maxResults = 10

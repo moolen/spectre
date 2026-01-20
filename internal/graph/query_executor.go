@@ -66,10 +66,7 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 	}
 
 	// Convert graph results to events and K8sEvents
-	allEvents, k8sEventsByResource, err := qe.parseTimelineResults(result)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse graph results: %w", err)
-	}
+	allEvents, k8sEventsByResource := qe.parseTimelineResults(result)
 
 	// Group events by resource UID to get actual resource count
 	// This is what BuildResourcesFromEventsWithQueryTime does, but we need to do it here
@@ -93,7 +90,7 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 	// Determine if there are more resources
 	// We fetched (pageSize * 2) + 1 ResourceIdentity nodes
 	// If we got that many or more unique resources, there are more pages
-	hasMore := actualResourceCount > (pageSize * 2)
+	var hasMore bool
 
 	// Apply resource-level pagination: limit to pageSize unique resources
 	// Maintain sort order (kind, namespace, name) from the query
@@ -168,9 +165,11 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 	executionTime := time.Since(start)
 
 	queryResult := &models.QueryResult{
-		Events:              limitedEvents,
-		Count:               int32(len(limitedEvents)),
-		ExecutionTimeMs:     int32(executionTime.Milliseconds()),
+		Events: limitedEvents,
+		// Event counts and execution times are bounded by query limits and timeouts
+		// #nosec G115 -- Counts are bounded by API limits and execution time by query timeout
+		Count:           int32(len(limitedEvents)),
+		ExecutionTimeMs: int32(executionTime.Milliseconds()), // #nosec G115 -- Query timeout ensures this fits in int32
 		QueryStartTime:      startTimeNs,
 		QueryEndTime:        endTimeNs,
 		K8sEventsByResource: k8sEventsByResource,
@@ -321,7 +320,7 @@ func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models
 // Returns:
 //   - events: ChangeEvents for building resource status segments
 //   - k8sEventsByResource: map of resource UID to K8sEvents for timeline display
-func (qe *QueryExecutor) parseTimelineResults(result *QueryResult) ([]models.Event, map[string][]models.K8sEvent, error) {
+func (qe *QueryExecutor) parseTimelineResults(result *QueryResult) ([]models.Event, map[string][]models.K8sEvent) {
 	var events []models.Event
 	k8sEventsByResource := make(map[string][]models.K8sEvent)
 
@@ -404,7 +403,7 @@ func (qe *QueryExecutor) parseTimelineResults(result *QueryResult) ([]models.Eve
 	}
 
 	qe.logger.Info("Parsed %d events and %d K8sEvents from graph query", len(events), len(k8sEventsByResource))
-	return events, k8sEventsByResource, nil
+	return events, k8sEventsByResource
 }
 
 // parseK8sEvent converts a K8sEvent graph node to a models.K8sEvent
@@ -420,8 +419,10 @@ func (qe *QueryExecutor) parseK8sEvent(node map[string]interface{}) *models.K8sE
 		Reason:    getStringField(node, "reason"),
 		Message:   getStringField(node, "message"),
 		Type:      getStringField(node, "type"),
-		Count:     int32(getInt64Field(node, "count")),
-		Source:    getStringField(node, "source"),
+		// K8s event counts are typically small (< 1000 for repeated events)
+		// #nosec G115 -- Event count from K8s API fits in int32
+		Count:  int32(getInt64Field(node, "count")),
+		Source: getStringField(node, "source"),
 	}
 }
 
@@ -507,18 +508,9 @@ func getInt64Field(node map[string]interface{}, key string) int64 {
 	return 0
 }
 
-func getBoolField(node map[string]interface{}, key string) bool {
-	if val, ok := node[key]; ok {
-		if b, ok := val.(bool); ok {
-			return b
-		}
-	}
-	return false
-}
-
 // QueryDistinctMetadata queries for distinct namespaces and kinds in a time range
 // without any pagination limits. This is specifically for the metadata endpoint.
-func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) (namespaces []string, kinds []string, minTime int64, maxTime int64, err error) {
+func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) (namespaces, kinds []string, minTime, maxTime int64, err error) {
 	// Build query to get distinct values
 	query := `
 		MATCH (r:ResourceIdentity)

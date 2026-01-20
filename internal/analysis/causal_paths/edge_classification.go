@@ -7,6 +7,11 @@ import (
 	"github.com/moolen/spectre/internal/analysis/anomaly"
 )
 
+const (
+	reasonImagePullBackOff    = "ImagePullBackOff"
+	anomalyTypeErrImagePull   = "ErrImagePull"
+)
+
 // edgeClassification maps relationship types to their causal category
 // Cause-introducing edges represent relationships where changes propagate causally
 // Materialization edges represent structural/ownership relationships
@@ -187,28 +192,6 @@ func hasOnlyIntermediateCauseAnomalies(nodeAnomalies []anomaly.Anomaly) bool {
 }
 
 // hasDefinitiveCauseIntroducingAnomaly checks if a node has a "definitive" cause anomaly
-// that should stop the causal path traversal. Returns false for intermediate anomalies
-// like ResourceCreated that may be effects of deeper root causes.
-func hasDefinitiveCauseIntroducingAnomaly(nodeAnomalies []anomaly.Anomaly, symptomFirstFailure time.Time) bool {
-	for _, a := range nodeAnomalies {
-		// Must occur BEFORE or AT symptom failure time
-		if a.Timestamp.After(symptomFirstFailure) {
-			continue
-		}
-
-		// Skip intermediate anomaly types
-		if intermediateAnomalyTypes[a.Type] {
-			continue
-		}
-
-		// Check if this is a cause-introducing anomaly type
-		if IsCauseIntroducingAnomaly(a.Type, a.Category) {
-			return true
-		}
-	}
-	return false
-}
-
 // HasOnlyDerivedAnomalies checks if a node has only derived failure anomalies
 // Returns true if there are no cause-introducing anomalies
 func HasOnlyDerivedAnomalies(nodeAnomalies []anomaly.Anomaly) bool {
@@ -250,7 +233,7 @@ func GetFirstCauseIntroducingAnomaly(nodeAnomalies []anomaly.Anomaly, beforeTime
 	return earliest
 }
 
-// ClassifyImagePullAnomaly determines whether an ImagePullBackOff/ErrImagePull anomaly
+// ClassifyImagePullAnomaly determines whether an ImagePullBackOff/anomalyTypeErrImagePull anomaly
 // is cause-introducing (the image genuinely doesn't exist or auth failed) or derived
 // (network issue, node problem, etc. causing the pull to fail).
 //
@@ -260,7 +243,7 @@ func GetFirstCauseIntroducingAnomaly(nodeAnomalies []anomaly.Anomaly, beforeTime
 // - "ImagePullTimeout" (cause-introducing): timeout/connection errors
 // - "ImagePullBackOff" (derived): transient or unknown cause, continue traversal
 func ClassifyImagePullAnomaly(a anomaly.Anomaly) string {
-	if a.Type != "ImagePullBackOff" && a.Type != "ErrImagePull" {
+	if a.Type != reasonImagePullBackOff && a.Type != anomalyTypeErrImagePull {
 		return a.Type // Not an image pull anomaly
 	}
 
@@ -295,7 +278,7 @@ func ClassifyImagePullAnomaly(a anomaly.Anomaly) string {
 	}
 
 	// Default: treat as derived (transient error, continue traversal)
-	return "ImagePullBackOff"
+	return reasonImagePullBackOff
 }
 
 // IsContextuallyDerivedAnomaly checks if an anomaly should be treated as derived
@@ -304,15 +287,15 @@ func ClassifyImagePullAnomaly(a anomaly.Anomaly) string {
 // sometimes derived depending on context.
 func IsContextuallyDerivedAnomaly(a anomaly.Anomaly, relatedAnomalies map[string][]anomaly.Anomaly) bool {
 	switch a.Type {
-	case "ImagePullBackOff", "ErrImagePull":
+	case reasonImagePullBackOff, anomalyTypeErrImagePull:
 		// Reclassify based on message content
 		reclassified := ClassifyImagePullAnomaly(a)
 		// If reclassified to ImagePullBackOff (unchanged), it's derived
-		return reclassified == "ImagePullBackOff"
+		return reclassified == reasonImagePullBackOff
 
 	case "Evicted":
 		// Evicted is derived if the Node has a pressure condition
-		return isEvictedDerivedFromNodePressure(a, relatedAnomalies)
+		return isEvictedDerivedFromNodePressure(relatedAnomalies)
 
 	default:
 		return derivedFailureAnomalyTypes[a.Type]
@@ -322,7 +305,7 @@ func IsContextuallyDerivedAnomaly(a anomaly.Anomaly, relatedAnomalies map[string
 // isEvictedDerivedFromNodePressure checks if a Pod eviction is caused by Node pressure.
 // If the Node has DiskPressure, MemoryPressure, PIDPressure, or NodeNotReady,
 // then the Evicted anomaly is derived (the Node condition is the root cause).
-func isEvictedDerivedFromNodePressure(evictedAnomaly anomaly.Anomaly, relatedAnomalies map[string][]anomaly.Anomaly) bool {
+func isEvictedDerivedFromNodePressure(relatedAnomalies map[string][]anomaly.Anomaly) bool {
 	nodePressureTypes := map[string]bool{
 		"DiskPressure":        true,
 		"NodeDiskPressure":    true,
@@ -417,7 +400,7 @@ func HasCauseIntroducingAnomalyWithContext(
 		}
 
 		// Handle image pull anomalies with context-aware classification
-		if a.Type == "ImagePullBackOff" || a.Type == "ErrImagePull" {
+		if a.Type == "ImagePullBackOff" || a.Type == anomalyTypeErrImagePull {
 			// If upstream has ImageChanged, ImagePullBackOff is derived (symptom of the image change)
 			if upstreamHasImageChanged {
 				continue
@@ -466,7 +449,7 @@ func hasDefinitiveCauseIntroducingAnomalyWithContext(
 		}
 
 		// Handle image pull anomalies with context-aware classification
-		if a.Type == "ImagePullBackOff" || a.Type == "ErrImagePull" {
+		if a.Type == "ImagePullBackOff" || a.Type == anomalyTypeErrImagePull {
 			// If upstream has ImageChanged, ImagePullBackOff is derived (symptom of the image change)
 			if upstreamHasImageChanged {
 				continue
