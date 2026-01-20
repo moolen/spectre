@@ -26,8 +26,17 @@ This roadmap delivers 31 v1 requirements across 5 phases, building from plugin f
 3. MCP server hot-reloads config when integration file changes on disk
 4. Plugins declare semantic version and server validates compatibility before loading
 
+**Plans:** 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Config schema & integration interface
+- [ ] 01-02-PLAN.md — Integration registry & config loader
+- [ ] 01-03-PLAN.md — Hot-reload with file watcher
+- [ ] 01-04-PLAN.md — Instance lifecycle & health management
+
 **Notes:**
-- Uses HashiCorp go-plugin (not Go stdlib plugin) to avoid versioning hell
+- Uses in-tree integrations (compiled into Spectre, not external plugins)
+- Multiple instances of same integration type supported
 - Atomic pointer swap pattern for race-free config reload
 - Koanf v2.3.0 for hot-reload with fsnotify
 - Research suggests this phase must be correct from day 1 (changing plugin system later forces complete rewrite)
@@ -46,6 +55,11 @@ This roadmap delivers 31 v1 requirements across 5 phases, building from plugin f
 1. User sees available integrations in UI with enable/disable toggle
 2. User configures integration connection details (e.g., VictoriaLogs URL) via UI
 3. REST API persists integration config to disk and triggers hot-reload
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (awaiting `/gsd:plan-phase 2`)
 
 **Notes:**
 - REST API endpoints for reading/writing integration configs
@@ -69,6 +83,11 @@ This roadmap delivers 31 v1 requirements across 5 phases, building from plugin f
 4. Plugin returns log counts grouped by namespace/pod/deployment
 5. Pipeline handles backpressure via bounded channels (prevents memory exhaustion)
 
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (awaiting `/gsd:plan-phase 3`)
+
 **Notes:**
 - HTTP client using net/http (stdlib)
 - Pipeline stages: normalize → batch → write
@@ -91,6 +110,11 @@ This roadmap delivers 31 v1 requirements across 5 phases, building from plugin f
 3. Templates have stable hash IDs for cross-client consistency
 4. Canonical templates stored in MCP server and persist across restarts
 5. Mining samples high-volume namespaces and uses time-window batching for efficiency
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (awaiting `/gsd:plan-phase 4`)
 
 **Notes:**
 - Log processing package is integration-agnostic (reusable beyond VictoriaLogs)
@@ -117,6 +141,11 @@ This roadmap delivers 31 v1 requirements across 5 phases, building from plugin f
 5. Overview highlights errors, panics, timeouts first via smart defaults
 6. System compares current templates to previous time window and flags novel patterns
 
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (awaiting `/gsd:plan-phase 5`)
+
 **Notes:**
 - Three-level drill-down: global → aggregated → detail
 - MCP tool descriptions with JSON Schema inputs
@@ -130,7 +159,7 @@ This roadmap delivers 31 v1 requirements across 5 phases, building from plugin f
 
 | Phase | Status | Requirements | Plans | Completion |
 |-------|--------|--------------|-------|------------|
-| 1 - Plugin Infrastructure Foundation | Pending | 8/8 | 0/0 | 0% |
+| 1 - Plugin Infrastructure Foundation | Planning | 8/8 | 4/4 | 0% |
 | 2 - Config Management & UI | Pending | 3/3 | 0/0 | 0% |
 | 3 - VictoriaLogs Client & Basic Pipeline | Pending | 6/6 | 0/0 | 0% |
 | 4 - Log Template Mining | Pending | 6/6 | 0/0 | 0% |
