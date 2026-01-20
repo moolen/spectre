@@ -93,43 +93,43 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PLUG-01 | TBD | Pending |
-| PLUG-02 | TBD | Pending |
-| PLUG-03 | TBD | Pending |
-| PLUG-04 | TBD | Pending |
-| PLUG-05 | TBD | Pending |
-| PLUG-06 | TBD | Pending |
-| CONF-01 | TBD | Pending |
-| CONF-02 | TBD | Pending |
-| CONF-03 | TBD | Pending |
-| CONF-04 | TBD | Pending |
-| CONF-05 | TBD | Pending |
-| VLOG-01 | TBD | Pending |
-| VLOG-02 | TBD | Pending |
-| VLOG-03 | TBD | Pending |
-| VLOG-04 | TBD | Pending |
-| VLOG-05 | TBD | Pending |
-| VLOG-06 | TBD | Pending |
-| MINE-01 | TBD | Pending |
-| MINE-02 | TBD | Pending |
-| MINE-03 | TBD | Pending |
-| MINE-04 | TBD | Pending |
-| MINE-05 | TBD | Pending |
-| MINE-06 | TBD | Pending |
-| NOVL-01 | TBD | Pending |
-| NOVL-02 | TBD | Pending |
-| NOVL-03 | TBD | Pending |
-| PROG-01 | TBD | Pending |
-| PROG-02 | TBD | Pending |
-| PROG-03 | TBD | Pending |
-| PROG-04 | TBD | Pending |
-| PROG-05 | TBD | Pending |
+| PLUG-01 | Phase 1 | Pending |
+| PLUG-02 | Phase 1 | Pending |
+| PLUG-03 | Phase 1 | Pending |
+| PLUG-04 | Phase 1 | Pending |
+| PLUG-05 | Phase 1 | Pending |
+| PLUG-06 | Phase 1 | Pending |
+| CONF-01 | Phase 1 | Pending |
+| CONF-02 | Phase 2 | Pending |
+| CONF-03 | Phase 1 | Pending |
+| CONF-04 | Phase 2 | Pending |
+| CONF-05 | Phase 2 | Pending |
+| VLOG-01 | Phase 3 | Pending |
+| VLOG-02 | Phase 3 | Pending |
+| VLOG-03 | Phase 3 | Pending |
+| VLOG-04 | Phase 3 | Pending |
+| VLOG-05 | Phase 3 | Pending |
+| VLOG-06 | Phase 3 | Pending |
+| MINE-01 | Phase 4 | Pending |
+| MINE-02 | Phase 4 | Pending |
+| MINE-03 | Phase 4 | Pending |
+| MINE-04 | Phase 4 | Pending |
+| MINE-05 | Phase 4 | Pending |
+| MINE-06 | Phase 4 | Pending |
+| NOVL-01 | Phase 5 | Pending |
+| NOVL-02 | Phase 5 | Pending |
+| NOVL-03 | Phase 5 | Pending |
+| PROG-01 | Phase 5 | Pending |
+| PROG-02 | Phase 5 | Pending |
+| PROG-03 | Phase 5 | Pending |
+| PROG-04 | Phase 5 | Pending |
+| PROG-05 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 30 total
-- Mapped to phases: 0
-- Unmapped: 30
+- v1 requirements: 31 total
+- Mapped to phases: 31
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-01-20*
-*Last updated: 2026-01-20 after initial definition*
+*Last updated: 2026-01-21 (traceability updated after roadmap creation)*
