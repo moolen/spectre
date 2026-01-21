@@ -88,14 +88,19 @@ Plans:
 4. Plugin returns log counts grouped by namespace/pod/deployment
 5. Pipeline handles backpressure via bounded channels (prevents memory exhaustion)
 
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (awaiting `/gsd:plan-phase 3`)
+- [ ] 03-01-PLAN.md — Core client implementation (types, query builder, HTTP client)
+- [ ] 03-02-PLAN.md — Pipeline & metrics (Prometheus instrumentation, backpressure handling)
+- [ ] 03-03-PLAN.md — Integration wiring & verification (wire client/pipeline into integration)
 
 **Notes:**
-- HTTP client using net/http (stdlib)
-- Pipeline stages: normalize → batch → write
+- HTTP client using net/http (stdlib) with tuned connection pooling (MaxIdleConnsPerHost: 10)
+- Structured LogsQL query builder (no raw LogsQL exposed to MCP tools)
+- Bounded channel pipeline (1000 buffer, 100-item batches) for backpressure
+- Prometheus metrics for pipeline observability (queue depth, throughput, errors)
+- 30-second query timeout per requirements
 - No template mining yet (Phase 4)
 - Validates VictoriaLogs integration before adding complexity
 
@@ -166,7 +171,7 @@ Plans:
 |-------|--------|--------------|-------|------------|
 | 1 - Plugin Infrastructure Foundation | ✓ Complete | 8/8 | 4/4 | 100% |
 | 2 - Config Management & UI | ✓ Complete | 3/3 | 3/3 | 100% |
-| 3 - VictoriaLogs Client & Basic Pipeline | Pending | 6/6 | 0/0 | 0% |
+| 3 - VictoriaLogs Client & Basic Pipeline | Planning | 6/6 | 3/3 | 0% |
 | 4 - Log Template Mining | Pending | 6/6 | 0/0 | 0% |
 | 5 - Progressive Disclosure MCP Tools | Pending | 8/8 | 0/0 | 0% |
 
@@ -192,4 +197,4 @@ All v1 requirements covered. No orphaned requirements.
 
 ---
 
-*Last updated: 2026-01-21 (Phase 2 complete)*
+*Last updated: 2026-01-21 (Phase 3 planned)*
