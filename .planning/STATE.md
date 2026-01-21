@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-01-21)
 
 ## Current Position
 
-Phase: Phase 7 — Service Layer Extraction (2 of 4) — COMPLETE
-Plan: 07-05 complete (5 of 5 plans in phase)
-Status: Complete - Service layer extraction finished, HTTP client removed
-Last activity: 2026-01-21 — Completed 07-05-PLAN.md (HTTP client removal)
+Phase: Phase 8 — Cleanup & Helm Chart Update (3 of 4) — IN PROGRESS
+Plan: 08-01 complete (1 of 2 plans in phase)
+Status: In progress - Dead code cleanup complete, Helm chart updates next
+Last activity: 2026-01-21 — Completed 08-01-PLAN.md (removed standalone commands)
 
-Progress: ███████░░░░░░░░░░░░░ 35% (7/20 total plans estimated)
+Progress: ████████░░░░░░░░░░░░ 40% (8/20 total plans estimated)
 
 ## Milestone: v1.1 Server Consolidation
 
@@ -23,7 +23,7 @@ Progress: ███████░░░░░░░░░░░░░ 35% (7/20
 **Phases:**
 - Phase 6: Consolidated Server & Integration Manager (7 reqs) — COMPLETE (2/2 plans complete)
 - Phase 7: Service Layer Extraction (5 reqs) — COMPLETE (5/5 plans complete)
-- Phase 8: Cleanup & Helm Chart Update (5 reqs) — Pending
+- Phase 8: Cleanup & Helm Chart Update (5 reqs) — IN PROGRESS (1/2 plans complete)
 - Phase 9: E2E Test Validation (4 reqs) — Pending
 
 **Total requirements:** 21
@@ -42,27 +42,22 @@ None
 
 - DateAdded field not persisted in integration config (from v1)
 - GET /{name} endpoint unused by UI (from v1)
-- Standalone MCP command disabled (needs gRPC/Connect refactor)
-- Agent command disabled (needs gRPC/Connect refactor)
-- Agent package excluded from build (build constraints added)
 
 ## Next Steps
 
-1. `/gsd:discuss-phase 8` — Gather context for cleanup and Helm chart updates
-2. `/gsd:plan-phase 8` — Plan cleanup and Helm chart updates
-3. Execute Phase 8 plans
-4. Phase 9: E2E test validation
+1. Execute 08-02-PLAN.md — Update Helm chart for consolidated server
+2. Phase 9: E2E test validation
 
 ## Performance Metrics
 
 **v1.1 Milestone:**
 - Phases complete: 2/4 (Phase 6 ✅, Phase 7 ✅)
-- Plans complete: 7/20 (estimated)
-- Requirements satisfied: 18/21 (SRVR-01 through SVCE-05)
+- Plans complete: 8/20 (estimated)
+- Requirements satisfied: 19/21 (SRVR-01 through CLNP-01)
 
 **Session metrics:**
 - Current session: 2026-01-21
-- Plans executed this session: 7
+- Plans executed this session: 8
 - Blockers hit this session: 0
 
 ## Accumulated Context
@@ -88,6 +83,8 @@ None
 | 07-05 | Delete HTTP client completely | HTTP client only used for self-calls in integrated server | Eliminates localhost HTTP overhead, cleaner service-only architecture |
 | 07-05 | Disable standalone MCP and agent commands | Commands require HTTP to remote server, out of scope for Phase 7 | Breaking change acceptable, can refactor with gRPC/Connect in future |
 | 07-05 | Build constraints on agent package | Agent depends on deleted HTTP client | Excludes agent from compilation, documents need for refactoring |
+| 08-01 | Complete deletion approach for dead code | No TODO comments or deprecation stubs | Clean removal per Phase 8 context, deleted 14,676 lines (74 files) |
+| 08-01 | Keep debug command even without subcommands | Future debug utilities may be added | Appears in Additional Help Topics, ready for future use |
 
 ### Active TODOs
 
@@ -100,18 +97,17 @@ None
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 7
-**Last output:** Phase 7 complete - all 5 plans executed and verified
-**Context preserved:** Service layer complete, HTTP client removed, verification passed 5/5
+**Last command:** /gsd:execute-plan .planning/phases/08-cleanup-helm-update/08-01-PLAN.md
+**Last output:** Plan 08-01 complete - Dead code cleanup finished
+**Context preserved:** Deleted 14,676 lines (74 files), CLI cleaned to server+debug commands only
 
 **On next session:**
-- Phase 7 COMPLETE ✓ — All 5 plans executed, verification passed
-- Service layer architecture: TimelineService, GraphService, SearchService, MetadataService
-- REST handlers are thin HTTP adapters (41-54% reduction in lines)
-- MCP tools use direct service calls (no HTTP overhead)
-- HTTP client package deleted
-- Standalone mcp and agent commands disabled (need gRPC refactor)
-- Next: `/gsd:discuss-phase 8` for cleanup and Helm chart updates
+- Phase 8 IN PROGRESS — Plan 08-01 complete (dead code cleanup)
+- Deleted commands: mcp, agent, mock
+- Deleted package: internal/agent/ (entire package with 70 files)
+- Removed tech debt: standalone MCP/agent commands and build-disabled agent package
+- CLI surface: only `spectre server` and `spectre debug` commands
+- Next: Execute 08-02-PLAN.md for Helm chart updates
 
 ---
-*Last updated: 2026-01-21 — Completed Phase 7 execution and verification*
+*Last updated: 2026-01-21 — Completed 08-01-PLAN.md execution*
