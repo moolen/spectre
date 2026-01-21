@@ -1,16 +1,14 @@
 // Package victorialogs provides VictoriaLogs integration for Spectre.
-// This is a placeholder implementation for Phase 2 (Config Management & UI).
-// Full implementation will be added in Phase 3 (VictoriaLogs Client & Basic Pipeline).
 package victorialogs
 
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func init() {
@@ -24,14 +22,16 @@ func init() {
 
 // VictoriaLogsIntegration implements the Integration interface for VictoriaLogs.
 type VictoriaLogsIntegration struct {
-	name    string
-	url     string
-	client  *http.Client
-	logger  *logging.Logger
-	healthy bool
+	name     string
+	url      string
+	client   *Client   // VictoriaLogs HTTP client
+	pipeline *Pipeline // Backpressure-aware ingestion pipeline
+	metrics  *Metrics  // Prometheus metrics for observability
+	logger   *logging.Logger
 }
 
 // NewVictoriaLogsIntegration creates a new VictoriaLogs integration instance.
+// Note: Client, pipeline, and metrics are initialized in Start() to follow lifecycle pattern.
 func NewVictoriaLogsIntegration(name string, config map[string]interface{}) (integration.Integration, error) {
 	url, ok := config["url"].(string)
 	if !ok || url == "" {
@@ -39,13 +39,12 @@ func NewVictoriaLogsIntegration(name string, config map[string]interface{}) (int
 	}
 
 	return &VictoriaLogsIntegration{
-		name: name,
-		url:  url,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-		logger:  logging.GetLogger("integration.victorialogs." + name),
-		healthy: false,
+		name:     name,
+		url:      url,
+		client:   nil, // Initialized in Start()
+		pipeline: nil, // Initialized in Start()
+		metrics:  nil, // Initialized in Start()
+		logger:   logging.GetLogger("integration.victorialogs." + name),
 	}, nil
 }
 
@@ -53,7 +52,7 @@ func NewVictoriaLogsIntegration(name string, config map[string]interface{}) (int
 func (v *VictoriaLogsIntegration) Metadata() integration.IntegrationMetadata {
 	return integration.IntegrationMetadata{
 		Name:        v.name,
-		Version:     "0.1.0", // Placeholder version for Phase 2
+		Version:     "0.1.0",
 		Description: "VictoriaLogs log aggregation integration",
 		Type:        "victorialogs",
 	}
@@ -63,13 +62,23 @@ func (v *VictoriaLogsIntegration) Metadata() integration.IntegrationMetadata {
 func (v *VictoriaLogsIntegration) Start(ctx context.Context) error {
 	v.logger.Info("Starting VictoriaLogs integration: %s (url: %s)", v.name, v.url)
 
-	// Test connectivity by checking the health endpoint
-	if err := v.checkHealth(ctx); err != nil {
-		v.healthy = false
-		return fmt.Errorf("failed to connect to VictoriaLogs at %s: %w", v.url, err)
+	// Create Prometheus metrics (registers with global registry)
+	v.metrics = NewMetrics(prometheus.DefaultRegisterer, v.name)
+
+	// Create HTTP client with 30-second query timeout
+	v.client = NewClient(v.url, 30*time.Second)
+
+	// Create and start pipeline
+	v.pipeline = NewPipeline(v.client, v.metrics, v.name)
+	if err := v.pipeline.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start pipeline: %w", err)
 	}
 
-	v.healthy = true
+	// Test connectivity (warn on failure but continue - degraded state with auto-recovery)
+	if err := v.testConnection(ctx); err != nil {
+		v.logger.Warn("Failed initial connectivity test (will retry on health checks): %v", err)
+	}
+
 	v.logger.Info("VictoriaLogs integration started successfully")
 	return nil
 }
@@ -77,19 +86,33 @@ func (v *VictoriaLogsIntegration) Start(ctx context.Context) error {
 // Stop gracefully shuts down the integration.
 func (v *VictoriaLogsIntegration) Stop(ctx context.Context) error {
 	v.logger.Info("Stopping VictoriaLogs integration: %s", v.name)
-	v.healthy = false
+
+	// Stop pipeline if it exists
+	if v.pipeline != nil {
+		if err := v.pipeline.Stop(ctx); err != nil {
+			v.logger.Error("Error stopping pipeline: %v", err)
+			// Continue with shutdown even if pipeline stop fails
+		}
+	}
+
+	// Clear references
+	v.client = nil
+	v.pipeline = nil
+	v.metrics = nil
+
+	v.logger.Info("VictoriaLogs integration stopped")
 	return nil
 }
 
 // Health returns the current health status.
 func (v *VictoriaLogsIntegration) Health(ctx context.Context) integration.HealthStatus {
-	if !v.healthy {
-		return integration.Degraded
+	// If client is nil, integration hasn't been started or has been stopped
+	if v.client == nil {
+		return integration.Stopped
 	}
 
-	// Quick health check
-	if err := v.checkHealth(ctx); err != nil {
-		v.healthy = false
+	// Test connectivity
+	if err := v.testConnection(ctx); err != nil {
 		return integration.Degraded
 	}
 
@@ -97,35 +120,25 @@ func (v *VictoriaLogsIntegration) Health(ctx context.Context) integration.Health
 }
 
 // RegisterTools registers MCP tools with the server for this integration instance.
-// Phase 3 will implement actual log query tools.
 func (v *VictoriaLogsIntegration) RegisterTools(registry integration.ToolRegistry) error {
-	// Placeholder - no tools implemented yet
-	// Phase 5 will add progressive disclosure tools:
-	// - victorialogs_overview: Global overview of log patterns
-	// - victorialogs_patterns: Aggregated log templates with counts
-	// - victorialogs_logs: Raw log details for specific scope
-	v.logger.Info("VictoriaLogs tools registration (placeholder - no tools yet)")
+	// Phase 3: Client and pipeline ready for MCP tool registration
+	// Tools to be added in Phase 5: victorialogs_overview, victorialogs_patterns, victorialogs_logs
+	v.logger.Info("VictoriaLogs tools registration (placeholder - tools in Phase 5)")
 	return nil
 }
 
-// checkHealth performs a health check against the VictoriaLogs instance.
-func (v *VictoriaLogsIntegration) checkHealth(ctx context.Context) error {
-	// VictoriaLogs exposes a health endpoint at /health
-	healthURL := v.url + "/health"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create health request: %w", err)
+// testConnection tests connectivity to VictoriaLogs by executing a minimal query.
+func (v *VictoriaLogsIntegration) testConnection(ctx context.Context) error {
+	// Create test query params with default time range and minimal limit
+	params := QueryParams{
+		TimeRange: DefaultTimeRange(),
+		Limit:     1,
 	}
 
-	resp, err := v.client.Do(req)
+	// Execute test query
+	_, err := v.client.QueryLogs(ctx, params)
 	if err != nil {
-		return fmt.Errorf("health check failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("health check returned status %d", resp.StatusCode)
+		return fmt.Errorf("connectivity test failed: %w", err)
 	}
 
 	return nil
