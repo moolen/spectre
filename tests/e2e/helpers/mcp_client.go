@@ -91,7 +91,7 @@ func (m *MCPClient) sendRequest(ctx context.Context, method string, params map[s
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", m.BaseURL+"/mcp", bytes.NewReader(reqBody))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", m.BaseURL+"/v1/mcp", bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
