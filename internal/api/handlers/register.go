@@ -46,16 +46,17 @@ func RegisterHandlers(
 	// Create timeline handler using the service
 	timelineHandler := NewTimelineHandler(timelineService, logger, tracer)
 
-	// Select appropriate executor for metadata handler (same as timeline)
+	// Create MetadataService with appropriate executor (same as timeline)
 	var metadataExecutor api.QueryExecutor
 	if graphExecutor != nil && querySource == api.TimelineQuerySourceGraph {
-		logger.Info("Metadata handler using GRAPH query executor")
+		logger.Info("Metadata service using GRAPH query executor")
 		metadataExecutor = graphExecutor
 	} else {
-		logger.Info("Metadata handler using STORAGE query executor")
+		logger.Info("Metadata service using STORAGE query executor")
 		metadataExecutor = storageExecutor
 	}
-	metadataHandler := NewMetadataHandler(metadataExecutor, metadataCache, logger, tracer)
+	metadataService := api.NewMetadataService(metadataExecutor, metadataCache, logger, tracer)
+	metadataHandler := NewMetadataHandler(metadataService, logger, tracer)
 
 	router.HandleFunc("/v1/search", withMethod(http.MethodGet, searchHandler.Handle))
 	router.HandleFunc("/v1/timeline", withMethod(http.MethodGet, timelineHandler.Handle))
