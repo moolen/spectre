@@ -28,6 +28,7 @@ type VictoriaLogsIntegration struct {
 	pipeline *Pipeline // Backpressure-aware ingestion pipeline
 	metrics  *Metrics  // Prometheus metrics for observability
 	logger   *logging.Logger
+	registry integration.ToolRegistry // MCP tool registry for dynamic tool registration
 }
 
 // NewVictoriaLogsIntegration creates a new VictoriaLogs integration instance.
@@ -121,9 +122,16 @@ func (v *VictoriaLogsIntegration) Health(ctx context.Context) integration.Health
 
 // RegisterTools registers MCP tools with the server for this integration instance.
 func (v *VictoriaLogsIntegration) RegisterTools(registry integration.ToolRegistry) error {
-	// Phase 3: Client and pipeline ready for MCP tool registration
-	// Tools to be added in Phase 5: victorialogs_overview, victorialogs_patterns, victorialogs_logs
-	v.logger.Info("VictoriaLogs tools registration (placeholder - tools in Phase 5)")
+	v.logger.Info("Registering VictoriaLogs MCP tools for instance: %s", v.name)
+
+	// Store registry for future tool implementations (Plans 2-4)
+	v.registry = registry
+
+	// TODO Phase 5 Plans 2-4: Register overview, patterns, logs tools
+	// Tool naming convention: victorialogs_{name}_{tool}
+	// Example: victorialogs_prod_overview, victorialogs_prod_patterns, victorialogs_prod_logs
+
+	v.logger.Info("VictoriaLogs tools registration complete (tools in Plans 2-4)")
 	return nil
 }
 
