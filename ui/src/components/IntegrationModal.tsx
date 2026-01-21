@@ -254,6 +254,7 @@ export function IntegrationModal({
             config={config}
             onChange={setConfig}
             firstInputRef={firstInputRef}
+            isEditMode={!!initialConfig}
           />
 
           {/* Test Result */}

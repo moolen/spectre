@@ -11,14 +11,15 @@ interface IntegrationConfigFormProps {
   config: IntegrationConfig;
   onChange: (config: IntegrationConfig) => void;
   firstInputRef?: React.RefObject<HTMLInputElement>;
+  isEditMode?: boolean;
 }
 
 export function IntegrationConfigForm({
   config,
   onChange,
   firstInputRef,
+  isEditMode = false,
 }: IntegrationConfigFormProps) {
-  const isEditMode = !!config.name && config.name.length > 0;
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onChange({ ...config, name: e.target.value });
