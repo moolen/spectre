@@ -39,22 +39,22 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **MINE-02**: Template extraction normalizes logs (lowercase, remove numbers/UUIDs/IPs)
 - [x] **MINE-03**: Templates have stable hashes for cross-client consistency
 - [x] **MINE-04**: Canonical templates stored in MCP server for persistence
-- [ ] **MINE-05**: Mining samples logs for high-volume namespaces (performance)
-- [ ] **MINE-06**: Mining uses time-window batching for efficiency
+- [x] **MINE-05**: Mining samples logs for high-volume namespaces (performance)
+- [x] **MINE-06**: Mining uses time-window batching for efficiency
 
 ### Novelty Detection
 
-- [ ] **NOVL-01**: System compares current templates to previous time window
-- [ ] **NOVL-02**: New patterns (not in previous window) are flagged as novel
-- [ ] **NOVL-03**: High-volume patterns are ranked by count
+- [x] **NOVL-01**: System compares current templates to previous time window
+- [x] **NOVL-02**: New patterns (not in previous window) are flagged as novel
+- [x] **NOVL-03**: High-volume patterns are ranked by count
 
 ### Progressive Disclosure Tools
 
-- [ ] **PROG-01**: MCP tool returns global overview (error/panic/timeout counts by namespace over time)
-- [ ] **PROG-02**: MCP tool returns aggregated view (log templates with counts, novelty flags)
-- [ ] **PROG-03**: MCP tool returns full logs for specific scope (namespace + time range)
-- [ ] **PROG-04**: Tools preserve filter state across drill-down levels
-- [ ] **PROG-05**: Overview highlights errors, panics, timeouts first (smart defaults)
+- [x] **PROG-01**: MCP tool returns global overview (error/panic/timeout counts by namespace over time)
+- [x] **PROG-02**: MCP tool returns aggregated view (log templates with counts, novelty flags)
+- [x] **PROG-03**: MCP tool returns full logs for specific scope (namespace + time range)
+- [x] **PROG-04**: Tools preserve filter state across drill-down levels
+- [x] **PROG-05**: Overview highlights errors, panics, timeouts first (smart defaults)
 
 ## v2 Requirements
 
@@ -114,16 +114,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MINE-02 | Phase 4 | Complete |
 | MINE-03 | Phase 4 | Complete |
 | MINE-04 | Phase 4 | Complete |
-| MINE-05 | Phase 5 | Pending |
-| MINE-06 | Phase 5 | Pending |
-| NOVL-01 | Phase 5 | Pending |
-| NOVL-02 | Phase 5 | Pending |
-| NOVL-03 | Phase 5 | Pending |
-| PROG-01 | Phase 5 | Pending |
-| PROG-02 | Phase 5 | Pending |
-| PROG-03 | Phase 5 | Pending |
-| PROG-04 | Phase 5 | Pending |
-| PROG-05 | Phase 5 | Pending |
+| MINE-05 | Phase 5 | Complete |
+| MINE-06 | Phase 5 | Complete |
+| NOVL-01 | Phase 5 | Complete |
+| NOVL-02 | Phase 5 | Complete |
+| NOVL-03 | Phase 5 | Complete |
+| PROG-01 | Phase 5 | Complete |
+| PROG-02 | Phase 5 | Complete |
+| PROG-03 | Phase 5 | Complete |
+| PROG-04 | Phase 5 | Complete |
+| PROG-05 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 31 total
