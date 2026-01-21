@@ -10,6 +10,15 @@ import (
 // Filters use exact match operator (:=) and always include a time range.
 // Returns a complete LogsQL query string ready for execution.
 func BuildLogsQLQuery(params QueryParams) string {
+	// Validate time range meets minimum duration requirement (15 minutes per VLOG-03)
+	if !params.TimeRange.IsZero() {
+		if err := params.TimeRange.ValidateMinimumDuration(15 * time.Minute); err != nil {
+			// Return empty query on validation failure - caller should check for empty result
+			// Alternative: log warning and clamp to 15min, but explicit failure is clearer
+			return ""
+		}
+	}
+
 	var filters []string
 
 	// Add K8s-focused field filters (only if non-empty)
