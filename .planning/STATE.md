@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-21)
 ## Current Position
 
 Phase: Phase 7 — Service Layer Extraction (2 of 4) — IN PROGRESS
-Plan: 07-02 complete (2 of 5 plans in phase)
-Status: In progress - Timeline and Graph services extracted, MCP tools wired
-Last activity: 2026-01-21 — Completed 07-02-PLAN.md (GraphService extraction with MCP tool wiring)
+Plan: 07-04 complete (4 of 5 plans in phase)
+Status: In progress - Timeline, Graph, and Metadata services extracted
+Last activity: 2026-01-21 — Completed 07-04-PLAN.md (MetadataService extraction)
 
-Progress: ████░░░░░░░░░░░░░░░░ 20% (4/20 total plans estimated)
+Progress: ██████░░░░░░░░░░░░░░ 30% (6/20 total plans estimated)
 
 ## Milestone: v1.1 Server Consolidation
 
@@ -22,7 +22,7 @@ Progress: ████░░░░░░░░░░░░░░░░ 20% (4/20
 
 **Phases:**
 - Phase 6: Consolidated Server & Integration Manager (7 reqs) — COMPLETE (2/2 plans complete)
-- Phase 7: Service Layer Extraction (5 reqs) — IN PROGRESS (2/5 plans complete)
+- Phase 7: Service Layer Extraction (5 reqs) — IN PROGRESS (4/5 plans complete)
 - Phase 8: Cleanup & Helm Chart Update (5 reqs) — Pending
 - Phase 9: E2E Test Validation (4 reqs) — Pending
 
@@ -53,12 +53,12 @@ None
 
 **v1.1 Milestone:**
 - Phases complete: 1/4 (Phase 6 ✅)
-- Plans complete: 4/20 (estimated)
-- Requirements satisfied: 9/21 (SRVR-01 through INTG-03, SVCE-01 through SVCE-02)
+- Plans complete: 6/20 (estimated)
+- Requirements satisfied: 13/21 (SRVR-01 through INTG-03, SVCE-01 through SVCE-04)
 
 **Session metrics:**
 - Current session: 2026-01-21
-- Plans executed this session: 4
+- Plans executed this session: 6
 - Blockers hit this session: 0
 
 ## Accumulated Context
@@ -78,6 +78,9 @@ None
 | 07-02 | GraphService wraps existing analyzers | Facade pattern over PathDiscoverer, AnomalyDetector, Analyzer | Reuses proven logic, provides unified interface |
 | 07-02 | Timeline integration deferred for detect_anomalies | TimelineService integration complex, uses HTTP for now | Keeps plan focused on graph operations |
 | 07-02 | Dual constructors for MCP tools | NewTool(service) and NewToolWithClient(client) | Enables gradual migration, backward compatibility |
+| 07-04 | MetadataService returns cache hit status | Service returns (response, cacheHit bool, error) tuple | Handler uses cacheHit for X-Cache header, cleaner than handler inspecting cache |
+| 07-04 | useCache hardcoded to true in handler | Metadata changes infrequently, always prefer cache | Simplifies API surface, cache fallback handled by service |
+| 07-04 | Service handles both efficient and fallback query paths | Check for MetadataQueryExecutor interface, fallback if unavailable | Centralizes query path selection in service layer |
 
 ### Active TODOs
 
@@ -90,16 +93,17 @@ None
 
 ## Session Continuity
 
-**Last command:** Executed 07-02-PLAN.md (GraphService extraction with MCP tool wiring)
-**Last output:** 07-02-SUMMARY.md created, STATE.md updated
-**Context preserved:** GraphService wraps analyzers, REST handlers refactored, MCP graph tools call services directly
+**Last command:** Executed 07-04-PLAN.md (MetadataService extraction)
+**Last output:** 07-04-SUMMARY.md created, STATE.md updated
+**Context preserved:** MetadataService created with cache integration, REST metadata handler refactored to thin adapter
 
 **On next session:**
-- Phase 7 IN PROGRESS — 2 of 5 plans complete (SVCE-01, SVCE-02 satisfied)
-- Service layer pattern proven for Timeline and Graph operations
-- MCP tools successfully using direct service calls (no HTTP for graph operations)
-- Next: Continue Phase 7 service extractions (plans 03-05)
-- REST handlers follow thin adapter pattern, MCP tools call services directly
+- Phase 7 IN PROGRESS — 4 of 5 plans complete (SVCE-01 through SVCE-04 satisfied)
+- Service layer pattern complete for all core API operations (Timeline, Graph, Metadata)
+- REST handlers follow thin adapter pattern, delegate all business logic to services
+- Services encapsulate cache integration and query path selection
+- Next: Plan 07-05 (final plan) - Wire MCP metadata tool to use MetadataService directly
+- After Phase 7: Phase 8 cleanup and Helm chart updates
 
 ---
-*Last updated: 2026-01-21 — Completed Phase 7 Plan 2*
+*Last updated: 2026-01-21 — Completed Phase 7 Plan 4*
