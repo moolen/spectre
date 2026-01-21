@@ -159,17 +159,23 @@ Plans:
 7. Template mining samples high-volume namespaces for efficiency (MINE-05)
 8. Template mining uses time-window batching for efficiency (MINE-06)
 
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (awaiting `/gsd:plan-phase 5`)
+- [ ] 05-01-PLAN.md — MCP tool registration infrastructure
+- [ ] 05-02-PLAN.md — Overview tool implementation (namespace-level severity counts)
+- [ ] 05-03-PLAN.md — Patterns tool with novelty detection and sampling
+- [ ] 05-04-PLAN.md — Logs tool and end-to-end integration
 
 **Notes:**
-- Three-level drill-down: global → aggregated → detail
-- MCP tool descriptions with JSON Schema inputs
-- MCP Resources for VictoriaLogs schema docs
+- Three-level drill-down: overview → patterns → logs
+- Tool naming convention: {integration-type}_{instance}_{tool}
+- Each integration instance gets its own set of 3 tools
+- Stateless design where each tool call is independent
 - Novelty detection compares to previous window (not long-term baseline)
-- Research suggests limiting to 10-20 MCP tools maximum (context window constraints)
+- Compact responses to minimize AI assistant context usage
+- High-volume namespace sampling (threshold: 500+ logs)
+- Time-window batching via single QueryLogs call per window
 
 ---
 
@@ -181,7 +187,7 @@ Plans:
 | 2 - Config Management & UI | ✓ Complete | 3/3 | 3/3 | 100% |
 | 3 - VictoriaLogs Client & Basic Pipeline | ✓ Complete | 6/6 | 4/4 | 100% |
 | 4 - Log Template Mining | ✓ Complete | 4/4 | 4/4 | 100% |
-| 5 - Progressive Disclosure MCP Tools | Pending | 10/10 | 0/0 | 0% |
+| 5 - Progressive Disclosure MCP Tools | Planned | 10/10 | 4/4 | 0% |
 
 **Overall:** 21/31 requirements complete (68%)
 
@@ -205,4 +211,4 @@ All v1 requirements covered. No orphaned requirements.
 
 ---
 
-*Last updated: 2026-01-21 (Phase 4 complete)*
+*Last updated: 2026-01-21 (Phase 5 planned)*
