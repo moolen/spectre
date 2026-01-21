@@ -122,17 +122,23 @@ Plans:
 4. Canonical templates stored in MCP server and persist across restarts
 5. Mining samples high-volume namespaces and uses time-window batching for efficiency
 
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (awaiting `/gsd:plan-phase 4`)
+- [ ] 04-01-PLAN.md — Core template mining foundation (Drain wrapper, template types, hashing)
+- [ ] 04-02-PLAN.md — Processing pipeline (normalization, masking, K8s patterns)
+- [ ] 04-03-PLAN.md — Storage & persistence (namespace store, disk snapshots)
+- [ ] 04-04-PLAN.md — Lifecycle management (rebalancing, pruning, testing)
 
 **Notes:**
 - Log processing package is integration-agnostic (reusable beyond VictoriaLogs)
-- Uses LoggingDrain library or custom Drain implementation
-- Pre-tokenization with masking to prevent template explosion from variable-starting logs
-- Periodic rebalancing mechanism to prevent template drift
-- Research flag: NEEDS DEEPER RESEARCH during planning for parameter tuning (similarity threshold, tree depth, masking patterns)
+- Uses github.com/faceair/drain library (official Go port of Drain3)
+- Post-tokenization masking to prevent template explosion from variable-starting logs
+- Periodic rebalancing mechanism (5 minutes) to prevent template drift
+- Count-based pruning (threshold: 10) and auto-merge (similarity: 0.7) for self-healing
+- Namespace-scoped template storage for multi-tenant environments
+- In-memory with periodic JSON snapshots (every 5 minutes) for persistence
+- Comprehensive test suite targeting >80% coverage
 
 ---
 
@@ -173,7 +179,7 @@ Plans:
 | 1 - Plugin Infrastructure Foundation | ✓ Complete | 8/8 | 4/4 | 100% |
 | 2 - Config Management & UI | ✓ Complete | 3/3 | 3/3 | 100% |
 | 3 - VictoriaLogs Client & Basic Pipeline | ✓ Complete | 6/6 | 4/4 | 100% |
-| 4 - Log Template Mining | Pending | 6/6 | 0/0 | 0% |
+| 4 - Log Template Mining | Pending | 6/6 | 4/4 | 0% |
 | 5 - Progressive Disclosure MCP Tools | Pending | 8/8 | 0/0 | 0% |
 
 **Overall:** 17/31 requirements complete (55%)
@@ -198,4 +204,4 @@ All v1 requirements covered. No orphaned requirements.
 
 ---
 
-*Last updated: 2026-01-21 (Phase 3 complete with gap closure)*
+*Last updated: 2026-01-21 (Phase 4 planned)*
