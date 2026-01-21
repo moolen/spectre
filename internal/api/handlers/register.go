@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
+	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -21,6 +23,8 @@ func RegisterHandlers(
 	graphPipeline sync.Pipeline,
 	metadataCache *api.MetadataCache,
 	namespaceGraphCache *namespacegraph.Cache,
+	configPath string,
+	integrationManager *integration.Manager,
 	logger *logging.Logger,
 	tracer trace.Tracer,
 	withMethod func(string, http.HandlerFunc) http.HandlerFunc,
@@ -118,5 +122,55 @@ func RegisterHandlers(
 		exportHandler := NewExportHandler(graphExecutor, logger)
 		router.HandleFunc("/v1/storage/export", withMethod(http.MethodGet, exportHandler.Handle))
 		logger.Info("Registered /v1/storage/export endpoint for event exports")
+	}
+
+	// Register integration config management endpoints
+	if configPath != "" && integrationManager != nil {
+		configHandler := NewIntegrationConfigHandler(configPath, integrationManager, logger)
+
+		// Collection endpoints
+		router.HandleFunc("/api/config/integrations", func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				configHandler.HandleList(w, r)
+			case http.MethodPost:
+				configHandler.HandleCreate(w, r)
+			default:
+				api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Allowed: GET, POST")
+			}
+		})
+
+		// Instance-specific endpoints with path parameter
+		router.HandleFunc("/api/config/integrations/", func(w http.ResponseWriter, r *http.Request) {
+			name := strings.TrimPrefix(r.URL.Path, "/api/config/integrations/")
+			if name == "" {
+				api.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Integration name required")
+				return
+			}
+
+			// Check for /test suffix
+			if strings.HasSuffix(name, "/test") {
+				if r.Method != http.MethodPost {
+					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+					return
+				}
+				configHandler.HandleTest(w, r)
+				return
+			}
+
+			// Route by method for /{name} operations
+			switch r.Method {
+			case http.MethodGet:
+				configHandler.HandleGet(w, r)
+			case http.MethodPut:
+				configHandler.HandleUpdate(w, r)
+			case http.MethodDelete:
+				configHandler.HandleDelete(w, r)
+			default:
+				api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Allowed: GET, PUT, DELETE")
+			}
+		})
+
+		logger.Info("Registered /api/config/integrations endpoints")
 	}
 }
