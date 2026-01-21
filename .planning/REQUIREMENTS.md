@@ -35,10 +35,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Log Template Mining
 
-- [ ] **MINE-01**: Log processing package extracts templates using Drain algorithm
-- [ ] **MINE-02**: Template extraction normalizes logs (lowercase, remove numbers/UUIDs/IPs)
-- [ ] **MINE-03**: Templates have stable hashes for cross-client consistency
-- [ ] **MINE-04**: Canonical templates stored in MCP server for persistence
+- [x] **MINE-01**: Log processing package extracts templates using Drain algorithm
+- [x] **MINE-02**: Template extraction normalizes logs (lowercase, remove numbers/UUIDs/IPs)
+- [x] **MINE-03**: Templates have stable hashes for cross-client consistency
+- [x] **MINE-04**: Canonical templates stored in MCP server for persistence
 - [ ] **MINE-05**: Mining samples logs for high-volume namespaces (performance)
 - [ ] **MINE-06**: Mining uses time-window batching for efficiency
 
@@ -110,12 +110,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VLOG-04 | Phase 3 | Complete |
 | VLOG-05 | Phase 3 | Complete |
 | VLOG-06 | Phase 3 | Complete |
-| MINE-01 | Phase 4 | Pending |
-| MINE-02 | Phase 4 | Pending |
-| MINE-03 | Phase 4 | Pending |
-| MINE-04 | Phase 4 | Pending |
-| MINE-05 | Phase 4 | Pending |
-| MINE-06 | Phase 4 | Pending |
+| MINE-01 | Phase 4 | Complete |
+| MINE-02 | Phase 4 | Complete |
+| MINE-03 | Phase 4 | Complete |
+| MINE-04 | Phase 4 | Complete |
+| MINE-05 | Phase 5 | Pending |
+| MINE-06 | Phase 5 | Pending |
 | NOVL-01 | Phase 5 | Pending |
 | NOVL-02 | Phase 5 | Pending |
 | NOVL-03 | Phase 5 | Pending |
@@ -132,4 +132,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-20*
-*Last updated: 2026-01-21 (Phase 3 requirements marked complete)*
+*Last updated: 2026-01-21 (MINE-05/06 moved to Phase 5 - integration concerns)*

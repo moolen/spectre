@@ -113,22 +113,21 @@ Plans:
 
 **Dependencies:** Phase 3 (needs log pipeline and VictoriaLogs client)
 
-**Requirements:** MINE-01, MINE-02, MINE-03, MINE-04, MINE-05, MINE-06
+**Requirements:** MINE-01, MINE-02, MINE-03, MINE-04
 
 **Success Criteria:**
 1. Log processing package extracts templates using Drain algorithm with O(log n) matching
 2. Template extraction normalizes logs (lowercase, remove numbers/UUIDs/IPs) for stable grouping
 3. Templates have stable hash IDs for cross-client consistency
 4. Canonical templates stored in MCP server and persist across restarts
-5. Mining samples high-volume namespaces and uses time-window batching for efficiency
 
 **Plans:** 4 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Core template mining foundation (Drain wrapper, template types, hashing)
-- [ ] 04-02-PLAN.md — Processing pipeline (normalization, masking, K8s patterns)
-- [ ] 04-03-PLAN.md — Storage & persistence (namespace store, disk snapshots)
-- [ ] 04-04-PLAN.md — Lifecycle management (rebalancing, pruning, testing)
+- [x] 04-01-PLAN.md — Core template mining foundation (Drain wrapper, template types, hashing)
+- [x] 04-02-PLAN.md — Processing pipeline (normalization, masking, K8s patterns)
+- [x] 04-03-PLAN.md — Storage & persistence (namespace store, disk snapshots)
+- [x] 04-04-PLAN.md — Lifecycle management (rebalancing, pruning, testing)
 
 **Notes:**
 - Log processing package is integration-agnostic (reusable beyond VictoriaLogs)
@@ -148,7 +147,7 @@ Plans:
 
 **Dependencies:** Phase 3 (VictoriaLogs client), Phase 4 (template mining)
 
-**Requirements:** PROG-01, PROG-02, PROG-03, PROG-04, PROG-05, NOVL-01, NOVL-02, NOVL-03
+**Requirements:** PROG-01, PROG-02, PROG-03, PROG-04, PROG-05, NOVL-01, NOVL-02, NOVL-03, MINE-05, MINE-06
 
 **Success Criteria:**
 1. MCP tool returns global overview (error/panic/timeout counts by namespace over time)
@@ -157,6 +156,8 @@ Plans:
 4. Tools preserve filter state across drill-down levels (no context loss)
 5. Overview highlights errors, panics, timeouts first via smart defaults
 6. System compares current templates to previous time window and flags novel patterns
+7. Template mining samples high-volume namespaces for efficiency (MINE-05)
+8. Template mining uses time-window batching for efficiency (MINE-06)
 
 **Plans:** 0 plans
 
@@ -179,10 +180,10 @@ Plans:
 | 1 - Plugin Infrastructure Foundation | ✓ Complete | 8/8 | 4/4 | 100% |
 | 2 - Config Management & UI | ✓ Complete | 3/3 | 3/3 | 100% |
 | 3 - VictoriaLogs Client & Basic Pipeline | ✓ Complete | 6/6 | 4/4 | 100% |
-| 4 - Log Template Mining | Pending | 6/6 | 4/4 | 0% |
-| 5 - Progressive Disclosure MCP Tools | Pending | 8/8 | 0/0 | 0% |
+| 4 - Log Template Mining | ✓ Complete | 4/4 | 4/4 | 100% |
+| 5 - Progressive Disclosure MCP Tools | Pending | 10/10 | 0/0 | 0% |
 
-**Overall:** 17/31 requirements complete (55%)
+**Overall:** 21/31 requirements complete (68%)
 
 ---
 
@@ -204,4 +205,4 @@ All v1 requirements covered. No orphaned requirements.
 
 ---
 
-*Last updated: 2026-01-21 (Phase 4 planned)*
+*Last updated: 2026-01-21 (Phase 4 complete)*
