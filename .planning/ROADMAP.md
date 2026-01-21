@@ -79,7 +79,12 @@ Plans:
 3. Helm values.yaml removes MCP-specific configuration (mcp.enabled, mcp.port, etc.)
 4. Deployed pod exposes MCP at /mcp path on main service port 8080
 
-**Plans:** TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — Remove standalone mcp/agent/mock commands and internal/agent package
+- [ ] 08-02-PLAN.md — Update Helm chart templates and values to remove MCP sidecar
+- [ ] 08-03-PLAN.md — Update project and Helm chart documentation
 
 **Status:** Pending
 
@@ -111,10 +116,10 @@ Plans:
 |-------|--------|-------|--------------|
 | 6 - Consolidated Server & Integration Manager | ✓ Complete | 2/2 | 7 |
 | 7 - Service Layer Extraction | ✓ Complete | 5/5 | 5 |
-| 8 - Cleanup & Helm Chart Update | Pending | 0/0 | 5 |
+| 8 - Cleanup & Helm Chart Update | Pending | 0/3 | 5 |
 | 9 - E2E Test Validation | Pending | 0/0 | 4 |
 
-**Total:** 7/7 Phase 6-7 plans complete, 12/21 requirements satisfied
+**Total:** 7/10 Phase 6-8 plans complete, 12/21 requirements satisfied
 
 ---
 
@@ -149,4 +154,4 @@ Plans:
 ---
 
 *Created: 2026-01-21*
-*Last updated: 2026-01-21 — Phase 7 complete (5/5 plans executed, verified)*
+*Last updated: 2026-01-21 — Phase 8 planned (3 plans created)*
