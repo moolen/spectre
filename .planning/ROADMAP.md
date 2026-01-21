@@ -92,21 +92,25 @@ Plans:
 
 ### Phase 9: E2E Test Validation
 
-**Goal:** E2E tests verify consolidated architecture works for MCP HTTP, MCP stdio, and config reload scenarios.
+**Goal:** E2E tests verify consolidated architecture works for MCP HTTP and config reload scenarios.
 
 **Dependencies:** Phase 8 (needs deployed consolidated server)
 
 **Requirements:** TEST-01, TEST-02, TEST-03, TEST-04
 
 **Success Criteria:**
-1. MCP HTTP tests connect to main server port 8080 at /mcp path and all tools respond
-2. MCP stdio tests work with consolidated `spectre server --transport=stdio` binary
+1. MCP HTTP tests connect to main server port 8080 at /v1/mcp path and all tools respond
+2. MCP stdio tests removed (standalone command no longer exists)
 3. Config reload tests verify integration hot-reload works in consolidated architecture
-4. MCP sidecar-specific test assumptions removed (no localhost:3000 hardcoding)
+4. MCP sidecar-specific test assumptions removed (port 8082 references deleted)
 
-**Plans:** TBD
+**Plans:** 2 plans
 
-**Status:** Pending
+Plans:
+- [ ] 09-01-PLAN.md — Update MCP endpoint and port references for consolidated architecture
+- [ ] 09-02-PLAN.md — Remove stdio tests and verify E2E suite
+
+**Status:** Planned (2026-01-21)
 
 ---
 
@@ -117,9 +121,9 @@ Plans:
 | 6 - Consolidated Server & Integration Manager | ✓ Complete | 2/2 | 7 |
 | 7 - Service Layer Extraction | ✓ Complete | 5/5 | 5 |
 | 8 - Cleanup & Helm Chart Update | ✓ Complete | 3/3 | 5 |
-| 9 - E2E Test Validation | Pending | 0/0 | 4 |
+| 9 - E2E Test Validation | Planned | 0/2 | 4 |
 
-**Total:** 10/10 Phase 6-8 plans complete, 17/21 requirements satisfied
+**Total:** 10/12 plans created, 17/21 requirements to be validated
 
 ---
 
@@ -152,4 +156,4 @@ Plans:
 ---
 
 *Created: 2026-01-21*
-*Last updated: 2026-01-21 — Phase 8 complete (CLI cleanup, Helm chart, documentation)*
+*Last updated: 2026-01-21 — Phase 9 planned (E2E test validation, 2 plans)*
