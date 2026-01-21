@@ -151,38 +151,35 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 04-01-PLAN.md (Drain Algorithm Foundation & Template Types)
+**Stopped at:** Completed 04-02-PLAN.md (Log Normalization & Variable Masking)
 
 **What just happened:**
-- Executed gap closure plan 03-04: Enforced 15-minute minimum time range validation for VictoriaLogs queries
-- Added ValidateMinimumDuration method to TimeRange type with error messages
-- Added Duration helper method for time range calculations
-- Created comprehensive test suite: types_test.go and query_test.go with 11 test cases
-- Updated BuildLogsQLQuery to validate time ranges early and return empty string on failure
-- All tests pass with 100% coverage of validation logic
-- All tasks completed in ~2 minutes with no deviations
-- Gap from 03-VERIFICATION.md closed: VLOG-03 requirement now fully satisfied
-- Phase 3 complete (17/31 requirements, 55% overall progress)
-- SUMMARY: .planning/phases/03-victorialogs-client-pipeline/03-04-SUMMARY.md
+- Executed plan 04-02: Log normalization and variable masking for stable template generation
+- Created ExtractMessage for JSON message field extraction with fallback to plain text
+- Created PreProcess for case-insensitive normalization (lowercase, trim) without variable masking
+- Created AggressiveMask with 11+ regex patterns: IPs, UUIDs, timestamps, hex, paths, URLs, emails
+- Created MaskKubernetesNames for K8s pod/replicaset name pattern detection
+- Implemented context-aware HTTP status code preservation (404 vs 500 stay distinct)
+- Fixed file path regex by removing word boundaries for correct full-path matching
+- All tests pass with 60+ test cases across normalize, masking, and kubernetes functions
+- All tasks completed in ~3.5 minutes with 1 auto-fixed bug (file path regex)
+- Phase 4 progress: 2/4 plans complete (50%)
+- SUMMARY: .planning/phases/04-log-template-mining/04-02-SUMMARY.md
 
 **What's next:**
-- Phase 3 fully complete (all 4 plans executed successfully, including gap closure)
-- Next: Plan Phase 4 (Log Template Mining) or Phase 5 (Progressive Disclosure MCP Tools)
-- Options:
-  - Phase 4: Drain algorithm, template pattern mining, mask detection
-  - Phase 5: MCP tools for progressive disclosure (overview, patterns, logs)
-  - Recommendation: Phase 5 first (delivers user value sooner), Phase 4 later (optimization)
+- Phase 4 in progress: 2/4 plans complete (Drain foundation + normalization/masking done)
+- Next: Plan 04-03 (integrate preprocessing with Drain processor) or Plan 04-04 (template storage & persistence)
+- Pipeline ready: PreProcess → Drain clustering → AggressiveMask → Template storage
 
 **Context for next agent:**
-- VictoriaLogs integration fully functional: client, pipeline, metrics all wired
-- Time range validation protects VictoriaLogs from excessive query load (15-minute minimum enforced)
-- Health checks return Healthy/Degraded/Stopped based on connectivity tests
-- Prometheus metrics exposed: victorialogs_pipeline_queue_depth, victorialogs_pipeline_logs_total, victorialogs_pipeline_errors_total
-- Integration framework from Phase 1 validates version compatibility
-- Config management UI from Phase 2 allows runtime integration configuration
-- Client provides QueryLogs, QueryHistogram, QueryAggregation for Phase 5 MCP tool implementation
-- BuildLogsQLQuery validates all query parameters including time range constraints
-- Pipeline ready for log ingestion (though no log source wired yet)
+- Complete two-phase processing pipeline: minimal preprocessing before Drain, aggressive masking after
+- JSON message extraction supports: message, msg, log, text, _raw, event fields with fallback
+- Masking preserves HTTP status codes and ports while aggressively masking variables
+- Kubernetes pod/replicaset names unified with <K8S_NAME> placeholder
+- All functions stateless and ready for integration with Drain processor
+- Test coverage ensures patterns work correctly for edge cases
+- VictoriaLogs integration fully functional from Phase 3
+- Integration framework from Phases 1-2 provides config management and lifecycle
 
 ---
 
