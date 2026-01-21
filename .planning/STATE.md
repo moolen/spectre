@@ -11,14 +11,14 @@
 ## Current Position
 
 **Phase:** 2 - Config Management & UI
-**Plan:** 2 of 2 (02-02-PLAN.md - just completed)
+**Plan:** 1 of 2 (02-01-PLAN.md - just completed)
 **Status:** In Progress
 **Progress:** 8/31 requirements
-**Last activity:** 2026-01-21 - Completed 02-02-PLAN.md
+**Last activity:** 2026-01-21 - Completed 02-01-PLAN.md
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
-[█████░░░░░] 50% Phase 2 (2/4 plans complete)
+[█████░░░░░] 50% Phase 2 (1/2 plans complete)
 [██▓░░░░░░░] 26% Overall (8/31 requirements)
 ```
 
@@ -57,6 +57,11 @@
 | Health checks auto-recover degraded instances | 01-04 | Every 30s (configurable), calls Start() for degraded instances |
 | Config reload triggers full restart with re-validation | 01-04 | Stop all → clear registry → re-validate versions → start new |
 | Manager registered as lifecycle component | 01-04 | No dependencies, follows existing lifecycle.Manager pattern |
+| Atomic writes prevent config corruption on crashes | 02-01 | Temp-file-then-rename ensures readers never see partial writes (POSIX atomicity) |
+| Health status enriched from manager registry in real-time | 02-01 | Config file only has static data - runtime status from registry.Get().Health() |
+| Test endpoint validates and attempts connection with 5s timeout | 02-01 | UI "Test Connection" needs to validate config without persisting |
+| Panic recovery in test endpoint | 02-01 | Malformed configs might panic - catch with recover() and return error message |
+| Path parameters extracted with strings.TrimPrefix | 02-01 | Codebase uses stdlib http.ServeMux - follow existing patterns |
 | IntegrationModal uses React portal for rendering at document.body | 02-02 | Proper z-index stacking, avoids parent container constraints |
 | Focus trap cycles Tab between focusable elements in modal | 02-02 | Accessibility - keyboard navigation stays within modal context |
 | Delete button only in edit mode with confirmation dialog | 02-02 | Prevents accidental deletes, clear separation add vs edit modes |
@@ -101,28 +106,28 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 02-02-PLAN.md (React UI for integration management)
+**Stopped at:** Completed 02-01-PLAN.md (REST API for integration config CRUD)
 
 **What just happened:**
-- Executed plan 02-02: React integration management UI
-- Created IntegrationModal with portal rendering and focus management
-- Created IntegrationTable with status indicators
-- Created IntegrationConfigForm with type-specific fields
-- Wired IntegrationsPage to REST API with full CRUD operations
-- All tasks completed in 3m 26s with no deviations from plan
-- SUMMARY: .planning/phases/02-config-management-ui/02-02-SUMMARY.md
+- Executed plan 02-01: REST API for integration config management
+- Atomic YAML writer with temp-file-then-rename pattern (already existed from 02-02)
+- REST handlers for CRUD operations with health status enrichment
+- Test endpoint validates config and attempts connection with 5s timeout
+- Routes registered at /api/config/integrations with method-based routing
+- All tasks completed in 6min with 3 auto-fixed bugs
+- SUMMARY: .planning/phases/02-config-management-ui/02-01-SUMMARY.md
 
 **What's next:**
-- Phase 2 has 2 more plans remaining (02-01 REST API, and one more)
-- Or proceed to Phase 3 if Phase 2 is actually complete
-- Need to verify Phase 2 completion status
+- Phase 2 plan 02-02 (React UI) was already executed previously
+- Phase 2 appears complete (both plans done)
+- Next: Verify Phase 2 completion or move to Phase 3 (VictoriaLogs integration)
 
 **Context for next agent:**
-- UI layer now provides user-facing interface for integration management
-- Modal-based add/edit/delete flow with connection testing
-- Table view displays runtime health status
-- Empty state (tiles) transitions to table when integrations exist
-- All components use inline CSS-in-JS following Sidebar patterns
+- REST API layer complete for programmatic integration config management
+- Atomic writes prevent config corruption on crashes
+- Health status enriched from manager registry in real-time
+- Test endpoint uses panic recovery for robustness
+- Integration with server.go needed (pass configPath and manager to RegisterHandlers)
 
 ---
 
