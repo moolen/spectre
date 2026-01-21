@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package tui provides a terminal user interface for the Spectre multi-agent system
 // using Bubble Tea.
 package tui

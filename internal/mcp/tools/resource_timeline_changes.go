@@ -9,19 +9,20 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analysis"
-	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/api"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // ResourceTimelineChangesTool implements the resource_timeline_changes MCP tool
 // which returns semantic field-level diffs for specific resources by UID.
 type ResourceTimelineChangesTool struct {
-	client *client.SpectreClient
+	timelineService *api.TimelineService
 }
 
 // NewResourceTimelineChangesTool creates a new resource timeline changes tool
-func NewResourceTimelineChangesTool(client *client.SpectreClient) *ResourceTimelineChangesTool {
+func NewResourceTimelineChangesTool(timelineService *api.TimelineService) *ResourceTimelineChangesTool {
 	return &ResourceTimelineChangesTool{
-		client: client,
+		timelineService: timelineService,
 	}
 }
 
@@ -183,12 +184,25 @@ func (t *ResourceTimelineChangesTool) Execute(ctx context.Context, input json.Ra
 
 	start := time.Now()
 
-	// Query timeline API - we need to query without filters and match by UID
-	// since the API doesn't support direct UID filtering
-	response, err := t.client.QueryTimeline(startTime, endTime, nil, 10000) // Large page size to search all resources by UID
+	// Query timeline service - we need to query without filters and match by UID
+	// Convert timestamps to strings for the service
+	startStr := fmt.Sprintf("%d", startTime)
+	endStr := fmt.Sprintf("%d", endTime)
+
+	// Parse query parameters using TimelineService
+	query, err := t.timelineService.ParseQueryParameters(ctx, startStr, endStr, map[string][]string{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse query parameters: %w", err)
+	}
+
+	// Execute queries to get resource data
+	queryResult, eventResult, err := t.timelineService.ExecuteConcurrentQueries(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query timeline: %w", err)
 	}
+
+	// Build timeline response
+	response := t.timelineService.BuildTimelineResponse(queryResult, eventResult)
 
 	// Build UID lookup set for efficient filtering
 	uidSet := make(map[string]bool)
@@ -241,7 +255,7 @@ func (t *ResourceTimelineChangesTool) Execute(ctx context.Context, input json.Ra
 }
 
 // processResource computes semantic changes for a single resource
-func (t *ResourceTimelineChangesTool) processResource(resource client.TimelineResource, maxChanges int, includeSnapshot bool, changeFilter string) ResourceTimelineEntry {
+func (t *ResourceTimelineChangesTool) processResource(resource models.Resource, maxChanges int, includeSnapshot bool, changeFilter string) ResourceTimelineEntry {
 	entry := ResourceTimelineEntry{
 		UID:       resource.ID,
 		Kind:      resource.Kind,
@@ -321,7 +335,7 @@ func (t *ResourceTimelineChangesTool) processResource(resource client.TimelineRe
 }
 
 // summarizeConditions extracts and summarizes status conditions across segments
-func (t *ResourceTimelineChangesTool) summarizeConditions(segments []client.StatusSegment) map[string]string {
+func (t *ResourceTimelineChangesTool) summarizeConditions(segments []models.StatusSegment) map[string]string {
 	result := make(map[string]string)
 
 	// Track condition states over time

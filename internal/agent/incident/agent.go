@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package incident implements a single-agent incident response system for Kubernetes clusters.
 // The agent operates in phases: intake, gathering, analysis, and review.
 package incident

@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package coordinator implements the top-level Coordinator Agent that routes
 // user requests to specialized sub-agents.
 package coordinator

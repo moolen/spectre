@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package reviewer implements the IncidentReviewerAgent for the multi-agent incident response system.
 package reviewer
 

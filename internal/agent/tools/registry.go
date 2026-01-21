@@ -1,4 +1,12 @@
+//go:build disabled
+
 // Package tools provides tool registry and execution for the Spectre agent.
+//
+// NOTE: This file is temporarily disabled (HTTP client removed in Phase 7).
+// Agent needs refactoring to use gRPC/Connect API instead of HTTP REST.
+//
+//go:build ignore
+
 package tools
 
 import (
@@ -11,8 +19,9 @@ import (
 
 	"github.com/moolen/spectre/internal/agent/provider"
 	"github.com/moolen/spectre/internal/graph"
-	"github.com/moolen/spectre/internal/mcp/client"
-	mcptools "github.com/moolen/spectre/internal/mcp/tools"
+	// NOTE: HTTP client was removed in Phase 7. Agent tools need refactoring to use gRPC/Connect API.
+	// "github.com/moolen/spectre/internal/mcp/client"
+	// mcptools "github.com/moolen/spectre/internal/mcp/tools"
 )
 
 const (

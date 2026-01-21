@@ -1,14 +1,8 @@
 package commands
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
 
-	"github.com/moolen/spectre/internal/agent/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -87,72 +81,7 @@ func init() {
 }
 
 func runAgent(cmd *cobra.Command, args []string) error {
-	// Initialize logging
-	if err := setupLog(logLevelFlags); err != nil {
-		return fmt.Errorf("failed to setup logging: %w", err)
-	}
-
-	// Setup signal handling for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		<-sigCh
-		fmt.Println("\nShutting down...")
-		cancel()
-	}()
-
-	// Get API key
-	apiKey := agentAnthropicKey
-	if apiKey == "" {
-		apiKey = os.Getenv("ANTHROPIC_API_KEY")
-	}
-
-	// Handle Azure AI Foundry environment variables
-	azureEndpoint := agentAzureFoundryEndpoint
-	if azureEndpoint == "" {
-		if resource := os.Getenv("ANTHROPIC_FOUNDRY_RESOURCE"); resource != "" {
-			azureEndpoint = "https://" + resource + ".services.ai.azure.com"
-		}
-	}
-	azureKey := agentAzureFoundryKey
-	if azureKey == "" {
-		azureKey = os.Getenv("ANTHROPIC_FOUNDRY_API_KEY")
-	}
-
-	// Check for API key - either Anthropic or Azure AI Foundry (skip for mock models)
-	isMockModel := strings.HasPrefix(agentModel, "mock")
-	if !isMockModel {
-		if azureEndpoint != "" {
-			if azureKey == "" {
-				return fmt.Errorf("Azure AI Foundry API key required. Set ANTHROPIC_FOUNDRY_API_KEY environment variable or use --azure-foundry-key flag")
-			}
-		} else {
-			if apiKey == "" {
-				return fmt.Errorf("Anthropic API key required. Set ANTHROPIC_API_KEY environment variable or use --anthropic-key flag")
-			}
-		}
-	}
-
-	cfg := runner.Config{
-		SpectreAPIURL:        agentSpectreURL,
-		AnthropicAPIKey:      apiKey,
-		Model:                agentModel,
-		AzureFoundryEndpoint: azureEndpoint,
-		AzureFoundryAPIKey:   azureKey,
-		AuditLogPath:         agentAuditLog,
-		InitialPrompt:        agentPrompt,
-		MockPort:             agentMockPort,
-		MockTools:            agentMockTools || isMockModel, // Default to mock tools when using mock model
-	}
-
-	r, err := runner.New(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to create multi-agent runner: %w", err)
-	}
-
-	return r.Run(ctx)
+	// Agent command is temporarily disabled - HTTP client was removed in Phase 7
+	// TODO: Refactor agent to use integrated server's gRPC/Connect API instead of HTTP REST
+	return fmt.Errorf("agent command is temporarily disabled (HTTP client removed in Phase 7). Use MCP tools via integrated server on port 8080")
 }

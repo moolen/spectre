@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package audit provides audit logging for the multi-agent incident response system.
 // It captures all agent events (activations, tool calls, responses) to a JSONL file
 // for debugging, analysis, and reproducibility.

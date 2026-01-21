@@ -4,35 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/moolen/spectre/internal/analysis/anomaly"
 	"github.com/moolen/spectre/internal/api"
-	"github.com/moolen/spectre/internal/mcp/client"
 )
 
 // DetectAnomaliesTool implements the detect_anomalies MCP tool
 type DetectAnomaliesTool struct {
 	graphService    *api.GraphService
 	timelineService *api.TimelineService
-	client          *client.SpectreClient
 }
 
-// NewDetectAnomaliesTool creates a new detect anomalies tool with direct services
+// NewDetectAnomaliesTool creates a new detect anomalies tool with services
 func NewDetectAnomaliesTool(graphService *api.GraphService, timelineService *api.TimelineService) *DetectAnomaliesTool {
 	return &DetectAnomaliesTool{
 		graphService:    graphService,
 		timelineService: timelineService,
-		client:          nil,
-	}
-}
-
-// NewDetectAnomaliesToolWithClient creates a new detect anomalies tool with HTTP client (backward compatibility)
-func NewDetectAnomaliesToolWithClient(client *client.SpectreClient) *DetectAnomaliesTool {
-	return &DetectAnomaliesTool{
-		graphService:    nil,
-		timelineService: nil,
-		client:          client,
 	}
 }
 
@@ -139,32 +126,19 @@ func (t *DetectAnomaliesTool) Execute(ctx context.Context, input json.RawMessage
 
 // executeByUID performs anomaly detection for a single resource by UID
 func (t *DetectAnomaliesTool) executeByUID(ctx context.Context, resourceUID string, startTime, endTime int64) (*DetectAnomaliesOutput, error) {
-	// Use GraphService if available (direct service call), otherwise HTTP client
-	if t.graphService != nil {
-		// Direct service call
-		input := anomaly.DetectInput{
-			ResourceUID: resourceUID,
-			Start:       startTime,
-			End:         endTime,
-		}
-		result, err := t.graphService.DetectAnomalies(ctx, input)
-		if err != nil {
-			return nil, fmt.Errorf("failed to detect anomalies: %w", err)
-		}
-
-		// Transform to MCP output format
-		output := t.transformAnomalyResponse(result, startTime, endTime)
-		output.Metadata.ResourceUID = resourceUID
-		return output, nil
+	// Call GraphService directly
+	input := anomaly.DetectInput{
+		ResourceUID: resourceUID,
+		Start:       startTime,
+		End:         endTime,
 	}
-
-	// Fallback to HTTP client
-	response, err := t.client.DetectAnomalies(resourceUID, startTime, endTime)
+	result, err := t.graphService.DetectAnomalies(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect anomalies: %w", err)
 	}
 
-	output := t.transformResponse(response, startTime, endTime)
+	// Transform to MCP output format
+	output := t.transformAnomalyResponse(result, startTime, endTime)
 	output.Metadata.ResourceUID = resourceUID
 	return output, nil
 }
@@ -179,20 +153,31 @@ func (t *DetectAnomaliesTool) executeByNamespaceKind(ctx context.Context, namesp
 		maxResults = 50
 	}
 
-	// Query timeline to discover resources in the namespace/kind
-	// Use TimelineService via HTTP client (timeline service integration is more complex, defer to future iteration)
-	filters := map[string]string{
-		"namespace": namespace,
-		"kind":      kind,
+	// Query timeline to discover resources in the namespace/kind using TimelineService
+	startStr := fmt.Sprintf("%d", startTime)
+	endStr := fmt.Sprintf("%d", endTime)
+
+	filterParams := map[string][]string{
+		"namespace": {namespace},
+		"kind":      {kind},
 	}
 
-	var resources []interface{ GetID() string }
-	// For now, always use HTTP client for timeline queries in detect_anomalies
-	// TODO: Integrate TimelineService properly in future iteration
-	timelineResponse, err := t.client.QueryTimeline(startTime, endTime, filters, 1000)
+	// Parse query parameters
+	query, err := t.timelineService.ParseQueryParameters(ctx, startStr, endStr, filterParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse query parameters: %w", err)
+	}
+
+	// Execute queries
+	queryResult, eventResult, err := t.timelineService.ExecuteConcurrentQueries(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query timeline for resource discovery: %w", err)
 	}
+
+	// Build timeline response
+	timelineResponse := t.timelineService.BuildTimelineResponse(queryResult, eventResult)
+
+	var resources []interface{ GetID() string }
 	for _, r := range timelineResponse.Resources {
 		resources = append(resources, &resourceWithID{id: r.ID})
 	}
@@ -245,57 +230,32 @@ func (t *DetectAnomaliesTool) executeByNamespaceKind(ctx context.Context, namesp
 		resourceID := resource.GetID()
 		aggregatedOutput.Metadata.ResourceUIDs = append(aggregatedOutput.Metadata.ResourceUIDs, resourceID)
 
-		// Use GraphService if available
-		if t.graphService != nil {
-			input := anomaly.DetectInput{
-				ResourceUID: resourceID,
-				Start:       startTime,
-				End:         endTime,
-			}
-			result, err := t.graphService.DetectAnomalies(ctx, input)
-			if err != nil {
-				// Log error but continue with other resources
-				continue
-			}
+		// Use GraphService to detect anomalies
+		input := anomaly.DetectInput{
+			ResourceUID: resourceID,
+			Start:       startTime,
+			End:         endTime,
+		}
+		result, err := t.graphService.DetectAnomalies(ctx, input)
+		if err != nil {
+			// Log error but continue with other resources
+			continue
+		}
 
-			// Merge results
-			singleOutput := t.transformAnomalyResponse(result, startTime, endTime)
-			aggregatedOutput.Anomalies = append(aggregatedOutput.Anomalies, singleOutput.Anomalies...)
-			aggregatedOutput.AnomalyCount += singleOutput.AnomalyCount
-			aggregatedOutput.Metadata.NodesAnalyzed += singleOutput.Metadata.NodesAnalyzed
+		// Merge results
+		singleOutput := t.transformAnomalyResponse(result, startTime, endTime)
+		aggregatedOutput.Anomalies = append(aggregatedOutput.Anomalies, singleOutput.Anomalies...)
+		aggregatedOutput.AnomalyCount += singleOutput.AnomalyCount
+		aggregatedOutput.Metadata.NodesAnalyzed += singleOutput.Metadata.NodesAnalyzed
 
-			// Merge severity counts
-			for severity, count := range singleOutput.AnomaliesBySeverity {
-				aggregatedOutput.AnomaliesBySeverity[severity] += count
-			}
+		// Merge severity counts
+		for severity, count := range singleOutput.AnomaliesBySeverity {
+			aggregatedOutput.AnomaliesBySeverity[severity] += count
+		}
 
-			// Merge category counts
-			for category, count := range singleOutput.AnomaliesByCategory {
-				aggregatedOutput.AnomaliesByCategory[category] += count
-			}
-		} else {
-			// HTTP client fallback
-			response, err := t.client.DetectAnomalies(resourceID, startTime, endTime)
-			if err != nil {
-				// Log error but continue with other resources
-				continue
-			}
-
-			// Merge results
-			singleOutput := t.transformResponse(response, startTime, endTime)
-			aggregatedOutput.Anomalies = append(aggregatedOutput.Anomalies, singleOutput.Anomalies...)
-			aggregatedOutput.AnomalyCount += singleOutput.AnomalyCount
-			aggregatedOutput.Metadata.NodesAnalyzed += singleOutput.Metadata.NodesAnalyzed
-
-			// Merge severity counts
-			for severity, count := range singleOutput.AnomaliesBySeverity {
-				aggregatedOutput.AnomaliesBySeverity[severity] += count
-			}
-
-			// Merge category counts
-			for category, count := range singleOutput.AnomaliesByCategory {
-				aggregatedOutput.AnomaliesByCategory[category] += count
-			}
+		// Merge category counts
+		for category, count := range singleOutput.AnomaliesByCategory {
+			aggregatedOutput.AnomaliesByCategory[category] += count
 		}
 	}
 
@@ -361,61 +321,3 @@ func (t *DetectAnomaliesTool) transformAnomalyResponse(response *anomaly.Anomaly
 	return output
 }
 
-// transformResponse converts the HTTP API response to LLM-optimized output
-func (t *DetectAnomaliesTool) transformResponse(response *client.AnomalyResponse, startTime, endTime int64) *DetectAnomaliesOutput {
-	output := &DetectAnomaliesOutput{
-		Anomalies:           make([]AnomalySummary, 0, len(response.Anomalies)),
-		AnomalyCount:        len(response.Anomalies),
-		AnomaliesBySeverity: make(map[string]int),
-		AnomaliesByCategory: make(map[string]int),
-		Metadata: AnomalyMetadataOut{
-			ResourceUID:     response.Metadata.ResourceUID,
-			StartTime:       startTime,
-			EndTime:         endTime,
-			StartTimeText:   FormatTimestamp(startTime),
-			EndTimeText:     FormatTimestamp(endTime),
-			NodesAnalyzed:   response.Metadata.NodesAnalyzed,
-			ExecutionTimeMs: response.Metadata.ExecTimeMs,
-		},
-	}
-
-	// Transform each anomaly
-	for _, a := range response.Anomalies {
-		// Parse the timestamp from RFC3339 format
-		ts, err := time.Parse(time.RFC3339, a.Timestamp)
-		var timestamp int64
-		var timestampText string
-		if err == nil {
-			timestamp = ts.Unix()
-			timestampText = FormatTimestamp(timestamp)
-		} else {
-			// Fallback if parsing fails
-			timestampText = a.Timestamp
-		}
-
-		summary := AnomalySummary{
-			Node: AnomalyNodeInfo{
-				UID:       a.Node.UID,
-				Kind:      a.Node.Kind,
-				Namespace: a.Node.Namespace,
-				Name:      a.Node.Name,
-			},
-			Category:      string(a.Category),
-			Type:          a.Type,
-			Severity:      string(a.Severity),
-			Timestamp:     timestamp,
-			TimestampText: timestampText,
-			Summary:       a.Summary,
-			Details:       a.Details,
-		}
-		output.Anomalies = append(output.Anomalies, summary)
-
-		// Count by severity
-		output.AnomaliesBySeverity[string(a.Severity)]++
-
-		// Count by category
-		output.AnomaliesByCategory[string(a.Category)]++
-	}
-
-	return output
-}

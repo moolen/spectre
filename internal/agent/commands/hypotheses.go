@@ -1,3 +1,5 @@
+//go:build disabled
+
 package commands
 
 func init() {

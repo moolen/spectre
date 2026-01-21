@@ -1,3 +1,5 @@
+//go:build disabled
+
 package incident
 
 // GetSystemPrompt returns the system prompt for the Incident Response Agent.

@@ -465,9 +465,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
-		SpectreURL:      fmt.Sprintf("http://localhost:%d", cfg.APIPort),
 		Version:         Version,
-		Logger:          logger,
 		TimelineService: timelineService, // Direct service access for tools
 		GraphService:    graphService,    // Direct graph service access for tools
 	})

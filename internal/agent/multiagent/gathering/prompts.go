@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package gathering implements the InformationGatheringAgent for the multi-agent incident response system.
 package gathering
 

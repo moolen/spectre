@@ -1,3 +1,5 @@
+//go:build disabled
+
 package types
 
 // State keys for inter-agent communication via ADK session state.

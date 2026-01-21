@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package intake implements the IncidentIntakeAgent for the multi-agent incident response system.
 package intake
 

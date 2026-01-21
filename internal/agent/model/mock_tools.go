@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package model provides LLM adapters for the ADK multi-agent system.
 package model
 

@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package provider implements LLM provider abstractions for the Spectre agent.
 package provider
 

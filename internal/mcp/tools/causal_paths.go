@@ -7,28 +7,17 @@ import (
 
 	"github.com/moolen/spectre/internal/api"
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
-	"github.com/moolen/spectre/internal/mcp/client"
 )
 
-// CausalPathsTool implements causal path discovery using GraphService or HTTP client
+// CausalPathsTool implements causal path discovery using GraphService
 type CausalPathsTool struct {
 	graphService *api.GraphService
-	client       *client.SpectreClient
 }
 
-// NewCausalPathsTool creates a new causal paths tool with direct GraphService
+// NewCausalPathsTool creates a new causal paths tool with GraphService
 func NewCausalPathsTool(graphService *api.GraphService) *CausalPathsTool {
 	return &CausalPathsTool{
 		graphService: graphService,
-		client:       nil,
-	}
-}
-
-// NewCausalPathsToolWithClient creates a new causal paths tool with HTTP client (backward compatibility)
-func NewCausalPathsToolWithClient(spectreClient *client.SpectreClient) *CausalPathsTool {
-	return &CausalPathsTool{
-		graphService: nil,
-		client:       spectreClient,
 	}
 }
 
@@ -87,34 +76,17 @@ func (t *CausalPathsTool) Execute(ctx context.Context, input json.RawMessage) (i
 	// Convert lookback minutes to nanoseconds
 	lookbackNs := int64(params.LookbackMinutes) * 60 * 1_000_000_000
 
-	// Use GraphService if available (direct service call), otherwise HTTP client
-	if t.graphService != nil {
-		// Direct service call
-		serviceInput := causalpaths.CausalPathsInput{
-			ResourceUID:      params.ResourceUID,
-			FailureTimestamp: failureTimestamp,
-			LookbackNs:       lookbackNs,
-			MaxDepth:         params.MaxDepth,
-			MaxPaths:         params.MaxPaths,
-		}
-		response, err := t.graphService.DiscoverCausalPaths(ctx, serviceInput)
-		if err != nil {
-			return nil, fmt.Errorf("failed to discover causal paths: %w", err)
-		}
-		return response, nil
+	// Call GraphService directly
+	serviceInput := causalpaths.CausalPathsInput{
+		ResourceUID:      params.ResourceUID,
+		FailureTimestamp: failureTimestamp,
+		LookbackNs:       lookbackNs,
+		MaxDepth:         params.MaxDepth,
+		MaxPaths:         params.MaxPaths,
 	}
-
-	// Fallback to HTTP client
-	response, err := t.client.QueryCausalPaths(
-		params.ResourceUID,
-		failureTimestamp,
-		params.LookbackMinutes,
-		params.MaxDepth,
-		params.MaxPaths,
-	)
+	response, err := t.graphService.DiscoverCausalPaths(ctx, serviceInput)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query causal paths: %w", err)
+		return nil, fmt.Errorf("failed to discover causal paths: %w", err)
 	}
-
 	return response, nil
 }

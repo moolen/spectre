@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package builder implements the HypothesisBuilderAgent for the multi-agent incident response system.
 package builder
 

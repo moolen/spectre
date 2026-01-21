@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package types defines the core data structures for the multi-agent incident response system.
 package types
 

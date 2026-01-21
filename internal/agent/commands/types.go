@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package commands provides slash command handling for the agent TUI.
 package commands
 

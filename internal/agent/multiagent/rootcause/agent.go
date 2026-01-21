@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package rootcause implements the RootCauseAgent that orchestrates the incident
 // analysis pipeline using ADK's sequential agent pattern.
 package rootcause

@@ -10,7 +10,6 @@ import (
 
 	"github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/api"
-	"github.com/moolen/spectre/internal/mcp/client"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -27,22 +26,12 @@ const (
 // ClusterHealthTool implements the cluster_health MCP tool
 type ClusterHealthTool struct {
 	timelineService *api.TimelineService
-	client          *client.SpectreClient // Deprecated: for backwards compatibility
 }
 
-// NewClusterHealthTool creates a new cluster health tool using TimelineService (direct service call)
+// NewClusterHealthTool creates a new cluster health tool using TimelineService
 func NewClusterHealthTool(timelineService *api.TimelineService) *ClusterHealthTool {
 	return &ClusterHealthTool{
 		timelineService: timelineService,
-		client:          nil,
-	}
-}
-
-// NewClusterHealthToolWithClient creates a cluster health tool using HTTP client (deprecated)
-func NewClusterHealthToolWithClient(client *client.SpectreClient) *ClusterHealthTool {
-	return &ClusterHealthTool{
-		timelineService: nil,
-		client:          client,
 	}
 }
 

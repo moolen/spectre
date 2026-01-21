@@ -8,29 +8,18 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/api"
-	"github.com/moolen/spectre/internal/mcp/client"
 	"github.com/moolen/spectre/internal/models"
 )
 
 // ResourceTimelineTool implements the resource_timeline MCP tool
 type ResourceTimelineTool struct {
 	timelineService *api.TimelineService
-	client          *client.SpectreClient // Deprecated: for backwards compatibility
 }
 
-// NewResourceTimelineTool creates a new resource_timeline tool using TimelineService (direct service call)
+// NewResourceTimelineTool creates a new resource_timeline tool using TimelineService
 func NewResourceTimelineTool(timelineService *api.TimelineService) *ResourceTimelineTool {
 	return &ResourceTimelineTool{
 		timelineService: timelineService,
-		client:          nil,
-	}
-}
-
-// NewResourceTimelineToolWithClient creates a resource_timeline tool using HTTP client (deprecated)
-func NewResourceTimelineToolWithClient(client *client.SpectreClient) *ResourceTimelineTool {
-	return &ResourceTimelineTool{
-		timelineService: nil,
-		client:          client,
 	}
 }
 

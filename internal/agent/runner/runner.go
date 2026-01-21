@@ -1,3 +1,5 @@
+//go:build disabled
+
 // Package runner provides the CLI runner for the multi-agent incident response system.
 // It wraps ADK's runner with Spectre-specific UI rendering and CLI interaction.
 package runner
