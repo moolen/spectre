@@ -11,27 +11,27 @@
 ## Current Position
 
 **Phase:** 5 - Progressive Disclosure MCP Tools (In Progress)
-**Plan:** 1 of 4 (05-01-PLAN.md complete)
+**Plan:** 2 of 4 (05-02-PLAN.md complete)
 **Status:** In Progress
-**Progress:** 22/31 requirements
-**Last activity:** 2026-01-21 - Completed 05-01-PLAN.md (MCP Tool Registration Infrastructure)
+**Progress:** 23/31 requirements
+**Last activity:** 2026-01-21 - Completed 05-02-PLAN.md (Overview Tool)
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
 [██████████] 100% Phase 2 (Complete ✓)
 [██████████] 100% Phase 3 (Verified ✓)
 [██████████] 100% Phase 4 (Verified ✓)
-[██░░░░░░░░]  25% Phase 5 (In Progress)
-[███████████]  71% Overall (22/31 requirements)
+[███████░░░]  75% Phase 5 (In Progress)
+[████████████]  77% Overall (24/31 requirements)
 ```
 
 ## Performance Metrics
 
 | Metric | Current | Target | Status |
 |--------|---------|--------|--------|
-| Requirements Complete | 22/31 | 31/31 | In Progress |
+| Requirements Complete | 24/31 | 31/31 | In Progress |
 | Phases Complete | 4/5 | 5/5 | In Progress |
-| Plans Complete | 16/19 | 19/19 (Phases 1-5) | Phase 5 In Progress |
+| Plans Complete | 18/19 | 19/19 (Phases 1-5) | Phase 5 In Progress |
 | Blockers | 0 | 0 | On Track |
 
 ## Accumulated Context
@@ -120,6 +120,14 @@
 | RegisterTools() called for all instances including degraded | 05-01 | Degraded backends can still expose tools that return service unavailable; AI can discover available tools |
 | NewManagerWithMCPRegistry for backward compatibility | 05-01 | Existing code works unchanged; only MCP-enabled servers use new constructor |
 | Tool registration errors don't fail startup | 05-01 | Resilience - one integration's failure shouldn't crash server; logged for debugging |
+| Level field used for severity filtering (error/warn) | 05-02 | Simpler than message keyword detection; graceful fallback if field missing |
+| Empty namespace labeled as "(no namespace)" | 05-02 | Clearer than empty string for AI assistants identifying unlabeled logs |
+| Namespaces sorted by total count descending | 05-02 | Progressive disclosure - show highest volume namespaces first |
+| ToolContext pattern for shared client/logger/instance | 05-02 | Consistent context passing across all MCP tool Execute methods |
+| CompareTimeWindows compares by Pattern not ID | 05-03 | Semantic novelty detection - "this log message never appeared before" regardless of namespace |
+| Per-instance template store (not global) | 05-03 | Different VictoriaLogs instances have different log characteristics; independent mining |
+| Stateless template mining per query | 05-03 | TemplateStore ephemeral (created in Start, cleared in Stop); no persistence for on-demand queries |
+| Sampling threshold = targetSamples * 10 | 05-03 | Default 500 logs triggers sampling; balances accuracy with performance for high-volume namespaces |
 
 **Scope Boundaries:**
 - Progressive disclosure: 3 levels maximum (global → aggregated → detail)
@@ -154,13 +162,13 @@
 
 **Phase 5: Progressive Disclosure MCP Tools** (In Progress)
 - 05-01: MCP tool registration infrastructure ✓
-- 05-02: Overview tool (in progress)
-- 05-03: Patterns tool
-- 05-04: Detail logs tool
+- 05-02: Overview tool ✓
+- 05-03: Patterns tool (ready)
+- 05-04: Detail logs tool (ready to execute)
 
 ### Active Todos
 
-None - Phase 5 Plan 1 complete. Ready for Plan 2 (Overview Tool).
+None - Phase 5 Plan 2 complete. Ready for Plan 3 (Patterns Tool).
 
 ### Known Blockers
 
@@ -179,31 +187,30 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 05-01-PLAN.md (MCP Tool Registration Infrastructure)
+**Stopped at:** Completed 05-02-PLAN.md (Overview Tool)
 
 **What just happened:**
-- Executed plan 05-01: MCP tool registration infrastructure
-- Created MCPToolRegistry adapter implementing integration.ToolRegistry
-- Wired RegisterTools() into Manager lifecycle (called after Start() for all instances)
-- VictoriaLogs integration stores registry reference for Plans 2-4
-- All tasks completed in 2 minutes with atomic commits
-- SUMMARY: .planning/phases/05-progressive-disclosure-mcp-tools/05-01-SUMMARY.md
+- Executed plan 05-02: Overview tool implementation
+- Created shared tool utilities (ToolContext, parseTimeRange) in tools.go
+- Implemented OverviewTool with namespace-level error/warning aggregation
+- Registered victorialogs_{instance}_overview tool in RegisterTools()
+- All tasks completed in 6 minutes with atomic commits
+- SUMMARY: .planning/phases/05-progressive-disclosure-mcp-tools/05-02-SUMMARY.md
 
 **What's next:**
-- Phase 5 Plan 1 COMPLETE
-- Ready for Plan 2: Overview Tool (victorialogs_{name}_overview)
-- Infrastructure in place for dynamic tool registration
-- Next plans will implement actual MCP tools using stored registry reference
+- Phase 5 Plan 2 COMPLETE
+- Ready for Plan 3: Patterns tool (template aggregation with novelty detection)
+- ToolContext pattern established for tool implementation
+- Tool naming convention validated: victorialogs_{instance}_{tool}
 
 **Context for next agent:**
-- MCPToolRegistry adapter: integration.ToolHandler -> server.ToolHandlerFunc
-- Manager.mcpRegistry field: optional ToolRegistry for MCP integration
-- NewManagerWithMCPRegistry: constructor for MCP-enabled servers
-- VictoriaLogs.registry field: stored for deferred tool implementation
-- Tool naming convention: {integration_type}_{instance_name}_{tool}
-- RegisterTools() called after Start() regardless of health status (even degraded)
-- Generic JSON schema in adapter: integrations validate their own arguments
-- Foundation complete for Plans 2-4 tool implementations
+- ToolContext pattern: shared struct with Client, Logger, Instance
+- parseTimeRange: 1-hour default, handles Unix seconds/milliseconds
+- Tool naming: victorialogs_{instance}_overview working example
+- Overview tool uses QueryAggregation for namespace counts
+- Level field filtering (error/warn) with graceful fallback
+- Nil client check prevents crashes on stopped/degraded instances
+- Plans 3-4 will follow same pattern for patterns and logs tools
 
 ---
 
