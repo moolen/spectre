@@ -1,3 +1,13 @@
+# Requirements Archive: v1 MCP Plugin System + VictoriaLogs Integration
+
+**Archived:** 2026-01-21
+**Status:** SHIPPED
+
+This is the archived requirements specification for v1.
+For current requirements, see `.planning/REQUIREMENTS.md` (created for next milestone).
+
+---
+
 # Requirements: Spectre MCP Plugin System + VictoriaLogs Integration
 
 **Defined:** 2026-01-20
@@ -89,7 +99,7 @@ Explicitly excluded. Documented to prevent scope creep.
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
+Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -131,5 +141,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-01-20*
-*Last updated: 2026-01-21 (MINE-05/06 moved to Phase 5 - integration concerns)*
+
+## Milestone Summary
+
+**Shipped:** 31 of 31 v1 requirements
+**Adjusted:**
+- MINE-05/06 moved from Phase 4 to Phase 5 (integration concerns, not standalone template mining)
+- PROG-01 uses error/warning levels instead of error/panic/timeout keywords (more general)
+
+**Dropped:** None
+
+---
+*Archived: 2026-01-21 as part of v1 milestone completion*

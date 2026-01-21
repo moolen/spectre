@@ -1,14 +1,14 @@
-# Project Roadmap: Spectre MCP Plugin System + VictoriaLogs Integration
+# Milestone v1: MCP Plugin System + VictoriaLogs Integration
 
-**Project:** Spectre MCP Plugin System with VictoriaLogs Integration
-**Created:** 2026-01-21
-**Depth:** Standard (5-8 phases, 3-5 plans each)
+**Status:** SHIPPED 2026-01-21
+**Phases:** 1-5
+**Total Plans:** 19
 
 ## Overview
 
 Enable AI assistants to explore logs progressively via MCP tools. Plugin system allows dynamic loading of observability integrations. VictoriaLogs integration delivers progressive disclosure: global overview → aggregated patterns → detailed logs.
 
-This roadmap delivers 31 v1 requirements across 5 phases, building from plugin foundation through VictoriaLogs client, template mining, and progressive disclosure tools.
+This roadmap delivered 31 v1 requirements across 5 phases, building from plugin foundation through VictoriaLogs client, template mining, and progressive disclosure tools.
 
 ## Phases
 
@@ -88,7 +88,7 @@ Plans:
 4. Plugin returns log counts grouped by namespace/pod/deployment
 5. Pipeline handles backpressure via bounded channels (prevents memory exhaustion)
 
-**Plans:** 3 plans
+**Plans:** 4 plans
 
 Plans:
 - [x] 03-01-PLAN.md — Core client implementation (types, query builder, HTTP client)
@@ -102,7 +102,6 @@ Plans:
 - Bounded channel pipeline (1000 buffer, 100-item batches) for backpressure
 - Prometheus metrics for pipeline observability (queue depth, throughput, errors)
 - 30-second query timeout per requirements
-- No template mining yet (Phase 4)
 - Validates VictoriaLogs integration before adding complexity
 
 ---
@@ -179,36 +178,33 @@ Plans:
 
 ---
 
-## Progress
+## Milestone Summary
 
-| Phase | Status | Requirements | Plans | Completion |
-|-------|--------|--------------|-------|------------|
-| 1 - Plugin Infrastructure Foundation | ✓ Complete | 8/8 | 4/4 | 100% |
-| 2 - Config Management & UI | ✓ Complete | 3/3 | 3/3 | 100% |
-| 3 - VictoriaLogs Client & Basic Pipeline | ✓ Complete | 6/6 | 4/4 | 100% |
-| 4 - Log Template Mining | ✓ Complete | 4/4 | 4/4 | 100% |
-| 5 - Progressive Disclosure MCP Tools | ✓ Complete | 10/10 | 4/4 | 100% |
+**Decimal Phases:** None
 
-**Overall:** 31/31 requirements complete (100%)
+**Key Decisions:**
+- In-tree integrations (not external plugins) — Simplifies deployment
+- Drain algorithm for template mining — O(log n), industry standard
+- Factory registry pattern — Compile-time discovery via init()
+- Atomic YAML writes — Prevents config corruption
+- Namespace-scoped templates — Multi-tenant support
+- Stateless MCP tools — AI passes filters per call
 
----
+**Issues Resolved:**
+- Time range minimum validation added (03-04) after initial verification found gap
+- All 31 requirements satisfied with no blockers
 
-## Coverage Validation
+**Issues Deferred:**
+- DateAdded field persistence (minor UI enhancement)
+- GET /{name} endpoint consumption by UI (uses list instead)
 
-**Total v1 requirements:** 31
-**Mapped to phases:** 31
-**Unmapped:** 0
-
-All v1 requirements covered. No orphaned requirements.
-
----
-
-## Milestone Metadata
-
-**Mode:** yolo
-**Depth:** standard
-**Parallelization:** enabled
+**Technical Debt Incurred:**
+- Minor: DateAdded field uses time.Now() instead of persisted creation time
 
 ---
 
-*Last updated: 2026-01-21 (Phase 5 complete - milestone complete)*
+*For current project status, see .planning/PROJECT.md*
+
+---
+
+*Archived: 2026-01-21 as part of v1 milestone completion*

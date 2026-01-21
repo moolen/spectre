@@ -2,11 +2,22 @@
 
 ## What This Is
 
-A plugin system for Spectre's MCP server that enables dynamic loading of observability integrations (Logz.io, VictoriaMetrics, Grafana Cloud, etc.). Each integration provides its own MCP tools. The first integration is VictoriaLogs, implementing a progressive disclosure approach for log exploration: global overview → aggregated view → full logs.
+A plugin system for Spectre's MCP server that enables dynamic loading of observability integrations. The first integration is VictoriaLogs, implementing progressive disclosure for log exploration: overview (severity counts) → patterns (template mining with novelty detection) → raw logs.
 
 ## Core Value
 
-Enable AI assistants to explore logs progressively—starting from high-level signals (errors, panics, timeouts) aggregated by namespace, then drilling into patterns, and finally viewing raw logs only when context is narrow.
+Enable AI assistants to explore logs progressively—starting from high-level signals aggregated by namespace, then drilling into patterns with novelty detection, and finally viewing raw logs only when context is narrow.
+
+## Current State (v1 Shipped)
+
+**Shipped 2026-01-21:**
+- Plugin infrastructure with factory registry, config hot-reload, lifecycle management
+- REST API + React UI for integration configuration
+- VictoriaLogs integration with LogsQL client and backpressure pipeline
+- Log template mining using Drain algorithm with namespace-scoped storage
+- Three progressive disclosure MCP tools: overview, patterns, logs
+
+**Stats:** 5 phases, 19 plans, 31 requirements, ~17,850 LOC (Go + TypeScript)
 
 ## Requirements
 
@@ -16,16 +27,17 @@ Enable AI assistants to explore logs progressively—starting from high-level si
 - ✓ REST API backend exists — existing
 - ✓ React UI exists for configuration — existing
 - ✓ FalkorDB integration pattern established — existing
+- ✓ Plugin system for MCP integrations — v1
+- ✓ Config hot-reload in MCP server — v1
+- ✓ REST API endpoints for integration management — v1
+- ✓ UI for enabling/configuring integrations — v1
+- ✓ VictoriaLogs integration with progressive disclosure — v1
+- ✓ Log template mining package (reusable across integrations) — v1
+- ✓ Canonical template storage in MCP — v1
 
 ### Active
 
-- [ ] Plugin system for MCP integrations
-- [ ] Config hot-reload in MCP server
-- [ ] REST API endpoints for integration management
-- [ ] UI for enabling/configuring integrations
-- [ ] VictoriaLogs integration with progressive disclosure
-- [ ] Log template mining package (reusable across integrations)
-- [ ] Canonical template storage in MCP
+(None — milestone complete, new requirements to be defined in next milestone)
 
 ### Out of Scope
 
@@ -38,50 +50,56 @@ Enable AI assistants to explore logs progressively—starting from high-level si
 
 ## Context
 
-**Existing codebase:**
-- MCP server at `internal/mcp/` with tool registration pattern
-- REST API at `internal/api/` using Connect/gRPC
-- React UI at `ui/src/` with existing configuration patterns
+**Current codebase:**
+- Plugin system at `internal/integration/` with factory registry and lifecycle manager
+- VictoriaLogs client at `internal/integration/victorialogs/`
+- Log processing at `internal/logprocessing/` (Drain algorithm, template storage)
+- MCP tools at `internal/integration/victorialogs/tools_*.go`
+- Config management at `internal/config/` with hot-reload via fsnotify
+- REST API at `internal/api/handlers/integration_config_handler.go`
+- React UI at `ui/src/pages/IntegrationsPage.tsx`
 - Go 1.24+, TypeScript 5.8, React 19
 
 **VictoriaLogs API:**
 - HTTP API documented at https://docs.victoriametrics.com/victorialogs/querying/#http-api
 - No authentication required, just base URL
 
-**Progressive disclosure model:**
-1. **Global Overview** — errors/panics/timeouts aggregated by namespace over time (default: last 60min, min: 15min)
-2. **Aggregated View** — log templates via client-side mining (Drain/IPLoM/Spell), highlight high-volume patterns and new patterns (vs previous window)
-3. **Full Logs** — raw logs once scope is narrowed
+**Progressive disclosure model (implemented):**
+1. **Overview** — error/warning counts by namespace (QueryAggregation with level filter)
+2. **Patterns** — log templates via Drain with novelty detection (compare to previous window)
+3. **Logs** — raw logs with limit enforcement (max 500)
 
-**Template mining considerations:**
-- Algorithm research needed (Drain vs IPLoM vs Spell)
-- Stable template hashing: normalize (lowercase, remove numbers/UUIDs/IPs) → hash
-- Store canonical templates in MCP for cross-client consistency
-- Sampling for high-volume namespaces
-- Time-window batching
-
-**Integration config flow:**
-- User enables/configures via UI
-- UI sends to REST API
-- API persists to disk
-- MCP server watches/reloads config dynamically
-- Tools become available to AI assistants
+**Template mining (implemented):**
+- Drain algorithm via github.com/faceair/drain
+- SHA-256 hashing for stable template IDs
+- Namespace-scoped storage with periodic persistence
+- Rebalancing with count-based pruning and similarity-based auto-merge
 
 ## Constraints
 
 - **Tech stack**: Go backend, TypeScript/React frontend — established patterns
 - **No auth**: VictoriaLogs uses no authentication, just base URL
 - **Client-side mining**: Template mining happens in Go (not dependent on log store features)
-- **Reusability**: Log processing package must be integration-agnostic
+- **Reusability**: Log processing package is integration-agnostic
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Client-side template mining | Independence from log store features, works across integrations | — Pending |
-| Previous-window pattern comparison | Simplicity over long-term baseline tracking | — Pending |
-| Config via REST API + disk | Matches existing architecture, enables hot-reload | — Pending |
-| Template algorithm TBD | Need to research Drain vs IPLoM vs Spell tradeoffs | — Pending |
+| In-tree integrations (not external plugins) | Simplifies deployment, eliminates version compatibility issues | ✓ Good |
+| Client-side template mining with Drain | Independence from log store features, works across integrations | ✓ Good |
+| Previous-window pattern comparison | Simplicity over long-term baseline tracking | ✓ Good |
+| Config via REST API + disk | Matches existing architecture, enables hot-reload | ✓ Good |
+| Drain algorithm (not IPLoM/Spell) | Research showed Drain is industry standard, O(log n) matching | ✓ Good |
+| Factory registry pattern | Compile-time discovery via init(), clean lifecycle | ✓ Good |
+| Atomic YAML writes (temp-then-rename) | Prevents config corruption on crashes | ✓ Good |
+| Namespace-scoped templates | Multi-tenant support, same pattern in different namespaces has different semantics | ✓ Good |
+| Stateless MCP tools | AI passes filters per call, no server-side session state | ✓ Good |
+
+## Tech Debt
+
+- DateAdded field not persisted in integration config (uses time.Now() on each GET request)
+- GET /{name} endpoint available but unused by UI (uses list endpoint instead)
 
 ---
-*Last updated: 2026-01-20 after initialization*
+*Last updated: 2026-01-21 after v1 milestone*
