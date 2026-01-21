@@ -8,6 +8,7 @@ import (
 
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/logprocessing"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -22,13 +23,14 @@ func init() {
 
 // VictoriaLogsIntegration implements the Integration interface for VictoriaLogs.
 type VictoriaLogsIntegration struct {
-	name     string
-	url      string
-	client   *Client   // VictoriaLogs HTTP client
-	pipeline *Pipeline // Backpressure-aware ingestion pipeline
-	metrics  *Metrics  // Prometheus metrics for observability
-	logger   *logging.Logger
-	registry integration.ToolRegistry // MCP tool registry for dynamic tool registration
+	name          string
+	url           string
+	client        *Client                      // VictoriaLogs HTTP client
+	pipeline      *Pipeline                    // Backpressure-aware ingestion pipeline
+	metrics       *Metrics                     // Prometheus metrics for observability
+	logger        *logging.Logger
+	registry      integration.ToolRegistry     // MCP tool registry for dynamic tool registration
+	templateStore *logprocessing.TemplateStore // Template store for pattern mining
 }
 
 // NewVictoriaLogsIntegration creates a new VictoriaLogs integration instance.
@@ -40,12 +42,13 @@ func NewVictoriaLogsIntegration(name string, config map[string]interface{}) (int
 	}
 
 	return &VictoriaLogsIntegration{
-		name:     name,
-		url:      url,
-		client:   nil, // Initialized in Start()
-		pipeline: nil, // Initialized in Start()
-		metrics:  nil, // Initialized in Start()
-		logger:   logging.GetLogger("integration.victorialogs." + name),
+		name:          name,
+		url:           url,
+		client:        nil, // Initialized in Start()
+		pipeline:      nil, // Initialized in Start()
+		metrics:       nil, // Initialized in Start()
+		templateStore: nil, // Initialized in Start()
+		logger:        logging.GetLogger("integration.victorialogs." + name),
 	}, nil
 }
 
@@ -75,6 +78,15 @@ func (v *VictoriaLogsIntegration) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start pipeline: %w", err)
 	}
 
+	// Create template store with default Drain config (from Phase 4)
+	drainConfig := logprocessing.DrainConfig{
+		LogClusterDepth: 4,
+		SimTh:           0.4,
+		MaxChildren:     100,
+	}
+	v.templateStore = logprocessing.NewTemplateStore(drainConfig)
+	v.logger.Info("Template store initialized with Drain config: depth=%d, simTh=%.2f", drainConfig.LogClusterDepth, drainConfig.SimTh)
+
 	// Test connectivity (warn on failure but continue - degraded state with auto-recovery)
 	if err := v.testConnection(ctx); err != nil {
 		v.logger.Warn("Failed initial connectivity test (will retry on health checks): %v", err)
@@ -100,6 +112,7 @@ func (v *VictoriaLogsIntegration) Stop(ctx context.Context) error {
 	v.client = nil
 	v.pipeline = nil
 	v.metrics = nil
+	v.templateStore = nil
 
 	v.logger.Info("VictoriaLogs integration stopped")
 	return nil
