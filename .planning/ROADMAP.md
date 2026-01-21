@@ -29,10 +29,10 @@ This roadmap delivers 31 v1 requirements across 5 phases, building from plugin f
 **Plans:** 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Config schema & integration interface
-- [ ] 01-02-PLAN.md — Integration registry & config loader
-- [ ] 01-03-PLAN.md — Hot-reload with file watcher
-- [ ] 01-04-PLAN.md — Instance lifecycle & health management
+- [x] 01-01-PLAN.md — Config schema & integration interface
+- [x] 01-02-PLAN.md — Integration registry & config loader
+- [x] 01-03-PLAN.md — Hot-reload with file watcher
+- [x] 01-04-PLAN.md — Instance lifecycle & health management
 
 **Notes:**
 - Uses in-tree integrations (compiled into Spectre, not external plugins)
@@ -159,13 +159,13 @@ Plans:
 
 | Phase | Status | Requirements | Plans | Completion |
 |-------|--------|--------------|-------|------------|
-| 1 - Plugin Infrastructure Foundation | Planning | 8/8 | 4/4 | 0% |
+| 1 - Plugin Infrastructure Foundation | ✓ Complete | 8/8 | 4/4 | 100% |
 | 2 - Config Management & UI | Pending | 3/3 | 0/0 | 0% |
 | 3 - VictoriaLogs Client & Basic Pipeline | Pending | 6/6 | 0/0 | 0% |
 | 4 - Log Template Mining | Pending | 6/6 | 0/0 | 0% |
 | 5 - Progressive Disclosure MCP Tools | Pending | 8/8 | 0/0 | 0% |
 
-**Overall:** 0/31 requirements complete (0%)
+**Overall:** 8/31 requirements complete (26%)
 
 ---
 
@@ -187,4 +187,4 @@ All v1 requirements covered. No orphaned requirements.
 
 ---
 
-*Last updated: 2026-01-21*
+*Last updated: 2026-01-21 (Phase 1 complete)*

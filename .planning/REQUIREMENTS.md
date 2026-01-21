@@ -9,18 +9,18 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Plugin System
 
-- [ ] **PLUG-01**: MCP server discovers plugins via convention-based naming pattern
-- [ ] **PLUG-02**: MCP server loads/unloads plugins with clean lifecycle (start/stop)
-- [ ] **PLUG-03**: Plugin errors are isolated (one broken plugin doesn't crash server)
-- [ ] **PLUG-04**: Plugin interface defines contract for tool registration
-- [ ] **PLUG-05**: Plugins declare semantic version for compatibility checking
-- [ ] **PLUG-06**: MCP server validates plugin version compatibility before loading
+- [x] **PLUG-01**: MCP server discovers plugins via convention-based naming pattern
+- [x] **PLUG-02**: MCP server loads/unloads plugins with clean lifecycle (start/stop)
+- [x] **PLUG-03**: Plugin errors are isolated (one broken plugin doesn't crash server)
+- [x] **PLUG-04**: Plugin interface defines contract for tool registration
+- [x] **PLUG-05**: Plugins declare semantic version for compatibility checking
+- [x] **PLUG-06**: MCP server validates plugin version compatibility before loading
 
 ### Config Management
 
-- [ ] **CONF-01**: Integration configs stored on disk (JSON/YAML)
+- [x] **CONF-01**: Integration configs stored on disk (JSON/YAML)
 - [ ] **CONF-02**: REST API endpoints for reading/writing integration configs
-- [ ] **CONF-03**: MCP server hot-reloads config when file changes
+- [x] **CONF-03**: MCP server hot-reloads config when file changes
 - [ ] **CONF-04**: UI displays available integrations with enable/disable toggle
 - [ ] **CONF-05**: UI allows configuring integration connection details (e.g., VictoriaLogs URL)
 
@@ -93,15 +93,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PLUG-01 | Phase 1 | Pending |
-| PLUG-02 | Phase 1 | Pending |
-| PLUG-03 | Phase 1 | Pending |
-| PLUG-04 | Phase 1 | Pending |
-| PLUG-05 | Phase 1 | Pending |
-| PLUG-06 | Phase 1 | Pending |
-| CONF-01 | Phase 1 | Pending |
+| PLUG-01 | Phase 1 | Complete |
+| PLUG-02 | Phase 1 | Complete |
+| PLUG-03 | Phase 1 | Complete |
+| PLUG-04 | Phase 1 | Complete |
+| PLUG-05 | Phase 1 | Complete |
+| PLUG-06 | Phase 1 | Complete |
+| CONF-01 | Phase 1 | Complete |
 | CONF-02 | Phase 2 | Pending |
-| CONF-03 | Phase 1 | Pending |
+| CONF-03 | Phase 1 | Complete |
 | CONF-04 | Phase 2 | Pending |
 | CONF-05 | Phase 2 | Pending |
 | VLOG-01 | Phase 3 | Pending |
@@ -132,4 +132,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-20*
-*Last updated: 2026-01-21 (traceability updated after roadmap creation)*
+*Last updated: 2026-01-21 (Phase 1 requirements marked complete)*
