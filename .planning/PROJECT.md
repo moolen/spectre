@@ -1,12 +1,23 @@
-# Spectre MCP Plugin System + VictoriaLogs Integration
+# Spectre
 
 ## What This Is
 
-A plugin system for Spectre's MCP server that enables dynamic loading of observability integrations. The first integration is VictoriaLogs, implementing progressive disclosure for log exploration: overview (severity counts) → patterns (template mining with novelty detection) → raw logs.
+A Kubernetes observability platform with an MCP server for AI assistants. Provides timeline-based event exploration, graph-based reasoning (FalkorDB), and pluggable integrations (VictoriaLogs). AI assistants can explore logs progressively: overview → patterns → raw logs.
 
 ## Core Value
 
-Enable AI assistants to explore logs progressively—starting from high-level signals aggregated by namespace, then drilling into patterns with novelty detection, and finally viewing raw logs only when context is narrow.
+Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, and log exploration in one server.
+
+## Current Milestone: v1.1 Server Consolidation
+
+**Goal:** Consolidate MCP server into main Spectre server for single-port deployment and in-process tool execution.
+
+**Target features:**
+- Single server binary serving REST API, UI, and MCP on one port (:8080)
+- MCP tools call shared service layer directly (no HTTP self-calls)
+- Remove MCP sidecar container from Helm chart
+- Extract handler logic into reusable services for REST and MCP
+- Update E2E tests for consolidated architecture
 
 ## Current State (v1 Shipped)
 
@@ -37,7 +48,14 @@ Enable AI assistants to explore logs progressively—starting from high-level si
 
 ### Active
 
-(None — milestone complete, new requirements to be defined in next milestone)
+- [ ] Single-port server serving REST, UI, and MCP at :8080
+- [ ] MCP endpoint at /mcp path on main server
+- [ ] Shared service layer for timeline/graph queries (used by REST handlers and MCP tools)
+- [ ] In-process MCP tool execution (no HTTP self-calls)
+- [ ] Remove `mcp` command from CLI (functionality moves to `server`)
+- [ ] Remove MCP sidecar from Helm chart deployment
+- [ ] Integration manager works with consolidated server
+- [ ] E2E tests updated for single-server architecture
 
 ### Out of Scope
 
@@ -102,4 +120,4 @@ Enable AI assistants to explore logs progressively—starting from high-level si
 - GET /{name} endpoint available but unused by UI (uses list endpoint instead)
 
 ---
-*Last updated: 2026-01-21 after v1 milestone*
+*Last updated: 2026-01-21 after starting v1.1 milestone*
