@@ -19,6 +19,9 @@ func (s *Server) registerHandlers() {
 	// Register health and readiness endpoints
 	s.registerHealthEndpoints()
 
+	// Register MCP endpoint (must be before static UI catch-all)
+	s.registerMCPHandler()
+
 	// Register static UI handlers (must be last as catch-all)
 	s.registerStaticUIHandlers()
 }

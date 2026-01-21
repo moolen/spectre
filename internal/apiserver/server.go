@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
@@ -51,6 +52,8 @@ type Server struct {
 	// Integration config management
 	integrationsConfigPath string
 	integrationManager     *integration.Manager
+	// MCP server
+	mcpServer *server.MCPServer
 }
 
 // NamespaceGraphCacheConfig holds configuration for the namespace graph cache
@@ -78,6 +81,7 @@ func NewWithStorageGraphAndPipeline(
 	nsGraphCacheConfig NamespaceGraphCacheConfig, // Namespace graph cache configuration
 	integrationsConfigPath string,         // Path to integrations config file (optional)
 	integrationManager *integration.Manager, // Integration manager (optional)
+	mcpServer *server.MCPServer, // MCP server for /v1/mcp endpoint (optional)
 ) *Server {
 	s := &Server{
 		port:                   port,
@@ -92,6 +96,7 @@ func NewWithStorageGraphAndPipeline(
 		tracingProvider:        tracingProvider,
 		integrationsConfigPath: integrationsConfigPath,
 		integrationManager:     integrationManager,
+		mcpServer:              mcpServer,
 	}
 
 	// Create metadata cache if we have a query executor
@@ -145,6 +150,28 @@ func (s *Server) configureHTTPServer(port int) {
 		WriteTimeout: 10 * time.Minute, // Allow time for processing + response writing (imports can take 5+ min)
 		IdleTimeout:  60 * time.Second,
 	}
+}
+
+// registerMCPHandler adds MCP endpoint to the router
+func (s *Server) registerMCPHandler() {
+	if s.mcpServer == nil {
+		s.logger.Debug("MCP server not configured, skipping /v1/mcp endpoint")
+		return
+	}
+
+	endpointPath := "/v1/mcp"
+	s.logger.Info("Registering MCP endpoint at %s", endpointPath)
+
+	// Create StreamableHTTP server with stateless mode
+	streamableServer := server.NewStreamableHTTPServer(
+		s.mcpServer,
+		server.WithEndpointPath(endpointPath),
+		server.WithStateLess(true), // Stateless mode per requirements
+	)
+
+	// Register on router (must be BEFORE static UI catch-all)
+	s.router.Handle(endpointPath, streamableServer)
+	s.logger.Info("MCP endpoint registered at %s", endpointPath)
 }
 
 // Start implements the lifecycle.Component interface

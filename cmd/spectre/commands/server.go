@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/config"
@@ -21,10 +22,12 @@ import (
 	"github.com/moolen/spectre/internal/graphservice"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/integration"
+
 	// Import integration implementations to register their factories
 	_ "github.com/moolen/spectre/internal/integration/victorialogs"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/mcp"
 	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
 	"github.com/spf13/cobra"
@@ -69,6 +72,8 @@ var (
 	// Integration manager configuration
 	integrationsConfigPath string
 	minIntegrationVersion  string
+	// MCP server configuration
+	stdioEnabled bool
 )
 
 var serverCmd = &cobra.Command{
@@ -135,6 +140,9 @@ func init() {
 		"Path to integrations configuration YAML file (default: integrations.yaml)")
 	serverCmd.Flags().StringVar(&minIntegrationVersion, "min-integration-version", "",
 		"Minimum required integration version (e.g., '1.0.0') for version validation (optional)")
+
+	// MCP server configuration
+	serverCmd.Flags().BoolVar(&stdioEnabled, "stdio", false, "Enable stdio MCP transport alongside HTTP (default: false)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -167,6 +175,23 @@ func runServer(cmd *cobra.Command, args []string) {
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
 
+	// Create MCP server for in-process tool execution
+	logger.Info("Initializing MCP server")
+	spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
+		SpectreURL: fmt.Sprintf("http://localhost:%d", cfg.APIPort),
+		Version:    Version,
+		Logger:     logger,
+	})
+	if err != nil {
+		logger.Error("Failed to create MCP server: %v", err)
+		HandleError(err, "MCP server initialization error")
+	}
+	mcpServer := spectreServer.GetMCPServer()
+	logger.Info("MCP server created")
+
+	// Create MCPToolRegistry adapter
+	mcpRegistry := mcp.NewMCPToolRegistry(mcpServer)
+
 	// Initialize integration manager (always enabled with default config path)
 	var integrationMgr *integration.Manager
 	if integrationsConfigPath != "" {
@@ -184,11 +209,10 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 
 		logger.Info("Initializing integration manager from: %s", integrationsConfigPath)
-		var err error
-		integrationMgr, err = integration.NewManager(integration.ManagerConfig{
+		integrationMgr, err = integration.NewManagerWithMCPRegistry(integration.ManagerConfig{
 			ConfigPath:            integrationsConfigPath,
 			MinIntegrationVersion: minIntegrationVersion,
-		})
+		}, mcpRegistry)
 		if err != nil {
 			logger.Error("Failed to create integration manager: %v", err)
 			HandleError(err, "Integration manager initialization error")
@@ -452,6 +476,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		},
 		integrationsConfigPath, // Pass config path for REST API handlers
 		integrationMgr,         // Pass integration manager for REST API handlers
+		mcpServer,              // Pass MCP server for /v1/mcp endpoint
 	)
 	logger.Info("API server component created (graph-only)")
 
@@ -517,6 +542,16 @@ func runServer(cmd *cobra.Command, args []string) {
 	if err := manager.Start(ctx); err != nil {
 		logger.Error("Failed to start components: %v", err)
 		HandleError(err, "Startup error")
+	}
+
+	// Start stdio MCP transport if requested
+	if stdioEnabled {
+		logger.Info("Starting stdio MCP transport alongside HTTP")
+		go func() {
+			if err := server.ServeStdio(mcpServer); err != nil {
+				logger.Error("Stdio transport error: %v", err)
+			}
+		}()
 	}
 
 	logger.Info("Application started successfully")
