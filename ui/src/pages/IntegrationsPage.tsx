@@ -10,7 +10,7 @@ interface IntegrationConfig {
   type: string;
   enabled: boolean;
   config: Record<string, any>;
-  health?: 'healthy' | 'degraded' | 'stopped';
+  health?: 'healthy' | 'degraded' | 'stopped' | 'not_started';
   dateAdded?: string;
 }
 

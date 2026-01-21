@@ -21,6 +21,8 @@ import (
 	"github.com/moolen/spectre/internal/graphservice"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/integration"
+	// Import integration implementations to register their factories
+	_ "github.com/moolen/spectre/internal/integration/victorialogs"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/tracing"
@@ -65,8 +67,8 @@ var (
 	reconcilerIntervalMins int
 	reconcilerBatchSize    int
 	// Integration manager configuration
-	integrationsConfigPath    string
-	minIntegrationVersion     string
+	integrationsConfigPath string
+	minIntegrationVersion  string
 )
 
 var serverCmd = &cobra.Command{
@@ -129,7 +131,7 @@ func init() {
 		"Maximum resources to check per reconciliation cycle (default: 100)")
 
 	// Integration manager configuration
-	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "integrations.yaml",
+	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "/tmp/integrations.yaml",
 		"Path to integrations configuration YAML file (default: integrations.yaml)")
 	serverCmd.Flags().StringVar(&minIntegrationVersion, "min-integration-version", "",
 		"Minimum required integration version (e.g., '1.0.0') for version validation (optional)")

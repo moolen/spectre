@@ -5,7 +5,7 @@ interface Integration {
   type: string;
   config: { url?: string; [key: string]: any };
   enabled: boolean;
-  health?: 'healthy' | 'degraded' | 'stopped';
+  health?: 'healthy' | 'degraded' | 'stopped' | 'not_started';
   dateAdded?: string;
 }
 
@@ -22,6 +22,8 @@ const getStatusColor = (health?: string): string => {
       return '#f59e0b'; // amber
     case 'stopped':
       return '#ef4444'; // red
+    case 'not_started':
+      return '#6b7280'; // gray - pending startup
     default:
       return '#6b7280'; // gray
   }
@@ -35,6 +37,8 @@ const getStatusLabel = (health?: string): string => {
       return 'Degraded';
     case 'stopped':
       return 'Stopped';
+    case 'not_started':
+      return 'Pending';
     default:
       return 'Unknown';
   }
