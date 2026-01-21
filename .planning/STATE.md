@@ -10,25 +10,26 @@
 
 ## Current Position
 
-**Phase:** 2 - Config Management & UI
-**Plan:** 3 of 3 (02-03-PLAN.md - just completed)
-**Status:** Phase Complete ✓
-**Progress:** 11/31 requirements
-**Last activity:** 2026-01-21 - Completed Phase 2 (Config Management & UI)
+**Phase:** 3 - VictoriaLogs Client & Basic Pipeline
+**Plan:** 1 of 3 (03-01-PLAN.md - just completed)
+**Status:** In Progress
+**Progress:** 12/31 requirements
+**Last activity:** 2026-01-21 - Completed 03-01-PLAN.md (VictoriaLogs Client & Query Builder)
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
 [██████████] 100% Phase 2 (Complete ✓)
-[█████▓░░░░] 35% Overall (11/31 requirements)
+[███▓░░░░░░] 33% Phase 3 (1/3 plans complete)
+[██████░░░░] 39% Overall (12/31 requirements)
 ```
 
 ## Performance Metrics
 
 | Metric | Current | Target | Status |
 |--------|---------|--------|--------|
-| Requirements Complete | 11/31 | 31/31 | In Progress |
+| Requirements Complete | 12/31 | 31/31 | In Progress |
 | Phases Complete | 2/5 | 5/5 | In Progress |
-| Plans Complete | 7/7 | 7/7 (Phases 1-2) | Phases 1-2 Complete ✓ |
+| Plans Complete | 8/10 | 10/10 (Phases 1-3) | Phase 3 in progress |
 | Blockers | 0 | 0 | On Track |
 
 ## Accumulated Context
@@ -75,6 +76,12 @@
 | Empty state shows tiles, table replaces tiles when data exists | 02-02 | Progressive disclosure - simple empty state, functional table when needed |
 | Name field disabled in edit mode | 02-02 | Name is immutable identifier - prevents breaking references |
 | Inline CSS-in-JS following Sidebar.tsx patterns | 02-02 | Consistent with existing codebase styling approach |
+| LogsQL exact match operator is := not = | 03-01 | VictoriaLogs LogsQL syntax for precise field matching |
+| Always include _time filter in queries | 03-01 | Prevents full history scans - default to last 1 hour when unspecified |
+| Read response body to completion with io.ReadAll | 03-01 | Critical for HTTP connection reuse - even on error responses |
+| MaxIdleConnsPerHost set to 10 (up from default 2) | 03-01 | Prevents connection churn under load for production workloads |
+| Use RFC3339 for VictoriaLogs timestamps | 03-01 | ISO 8601-compliant time format for API requests |
+| Empty field values omitted from LogsQL queries | 03-01 | Cleaner queries - only include non-empty filter parameters |
 
 **Scope Boundaries:**
 - Progressive disclosure: 3 levels maximum (global → aggregated → detail)
@@ -95,11 +102,13 @@
 - 02-02: React UI components for integration management (CONF-04, CONF-05)
 - 02-03: Server integration and end-to-end verification
 
+**Phase 3: VictoriaLogs Client & Basic Pipeline** (In Progress)
+- 03-01: VictoriaLogs HTTP client with LogsQL query builder ✓
+
 ### Active Todos
 
-- [ ] Plan Phase 3: VictoriaLogs Client & Basic Pipeline
-- [ ] Implement VictoriaLogs HTTP client with LogsQL query support
-- [ ] Build log ingestion pipeline with backpressure handling
+- [ ] Implement log ingestion pipeline with backpressure handling (Plan 03-02)
+- [ ] Wire VictoriaLogs integration with client and pipeline (Plan 03-03)
 
 ### Known Blockers
 
@@ -117,31 +126,29 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed Phase 2 (Config Management & UI)
+**Stopped at:** Completed 03-01-PLAN.md (VictoriaLogs Client & Query Builder)
 
 **What just happened:**
-- Executed plan 02-03: Server integration and end-to-end verification
-- Wired REST API handlers into server startup (pass configPath and integrationManager)
-- Human verification discovered and approved 7 bug fixes
-- Added VictoriaLogs integration placeholder for UI testing
-- Set default --integrations-config to "integrations.yaml" with auto-create
-- Fixed API routing conflict (static handler serving /api/* paths)
-- Added /test endpoint for unsaved integration validation
-- Added Helm chart extraVolumeMounts and extraArgs for production deployment
-- All tasks completed in 1h 24min with 7 auto-fixed issues
-- SUMMARY: .planning/phases/02-config-management-ui/02-03-SUMMARY.md
+- Executed plan 03-01: VictoriaLogs HTTP client with LogsQL query builder
+- Created types.go with QueryParams, TimeRange, LogEntry, and response types
+- Implemented query.go with BuildLogsQLQuery, BuildHistogramQuery, BuildAggregationQuery
+- Implemented client.go with QueryLogs, QueryHistogram, QueryAggregation, IngestBatch methods
+- Tuned HTTP transport settings (MaxIdleConnsPerHost: 10) for production workloads
+- Ensured connection reuse pattern (io.ReadAll before close) in all methods
+- All tasks completed in 3 minutes with no deviations
+- SUMMARY: .planning/phases/03-victorialogs-client-pipeline/03-01-SUMMARY.md
 
 **What's next:**
-- Phase 2 complete (all 3 plans done)
-- Ready for Phase 3: VictoriaLogs Client & Basic Pipeline
-- Next: Plan Phase 3 with `/gsd:plan-phase 3`
+- Phase 3 in progress (1 of 3 plans complete)
+- Next: Plan 03-02 (Pipeline with Backpressure)
+- Next: Execute `/gsd:execute-phase 3 --plan 2` when ready
 
 **Context for next agent:**
-- End-to-end integration management system working and tested
-- Hot-reload chain verified: API → file → watcher → manager
-- VictoriaLogs placeholder demonstrates integration pattern
-- Default config auto-creation reduces deployment friction
-- Helm chart ready for production ConfigMap mounting
+- HTTP client foundation complete with four operations (query, histogram, aggregation, ingestion)
+- Query builder uses structured parameters (no raw LogsQL exposure)
+- Connection pooling tuned for high-throughput queries
+- IngestBatch method ready for pipeline integration (Plan 03-02)
+- All error responses include VictoriaLogs details for debugging
 
 ---
 
