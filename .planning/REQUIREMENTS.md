@@ -17,11 +17,11 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 ### Service Layer
 
-- [ ] **SRVC-01**: TimelineService interface shared by REST handlers and MCP tools
-- [ ] **SRVC-02**: GraphService interface for graph queries shared by REST and MCP
-- [ ] **SRVC-03**: MetadataService interface for metadata operations
-- [ ] **SRVC-04**: MCP tools use service layer directly (no HTTP self-calls)
-- [ ] **SRVC-05**: REST handlers refactored to use service layer
+- [x] **SRVC-01**: TimelineService interface shared by REST handlers and MCP tools
+- [x] **SRVC-02**: GraphService interface for graph queries shared by REST and MCP
+- [x] **SRVC-03**: MetadataService interface for metadata operations
+- [x] **SRVC-04**: MCP tools use service layer directly (no HTTP self-calls)
+- [x] **SRVC-05**: REST handlers refactored to use service layer
 
 ### Integration Manager
 
@@ -63,11 +63,11 @@ Requirements for server consolidation. Each maps to roadmap phases.
 | INTG-01 | Phase 6 | Complete |
 | INTG-02 | Phase 6 | Complete |
 | INTG-03 | Phase 6 | Complete |
-| SRVC-01 | Phase 7 | Pending |
-| SRVC-02 | Phase 7 | Pending |
-| SRVC-03 | Phase 7 | Pending |
-| SRVC-04 | Phase 7 | Pending |
-| SRVC-05 | Phase 7 | Pending |
+| SRVC-01 | Phase 7 | Complete |
+| SRVC-02 | Phase 7 | Complete |
+| SRVC-03 | Phase 7 | Complete |
+| SRVC-04 | Phase 7 | Complete |
+| SRVC-05 | Phase 7 | Complete |
 | SRVR-05 | Phase 8 | Pending |
 | HELM-01 | Phase 8 | Pending |
 | HELM-02 | Phase 8 | Pending |
@@ -85,4 +85,4 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 ---
 *Requirements defined: 2026-01-21*
-*Last updated: 2026-01-21 — Phase 6 requirements marked Complete (7/21)*
+*Last updated: 2026-01-21 — Phase 7 requirements marked Complete (12/21)*

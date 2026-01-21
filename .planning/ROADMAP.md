@@ -55,13 +55,13 @@ Plans:
 **Plans:** 5 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Complete TimelineService and wire REST handlers and MCP tools (resource_timeline, cluster_health)
-- [ ] 07-02-PLAN.md — Create GraphService and wire REST handlers and MCP tools (causal_paths, detect_anomalies)
-- [ ] 07-03-PLAN.md — Create SearchService and refactor REST search handler
-- [ ] 07-04-PLAN.md — Create MetadataService with cache integration and refactor REST metadata handler
-- [ ] 07-05-PLAN.md — Delete HTTP client code (internal/mcp/client/client.go)
+- [x] 07-01-PLAN.md — Complete TimelineService and wire REST handlers and MCP tools (resource_timeline, cluster_health)
+- [x] 07-02-PLAN.md — Create GraphService and wire REST handlers and MCP tools (causal_paths, detect_anomalies)
+- [x] 07-03-PLAN.md — Create SearchService and refactor REST search handler
+- [x] 07-04-PLAN.md — Create MetadataService with cache integration and refactor REST metadata handler
+- [x] 07-05-PLAN.md — Delete HTTP client code (internal/mcp/client/client.go)
 
-**Status:** Ready to start
+**Status:** ✓ Complete (2026-01-21)
 
 ---
 
@@ -110,11 +110,11 @@ Plans:
 | Phase | Status | Plans | Requirements |
 |-------|--------|-------|--------------|
 | 6 - Consolidated Server & Integration Manager | ✓ Complete | 2/2 | 7 |
-| 7 - Service Layer Extraction | Ready | 0/5 | 5 |
+| 7 - Service Layer Extraction | ✓ Complete | 5/5 | 5 |
 | 8 - Cleanup & Helm Chart Update | Pending | 0/0 | 5 |
 | 9 - E2E Test Validation | Pending | 0/0 | 4 |
 
-**Total:** 2/7 Phase 6-7 plans complete, 7/21 requirements satisfied
+**Total:** 7/7 Phase 6-7 plans complete, 12/21 requirements satisfied
 
 ---
 
@@ -126,15 +126,20 @@ Plans:
 - Phase 6: Use /v1/mcp path (not /mcp) for API versioning consistency
 - Phase 6: Use --stdio flag (not --transport=stdio) for simpler interface
 - Phase 6: StreamableHTTP with stateless mode for client compatibility
+- Phase 7: HTTP client completely removed, service-only architecture
+- Phase 7: Standalone mcp/agent commands disabled (need gRPC refactor)
 
 **Issues Resolved:**
-- TBD
+- MCP tools HTTP self-calls eliminated (service layer)
+- Handler business logic centralized in services
 
 **Issues Deferred:**
-- TBD
+- Standalone MCP command (needs gRPC/Connect transport)
+- Agent command (depends on HTTP client, needs refactor)
 
 **Technical Debt Incurred:**
-- TBD
+- Agent package excluded from build (build constraints)
+- Standalone mcp command disabled pending gRPC support
 
 ---
 
@@ -144,4 +149,4 @@ Plans:
 ---
 
 *Created: 2026-01-21*
-*Last updated: 2026-01-21 — Phase 7 planned (5/5 plans created)*
+*Last updated: 2026-01-21 — Phase 7 complete (5/5 plans executed, verified)*
