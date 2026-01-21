@@ -140,6 +140,15 @@ func RegisterHandlers(
 			}
 		})
 
+		// Test endpoint for unsaved integrations (must be registered before the trailing-slash route)
+		router.HandleFunc("/api/config/integrations/test", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+				return
+			}
+			configHandler.HandleTest(w, r)
+		})
+
 		// Instance-specific endpoints with path parameter
 		router.HandleFunc("/api/config/integrations/", func(w http.ResponseWriter, r *http.Request) {
 			name := strings.TrimPrefix(r.URL.Path, "/api/config/integrations/")
@@ -148,7 +157,7 @@ func RegisterHandlers(
 				return
 			}
 
-			// Check for /test suffix
+			// Check for /test suffix (for saved integrations: /api/config/integrations/{name}/test)
 			if strings.HasSuffix(name, "/test") {
 				if r.Method != http.MethodPost {
 					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -172,5 +181,7 @@ func RegisterHandlers(
 		})
 
 		logger.Info("Registered /api/config/integrations endpoints")
+	} else {
+		logger.Warn("Integration config endpoints NOT registered (configPath=%q, manager=%v)", configPath, integrationManager != nil)
 	}
 }

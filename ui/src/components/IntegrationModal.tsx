@@ -115,14 +115,18 @@ export function IntegrationModal({
     setTestResult(null);
 
     try {
-      const response = await fetch(`/api/config/integrations/${config.name}/test`, {
+      // Use /test endpoint for unsaved integrations, /{name}/test for saved ones
+      const testUrl = initialConfig
+        ? `/api/config/integrations/${config.name}/test`
+        : '/api/config/integrations/test';
+      const response = await fetch(testUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
       const result = await response.json();
       setTestResult({
-        success: response.ok,
+        success: response.ok && result.success,
         message: result.message || (response.ok ? 'Connection successful' : 'Connection failed'),
       });
     } catch (err: any) {
