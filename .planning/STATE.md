@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-21)
 ## Current Position
 
 Phase: Phase 7 — Service Layer Extraction (2 of 4) — IN PROGRESS
-Plan: 07-01 complete (1 of 5 plans in phase)
-Status: In progress - Timeline service extraction complete
-Last activity: 2026-01-21 — Completed 07-01-PLAN.md (TimelineService extraction and MCP tool wiring)
+Plan: 07-03 complete (3 of 5 plans in phase)
+Status: In progress - Timeline, Graph, and Search services extracted
+Last activity: 2026-01-21 — Completed 07-03-PLAN.md (SearchService extraction and REST handler refactoring)
 
-Progress: ███░░░░░░░░░░░░░░░░░ 15% (3/20 total plans estimated)
+Progress: █████░░░░░░░░░░░░░░░ 25% (5/20 total plans estimated)
 
 ## Milestone: v1.1 Server Consolidation
 
@@ -22,7 +22,7 @@ Progress: ███░░░░░░░░░░░░░░░░░ 15% (3/20
 
 **Phases:**
 - Phase 6: Consolidated Server & Integration Manager (7 reqs) — COMPLETE (2/2 plans complete)
-- Phase 7: Service Layer Extraction (5 reqs) — IN PROGRESS (1/5 plans complete)
+- Phase 7: Service Layer Extraction (5 reqs) — IN PROGRESS (3/5 plans complete)
 - Phase 8: Cleanup & Helm Chart Update (5 reqs) — Pending
 - Phase 9: E2E Test Validation (4 reqs) — Pending
 
@@ -53,12 +53,12 @@ None
 
 **v1.1 Milestone:**
 - Phases complete: 1/4 (Phase 6 ✅)
-- Plans complete: 3/20 (estimated)
-- Requirements satisfied: 8/21 (SRVR-01 through INTG-03, SVCE-01)
+- Plans complete: 5/20 (estimated)
+- Requirements satisfied: 10/21 (SRVR-01 through INTG-03, SVCE-01 through SVCE-03)
 
 **Session metrics:**
 - Current session: 2026-01-21
-- Plans executed this session: 3
+- Plans executed this session: 5
 - Blockers hit this session: 0
 
 ## Accumulated Context
@@ -75,6 +75,8 @@ None
 | 07-01 | Create API server before MCP server | TimelineService created by API server, needed by MCP tools | Enables direct service sharing, required init order change |
 | 07-01 | Add RegisterMCPEndpoint for late registration | MCP endpoint must register after MCP server creation | Clean separation of API server construction and MCP registration |
 | 07-01 | WithClient constructors for backward compatibility | Agent tools still use HTTP client pattern | Both patterns supported during transition |
+| 07-03 | SearchService follows TimelineService pattern | Used constructor injection, domain errors, same observability | Consistency across service layer for maintainability |
+| 07-03 | Query string validation in service | Service validates 'q' parameter required | Ensures consistent behavior when reused by MCP tools |
 
 ### Active TODOs
 
@@ -87,15 +89,15 @@ None
 
 ## Session Continuity
 
-**Last command:** Executed 07-01-PLAN.md (TimelineService extraction and MCP tool wiring)
-**Last output:** 07-01-SUMMARY.md created, STATE.md updated
-**Context preserved:** TimelineService pattern established, MCP timeline tools use direct service calls
+**Last command:** Executed 07-03-PLAN.md (SearchService extraction and REST handler refactoring)
+**Last output:** 07-03-SUMMARY.md created, STATE.md updated
+**Context preserved:** Three services extracted (Timeline, Graph, Search), REST handlers refactored to use services
 
 **On next session:**
-- Phase 7 IN PROGRESS — 1 of 5 plans complete (SVCE-01 satisfied)
-- TimelineService pattern working - ready to replicate for GraphService
-- Next: Continue Phase 7 plans (GraphService, SearchService, MetadataService)
-- Server initialization order supports service sharing between REST and MCP
+- Phase 7 IN PROGRESS — 3 of 5 plans complete (SVCE-01, SVCE-02, SVCE-03 satisfied)
+- Service layer pattern proven across Timeline, Graph, and Search operations
+- Next: Complete Phase 7 (MetadataService, MCP tool wiring)
+- All REST handlers follow thin adapter pattern over service layer
 
 ---
-*Last updated: 2026-01-21 — Completed Phase 7 Plan 1*
+*Last updated: 2026-01-21 — Completed Phase 7 Plan 3*
