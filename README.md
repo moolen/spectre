@@ -71,7 +71,17 @@ resources:
 
 ## MCP Integration
 
-Spectre provides an MCP server for AI assistants to query cluster state during incident investigation. The server exposes five tools:
+Spectre runs an integrated MCP server on **port 8080** at the **/v1/mcp** endpoint. The MCP server runs in-process within the main Spectre server (not as a separate container) and provides AI assistants with direct access to cluster data during incident investigation.
+
+### Connection
+
+After port-forwarding the Spectre service (see [Quick Start](#quick-start)), connect your AI assistant to:
+
+```
+http://localhost:8080/v1/mcp
+```
+
+The MCP server exposes five tools:
 
 ### Tools
 

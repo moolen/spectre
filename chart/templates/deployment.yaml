@@ -155,55 +155,6 @@ spec:
         {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 12 }}
-      {{- if .Values.mcp.enabled }}
-      - name: mcp
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
-        {{- with .Values.mcp.securityContext }}
-        securityContext:
-          {{- toYaml . | nindent 12 }}
-        {{- end }}
-        ports:
-        - name: mcp
-          containerPort: {{ .Values.mcp.port }}
-          protocol: TCP
-        command:
-        - /app/spectre
-        - mcp
-        - --log-level=debug
-        {{- range .Values.mcp.extraArgs }}
-        - {{ . }}
-        {{- end }}
-        {{- with .Values.mcp.extraVolumeMounts }}
-        volumeMounts:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        env:
-        - name: SPECTRE_URL
-          value: {{ .Values.mcp.spectreURL | quote }}
-        - name: MCP_HTTP_ADDR
-          value: {{ .Values.mcp.httpAddr | quote }}
-        {{- if .Values.graph.enabled }}
-        - name: GRAPH_ENABLED
-          value: "true"
-        - name: GRAPH_HOST
-          value: "localhost"
-        - name: GRAPH_PORT
-          value: {{ .Values.graph.falkordb.port | quote }}
-        - name: GRAPH_NAME
-          value: {{ .Values.graph.falkordb.graphName | quote }}
-        {{- end }}
-        {{- if .Values.mcp.livenessProbe.enabled }}
-        livenessProbe:
-          {{- omit .Values.mcp.livenessProbe "enabled" | toYaml | nindent 10 }}
-        {{- end }}
-        {{- if .Values.mcp.readinessProbe.enabled }}
-        readinessProbe:
-          {{- omit .Values.mcp.readinessProbe "enabled" | toYaml | nindent 10 }}
-        {{- end }}
-        resources:
-          {{- toYaml .Values.mcp.resources | nindent 12 }}
-      {{- end }}
       {{- if and .Values.graph.enabled .Values.graph.falkordb.sidecar }}
       - name: falkordb
         image: "{{ .Values.graph.falkordb.image.repository }}:{{ .Values.graph.falkordb.image.tag }}"
