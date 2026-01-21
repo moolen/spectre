@@ -13,7 +13,7 @@ Requirements for server consolidation. Each maps to roadmap phases.
 - [x] **SRVR-02**: MCP endpoint available at `/v1/mcp` path on main server
 - [x] **SRVR-03**: MCP stdio transport remains available via `--stdio` flag
 - [x] **SRVR-04**: Graceful shutdown handles all components (REST, MCP, integrations)
-- [ ] **SRVR-05**: Remove standalone `mcp` command from CLI
+- [x] **SRVR-05**: Remove standalone `mcp` command from CLI
 
 ### Service Layer
 
@@ -31,10 +31,10 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 ### Helm Chart
 
-- [ ] **HELM-01**: Remove MCP sidecar container from deployment template
-- [ ] **HELM-02**: Remove MCP-specific values (mcp.enabled, mcp.port, etc.)
-- [ ] **HELM-03**: Single container deployment for Spectre
-- [ ] **HELM-04**: MCP available at /mcp on main service port
+- [x] **HELM-01**: Remove MCP sidecar container from deployment template
+- [x] **HELM-02**: Remove MCP-specific values (mcp.enabled, mcp.port, etc.)
+- [x] **HELM-03**: Single container deployment for Spectre
+- [x] **HELM-04**: MCP available at /mcp on main service port
 
 ### E2E Tests
 
@@ -68,11 +68,11 @@ Requirements for server consolidation. Each maps to roadmap phases.
 | SRVC-03 | Phase 7 | Complete |
 | SRVC-04 | Phase 7 | Complete |
 | SRVC-05 | Phase 7 | Complete |
-| SRVR-05 | Phase 8 | Pending |
-| HELM-01 | Phase 8 | Pending |
-| HELM-02 | Phase 8 | Pending |
-| HELM-03 | Phase 8 | Pending |
-| HELM-04 | Phase 8 | Pending |
+| SRVR-05 | Phase 8 | Complete |
+| HELM-01 | Phase 8 | Complete |
+| HELM-02 | Phase 8 | Complete |
+| HELM-03 | Phase 8 | Complete |
+| HELM-04 | Phase 8 | Complete |
 | TEST-01 | Phase 9 | Pending |
 | TEST-02 | Phase 9 | Pending |
 | TEST-03 | Phase 9 | Pending |
@@ -85,4 +85,4 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 ---
 *Requirements defined: 2026-01-21*
-*Last updated: 2026-01-21 — Phase 7 requirements marked Complete (12/21)*
+*Last updated: 2026-01-21 — Phase 8 requirements marked Complete (17/21)*
