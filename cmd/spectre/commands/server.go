@@ -129,8 +129,8 @@ func init() {
 		"Maximum resources to check per reconciliation cycle (default: 100)")
 
 	// Integration manager configuration
-	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "",
-		"Path to integrations configuration YAML file (optional)")
+	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "integrations.yaml",
+		"Path to integrations configuration YAML file (default: integrations.yaml)")
 	serverCmd.Flags().StringVar(&minIntegrationVersion, "min-integration-version", "",
 		"Minimum required integration version (e.g., '1.0.0') for version validation (optional)")
 }
@@ -165,9 +165,22 @@ func runServer(cmd *cobra.Command, args []string) {
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
 
-	// Initialize integration manager if config is provided
+	// Initialize integration manager (always enabled with default config path)
 	var integrationMgr *integration.Manager
 	if integrationsConfigPath != "" {
+		// Create default config file if it doesn't exist
+		if _, err := os.Stat(integrationsConfigPath); os.IsNotExist(err) {
+			logger.Info("Creating default integrations config file: %s", integrationsConfigPath)
+			defaultConfig := &config.IntegrationsFile{
+				SchemaVersion: "v1",
+				Instances:     []config.IntegrationConfig{},
+			}
+			if err := config.WriteIntegrationsFile(integrationsConfigPath, defaultConfig); err != nil {
+				logger.Error("Failed to create default integrations config: %v", err)
+				HandleError(err, "Integration config creation error")
+			}
+		}
+
 		logger.Info("Initializing integration manager from: %s", integrationsConfigPath)
 		var err error
 		integrationMgr, err = integration.NewManager(integration.ManagerConfig{
@@ -185,8 +198,6 @@ func runServer(cmd *cobra.Command, args []string) {
 			HandleError(err, "Integration manager registration error")
 		}
 		logger.Info("Integration manager registered")
-	} else {
-		logger.Info("Integration manager disabled (no --integrations-config provided)")
 	}
 
 	// Initialize tracing provider
