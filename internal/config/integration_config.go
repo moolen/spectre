@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-
-	"github.com/moolen/spectre/internal/integration"
 )
 
 // IntegrationsFile represents the top-level structure of the integrations config file.
@@ -94,17 +92,4 @@ func (f *IntegrationsFile) Validate() error {
 	}
 
 	return nil
-}
-
-// ToInstanceConfigs converts the IntegrationConfig entries to integration.InstanceConfig.
-// This is a placeholder for now - actual conversion will be implemented when
-// concrete integration types are added in later phases.
-func (f *IntegrationsFile) ToInstanceConfigs() []integration.InstanceConfig {
-	configs := make([]integration.InstanceConfig, len(f.Instances))
-	for i, instance := range f.Instances {
-		// For now, just return the map directly
-		// In later phases, this will deserialize to concrete types
-		configs[i] = instance.Config
-	}
-	return configs
 }
