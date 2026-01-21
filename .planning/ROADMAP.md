@@ -52,9 +52,16 @@ Plans:
 4. MCP tools execute service methods in-process (no HTTP self-calls to localhost)
 5. REST handlers refactored to use service layer instead of inline business logic
 
-**Plans:** TBD
+**Plans:** 5 plans
 
-**Status:** Pending
+Plans:
+- [ ] 07-01-PLAN.md — Complete TimelineService and wire REST handlers and MCP tools (resource_timeline, cluster_health)
+- [ ] 07-02-PLAN.md — Create GraphService and wire REST handlers and MCP tools (causal_paths, detect_anomalies)
+- [ ] 07-03-PLAN.md — Create SearchService and refactor REST search handler
+- [ ] 07-04-PLAN.md — Create MetadataService with cache integration and refactor REST metadata handler
+- [ ] 07-05-PLAN.md — Delete HTTP client code (internal/mcp/client/client.go)
+
+**Status:** Ready to start
 
 ---
 
@@ -103,11 +110,11 @@ Plans:
 | Phase | Status | Plans | Requirements |
 |-------|--------|-------|--------------|
 | 6 - Consolidated Server & Integration Manager | ✓ Complete | 2/2 | 7 |
-| 7 - Service Layer Extraction | Ready | 0/0 | 5 |
+| 7 - Service Layer Extraction | Ready | 0/5 | 5 |
 | 8 - Cleanup & Helm Chart Update | Pending | 0/0 | 5 |
 | 9 - E2E Test Validation | Pending | 0/0 | 4 |
 
-**Total:** 2/2 Phase 6 plans complete, 7/21 requirements satisfied
+**Total:** 2/7 Phase 6-7 plans complete, 7/21 requirements satisfied
 
 ---
 
@@ -137,4 +144,4 @@ Plans:
 ---
 
 *Created: 2026-01-21*
-*Last updated: 2026-01-21 — Phase 6 complete (2/2 plans executed, 7 requirements satisfied)*
+*Last updated: 2026-01-21 — Phase 7 planned (5/5 plans created)*
