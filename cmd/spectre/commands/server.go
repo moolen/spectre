@@ -437,6 +437,8 @@ func runServer(cmd *cobra.Command, args []string) {
 			RefreshTTL:  time.Duration(namespaceGraphCacheRefreshSeconds) * time.Second,
 			MaxMemoryMB: int64(namespaceGraphCacheMemoryMB),
 		},
+		integrationsConfigPath, // Pass config path for REST API handlers
+		integrationMgr,         // Pass integration manager for REST API handlers
 	)
 	logger.Info("API server component created (graph-only)")
 

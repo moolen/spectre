@@ -10,6 +10,7 @@ import (
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
+	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -47,6 +48,9 @@ type Server struct {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	}
+	// Integration config management
+	integrationsConfigPath string
+	integrationManager     *integration.Manager
 }
 
 // NamespaceGraphCacheConfig holds configuration for the namespace graph cache
@@ -72,18 +76,22 @@ func NewWithStorageGraphAndPipeline(
 	},
 	metadataRefreshPeriod time.Duration, // How often to refresh the metadata cache
 	nsGraphCacheConfig NamespaceGraphCacheConfig, // Namespace graph cache configuration
+	integrationsConfigPath string,         // Path to integrations config file (optional)
+	integrationManager *integration.Manager, // Integration manager (optional)
 ) *Server {
 	s := &Server{
-		port:             port,
-		logger:           logging.GetLogger("api"),
-		queryExecutor:    storageExecutor,
-		graphExecutor:    graphExecutor,
-		querySource:      querySource,
-		graphClient:      graphClient,
-		graphPipeline:    graphPipeline,
-		router:           http.NewServeMux(),
-		readinessChecker: readinessChecker,
-		tracingProvider:  tracingProvider,
+		port:                   port,
+		logger:                 logging.GetLogger("api"),
+		queryExecutor:          storageExecutor,
+		graphExecutor:          graphExecutor,
+		querySource:            querySource,
+		graphClient:            graphClient,
+		graphPipeline:          graphPipeline,
+		router:                 http.NewServeMux(),
+		readinessChecker:       readinessChecker,
+		tracingProvider:        tracingProvider,
+		integrationsConfigPath: integrationsConfigPath,
+		integrationManager:     integrationManager,
 	}
 
 	// Create metadata cache if we have a query executor
