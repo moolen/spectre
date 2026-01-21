@@ -56,27 +56,27 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRVR-01 | Phase 1 | Pending |
-| SRVR-02 | Phase 1 | Pending |
-| SRVR-03 | Phase 1 | Pending |
-| SRVR-04 | Phase 1 | Pending |
-| SRVR-05 | Phase 3 | Pending |
-| SRVC-01 | Phase 2 | Pending |
-| SRVC-02 | Phase 2 | Pending |
-| SRVC-03 | Phase 2 | Pending |
-| SRVC-04 | Phase 2 | Pending |
-| SRVC-05 | Phase 2 | Pending |
-| INTG-01 | Phase 1 | Pending |
-| INTG-02 | Phase 1 | Pending |
-| INTG-03 | Phase 1 | Pending |
-| HELM-01 | Phase 3 | Pending |
-| HELM-02 | Phase 3 | Pending |
-| HELM-03 | Phase 3 | Pending |
-| HELM-04 | Phase 3 | Pending |
-| TEST-01 | Phase 4 | Pending |
-| TEST-02 | Phase 4 | Pending |
-| TEST-03 | Phase 4 | Pending |
-| TEST-04 | Phase 4 | Pending |
+| SRVR-01 | Phase 6 | Pending |
+| SRVR-02 | Phase 6 | Pending |
+| SRVR-03 | Phase 6 | Pending |
+| SRVR-04 | Phase 6 | Pending |
+| INTG-01 | Phase 6 | Pending |
+| INTG-02 | Phase 6 | Pending |
+| INTG-03 | Phase 6 | Pending |
+| SRVC-01 | Phase 7 | Pending |
+| SRVC-02 | Phase 7 | Pending |
+| SRVC-03 | Phase 7 | Pending |
+| SRVC-04 | Phase 7 | Pending |
+| SRVC-05 | Phase 7 | Pending |
+| SRVR-05 | Phase 8 | Pending |
+| HELM-01 | Phase 8 | Pending |
+| HELM-02 | Phase 8 | Pending |
+| HELM-03 | Phase 8 | Pending |
+| HELM-04 | Phase 8 | Pending |
+| TEST-01 | Phase 9 | Pending |
+| TEST-02 | Phase 9 | Pending |
+| TEST-03 | Phase 9 | Pending |
+| TEST-04 | Phase 9 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 21 total
@@ -85,4 +85,4 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 ---
 *Requirements defined: 2026-01-21*
-*Last updated: 2026-01-21 after initial definition*
+*Last updated: 2026-01-21 — traceability updated with phase 6-9 mappings*
