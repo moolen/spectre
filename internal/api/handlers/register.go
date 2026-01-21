@@ -38,21 +38,24 @@ func RegisterHandlers(
 	}
 	searchHandler := NewSearchHandler(searchExecutor, logger, tracer)
 
-	// Create timeline handler with appropriate executor(s)
-	var timelineHandler *TimelineHandler
+	// Create timeline service with appropriate executor(s)
+	var timelineService *api.TimelineService
 	if graphExecutor != nil && querySource == api.TimelineQuerySourceGraph {
 		// Use dual-executor mode with graph as primary
-		logger.Info("Timeline handler using GRAPH query executor")
-		timelineHandler = NewTimelineHandlerWithMode(storageExecutor, graphExecutor, querySource, logger, tracer)
+		logger.Info("Timeline service using GRAPH query executor")
+		timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, querySource, logger, tracer)
 	} else if graphExecutor != nil {
 		// Graph available but using storage - enable both for A/B testing
-		logger.Info("Timeline handler using STORAGE query executor (graph available for comparison)")
-		timelineHandler = NewTimelineHandlerWithMode(storageExecutor, graphExecutor, api.TimelineQuerySourceStorage, logger, tracer)
+		logger.Info("Timeline service using STORAGE query executor (graph available for comparison)")
+		timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, api.TimelineQuerySourceStorage, logger, tracer)
 	} else {
 		// Storage only
-		logger.Info("Timeline handler using STORAGE query executor only")
-		timelineHandler = NewTimelineHandler(storageExecutor, logger, tracer)
+		logger.Info("Timeline service using STORAGE query executor only")
+		timelineService = api.NewTimelineService(storageExecutor, logger, tracer)
 	}
+
+	// Create timeline handler using the service
+	timelineHandler := NewTimelineHandler(timelineService, logger, tracer)
 
 	// Select appropriate executor for metadata handler (same as timeline)
 	var metadataExecutor api.QueryExecutor

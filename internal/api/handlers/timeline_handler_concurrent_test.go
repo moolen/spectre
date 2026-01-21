@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -127,7 +128,8 @@ func TestExecuteConcurrentQueries_BothQueriesSucceed(t *testing.T) {
 		},
 	}
 
-	handler := NewTimelineHandler(mockExecutor, logger, tracer)
+	// Create timeline service for testing
+	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -139,7 +141,7 @@ func TestExecuteConcurrentQueries_BothQueriesSucceed(t *testing.T) {
 	}
 
 	start := time.Now()
-	resourceResult, eventResult, err := handler.executeConcurrentQueries(context.Background(), query)
+	resourceResult, eventResult, err := timelineService.ExecuteConcurrentQueries(context.Background(), query)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -199,7 +201,8 @@ func TestExecuteConcurrentQueries_ResourceQueryFails(t *testing.T) {
 		},
 	}
 
-	handler := NewTimelineHandler(mockExecutor, logger, tracer)
+	// Create timeline service for testing
+	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -210,7 +213,7 @@ func TestExecuteConcurrentQueries_ResourceQueryFails(t *testing.T) {
 		},
 	}
 
-	resourceResult, eventResult, err := handler.executeConcurrentQueries(context.Background(), query)
+	resourceResult, eventResult, err := timelineService.ExecuteConcurrentQueries(context.Background(), query)
 
 	if !errors.Is(err, resourceErr) && err.Error() != resourceErr.Error() {
 		t.Fatalf("Expected resource error, got: %v", err)
@@ -248,7 +251,8 @@ func TestExecuteConcurrentQueries_EventQueryFails(t *testing.T) {
 		},
 	}
 
-	handler := NewTimelineHandler(mockExecutor, logger, tracer)
+	// Create timeline service for testing
+	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -259,7 +263,7 @@ func TestExecuteConcurrentQueries_EventQueryFails(t *testing.T) {
 		},
 	}
 
-	resourceResult, eventResult, err := handler.executeConcurrentQueries(context.Background(), query)
+	resourceResult, eventResult, err := timelineService.ExecuteConcurrentQueries(context.Background(), query)
 
 	// Should succeed with empty event result (graceful degradation)
 	if err != nil {
@@ -296,7 +300,8 @@ func TestExecuteConcurrentQueries_ContextCancellation(t *testing.T) {
 		queryDuration: 200 * time.Millisecond, // Long duration to allow cancellation
 	}
 
-	handler := NewTimelineHandler(mockExecutor, logger, tracer)
+	// Create timeline service for testing
+	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -312,7 +317,7 @@ func TestExecuteConcurrentQueries_ContextCancellation(t *testing.T) {
 	// Cancel after 50ms
 	time.AfterFunc(50*time.Millisecond, cancel)
 
-	resourceResult, eventResult, err := handler.executeConcurrentQueries(ctx, query)
+	resourceResult, eventResult, err := timelineService.ExecuteConcurrentQueries(ctx, query)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled error, got: %v", err)
@@ -342,7 +347,8 @@ func TestExecuteConcurrentQueries_EmptyResults(t *testing.T) {
 		},
 	}
 
-	handler := NewTimelineHandler(mockExecutor, logger, tracer)
+	// Create timeline service for testing
+	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -353,7 +359,7 @@ func TestExecuteConcurrentQueries_EmptyResults(t *testing.T) {
 		},
 	}
 
-	resourceResult, eventResult, err := handler.executeConcurrentQueries(context.Background(), query)
+	resourceResult, eventResult, err := timelineService.ExecuteConcurrentQueries(context.Background(), query)
 
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
@@ -392,7 +398,8 @@ func TestExecuteConcurrentQueries_ConcurrentSafety(t *testing.T) {
 		},
 	}
 
-	handler := NewTimelineHandler(mockExecutor, logger, tracer)
+	// Create timeline service for testing
+	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -412,7 +419,7 @@ func TestExecuteConcurrentQueries_ConcurrentSafety(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			_, _, err := handler.executeConcurrentQueries(context.Background(), query)
+			_, _, err := timelineService.ExecuteConcurrentQueries(context.Background(), query)
 			errors[idx] = err
 		}(i)
 	}
@@ -438,7 +445,9 @@ func TestBuildTimelineResponse_WithEvents(t *testing.T) {
 	logger := logging.GetLogger("test")
 	tracer := noop.NewTracerProvider().Tracer("test")
 
-	handler := NewTimelineHandler(nil, logger, tracer)
+	// Create a mock executor for the service
+	mockExecutor := &mockConcurrentQueryExecutor{}
+	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
 
 	now := time.Now()
 	podUID := "pod-uid-123"
@@ -481,7 +490,7 @@ func TestBuildTimelineResponse_WithEvents(t *testing.T) {
 		ExecutionTimeMs: 5,
 	}
 
-	response := handler.buildTimelineResponse(resourceResult, eventResult)
+	response := timelineService.BuildTimelineResponse(resourceResult, eventResult)
 
 	if response == nil {
 		t.Fatal("Expected response, got nil")
@@ -507,7 +516,9 @@ func TestBuildTimelineResponse_WithoutEvents(t *testing.T) {
 	logger := logging.GetLogger("test")
 	tracer := noop.NewTracerProvider().Tracer("test")
 
-	handler := NewTimelineHandler(nil, logger, tracer)
+	// Create a mock executor for the service
+	mockExecutor := &mockConcurrentQueryExecutor{}
+	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
 
 	now := time.Now()
 
@@ -535,7 +546,7 @@ func TestBuildTimelineResponse_WithoutEvents(t *testing.T) {
 		ExecutionTimeMs: 5,
 	}
 
-	response := handler.buildTimelineResponse(resourceResult, eventResult)
+	response := timelineService.BuildTimelineResponse(resourceResult, eventResult)
 
 	if response == nil {
 		t.Fatal("Expected response, got nil")
