@@ -27,9 +27,13 @@ This roadmap delivers 21 v1.1 requirements across 4 phases, progressing from ser
 4. Server gracefully shuts down all components (REST, MCP, integrations) on SIGTERM
 5. Config hot-reload continues to work for integrations in consolidated mode
 
-**Plans:** TBD
+**Plans:** 2 plans
 
-**Status:** Pending
+Plans:
+- [ ] 06-01-PLAN.md — Integrate MCP server into main server with StreamableHTTP transport and integration manager
+- [ ] 06-02-PLAN.md — Verify consolidated server with MCP endpoint, integrations, and graceful shutdown
+
+**Status:** Ready to execute
 
 ---
 
@@ -98,12 +102,12 @@ This roadmap delivers 21 v1.1 requirements across 4 phases, progressing from ser
 
 | Phase | Status | Plans | Requirements |
 |-------|--------|-------|--------------|
-| 6 - Consolidated Server & Integration Manager | Pending | 0/0 | 7 |
+| 6 - Consolidated Server & Integration Manager | Ready to execute | 0/2 | 7 |
 | 7 - Service Layer Extraction | Pending | 0/0 | 5 |
 | 8 - Cleanup & Helm Chart Update | Pending | 0/0 | 5 |
 | 9 - E2E Test Validation | Pending | 0/0 | 4 |
 
-**Total:** 0/0 plans complete, 21 requirements
+**Total:** 0/2 plans complete, 21 requirements
 
 ---
 
@@ -131,4 +135,4 @@ This roadmap delivers 21 v1.1 requirements across 4 phases, progressing from ser
 ---
 
 *Created: 2026-01-21*
-*Last updated: 2026-01-21 — roadmap initialized*
+*Last updated: 2026-01-21 — Phase 6 plans created (2 plans in 2 waves)*
