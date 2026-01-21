@@ -1,6 +1,7 @@
 package victorialogs
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -29,6 +30,26 @@ type TimeRange struct {
 // IsZero returns true if the time range is not set (both Start and End are zero).
 func (tr TimeRange) IsZero() bool {
 	return tr.Start.IsZero() && tr.End.IsZero()
+}
+
+// ValidateMinimumDuration checks that the time range duration meets the minimum requirement.
+// Returns an error if the duration is less than the specified minimum.
+func (tr TimeRange) ValidateMinimumDuration(minDuration time.Duration) error {
+	if tr.IsZero() {
+		return nil // Zero time ranges use defaults, no validation needed
+	}
+
+	duration := tr.End.Sub(tr.Start)
+	if duration < minDuration {
+		return fmt.Errorf("time range duration %v is below minimum %v", duration, minDuration)
+	}
+
+	return nil
+}
+
+// Duration returns the duration of the time range (End - Start).
+func (tr TimeRange) Duration() time.Duration {
+	return tr.End.Sub(tr.Start)
 }
 
 // DefaultTimeRange returns a TimeRange for the last 1 hour.
