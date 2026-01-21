@@ -187,30 +187,29 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 05-02-PLAN.md (Overview Tool)
+**Stopped at:** Completed 05-03-PLAN.md (Patterns Tool with Novelty Detection)
 
 **What just happened:**
-- Executed plan 05-02: Overview tool implementation
-- Created shared tool utilities (ToolContext, parseTimeRange) in tools.go
-- Implemented OverviewTool with namespace-level error/warning aggregation
-- Registered victorialogs_{instance}_overview tool in RegisterTools()
-- All tasks completed in 6 minutes with atomic commits
-- SUMMARY: .planning/phases/05-progressive-disclosure-mcp-tools/05-02-SUMMARY.md
+- Executed plan 05-03: Patterns tool with template mining and novelty detection
+- Added CompareTimeWindows method to TemplateStore for novelty detection
+- Integrated TemplateStore into VictoriaLogs lifecycle (Start/Stop)
+- Implemented PatternsTool with sampling and time-window comparison
+- All tasks completed in 3 minutes with atomic commits
+- SUMMARY: .planning/phases/05-progressive-disclosure-mcp-tools/05-03-SUMMARY.md
 
 **What's next:**
-- Phase 5 Plan 2 COMPLETE
-- Ready for Plan 3: Patterns tool (template aggregation with novelty detection)
-- ToolContext pattern established for tool implementation
-- Tool naming convention validated: victorialogs_{instance}_{tool}
+- Phase 5 Plan 3 COMPLETE
+- Ready for Plan 4: Detail logs tool (victorialogs_{name}_logs)
+- Patterns tool provides template aggregation as second level of progressive disclosure
+- Novelty detection compares current to previous time windows
+- Infrastructure complete for final tool (raw log viewing)
 
 **Context for next agent:**
-- ToolContext pattern: shared struct with Client, Logger, Instance
-- parseTimeRange: 1-hour default, handles Unix seconds/milliseconds
-- Tool naming: victorialogs_{instance}_overview working example
-- Overview tool uses QueryAggregation for namespace counts
-- Level field filtering (error/warn) with graceful fallback
-- Nil client check prevents crashes on stopped/degraded instances
-- Plans 3-4 will follow same pattern for patterns and logs tools
+- CompareTimeWindows: Compares templates by Pattern for semantic novelty
+- TemplateStore: Per-instance, ephemeral (created in Start, cleared in Stop)
+- Sampling: threshold = targetSamples * 10 (default 500 logs)
+- Time-window batching: Single QueryLogs per window (not streaming)
+- PatternsTool: On-demand mining, no persistence required
 
 ---
 
