@@ -10,27 +10,28 @@
 
 ## Current Position
 
-**Phase:** 4 - Log Template Mining (In Progress)
-**Plan:** 3 of 4 (04-03-PLAN.md complete)
-**Status:** In Progress
-**Progress:** 17/31 requirements
-**Last activity:** 2026-01-21 - Completed 04-03-PLAN.md (Template Storage & Persistence)
+**Phase:** 4 - Log Template Mining (Complete ✓)
+**Plan:** 4 of 4 (04-04-PLAN.md complete)
+**Status:** Phase Complete
+**Progress:** 21/31 requirements
+**Last activity:** 2026-01-21 - Completed 04-04-PLAN.md (Template Lifecycle & Testing)
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
 [██████████] 100% Phase 2 (Complete ✓)
 [██████████] 100% Phase 3 (Verified ✓)
-[███████░░░]  75% Phase 4 (In Progress - 3/4 plans)
-[██████████]  58% Overall (18/31 requirements)
+[██████████] 100% Phase 4 (Complete ✓)
+[░░░░░░░░░░]   0% Phase 5 (Not Started)
+[██████████]  68% Overall (21/31 requirements)
 ```
 
 ## Performance Metrics
 
 | Metric | Current | Target | Status |
 |--------|---------|--------|--------|
-| Requirements Complete | 17/31 | 31/31 | In Progress |
-| Phases Complete | 3/5 | 5/5 | In Progress |
-| Plans Complete | 11/11 | 11/11 (Phases 1-3) | Phases 1-3 Verified ✓ |
+| Requirements Complete | 21/31 | 31/31 | In Progress |
+| Phases Complete | 4/5 | 5/5 | In Progress |
+| Plans Complete | 15/15 | 15/15 (Phases 1-4) | Phases 1-4 Complete ✓ |
 | Blockers | 0 | 0 | On Track |
 
 ## Accumulated Context
@@ -112,6 +113,9 @@
 | Failed snapshots don't stop periodic loop | 04-03 | Snapshot errors logged but don't halt persistence manager; lose max 5 minutes on crash (user decision) |
 | Atomic writes for snapshots using temp-file-then-rename | 04-03 | POSIX atomicity prevents corruption; readers never see partial writes |
 | Double-checked locking for namespace creation | 04-03 | Fast read path for existing namespaces, slow write path with recheck for thread-safe lazy initialization |
+| Default rebalancing config: prune threshold 10, merge interval 5min, similarity 0.7 | 04-04 | Prune threshold catches rare but important patterns; 5min matches persistence; 0.7 for loose clustering per CONTEXT.md |
+| Namespace lock protects entire Drain.Train() operation | 04-04 | Drain library not thread-safe; race condition fix - lock before Train() not after |
+| Existing test suite organization kept as-is | 04-04 | Tests already comprehensive at 85.2% coverage; better organized than plan suggested (rebalancer_test.go vs store_test.go) |
 
 **Scope Boundaries:**
 - Progressive disclosure: 3 levels maximum (global → aggregated → detail)
@@ -138,9 +142,15 @@
 - 03-03: Wire VictoriaLogs integration with client, pipeline, and metrics
 - 03-04: Time range validation enforcing 15-minute minimum (gap closure for VLOG-03)
 
+**Phase 4: Log Template Mining** ✓
+- 04-01: Drain algorithm wrapper with configuration (MINE-01)
+- 04-02: Log normalization and aggressive variable masking (MINE-02)
+- 04-03: Namespace-scoped template storage with periodic persistence (MINE-03, MINE-04)
+- 04-04: Template lifecycle management with pruning, auto-merge, and comprehensive testing (85.2% coverage)
+
 ### Active Todos
 
-None - Phase 3 verified. Ready to plan Phase 4 (Log Template Mining) or Phase 5 (Progressive Disclosure MCP Tools).
+None - Phase 4 complete. Ready to plan Phase 5 (Progressive Disclosure MCP Tools).
 
 ### Known Blockers
 
@@ -148,45 +158,45 @@ None currently.
 
 ### Research Flags
 
-**Phase 4 (Log Template Mining):** NEEDS DEEPER RESEARCH during planning
-- Sample production logs to validate template count is reasonable (<1000 for typical app)
-- Tune Drain parameters: similarity threshold (0.3-0.6 range), tree depth (4-6), max clusters
-- Test masking patterns with edge cases (variable-starting logs)
+**Phase 4 (Log Template Mining):** ✓ COMPLETE
+- Research was performed during planning (04-RESEARCH.md)
+- Drain parameters tuned: sim_th=0.4, tree depth=4, maxChildren=100
+- Masking patterns tested with comprehensive test suite
+- Template count management via pruning (threshold 10) and auto-merge (similarity 0.7)
 
-**Other phases:** Standard patterns, skip additional research.
+**Phase 5 (Progressive Disclosure MCP Tools):** Standard patterns, skip additional research.
 
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 04-03-PLAN.md (Template Storage & Persistence)
+**Stopped at:** Completed 04-04-PLAN.md (Template Lifecycle & Testing)
 
 **What just happened:**
-- Executed plan 04-03: Namespace-scoped template storage with periodic persistence
-- Created TemplateStore integrating PreProcess → Drain → AggressiveMask → normalization pipeline
-- Implemented pattern normalization for stable template IDs (all placeholders → <VAR>)
-- Created PersistenceManager with 5-minute JSON snapshots using atomic writes
-- Per-namespace Drain instances for multi-tenant isolation
-- Thread-safe with RWMutex; double-checked locking for lazy namespace creation
-- Deep copy templates on retrieval to prevent external mutation
-- Comprehensive test coverage: 30+ tests including concurrency, roundtrip serialization
-- Auto-fixed 2 bugs: Drain pattern extraction and template ID consistency
-- All tasks completed in ~8 minutes
-- Phase 4 progress: 3/4 plans complete (75%)
-- SUMMARY: .planning/phases/04-log-template-mining/04-03-SUMMARY.md
+- Executed plan 04-04: Template lifecycle management and comprehensive testing
+- Created TemplateRebalancer with count-based pruning and similarity-based auto-merge
+- Added levenshtein library for edit distance calculation in template similarity
+- Fixed critical race condition: Drain library not thread-safe, moved lock before Train() call
+- Achieved 85.2% test coverage across entire logprocessing package (exceeds 80% target)
+- All tests pass with race detector enabled
+- Phase 4 COMPLETE: Production-ready log template mining package
+- All tasks completed in ~4 minutes
+- SUMMARY: .planning/phases/04-log-template-mining/04-04-SUMMARY.md
 
 **What's next:**
-- Phase 4 in progress: 3/4 plans complete (foundation, normalization, storage done)
-- Next: Plan 04-04 (template lifecycle management: pruning, auto-merge, rebalancing)
-- Storage layer ready for lifecycle operations: count tracking for pruning, pattern tokens for auto-merge
+- Phase 4 COMPLETE (all 4 plans done)
+- Ready to plan Phase 5: Progressive Disclosure MCP Tools
+- Log processing foundation complete: Drain + storage + persistence + rebalancing
+- Next phase will integrate template mining with VictoriaLogs and build MCP tools
 
 **Context for next agent:**
-- TemplateStore provides clean interface: Process(), GetTemplate(), ListTemplates(), GetNamespaces()
-- Pattern normalization ensures stable template IDs across Drain learning phases
-- Persistence ensures templates survive restarts (max 5 min loss on crash)
-- Namespace scoping ready for multi-tenant MCP tool queries
-- Thread-safe for concurrent access from multiple goroutines
-- VictoriaLogs integration fully functional from Phase 3
-- Integration framework from Phases 1-2 provides config management and lifecycle
+- Complete log processing pipeline: PreProcess → Drain → AggressiveMask → Normalize → Store → Rebalance
+- TemplateStore interface: Process(), GetTemplate(), ListTemplates(), GetNamespaces()
+- PersistenceManager: 5-minute JSON snapshots with atomic writes
+- TemplateRebalancer: 5-minute rebalancing with pruning (threshold 10) and auto-merge (similarity 0.7)
+- Thread-safe with proper locking (race condition fixed)
+- Test coverage: 85.2% with comprehensive test suite
+- VictoriaLogs integration from Phase 3 ready for log source
+- Integration framework from Phases 1-2 provides config management
 
 ---
 
