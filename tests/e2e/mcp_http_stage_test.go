@@ -62,7 +62,7 @@ func (s *MCPHTTPStage) mcp_client_is_connected() *MCPHTTPStage {
 	serviceName := s.TestCtx.ReleaseName + "-spectre"
 	// Important: Use SharedDeployment.Namespace, not TestCtx.Namespace
 	mcpNamespace := s.TestCtx.SharedDeployment.Namespace
-	mcpPortForward, err := helpers.NewPortForwarder(s.T, s.TestCtx.Cluster.GetContext(), mcpNamespace, serviceName, 8082)
+	mcpPortForward, err := helpers.NewPortForwarder(s.T, s.TestCtx.Cluster.GetContext(), mcpNamespace, serviceName, 8080)
 	s.Require.NoError(err, "failed to create MCP port-forward")
 
 	err = mcpPortForward.WaitForReady(30 * time.Second)

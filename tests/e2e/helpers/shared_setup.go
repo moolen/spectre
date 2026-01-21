@@ -42,7 +42,7 @@ func SetupE2ETestSharedFlux(t *testing.T) *TestContext {
 // SetupE2ETestSharedMCP provisions test infrastructure using a shared Spectre deployment
 // with MCP server enabled. This is for MCP tests that need to interact with the MCP API.
 //
-// The shared MCP deployment is created once in TestMain with MCP server enabled on port 8082.
+// The shared MCP deployment is created once in TestMain with MCP server integrated on port 8080.
 // Each test still gets its own namespace for deploying test resources (failing pods, etc.)
 // but connects to the shared Spectre MCP endpoint for queries.
 func SetupE2ETestSharedMCP(t *testing.T) *TestContext {
