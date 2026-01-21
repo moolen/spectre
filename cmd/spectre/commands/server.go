@@ -452,21 +452,31 @@ func runServer(cmd *cobra.Command, args []string) {
 	)
 	logger.Info("API server component created (graph-only)")
 
-	// Now create MCP server with TimelineService from API server
-	logger.Info("Initializing MCP server with TimelineService")
+	// Now create MCP server with TimelineService and GraphService from API server
+	logger.Info("Initializing MCP server with TimelineService and GraphService")
 	timelineService := apiComponent.GetTimelineService()
+
+	// Create GraphService if graph client is available
+	var graphService *api.GraphService
+	if graphClient != nil {
+		tracer := tracingProvider.GetTracer("graph_service")
+		graphService = api.NewGraphService(graphClient, logger, tracer)
+		logger.Info("Created GraphService for MCP graph tools")
+	}
+
 	spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
 		SpectreURL:      fmt.Sprintf("http://localhost:%d", cfg.APIPort),
 		Version:         Version,
 		Logger:          logger,
 		TimelineService: timelineService, // Direct service access for tools
+		GraphService:    graphService,    // Direct graph service access for tools
 	})
 	if err != nil {
 		logger.Error("Failed to create MCP server: %v", err)
 		HandleError(err, "MCP server initialization error")
 	}
 	mcpServer = spectreServer.GetMCPServer()
-	logger.Info("MCP server created with direct TimelineService access")
+	logger.Info("MCP server created with direct TimelineService and GraphService access")
 
 	// Create MCPToolRegistry adapter for integration tools
 	mcpRegistry = mcp.NewMCPToolRegistry(mcpServer)
