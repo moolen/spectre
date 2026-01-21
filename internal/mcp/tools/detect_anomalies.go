@@ -6,18 +6,33 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/moolen/spectre/internal/analysis/anomaly"
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/mcp/client"
 )
 
 // DetectAnomaliesTool implements the detect_anomalies MCP tool
 type DetectAnomaliesTool struct {
-	client *client.SpectreClient
+	graphService    *api.GraphService
+	timelineService *api.TimelineService
+	client          *client.SpectreClient
 }
 
-// NewDetectAnomaliesTool creates a new detect anomalies tool
-func NewDetectAnomaliesTool(client *client.SpectreClient) *DetectAnomaliesTool {
+// NewDetectAnomaliesTool creates a new detect anomalies tool with direct services
+func NewDetectAnomaliesTool(graphService *api.GraphService, timelineService *api.TimelineService) *DetectAnomaliesTool {
 	return &DetectAnomaliesTool{
-		client: client,
+		graphService:    graphService,
+		timelineService: timelineService,
+		client:          nil,
+	}
+}
+
+// NewDetectAnomaliesToolWithClient creates a new detect anomalies tool with HTTP client (backward compatibility)
+func NewDetectAnomaliesToolWithClient(client *client.SpectreClient) *DetectAnomaliesTool {
+	return &DetectAnomaliesTool{
+		graphService:    nil,
+		timelineService: nil,
+		client:          client,
 	}
 }
 
@@ -123,7 +138,27 @@ func (t *DetectAnomaliesTool) Execute(ctx context.Context, input json.RawMessage
 }
 
 // executeByUID performs anomaly detection for a single resource by UID
-func (t *DetectAnomaliesTool) executeByUID(_ context.Context, resourceUID string, startTime, endTime int64) (*DetectAnomaliesOutput, error) {
+func (t *DetectAnomaliesTool) executeByUID(ctx context.Context, resourceUID string, startTime, endTime int64) (*DetectAnomaliesOutput, error) {
+	// Use GraphService if available (direct service call), otherwise HTTP client
+	if t.graphService != nil {
+		// Direct service call
+		input := anomaly.DetectInput{
+			ResourceUID: resourceUID,
+			Start:       startTime,
+			End:         endTime,
+		}
+		result, err := t.graphService.DetectAnomalies(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to detect anomalies: %w", err)
+		}
+
+		// Transform to MCP output format
+		output := t.transformAnomalyResponse(result, startTime, endTime)
+		output.Metadata.ResourceUID = resourceUID
+		return output, nil
+	}
+
+	// Fallback to HTTP client
 	response, err := t.client.DetectAnomalies(resourceUID, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect anomalies: %w", err)
@@ -135,7 +170,7 @@ func (t *DetectAnomaliesTool) executeByUID(_ context.Context, resourceUID string
 }
 
 // executeByNamespaceKind discovers resources by namespace/kind and runs anomaly detection on each
-func (t *DetectAnomaliesTool) executeByNamespaceKind(_ context.Context, namespace, kind string, startTime, endTime int64, maxResults int) (*DetectAnomaliesOutput, error) {
+func (t *DetectAnomaliesTool) executeByNamespaceKind(ctx context.Context, namespace, kind string, startTime, endTime int64, maxResults int) (*DetectAnomaliesOutput, error) {
 	// Apply default limit: 10 (default), max 50
 	if maxResults <= 0 {
 		maxResults = 10
@@ -145,16 +180,24 @@ func (t *DetectAnomaliesTool) executeByNamespaceKind(_ context.Context, namespac
 	}
 
 	// Query timeline to discover resources in the namespace/kind
+	// Use TimelineService via HTTP client (timeline service integration is more complex, defer to future iteration)
 	filters := map[string]string{
 		"namespace": namespace,
 		"kind":      kind,
 	}
+
+	var resources []interface{ GetID() string }
+	// For now, always use HTTP client for timeline queries in detect_anomalies
+	// TODO: Integrate TimelineService properly in future iteration
 	timelineResponse, err := t.client.QueryTimeline(startTime, endTime, filters, 1000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query timeline for resource discovery: %w", err)
 	}
+	for _, r := range timelineResponse.Resources {
+		resources = append(resources, &resourceWithID{id: r.ID})
+	}
 
-	if len(timelineResponse.Resources) == 0 {
+	if len(resources) == 0 {
 		return &DetectAnomaliesOutput{
 			Anomalies:           make([]AnomalySummary, 0),
 			AnomalyCount:        0,
@@ -174,7 +217,6 @@ func (t *DetectAnomaliesTool) executeByNamespaceKind(_ context.Context, namespac
 	}
 
 	// Limit the number of resources to analyze
-	resources := timelineResponse.Resources
 	if len(resources) > maxResults {
 		resources = resources[:maxResults]
 	}
@@ -200,35 +242,126 @@ func (t *DetectAnomaliesTool) executeByNamespaceKind(_ context.Context, namespac
 
 	// Run anomaly detection for each discovered resource
 	for _, resource := range resources {
-		aggregatedOutput.Metadata.ResourceUIDs = append(aggregatedOutput.Metadata.ResourceUIDs, resource.ID)
+		resourceID := resource.GetID()
+		aggregatedOutput.Metadata.ResourceUIDs = append(aggregatedOutput.Metadata.ResourceUIDs, resourceID)
 
-		response, err := t.client.DetectAnomalies(resource.ID, startTime, endTime)
-		if err != nil {
-			// Log error but continue with other resources
-			continue
-		}
+		// Use GraphService if available
+		if t.graphService != nil {
+			input := anomaly.DetectInput{
+				ResourceUID: resourceID,
+				Start:       startTime,
+				End:         endTime,
+			}
+			result, err := t.graphService.DetectAnomalies(ctx, input)
+			if err != nil {
+				// Log error but continue with other resources
+				continue
+			}
 
-		// Merge results
-		singleOutput := t.transformResponse(response, startTime, endTime)
-		aggregatedOutput.Anomalies = append(aggregatedOutput.Anomalies, singleOutput.Anomalies...)
-		aggregatedOutput.AnomalyCount += singleOutput.AnomalyCount
-		aggregatedOutput.Metadata.NodesAnalyzed += singleOutput.Metadata.NodesAnalyzed
+			// Merge results
+			singleOutput := t.transformAnomalyResponse(result, startTime, endTime)
+			aggregatedOutput.Anomalies = append(aggregatedOutput.Anomalies, singleOutput.Anomalies...)
+			aggregatedOutput.AnomalyCount += singleOutput.AnomalyCount
+			aggregatedOutput.Metadata.NodesAnalyzed += singleOutput.Metadata.NodesAnalyzed
 
-		// Merge severity counts
-		for severity, count := range singleOutput.AnomaliesBySeverity {
-			aggregatedOutput.AnomaliesBySeverity[severity] += count
-		}
+			// Merge severity counts
+			for severity, count := range singleOutput.AnomaliesBySeverity {
+				aggregatedOutput.AnomaliesBySeverity[severity] += count
+			}
 
-		// Merge category counts
-		for category, count := range singleOutput.AnomaliesByCategory {
-			aggregatedOutput.AnomaliesByCategory[category] += count
+			// Merge category counts
+			for category, count := range singleOutput.AnomaliesByCategory {
+				aggregatedOutput.AnomaliesByCategory[category] += count
+			}
+		} else {
+			// HTTP client fallback
+			response, err := t.client.DetectAnomalies(resourceID, startTime, endTime)
+			if err != nil {
+				// Log error but continue with other resources
+				continue
+			}
+
+			// Merge results
+			singleOutput := t.transformResponse(response, startTime, endTime)
+			aggregatedOutput.Anomalies = append(aggregatedOutput.Anomalies, singleOutput.Anomalies...)
+			aggregatedOutput.AnomalyCount += singleOutput.AnomalyCount
+			aggregatedOutput.Metadata.NodesAnalyzed += singleOutput.Metadata.NodesAnalyzed
+
+			// Merge severity counts
+			for severity, count := range singleOutput.AnomaliesBySeverity {
+				aggregatedOutput.AnomaliesBySeverity[severity] += count
+			}
+
+			// Merge category counts
+			for category, count := range singleOutput.AnomaliesByCategory {
+				aggregatedOutput.AnomaliesByCategory[category] += count
+			}
 		}
 	}
 
 	return aggregatedOutput, nil
 }
 
-// transformResponse converts the API response to LLM-optimized output
+// resourceWithID is a helper type to unify resource ID access
+type resourceWithID struct {
+	id string
+}
+
+func (r *resourceWithID) GetID() string {
+	return r.id
+}
+
+// transformAnomalyResponse transforms anomaly.AnomalyResponse to MCP output format
+func (t *DetectAnomaliesTool) transformAnomalyResponse(response *anomaly.AnomalyResponse, startTime, endTime int64) *DetectAnomaliesOutput {
+	output := &DetectAnomaliesOutput{
+		Anomalies:           make([]AnomalySummary, 0, len(response.Anomalies)),
+		AnomalyCount:        len(response.Anomalies),
+		AnomaliesBySeverity: make(map[string]int),
+		AnomaliesByCategory: make(map[string]int),
+		Metadata: AnomalyMetadataOut{
+			ResourceUID:     response.Metadata.ResourceUID,
+			StartTime:       startTime,
+			EndTime:         endTime,
+			StartTimeText:   FormatTimestamp(startTime),
+			EndTimeText:     FormatTimestamp(endTime),
+			NodesAnalyzed:   response.Metadata.NodesAnalyzed,
+			ExecutionTimeMs: response.Metadata.ExecutionTimeMs,
+		},
+	}
+
+	// Transform each anomaly
+	for _, a := range response.Anomalies {
+		timestamp := a.Timestamp.Unix()
+		timestampText := FormatTimestamp(timestamp)
+
+		summary := AnomalySummary{
+			Node: AnomalyNodeInfo{
+				UID:       a.Node.UID,
+				Kind:      a.Node.Kind,
+				Namespace: a.Node.Namespace,
+				Name:      a.Node.Name,
+			},
+			Category:      string(a.Category),
+			Type:          a.Type,
+			Severity:      string(a.Severity),
+			Timestamp:     timestamp,
+			TimestampText: timestampText,
+			Summary:       a.Summary,
+			Details:       a.Details,
+		}
+		output.Anomalies = append(output.Anomalies, summary)
+
+		// Count by severity
+		output.AnomaliesBySeverity[string(a.Severity)]++
+
+		// Count by category
+		output.AnomaliesByCategory[string(a.Category)]++
+	}
+
+	return output
+}
+
+// transformResponse converts the HTTP API response to LLM-optimized output
 func (t *DetectAnomaliesTool) transformResponse(response *client.AnomalyResponse, startTime, endTime int64) *DetectAnomaliesOutput {
 	output := &DetectAnomaliesOutput{
 		Anomalies:           make([]AnomalySummary, 0, len(response.Anomalies)),
@@ -267,9 +400,9 @@ func (t *DetectAnomaliesTool) transformResponse(response *client.AnomalyResponse
 				Namespace: a.Node.Namespace,
 				Name:      a.Node.Name,
 			},
-			Category:      a.Category,
+			Category:      string(a.Category),
 			Type:          a.Type,
-			Severity:      a.Severity,
+			Severity:      string(a.Severity),
 			Timestamp:     timestamp,
 			TimestampText: timestampText,
 			Summary:       a.Summary,
@@ -278,10 +411,10 @@ func (t *DetectAnomaliesTool) transformResponse(response *client.AnomalyResponse
 		output.Anomalies = append(output.Anomalies, summary)
 
 		// Count by severity
-		output.AnomaliesBySeverity[a.Severity]++
+		output.AnomaliesBySeverity[string(a.Severity)]++
 
 		// Count by category
-		output.AnomaliesByCategory[a.Category]++
+		output.AnomaliesByCategory[string(a.Category)]++
 	}
 
 	return output

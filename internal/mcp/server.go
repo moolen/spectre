@@ -23,6 +23,7 @@ type SpectreServer struct {
 	mcpServer       *server.MCPServer
 	spectreClient   *SpectreClient // Deprecated: will be removed after all tools migrated to services
 	timelineService *api.TimelineService
+	graphService    *api.GraphService
 	tools           map[string]Tool
 	version         string
 }
@@ -31,8 +32,9 @@ type SpectreServer struct {
 type ServerOptions struct {
 	SpectreURL      string
 	Version         string
-	Logger          client.Logger // Optional logger for retry messages
-	TimelineService *api.TimelineService // Direct service for tools (bypasses HTTP)
+	Logger          client.Logger            // Optional logger for retry messages
+	TimelineService *api.TimelineService     // Direct service for tools (bypasses HTTP)
+	GraphService    *api.GraphService        // Direct graph service for tools (bypasses HTTP)
 }
 
 // NewSpectreServer creates a new Spectre MCP server
@@ -63,6 +65,7 @@ func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
 		mcpServer:       mcpServer,
 		spectreClient:   spectreClient,
 		timelineService: opts.TimelineService,
+		graphService:    opts.GraphService,
 		tools:           make(map[string]Tool),
 		version:         opts.Version,
 	}
@@ -192,10 +195,17 @@ func (s *SpectreServer) registerTools() {
 	)
 
 	// Register detect_anomalies tool
+	// Use GraphService and TimelineService if available (direct service calls), otherwise fall back to HTTP client
+	var detectAnomaliesTool Tool
+	if s.graphService != nil && s.timelineService != nil {
+		detectAnomaliesTool = tools.NewDetectAnomaliesTool(s.graphService, s.timelineService)
+	} else {
+		detectAnomaliesTool = tools.NewDetectAnomaliesToolWithClient(s.spectreClient)
+	}
 	s.registerTool(
 		"detect_anomalies",
 		"Detect anomalies in a resource's causal subgraph including crash loops, config errors, state transitions, and networking issues",
-		tools.NewDetectAnomaliesTool(s.spectreClient),
+		detectAnomaliesTool,
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -217,10 +227,17 @@ func (s *SpectreServer) registerTools() {
 	)
 
 	// Register causal_paths tool
+	// Use GraphService if available (direct service call), otherwise fall back to HTTP client
+	var causalPathsTool Tool
+	if s.graphService != nil {
+		causalPathsTool = tools.NewCausalPathsTool(s.graphService)
+	} else {
+		causalPathsTool = tools.NewCausalPathsToolWithClient(s.spectreClient)
+	}
 	s.registerTool(
 		"causal_paths",
 		"Discover causal paths from root causes to a failing resource using graph-based causality analysis. Returns ranked paths with confidence scores.",
-		tools.NewCausalPathsTool(s.spectreClient),
+		causalPathsTool,
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

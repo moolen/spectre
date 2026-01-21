@@ -5,19 +5,30 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/moolen/spectre/internal/api"
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
 	"github.com/moolen/spectre/internal/mcp/client"
 )
 
-// CausalPathsTool implements causal path discovery using the HTTP API
+// CausalPathsTool implements causal path discovery using GraphService or HTTP client
 type CausalPathsTool struct {
-	client *client.SpectreClient
+	graphService *api.GraphService
+	client       *client.SpectreClient
 }
 
-// NewCausalPathsTool creates a new causal paths tool
-func NewCausalPathsTool(spectreClient *client.SpectreClient) *CausalPathsTool {
+// NewCausalPathsTool creates a new causal paths tool with direct GraphService
+func NewCausalPathsTool(graphService *api.GraphService) *CausalPathsTool {
 	return &CausalPathsTool{
-		client: spectreClient,
+		graphService: graphService,
+		client:       nil,
+	}
+}
+
+// NewCausalPathsToolWithClient creates a new causal paths tool with HTTP client (backward compatibility)
+func NewCausalPathsToolWithClient(spectreClient *client.SpectreClient) *CausalPathsTool {
+	return &CausalPathsTool{
+		graphService: nil,
+		client:       spectreClient,
 	}
 }
 
@@ -73,7 +84,27 @@ func (t *CausalPathsTool) Execute(ctx context.Context, input json.RawMessage) (i
 	// Normalize timestamp (convert seconds to nanoseconds if needed)
 	failureTimestamp := normalizeTimestamp(params.FailureTimestamp)
 
-	// Call HTTP API
+	// Convert lookback minutes to nanoseconds
+	lookbackNs := int64(params.LookbackMinutes) * 60 * 1_000_000_000
+
+	// Use GraphService if available (direct service call), otherwise HTTP client
+	if t.graphService != nil {
+		// Direct service call
+		serviceInput := causalpaths.CausalPathsInput{
+			ResourceUID:      params.ResourceUID,
+			FailureTimestamp: failureTimestamp,
+			LookbackNs:       lookbackNs,
+			MaxDepth:         params.MaxDepth,
+			MaxPaths:         params.MaxPaths,
+		}
+		response, err := t.graphService.DiscoverCausalPaths(ctx, serviceInput)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover causal paths: %w", err)
+		}
+		return response, nil
+	}
+
+	// Fallback to HTTP client
 	response, err := t.client.QueryCausalPaths(
 		params.ResourceUID,
 		failureTimestamp,

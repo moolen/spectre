@@ -769,7 +769,7 @@ type CausalPathsToolWrapper struct {
 
 func NewCausalPathsToolWrapper(spectreClient *client.SpectreClient) *CausalPathsToolWrapper {
 	return &CausalPathsToolWrapper{
-		inner: mcptools.NewCausalPathsTool(spectreClient),
+		inner: mcptools.NewCausalPathsToolWithClient(spectreClient),
 	}
 }
 
@@ -951,7 +951,7 @@ type DetectAnomaliesToolWrapper struct {
 
 func NewDetectAnomaliesToolWrapper(client *client.SpectreClient) *DetectAnomaliesToolWrapper {
 	return &DetectAnomaliesToolWrapper{
-		inner: mcptools.NewDetectAnomaliesTool(client),
+		inner: mcptools.NewDetectAnomaliesToolWithClient(client),
 	}
 }
 
