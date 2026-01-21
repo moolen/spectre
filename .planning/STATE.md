@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-01-21)
 
 ## Current Position
 
-Phase: Phase 8 — Cleanup & Helm Chart Update (3 of 4) — COMPLETE
-Plan: 08-03 complete (3 of 3 plans in phase)
-Status: Phase verified complete, goal achieved
-Last activity: 2026-01-21 — Phase 8 execution complete (all plans verified)
+Phase: Phase 9 — E2E Test Validation (4 of 4) — IN PROGRESS
+Plan: 09-01 complete (1 of 3 plans in phase)
+Status: In progress
+Last activity: 2026-01-21 — Completed 09-01-PLAN.md
 
-Progress: ██████████░░░░░░░░░░ 50% (10/20 total plans estimated)
+Progress: ███████████░░░░░░░░░ 55% (11/20 total plans estimated)
 
 ## Milestone: v1.1 Server Consolidation
 
@@ -24,7 +24,7 @@ Progress: ██████████░░░░░░░░░░ 50% (10/2
 - Phase 6: Consolidated Server & Integration Manager (7 reqs) — COMPLETE (2/2 plans complete)
 - Phase 7: Service Layer Extraction (5 reqs) — COMPLETE (5/5 plans complete)
 - Phase 8: Cleanup & Helm Chart Update (5 reqs) — COMPLETE (3/3 plans complete)
-- Phase 9: E2E Test Validation (4 reqs) — Pending
+- Phase 9: E2E Test Validation (4 reqs) — IN PROGRESS (1/3 plans complete)
 
 **Total requirements:** 21
 
@@ -45,20 +45,20 @@ None
 
 ## Next Steps
 
-1. `/gsd:discuss-phase 9` — Gather context for E2E test validation
-2. `/gsd:plan-phase 9` — Plan E2E test validation
-3. Execute Phase 9 plans
+1. Execute plan 09-02 (Run MCP HTTP tests)
+2. Execute plan 09-03 (Run MCP failure scenario tests)
+3. Verify v1.1 milestone complete
 
 ## Performance Metrics
 
 **v1.1 Milestone:**
-- Phases complete: 3/4 (Phase 6 ✅, Phase 7 ✅, Phase 8 ✅)
-- Plans complete: 10/20 (estimated)
-- Requirements satisfied: 17/21 (SRVR-01 through HELM-04)
+- Phases complete: 3/4 (Phase 6 ✅, Phase 7 ✅, Phase 8 ✅, Phase 9 in progress)
+- Plans complete: 11/20 (estimated)
+- Requirements satisfied: 18/21 (SRVR-01 through TEST-01)
 
 **Session metrics:**
 - Current session: 2026-01-21
-- Plans executed this session: 10
+- Plans executed this session: 11
 - Blockers hit this session: 0
 
 ## Accumulated Context
@@ -91,6 +91,9 @@ None
 | 08-02 | Remove MCP sidecar completely from Helm chart | After Phase 6, MCP runs in-process on port 8080 | Simplified deployment, lower resource usage, single-container architecture |
 | 08-02 | Port consolidation: all HTTP traffic on port 8080 | Aligns with Phase 6 consolidated server | Simpler service definition, ingress routing, and firewall rules |
 | 08-02 | Update test fixtures immediately | E2E tests in Phase 9 need correct architecture | Test fixtures ready, no follow-up work needed |
+| 09-01 | E2E tests use /v1/mcp endpoint instead of /mcp | Aligns with Phase 6 decision for API versioning consistency | Test client sends requests to correct endpoint matching server implementation |
+| 09-01 | E2E tests connect to port 8080 instead of 8082 | MCP now integrated on main server port after Phase 6-8 | Test infrastructure matches production consolidated architecture |
+| 09-01 | Remove MCP Helm values from test deployment | MCP integrated by default, no separate config needed | Simplified test deployment configuration |
 
 ### Active TODOs
 
@@ -103,19 +106,18 @@ None
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 8
-**Last output:** Phase 8 complete — all 3 plans executed and verified
-**Context preserved:** CLI cleanup (14,676 lines deleted), Helm chart update (133 lines deleted), documentation updated
+**Last command:** /gsd:execute-plan 09-01
+**Last output:** Plan 09-01 complete — E2E test configuration updated
+**Context preserved:** Test endpoints updated to /v1/mcp, ports updated to 8080, MCP Helm config removed
 
 **On next session:**
-- Phase 8 COMPLETE ✓ — Verified 12/12 must-haves
-- Deleted: standalone mcp/agent/mock commands, internal/agent package (74 files)
-- Helm chart: single Spectre container, no MCP sidecar, port 8080 only
-- Documentation: README describes integrated MCP at port 8080 /v1/mcp
-- Tech debt resolved: agent package exclusion, disabled commands
-- 17/21 v1.1 requirements satisfied (TEST-01 through TEST-04 remain)
-- Ready for Phase 9: E2E test validation
-- Next: `/gsd:discuss-phase 9` for E2E test context
+- Phase 9 IN PROGRESS — Plan 09-01 complete (1/3)
+- E2E tests configured for consolidated MCP architecture
+- TEST-01 requirement satisfied ✓
+- Tests connect to port 8080 at /v1/mcp endpoint
+- Test deployment matches production architecture
+- 18/21 v1.1 requirements satisfied (TEST-02 through TEST-04 remain)
+- Next: Execute plan 09-02 (Run MCP HTTP tests)
 
 ---
-*Last updated: 2026-01-21 — Completed Phase 8 execution and verification (100% must-haves)*
+*Last updated: 2026-01-21 — Completed 09-01-PLAN.md execution*
