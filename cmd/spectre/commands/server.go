@@ -20,6 +20,7 @@ import (
 	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/graphservice"
 	"github.com/moolen/spectre/internal/importexport"
+	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/tracing"
@@ -63,6 +64,9 @@ var (
 	reconcilerEnabled      bool
 	reconcilerIntervalMins int
 	reconcilerBatchSize    int
+	// Integration manager configuration
+	integrationsConfigPath    string
+	minIntegrationVersion     string
 )
 
 var serverCmd = &cobra.Command{
@@ -123,6 +127,12 @@ func init() {
 		"Reconciliation interval in minutes (default: 5)")
 	serverCmd.Flags().IntVar(&reconcilerBatchSize, "reconciler-batch-size", 100,
 		"Maximum resources to check per reconciliation cycle (default: 100)")
+
+	// Integration manager configuration
+	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "",
+		"Path to integrations configuration YAML file (optional)")
+	serverCmd.Flags().StringVar(&minIntegrationVersion, "min-integration-version", "",
+		"Minimum required integration version (e.g., '1.0.0') for version validation (optional)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -154,6 +164,30 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
+
+	// Initialize integration manager if config is provided
+	var integrationMgr *integration.Manager
+	if integrationsConfigPath != "" {
+		logger.Info("Initializing integration manager from: %s", integrationsConfigPath)
+		var err error
+		integrationMgr, err = integration.NewManager(integration.ManagerConfig{
+			ConfigPath:            integrationsConfigPath,
+			MinIntegrationVersion: minIntegrationVersion,
+		})
+		if err != nil {
+			logger.Error("Failed to create integration manager: %v", err)
+			HandleError(err, "Integration manager initialization error")
+		}
+
+		// Register integration manager with lifecycle manager (no dependencies)
+		if err := manager.Register(integrationMgr); err != nil {
+			logger.Error("Failed to register integration manager: %v", err)
+			HandleError(err, "Integration manager registration error")
+		}
+		logger.Info("Integration manager registered")
+	} else {
+		logger.Info("Integration manager disabled (no --integrations-config provided)")
+	}
 
 	// Initialize tracing provider
 	tracingCfg := tracing.Config{
