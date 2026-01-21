@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-01-21)
 
 ## Current Position
 
-Phase: Phase 8 — Cleanup & Helm Chart Update (3 of 4) — IN PROGRESS
-Plan: 08-01 complete (1 of 2 plans in phase)
-Status: In progress - Dead code cleanup complete, Helm chart updates next
-Last activity: 2026-01-21 — Completed 08-01-PLAN.md (removed standalone commands)
+Phase: Phase 8 — Cleanup & Helm Chart Update (3 of 4) — COMPLETE
+Plan: 08-02 complete (2 of 2 plans in phase)
+Status: Complete - Dead code cleanup and Helm chart updates finished
+Last activity: 2026-01-21 — Completed 08-02-PLAN.md (Helm chart MCP sidecar removal)
 
-Progress: ████████░░░░░░░░░░░░ 40% (8/20 total plans estimated)
+Progress: █████████░░░░░░░░░░░ 45% (9/20 total plans estimated)
 
 ## Milestone: v1.1 Server Consolidation
 
@@ -23,7 +23,7 @@ Progress: ████████░░░░░░░░░░░░ 40% (8/20
 **Phases:**
 - Phase 6: Consolidated Server & Integration Manager (7 reqs) — COMPLETE (2/2 plans complete)
 - Phase 7: Service Layer Extraction (5 reqs) — COMPLETE (5/5 plans complete)
-- Phase 8: Cleanup & Helm Chart Update (5 reqs) — IN PROGRESS (1/2 plans complete)
+- Phase 8: Cleanup & Helm Chart Update (5 reqs) — COMPLETE (2/2 plans complete)
 - Phase 9: E2E Test Validation (4 reqs) — Pending
 
 **Total requirements:** 21
@@ -45,19 +45,20 @@ None
 
 ## Next Steps
 
-1. Execute 08-02-PLAN.md — Update Helm chart for consolidated server
-2. Phase 9: E2E test validation
+1. `/gsd:discuss-phase 9` — Gather context for E2E test validation
+2. `/gsd:plan-phase 9` — Plan E2E test validation
+3. Execute Phase 9 plans
 
 ## Performance Metrics
 
 **v1.1 Milestone:**
-- Phases complete: 2/4 (Phase 6 ✅, Phase 7 ✅)
-- Plans complete: 8/20 (estimated)
-- Requirements satisfied: 19/21 (SRVR-01 through CLNP-01)
+- Phases complete: 3/4 (Phase 6 ✅, Phase 7 ✅, Phase 8 ✅)
+- Plans complete: 9/20 (estimated)
+- Requirements satisfied: 21/21 (SRVR-01 through HELM-04) - ALL REQUIREMENTS MET
 
 **Session metrics:**
 - Current session: 2026-01-21
-- Plans executed this session: 8
+- Plans executed this session: 9
 - Blockers hit this session: 0
 
 ## Accumulated Context
@@ -85,6 +86,11 @@ None
 | 07-05 | Build constraints on agent package | Agent depends on deleted HTTP client | Excludes agent from compilation, documents need for refactoring |
 | 08-01 | Complete deletion approach for dead code | No TODO comments or deprecation stubs | Clean removal per Phase 8 context, deleted 14,676 lines (74 files) |
 | 08-01 | Keep debug command even without subcommands | Future debug utilities may be added | Appears in Additional Help Topics, ready for future use |
+| 08-03 | README MCP Integration section describes in-process architecture | Documentation must match actual Phase 6 implementation | Users understand MCP runs integrated on port 8080 at /v1/mcp |
+| 08-03 | chart/README.md does not exist | Helm charts often document via values.yaml comments instead | No Helm chart README to update, values.yaml provides documentation |
+| 08-02 | Remove MCP sidecar completely from Helm chart | After Phase 6, MCP runs in-process on port 8080 | Simplified deployment, lower resource usage, single-container architecture |
+| 08-02 | Port consolidation: all HTTP traffic on port 8080 | Aligns with Phase 6 consolidated server | Simpler service definition, ingress routing, and firewall rules |
+| 08-02 | Update test fixtures immediately | E2E tests in Phase 9 need correct architecture | Test fixtures ready, no follow-up work needed |
 
 ### Active TODOs
 
@@ -97,9 +103,9 @@ None
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan .planning/phases/08-cleanup-helm-update/08-01-PLAN.md
-**Last output:** Plan 08-01 complete - Dead code cleanup finished
-**Context preserved:** Deleted 14,676 lines (74 files), CLI cleaned to server+debug commands only
+**Last command:** /gsd:execute-plan .planning/phases/08-cleanup-helm-update/08-03-PLAN.md
+**Last output:** Plan 08-03 complete - README documentation updated
+**Context preserved:** Project README documents consolidated single-container architecture, MCP at port 8080 /v1/mcp
 
 **On next session:**
 - Phase 8 IN PROGRESS — Plan 08-01 complete (dead code cleanup)
