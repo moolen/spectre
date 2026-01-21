@@ -4,19 +4,19 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // CreateCrashLoopBackOffScenario creates a pod in CrashLoopBackOff state
-func CreateCrashLoopBackOffScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreateCrashLoopBackOffScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:        "pod/default/crashloop-pod",
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "crashloop-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Ready",
 						Message:   "Pod started",
@@ -30,7 +30,7 @@ func CreateCrashLoopBackOffScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "BackOff",
 						Message:        "Back-off restarting failed container app in pod crashloop-pod",
@@ -46,15 +46,15 @@ func CreateCrashLoopBackOffScenario() *client.TimelineResponse {
 }
 
 // CreateImagePullBackOffScenario creates a pod stuck in ImagePullBackOff
-func CreateImagePullBackOffScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreateImagePullBackOffScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID: "pod/default/imagepull-pod",
 				Kind:       "Pod",
 				Namespace:  "default",
 				Name:       "imagepull-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Error",
 						Message:   "Container nginx is in ImagePullBackOff",
@@ -62,7 +62,7 @@ func CreateImagePullBackOffScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "Failed",
 						Message:        "Failed to pull image \"invalid-image:latest\": rpc error: code = Unknown desc = Error response from daemon: manifest for invalid-image:latest not found",
@@ -86,15 +86,15 @@ func CreateImagePullBackOffScenario() *client.TimelineResponse {
 }
 
 // CreateOOMKillScenario creates a pod that was OOMKilled
-func CreateOOMKillScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreateOOMKillScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID: "pod/default/oomkill-pod",
 				Kind:       "Pod",
 				Namespace:  "default",
 				Name:       "oomkill-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Ready",
 						Message:   "Pod running",
@@ -108,7 +108,7 @@ func CreateOOMKillScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "OOMKilling",
 						Message:        "Memory cgroup out of memory: Killed process 1234 (app) total-vm:2097152kB, anon-rss:1048576kB, file-rss:0kB",
@@ -124,15 +124,15 @@ func CreateOOMKillScenario() *client.TimelineResponse {
 }
 
 // CreateReadinessProbeFailureScenario creates a pod failing readiness probes after upgrade
-func CreateReadinessProbeFailureScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreateReadinessProbeFailureScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID: "deployment/default/web",
 				Kind:       "Deployment",
 				Namespace:  "default",
 				Name:       "web",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Ready",
 						Message:   "Deployment has minimum availability",
@@ -152,7 +152,7 @@ func CreateReadinessProbeFailureScenario() *client.TimelineResponse {
 				Kind:       "Pod",
 				Namespace:  "default",
 				Name:       "web-new-abc123",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Warning",
 						Message:   "Readiness probe failed",
@@ -160,7 +160,7 @@ func CreateReadinessProbeFailureScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "Unhealthy",
 						Message:        "Readiness probe failed: Get http://10.0.0.1:8080/health: dial tcp 10.0.0.1:8080: connect: connection refused",
@@ -176,14 +176,14 @@ func CreateReadinessProbeFailureScenario() *client.TimelineResponse {
 }
 
 // CreateNodePressureScenario creates a node with memory pressure and evicting pods
-func CreateNodePressureScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreateNodePressureScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID: "node/worker-1",
 				Kind:       "Node",
 				Name:       "worker-1",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Ready",
 						Message:   "Node is healthy",
@@ -197,7 +197,7 @@ func CreateNodePressureScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "NodeHasInsufficientMemory",
 						Message:        "Node worker-1 status is now: NodeHasInsufficientMemory",
@@ -213,7 +213,7 @@ func CreateNodePressureScenario() *client.TimelineResponse {
 				Kind:       "Pod",
 				Namespace:  "default",
 				Name:       "evicted-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Ready",
 						Message:   "Pod running",
@@ -227,7 +227,7 @@ func CreateNodePressureScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "Evicted",
 						Message:        "The node was low on resource: memory. Container app was using 512Mi, which exceeds its request of 256Mi.",
@@ -243,15 +243,15 @@ func CreateNodePressureScenario() *client.TimelineResponse {
 }
 
 // CreateUnschedulablePodScenario creates a pod that cannot be scheduled
-func CreateUnschedulablePodScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreateUnschedulablePodScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID: "pod/default/unschedulable-pod",
 				Kind:       "Pod",
 				Namespace:  "default",
 				Name:       "unschedulable-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Warning",
 						Message:   "Pod pending - unschedulable",
@@ -259,7 +259,7 @@ func CreateUnschedulablePodScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "FailedScheduling",
 						Message:        "0/5 nodes are available: 3 Insufficient cpu, 2 node(s) didn't match node selector.",
@@ -275,15 +275,15 @@ func CreateUnschedulablePodScenario() *client.TimelineResponse {
 }
 
 // CreateServiceNoEndpointsScenario creates a service with no backing endpoints
-func CreateServiceNoEndpointsScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreateServiceNoEndpointsScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID: "service/default/backend",
 				Kind:       "Service",
 				Namespace:  "default",
 				Name:       "backend",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Ready",
 						Message:   "Service created",
@@ -297,7 +297,7 @@ func CreateServiceNoEndpointsScenario() *client.TimelineResponse {
 				Kind:       "Pod",
 				Namespace:  "default",
 				Name:       "backend-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Error",
 						Message:   "CrashLoopBackOff",
@@ -311,16 +311,16 @@ func CreateServiceNoEndpointsScenario() *client.TimelineResponse {
 }
 
 // CreateNamespaceDeletionScenario creates a namespace being deleted with cascading resources
-func CreateNamespaceDeletionScenario() *client.TimelineResponse {
+func CreateNamespaceDeletionScenario() *models.SearchResponse {
 	now := time.Now()
 	deletionTime := now.Add(-2 * time.Minute)
 
-	resources := []client.TimelineResource{
+	resources := []models.Resource{
 		{
 			ID: "namespace/test-namespace",
 			Kind:       "Namespace",
 			Name:       "test-namespace",
-			StatusSegments: []client.StatusSegment{
+			StatusSegments: []models.StatusSegment{
 				{
 					Status:    "Terminating",
 					Message:   "Namespace is being deleted",
@@ -333,12 +333,12 @@ func CreateNamespaceDeletionScenario() *client.TimelineResponse {
 
 	// Add 10 pods being deleted
 	for i := 1; i <= 10; i++ {
-		resources = append(resources, client.TimelineResource{
+		resources = append(resources, models.Resource{
 			ID: fmt.Sprintf("pod/test-namespace/app-%d", i),
 			Kind:       "Pod",
 			Namespace:  "test-namespace",
 			Name:       fmt.Sprintf("app-%d", i),
-			StatusSegments: []client.StatusSegment{
+			StatusSegments: []models.StatusSegment{
 				{
 					Status:    "Ready",
 					Message:   "Pod running",
@@ -355,21 +355,21 @@ func CreateNamespaceDeletionScenario() *client.TimelineResponse {
 		})
 	}
 
-	return &client.TimelineResponse{
+	return &models.SearchResponse{
 		Resources: resources,
 	}
 }
 
 // CreateDaemonSetSchedulingIssuesScenario creates a DaemonSet with scheduling problems
-func CreateDaemonSetSchedulingIssuesScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreateDaemonSetSchedulingIssuesScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID: "daemonset/kube-system/monitoring-agent",
 				Kind:       "DaemonSet",
 				Namespace:  "kube-system",
 				Name:       "monitoring-agent",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Warning",
 						Message:   "DaemonSet has unavailable pods",
@@ -377,7 +377,7 @@ func CreateDaemonSetSchedulingIssuesScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "FailedScheduling",
 						Message:        "0/3 nodes available: 3 node(s) had taint {node.kubernetes.io/disk-pressure: }, that the pod didn't tolerate.",
@@ -393,15 +393,15 @@ func CreateDaemonSetSchedulingIssuesScenario() *client.TimelineResponse {
 }
 
 // CreatePVCPendingScenario creates a PVC stuck in Pending state
-func CreatePVCPendingScenario() *client.TimelineResponse {
-	return &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+func CreatePVCPendingScenario() *models.SearchResponse {
+	return &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID: "persistentvolumeclaim/default/data-claim",
 				Kind:       "PersistentVolumeClaim",
 				Namespace:  "default",
 				Name:       "data-claim",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Warning",
 						Message:   "PVC is pending",
@@ -409,7 +409,7 @@ func CreatePVCPendingScenario() *client.TimelineResponse {
 						EndTime:   time.Now().Unix(),
 					},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{
 						Reason:         "FailedBinding",
 						Message:        "no persistent volumes available for this claim and no storage class is set",
@@ -425,7 +425,7 @@ func CreatePVCPendingScenario() *client.TimelineResponse {
 				Kind:       "Pod",
 				Namespace:  "default",
 				Name:       "app-waiting-for-volume",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Warning",
 						Message:   "Pod pending - waiting for volume",

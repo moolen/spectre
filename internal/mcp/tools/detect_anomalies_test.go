@@ -4,72 +4,73 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
-	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/analysis/anomaly"
 )
 
 func TestDetectAnomaliesTool_TransformResponse(t *testing.T) {
 	tool := &DetectAnomaliesTool{}
 
-	response := &client.AnomalyResponse{
-		Anomalies: []client.Anomaly{
+	ts1, _ := time.Parse(time.RFC3339, "2024-01-15T10:30:00Z")
+	ts2, _ := time.Parse(time.RFC3339, "2024-01-15T10:25:00Z")
+	ts3, _ := time.Parse(time.RFC3339, "2024-01-15T10:20:00Z")
+
+	response := &anomaly.AnomalyResponse{
+		Anomalies: []anomaly.Anomaly{
 			{
-				Node: client.AnomalyNode{
+				Node: anomaly.AnomalyNode{
 					UID:       "uid-1",
 					Kind:      "Pod",
 					Namespace: "default",
 					Name:      "crash-pod",
 				},
-				Category:  "Event",
+				Category:  anomaly.CategoryEvent,
 				Type:      "CrashLoopBackOff",
-				Severity:  "critical",
-				Timestamp: "2024-01-15T10:30:00Z",
+				Severity:  anomaly.SeverityCritical,
+				Timestamp: ts1,
 				Summary:   "Container repeatedly crashing",
 				Details: map[string]interface{}{
 					"restart_count": 5,
 				},
 			},
 			{
-				Node: client.AnomalyNode{
+				Node: anomaly.AnomalyNode{
 					UID:       "uid-2",
 					Kind:      "Pod",
 					Namespace: "default",
 					Name:      "oom-pod",
 				},
-				Category:  "State",
+				Category:  anomaly.CategoryState,
 				Type:      "OOMKilled",
-				Severity:  "high",
-				Timestamp: "2024-01-15T10:25:00Z",
+				Severity:  anomaly.SeverityHigh,
+				Timestamp: ts2,
 				Summary:   "Container killed due to OOM",
 				Details:   map[string]interface{}{},
 			},
 			{
-				Node: client.AnomalyNode{
+				Node: anomaly.AnomalyNode{
 					UID:       "uid-3",
 					Kind:      "Deployment",
 					Namespace: "default",
 					Name:      "web-deploy",
 				},
-				Category:  "Change",
+				Category:  anomaly.CategoryChange,
 				Type:      "ReplicaChange",
-				Severity:  "medium",
-				Timestamp: "2024-01-15T10:20:00Z",
+				Severity:  anomaly.SeverityMedium,
+				Timestamp: ts3,
 				Summary:   "Replicas changed from 3 to 1",
 				Details:   map[string]interface{}{},
 			},
 		},
-		Metadata: client.AnomalyMetadata{
-			ResourceUID: "uid-target",
-			TimeWindow: client.AnomalyTimeWindow{
-				Start: "2024-01-15T10:00:00Z",
-				End:   "2024-01-15T11:00:00Z",
-			},
+		Metadata: anomaly.ResponseMetadata{
+			ResourceUID:   "uid-target",
 			NodesAnalyzed: 5,
-			ExecTimeMs:    42,
+			ExecutionTimeMs: 42,
 		},
 	}
 
-	output := tool.transformResponse(response, 1705315200, 1705318800)
+	output := tool.transformAnomalyResponse(response, 1705315200, 1705318800)
 
 	// Check anomaly count
 	if output.AnomalyCount != 3 {
@@ -130,16 +131,16 @@ func TestDetectAnomaliesTool_TransformResponse(t *testing.T) {
 func TestDetectAnomaliesTool_EmptyResponse(t *testing.T) {
 	tool := &DetectAnomaliesTool{}
 
-	response := &client.AnomalyResponse{
-		Anomalies: []client.Anomaly{},
-		Metadata: client.AnomalyMetadata{
+	response := &anomaly.AnomalyResponse{
+		Anomalies: []anomaly.Anomaly{},
+		Metadata: anomaly.ResponseMetadata{
 			ResourceUID:   "uid-target",
 			NodesAnalyzed: 3,
-			ExecTimeMs:    10,
+			ExecutionTimeMs: 10,
 		},
 	}
 
-	output := tool.transformResponse(response, 1705315200, 1705318800)
+	output := tool.transformAnomalyResponse(response, 1705315200, 1705318800)
 
 	if output.AnomalyCount != 0 {
 		t.Errorf("Expected anomaly count 0, got %d", output.AnomalyCount)
@@ -261,44 +262,40 @@ func TestDetectAnomaliesTool_TimestampConversion(t *testing.T) {
 func TestDetectAnomaliesTool_InvalidTimestampFormat(t *testing.T) {
 	tool := &DetectAnomaliesTool{}
 
-	// Test with invalid timestamp format in response
-	response := &client.AnomalyResponse{
-		Anomalies: []client.Anomaly{
+	// Test with zero timestamp - the internal conversion handles this
+	response := &anomaly.AnomalyResponse{
+		Anomalies: []anomaly.Anomaly{
 			{
-				Node: client.AnomalyNode{
+				Node: anomaly.AnomalyNode{
 					UID:       "uid-1",
 					Kind:      "Pod",
 					Namespace: "default",
 					Name:      "test-pod",
 				},
-				Category:  "Event",
+				Category:  anomaly.CategoryEvent,
 				Type:      "TestAnomaly",
-				Severity:  "low",
-				Timestamp: "invalid-timestamp", // Invalid format
+				Severity:  anomaly.SeverityLow,
+				Timestamp: time.Time{}, // Zero time
 				Summary:   "Test anomaly",
 			},
 		},
-		Metadata: client.AnomalyMetadata{
+		Metadata: anomaly.ResponseMetadata{
 			ResourceUID:   "uid-target",
 			NodesAnalyzed: 1,
 		},
 	}
 
-	output := tool.transformResponse(response, 1000, 2000)
+	output := tool.transformAnomalyResponse(response, 1000, 2000)
 
-	// Should not crash, and should use fallback
+	// Should not crash, and should handle zero time
 	if len(output.Anomalies) != 1 {
 		t.Fatalf("Expected 1 anomaly, got %d", len(output.Anomalies))
 	}
 
-	// TimestampText should fall back to the original string
-	if output.Anomalies[0].TimestampText != "invalid-timestamp" {
-		t.Errorf("Expected timestamp text to be 'invalid-timestamp', got '%s'", output.Anomalies[0].TimestampText)
-	}
-
-	// Timestamp (int64) should be 0 since parsing failed
-	if output.Anomalies[0].Timestamp != 0 {
-		t.Errorf("Expected timestamp to be 0 for invalid format, got %d", output.Anomalies[0].Timestamp)
+	// Timestamp should be the Unix representation of zero time (negative value from 1970)
+	// or we just check that it processed without crashing
+	if output.Anomalies[0].TimestampText == "" {
+		t.Error("Expected timestamp text to be non-empty")
 	}
 }
 

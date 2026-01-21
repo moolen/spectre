@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/models"
 )
 
 const kindPod = "Pod"
 
 func TestAnalyzeHealth_AllHealthyCluster(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:        "pod-1",
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "app-1",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready", Message: "Pod is running"},
 				},
 			},
@@ -26,7 +26,7 @@ func TestAnalyzeHealth_AllHealthyCluster(t *testing.T) {
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "app-2",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready", Message: "Pod is running"},
 				},
 			},
@@ -35,7 +35,7 @@ func TestAnalyzeHealth_AllHealthyCluster(t *testing.T) {
 				Kind:      "Deployment",
 				Namespace: "default",
 				Name:      "web",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready", Message: "All replicas ready"},
 				},
 			},
@@ -66,14 +66,14 @@ func TestAnalyzeHealth_AllHealthyCluster(t *testing.T) {
 }
 
 func TestAnalyzeHealth_CriticalCluster(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:        "pod-1",
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "app-1",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Error", Message: "CrashLoopBackOff"},
 				},
 			},
@@ -82,7 +82,7 @@ func TestAnalyzeHealth_CriticalCluster(t *testing.T) {
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "app-2",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Error", Message: "ImagePullBackOff"},
 				},
 			},
@@ -105,14 +105,14 @@ func TestAnalyzeHealth_CriticalCluster(t *testing.T) {
 }
 
 func TestAnalyzeHealth_DegradedCluster(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:        "pod-1",
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "app-1",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready", Message: "Pod is running"},
 				},
 			},
@@ -121,7 +121,7 @@ func TestAnalyzeHealth_DegradedCluster(t *testing.T) {
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "app-2",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Warning", Message: "Pending"},
 				},
 			},
@@ -144,14 +144,14 @@ func TestAnalyzeHealth_DegradedCluster(t *testing.T) {
 }
 
 func TestAnalyzeHealth_MixedHealthCluster(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:        "pod-1",
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "healthy",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready"},
 				},
 			},
@@ -160,7 +160,7 @@ func TestAnalyzeHealth_MixedHealthCluster(t *testing.T) {
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "warning",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Warning"},
 				},
 			},
@@ -169,7 +169,7 @@ func TestAnalyzeHealth_MixedHealthCluster(t *testing.T) {
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "error",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Error"},
 				},
 			},
@@ -178,7 +178,7 @@ func TestAnalyzeHealth_MixedHealthCluster(t *testing.T) {
 				Kind:      "Deployment",
 				Namespace: "default",
 				Name:      "app",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready"},
 				},
 			},
@@ -210,8 +210,8 @@ func TestAnalyzeHealth_MixedHealthCluster(t *testing.T) {
 }
 
 func TestAnalyzeHealth_EmptyCluster(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{},
+	response := &models.SearchResponse{
+		Resources: []models.Resource{},
 	}
 
 	output := analyzeHealth(response, 100)
@@ -226,26 +226,26 @@ func TestAnalyzeHealth_EmptyCluster(t *testing.T) {
 }
 
 func TestAnalyzeHealth_ResourceCountsByKind(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:   "pod-1",
 				Kind: "Pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready"},
 				},
 			},
 			{
 				ID:   "pod-2",
 				Kind: "Pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Error"},
 				},
 			},
 			{
 				ID:   "deploy-1",
 				Kind: "Deployment",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready"},
 				},
 			},
@@ -285,12 +285,12 @@ func TestAnalyzeHealth_ResourceCountsByKind(t *testing.T) {
 }
 
 func TestAnalyzeHealth_ErrorRateCalculation(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
-			{Kind: "Pod", StatusSegments: []client.StatusSegment{{Status: "Ready"}}},
-			{Kind: "Pod", StatusSegments: []client.StatusSegment{{Status: "Ready"}}},
-			{Kind: "Pod", StatusSegments: []client.StatusSegment{{Status: "Error"}}},
-			{Kind: "Pod", StatusSegments: []client.StatusSegment{{Status: "Error"}}},
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
+			{Kind: "Pod", StatusSegments: []models.StatusSegment{{Status: "Ready"}}},
+			{Kind: "Pod", StatusSegments: []models.StatusSegment{{Status: "Ready"}}},
+			{Kind: "Pod", StatusSegments: []models.StatusSegment{{Status: "Error"}}},
+			{Kind: "Pod", StatusSegments: []models.StatusSegment{{Status: "Error"}}},
 		},
 	}
 
@@ -316,13 +316,13 @@ func TestAnalyzeHealth_ErrorRateCalculation(t *testing.T) {
 }
 
 func TestAnalyzeHealth_TopIssuesSorting(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:   "pod-1",
 				Kind: "Pod",
 				Name: "short-error",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Error",
 						Message:   "Error 1",
@@ -335,7 +335,7 @@ func TestAnalyzeHealth_TopIssuesSorting(t *testing.T) {
 				ID:   "pod-2",
 				Kind: "Pod",
 				Name: "long-error",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Error",
 						Message:   "Error 2",
@@ -348,7 +348,7 @@ func TestAnalyzeHealth_TopIssuesSorting(t *testing.T) {
 				ID:   "pod-3",
 				Kind: "Pod",
 				Name: "medium-error",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						Status:    "Error",
 						Message:   "Error 3",
@@ -386,13 +386,13 @@ func TestAnalyzeHealth_TopIssuesSorting(t *testing.T) {
 }
 
 func TestAnalyzeHealth_TerminatingResources(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:   "pod-1",
 				Kind: "Pod",
 				Name: "terminating-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Terminating", Message: "Pod is being deleted"},
 				},
 			},
@@ -400,7 +400,7 @@ func TestAnalyzeHealth_TerminatingResources(t *testing.T) {
 				ID:   "pod-2",
 				Kind: "Pod",
 				Name: "healthy-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Ready"},
 				},
 			},
@@ -431,12 +431,12 @@ func TestAnalyzeHealth_TerminatingResources(t *testing.T) {
 }
 
 func TestAnalyzeHealth_UnknownStatus(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:   "pod-1",
 				Kind: "Pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Unknown", Message: "Status cannot be determined"},
 				},
 			},
@@ -464,19 +464,19 @@ func TestAnalyzeHealth_UnknownStatus(t *testing.T) {
 
 func TestAnalyzeHealth_MaxResourcesLimit(t *testing.T) {
 	// Create 10 error resources
-	resources := make([]client.TimelineResource, 10)
+	resources := make([]models.Resource, 10)
 	for i := 0; i < 10; i++ {
-		resources[i] = client.TimelineResource{
+		resources[i] = models.Resource{
 			ID:   fmt.Sprintf("pod-%d", i),
 			Kind: "Pod",
 			Name: fmt.Sprintf("error-pod-%d", i),
-			StatusSegments: []client.StatusSegment{
+			StatusSegments: []models.StatusSegment{
 				{Status: "Error", Message: "Test error"},
 			},
 		}
 	}
 
-	response := &client.TimelineResponse{
+	response := &models.SearchResponse{
 		Resources: resources,
 	}
 
@@ -515,13 +515,13 @@ func TestAnalyzeHealth_MaxResourcesLimit(t *testing.T) {
 }
 
 func TestAnalyzeHealth_MultipleResourceKinds(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
-			{Kind: "Pod", StatusSegments: []client.StatusSegment{{Status: "Ready"}}},
-			{Kind: "Pod", StatusSegments: []client.StatusSegment{{Status: "Error"}}},
-			{Kind: "Deployment", StatusSegments: []client.StatusSegment{{Status: "Ready"}}},
-			{Kind: "Service", StatusSegments: []client.StatusSegment{{Status: "Ready"}}},
-			{Kind: "Node", StatusSegments: []client.StatusSegment{{Status: "Warning"}}},
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
+			{Kind: "Pod", StatusSegments: []models.StatusSegment{{Status: "Ready"}}},
+			{Kind: "Pod", StatusSegments: []models.StatusSegment{{Status: "Error"}}},
+			{Kind: "Deployment", StatusSegments: []models.StatusSegment{{Status: "Ready"}}},
+			{Kind: "Service", StatusSegments: []models.StatusSegment{{Status: "Ready"}}},
+			{Kind: "Node", StatusSegments: []models.StatusSegment{{Status: "Warning"}}},
 		},
 	}
 
@@ -547,13 +547,13 @@ func TestAnalyzeHealth_MultipleResourceKinds(t *testing.T) {
 }
 
 func TestAnalyzeHealth_NoStatusSegments(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:             "pod-1",
 				Kind:           "Pod",
 				Name:           "no-segments",
-				StatusSegments: []client.StatusSegment{}, // Empty
+				StatusSegments: []models.StatusSegment{}, // Empty
 			},
 		},
 	}
@@ -579,16 +579,16 @@ func TestAnalyzeHealth_NoStatusSegments(t *testing.T) {
 }
 
 func TestAnalyzeHealth_EventCounting(t *testing.T) {
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:   "pod-1",
 				Kind: "Pod",
 				Name: "high-event-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{Status: "Error", Message: "CrashLoopBackOff"},
 				},
-				Events: []client.K8sEvent{
+				Events: []models.K8sEvent{
 					{Reason: "BackOff"},
 					{Reason: "BackOff"},
 					{Reason: "BackOff"},
