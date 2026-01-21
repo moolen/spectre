@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/mcp/client"
 	"github.com/moolen/spectre/internal/mcp/tools"
 )
@@ -363,4 +364,66 @@ func (s *SpectreServer) registerPrompts() {
 // GetMCPServer returns the underlying mcp-go server for transport setup
 func (s *SpectreServer) GetMCPServer() *server.MCPServer {
 	return s.mcpServer
+}
+
+// MCPToolRegistry adapts the integration.ToolRegistry interface to the mcp-go server.
+// It allows integrations to register tools dynamically during startup.
+type MCPToolRegistry struct {
+	mcpServer *server.MCPServer
+}
+
+// NewMCPToolRegistry creates a new tool registry adapter.
+func NewMCPToolRegistry(mcpServer *server.MCPServer) *MCPToolRegistry {
+	return &MCPToolRegistry{
+		mcpServer: mcpServer,
+	}
+}
+
+// RegisterTool registers an MCP tool with the mcp-go server.
+// It adapts the integration.ToolHandler to the mcp-go handler format.
+func (r *MCPToolRegistry) RegisterTool(name string, handler integration.ToolHandler) error {
+	// Validation
+	if name == "" {
+		return fmt.Errorf("tool name cannot be empty")
+	}
+
+	// Generic schema (tools provide args via JSON)
+	// Integration handlers will validate their own arguments
+	inputSchema := map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}
+	schemaJSON, err := json.Marshal(inputSchema)
+	if err != nil {
+		return fmt.Errorf("failed to marshal schema: %w", err)
+	}
+
+	// Create MCP tool with generic schema
+	mcpTool := mcp.NewToolWithRawSchema(name, "", schemaJSON)
+
+	// Adapter: integration.ToolHandler -> server.ToolHandlerFunc
+	adaptedHandler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Marshal mcp arguments to []byte for integration handler
+		args, err := json.Marshal(request.Params.Arguments)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+
+		// Call integration handler
+		result, err := handler(ctx, args)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Tool execution failed: %v", err)), nil
+		}
+
+		// Format result as JSON
+		resultJSON, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to format result: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(resultJSON)), nil
+	}
+
+	r.mcpServer.AddTool(mcpTool, adaptedHandler)
+	return nil
 }
