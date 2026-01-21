@@ -11,17 +11,17 @@
 ## Current Position
 
 **Phase:** 4 - Log Template Mining (In Progress)
-**Plan:** 2 of 4 (04-02-PLAN.md complete)
+**Plan:** 3 of 4 (04-03-PLAN.md complete)
 **Status:** In Progress
 **Progress:** 17/31 requirements
-**Last activity:** 2026-01-21 - Completed 04-02-PLAN.md (Log Normalization & Variable Masking)
+**Last activity:** 2026-01-21 - Completed 04-03-PLAN.md (Template Storage & Persistence)
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
 [██████████] 100% Phase 2 (Complete ✓)
 [██████████] 100% Phase 3 (Verified ✓)
-[█████░░░░░]  50% Phase 4 (In Progress - 2/4 plans)
-[█████████░]  55% Overall (17/31 requirements)
+[███████░░░]  75% Phase 4 (In Progress - 3/4 plans)
+[██████████]  58% Overall (18/31 requirements)
 ```
 
 ## Performance Metrics
@@ -105,6 +105,13 @@
 | HTTP status codes preserved in templates | 04-02 | "returned 404" vs "returned 500" must stay distinct for debugging (user decision) |
 | Kubernetes pod/replicaset names masked with <K8S_NAME> | 04-02 | Dynamic K8s resource names (deployment-replicaset-pod format) unified for stable templates |
 | File path regex without word boundaries | 04-02 | Word boundaries don't work with slash separators; removed for correct full-path matching |
+| Pattern normalization for stable template IDs | 04-03 | All placeholders (<IP>, <UUID>, <*>, etc.) normalized to <VAR> for ID generation; semantic patterns preserved for display |
+| Per-namespace Drain instances in TemplateStore | 04-03 | Namespace isolation with separate clustering state; each namespace gets own DrainProcessor |
+| Deep copy templates on retrieval | 04-03 | GetTemplate/ListTemplates return copies to prevent external mutation of internal state |
+| Load errors don't crash server | 04-03 | Corrupted snapshots logged but server continues with empty state; resilience over strict validation |
+| Failed snapshots don't stop periodic loop | 04-03 | Snapshot errors logged but don't halt persistence manager; lose max 5 minutes on crash (user decision) |
+| Atomic writes for snapshots using temp-file-then-rename | 04-03 | POSIX atomicity prevents corruption; readers never see partial writes |
+| Double-checked locking for namespace creation | 04-03 | Fast read path for existing namespaces, slow write path with recheck for thread-safe lazy initialization |
 
 **Scope Boundaries:**
 - Progressive disclosure: 3 levels maximum (global → aggregated → detail)
@@ -151,33 +158,33 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 04-02-PLAN.md (Log Normalization & Variable Masking)
+**Stopped at:** Completed 04-03-PLAN.md (Template Storage & Persistence)
 
 **What just happened:**
-- Executed plan 04-02: Log normalization and variable masking for stable template generation
-- Created ExtractMessage for JSON message field extraction with fallback to plain text
-- Created PreProcess for case-insensitive normalization (lowercase, trim) without variable masking
-- Created AggressiveMask with 11+ regex patterns: IPs, UUIDs, timestamps, hex, paths, URLs, emails
-- Created MaskKubernetesNames for K8s pod/replicaset name pattern detection
-- Implemented context-aware HTTP status code preservation (404 vs 500 stay distinct)
-- Fixed file path regex by removing word boundaries for correct full-path matching
-- All tests pass with 60+ test cases across normalize, masking, and kubernetes functions
-- All tasks completed in ~3.5 minutes with 1 auto-fixed bug (file path regex)
-- Phase 4 progress: 2/4 plans complete (50%)
-- SUMMARY: .planning/phases/04-log-template-mining/04-02-SUMMARY.md
+- Executed plan 04-03: Namespace-scoped template storage with periodic persistence
+- Created TemplateStore integrating PreProcess → Drain → AggressiveMask → normalization pipeline
+- Implemented pattern normalization for stable template IDs (all placeholders → <VAR>)
+- Created PersistenceManager with 5-minute JSON snapshots using atomic writes
+- Per-namespace Drain instances for multi-tenant isolation
+- Thread-safe with RWMutex; double-checked locking for lazy namespace creation
+- Deep copy templates on retrieval to prevent external mutation
+- Comprehensive test coverage: 30+ tests including concurrency, roundtrip serialization
+- Auto-fixed 2 bugs: Drain pattern extraction and template ID consistency
+- All tasks completed in ~8 minutes
+- Phase 4 progress: 3/4 plans complete (75%)
+- SUMMARY: .planning/phases/04-log-template-mining/04-03-SUMMARY.md
 
 **What's next:**
-- Phase 4 in progress: 2/4 plans complete (Drain foundation + normalization/masking done)
-- Next: Plan 04-03 (integrate preprocessing with Drain processor) or Plan 04-04 (template storage & persistence)
-- Pipeline ready: PreProcess → Drain clustering → AggressiveMask → Template storage
+- Phase 4 in progress: 3/4 plans complete (foundation, normalization, storage done)
+- Next: Plan 04-04 (template lifecycle management: pruning, auto-merge, rebalancing)
+- Storage layer ready for lifecycle operations: count tracking for pruning, pattern tokens for auto-merge
 
 **Context for next agent:**
-- Complete two-phase processing pipeline: minimal preprocessing before Drain, aggressive masking after
-- JSON message extraction supports: message, msg, log, text, _raw, event fields with fallback
-- Masking preserves HTTP status codes and ports while aggressively masking variables
-- Kubernetes pod/replicaset names unified with <K8S_NAME> placeholder
-- All functions stateless and ready for integration with Drain processor
-- Test coverage ensures patterns work correctly for edge cases
+- TemplateStore provides clean interface: Process(), GetTemplate(), ListTemplates(), GetNamespaces()
+- Pattern normalization ensures stable template IDs across Drain learning phases
+- Persistence ensures templates survive restarts (max 5 min loss on crash)
+- Namespace scoping ready for multi-tenant MCP tool queries
+- Thread-safe for concurrent access from multiple goroutines
 - VictoriaLogs integration fully functional from Phase 3
 - Integration framework from Phases 1-2 provides config management and lifecycle
 
