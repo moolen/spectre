@@ -10,17 +10,18 @@
 
 ## Current Position
 
-**Phase:** 3 - VictoriaLogs Client & Basic Pipeline (Verified ✓)
-**Plan:** 4 of 4 (03-04-PLAN.md gap closure complete)
-**Status:** Phase Verified
+**Phase:** 4 - Log Template Mining (In Progress)
+**Plan:** 2 of 4 (04-02-PLAN.md complete)
+**Status:** In Progress
 **Progress:** 17/31 requirements
-**Last activity:** 2026-01-21 - Completed 03-04-PLAN.md (Time Range Validation - gap closure)
+**Last activity:** 2026-01-21 - Completed 04-02-PLAN.md (Log Normalization & Variable Masking)
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
 [██████████] 100% Phase 2 (Complete ✓)
 [██████████] 100% Phase 3 (Verified ✓)
-[█████████░] 55% Overall (17/31 requirements)
+[█████░░░░░]  50% Phase 4 (In Progress - 2/4 plans)
+[█████████░]  55% Overall (17/31 requirements)
 ```
 
 ## Performance Metrics
@@ -95,6 +96,15 @@
 | ValidateMinimumDuration skips validation for zero time ranges | 03-04 | Zero ranges use default 1-hour duration, validation not needed |
 | BuildLogsQLQuery returns empty string on validation failure | 03-04 | Explicit failure clearer than logging/clamping; avoids silent behavior changes |
 | 15-minute minimum time range hardcoded per VLOG-03 | 03-04 | Protects VictoriaLogs from excessive query load; no business need for configuration |
+| DrainConfig uses sim_th=0.4, tree depth=4, maxChildren=100 | 04-01 | Research-recommended defaults for structured logs; balances clustering vs explosion |
+| Templates scoped per-namespace with composite key | 04-01 | Multi-tenancy - same pattern in different namespaces has different semantics |
+| SHA-256 hashing for template IDs | 04-01 | Deterministic, collision-resistant IDs for cross-client consistency (MINE-03) |
+| Linear search for template lookup | 04-01 | Target <1000 templates per namespace; premature optimization unnecessary |
+| JSON message field extraction with fallback order | 04-02 | Try message, msg, log, text, _raw, event - covers most frameworks while allowing structured event logs |
+| Masking happens AFTER Drain clustering | 04-02 | Preserves Drain's structure detection before normalizing variables (user decision) |
+| HTTP status codes preserved in templates | 04-02 | "returned 404" vs "returned 500" must stay distinct for debugging (user decision) |
+| Kubernetes pod/replicaset names masked with <K8S_NAME> | 04-02 | Dynamic K8s resource names (deployment-replicaset-pod format) unified for stable templates |
+| File path regex without word boundaries | 04-02 | Word boundaries don't work with slash separators; removed for correct full-path matching |
 
 **Scope Boundaries:**
 - Progressive disclosure: 3 levels maximum (global → aggregated → detail)
@@ -141,7 +151,7 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 03-04-PLAN.md (Time Range Validation - gap closure) - Phase 3 Complete ✓
+**Stopped at:** Completed 04-01-PLAN.md (Drain Algorithm Foundation & Template Types)
 
 **What just happened:**
 - Executed gap closure plan 03-04: Enforced 15-minute minimum time range validation for VictoriaLogs queries
