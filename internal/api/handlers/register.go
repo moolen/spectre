@@ -19,6 +19,7 @@ func RegisterHandlers(
 	storageExecutor api.QueryExecutor,
 	graphExecutor api.QueryExecutor,
 	querySource api.TimelineQuerySource,
+	timelineService *api.TimelineService, // Shared timeline service
 	graphClient graph.Client,
 	graphPipeline sync.Pipeline,
 	metadataCache *api.MetadataCache,
@@ -38,22 +39,7 @@ func RegisterHandlers(
 	}
 	searchHandler := NewSearchHandler(searchExecutor, logger, tracer)
 
-	// Create timeline service with appropriate executor(s)
-	var timelineService *api.TimelineService
-	if graphExecutor != nil && querySource == api.TimelineQuerySourceGraph {
-		// Use dual-executor mode with graph as primary
-		logger.Info("Timeline service using GRAPH query executor")
-		timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, querySource, logger, tracer)
-	} else if graphExecutor != nil {
-		// Graph available but using storage - enable both for A/B testing
-		logger.Info("Timeline service using STORAGE query executor (graph available for comparison)")
-		timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, api.TimelineQuerySourceStorage, logger, tracer)
-	} else {
-		// Storage only
-		logger.Info("Timeline service using STORAGE query executor only")
-		timelineService = api.NewTimelineService(storageExecutor, logger, tracer)
-	}
-
+	// Use provided timeline service (created by apiserver for sharing between REST and MCP)
 	// Create timeline handler using the service
 	timelineHandler := NewTimelineHandler(timelineService, logger, tracer)
 

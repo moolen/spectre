@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/mcp/client"
 	"github.com/moolen/spectre/internal/mcp/tools"
@@ -19,17 +20,19 @@ type Tool interface {
 
 // SpectreServer wraps mcp-go server with Spectre-specific logic
 type SpectreServer struct {
-	mcpServer     *server.MCPServer
-	spectreClient *SpectreClient
-	tools         map[string]Tool
-	version       string
+	mcpServer       *server.MCPServer
+	spectreClient   *SpectreClient // Deprecated: will be removed after all tools migrated to services
+	timelineService *api.TimelineService
+	tools           map[string]Tool
+	version         string
 }
 
 // ServerOptions configures the Spectre MCP server
 type ServerOptions struct {
-	SpectreURL string
-	Version    string
-	Logger     client.Logger // Optional logger for retry messages
+	SpectreURL      string
+	Version         string
+	Logger          client.Logger // Optional logger for retry messages
+	TimelineService *api.TimelineService // Direct service for tools (bypasses HTTP)
 }
 
 // NewSpectreServer creates a new Spectre MCP server
@@ -57,10 +60,11 @@ func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
 	)
 
 	s := &SpectreServer{
-		mcpServer:     mcpServer,
-		spectreClient: spectreClient,
-		tools:         make(map[string]Tool),
-		version:       opts.Version,
+		mcpServer:       mcpServer,
+		spectreClient:   spectreClient,
+		timelineService: opts.TimelineService,
+		tools:           make(map[string]Tool),
+		version:         opts.Version,
 	}
 
 	// Register tools
@@ -74,10 +78,17 @@ func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
 
 func (s *SpectreServer) registerTools() {
 	// Register cluster_health tool
+	// Use TimelineService if available (direct service call), otherwise fall back to HTTP client
+	var clusterHealthTool Tool
+	if s.timelineService != nil {
+		clusterHealthTool = tools.NewClusterHealthTool(s.timelineService)
+	} else {
+		clusterHealthTool = tools.NewClusterHealthToolWithClient(s.spectreClient)
+	}
 	s.registerTool(
 		"cluster_health",
 		"Get cluster health overview with resource status breakdown and top issues",
-		tools.NewClusterHealthTool(s.spectreClient),
+		clusterHealthTool,
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -137,10 +148,17 @@ func (s *SpectreServer) registerTools() {
 	)
 
 	// Register resource_timeline tool
+	// Use TimelineService if available (direct service call), otherwise fall back to HTTP client
+	var resourceTimelineTool Tool
+	if s.timelineService != nil {
+		resourceTimelineTool = tools.NewResourceTimelineTool(s.timelineService)
+	} else {
+		resourceTimelineTool = tools.NewResourceTimelineToolWithClient(s.spectreClient)
+	}
 	s.registerTool(
 		"resource_timeline",
 		"Get resource timeline with status segments, events, and transitions for root cause analysis",
-		tools.NewResourceTimelineTool(s.spectreClient),
+		resourceTimelineTool,
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

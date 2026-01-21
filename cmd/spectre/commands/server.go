@@ -175,25 +175,13 @@ func runServer(cmd *cobra.Command, args []string) {
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
 
-	// Create MCP server for in-process tool execution
-	logger.Info("Initializing MCP server")
-	spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
-		SpectreURL: fmt.Sprintf("http://localhost:%d", cfg.APIPort),
-		Version:    Version,
-		Logger:     logger,
-	})
-	if err != nil {
-		logger.Error("Failed to create MCP server: %v", err)
-		HandleError(err, "MCP server initialization error")
-	}
-	mcpServer := spectreServer.GetMCPServer()
-	logger.Info("MCP server created")
-
-	// Create MCPToolRegistry adapter
-	mcpRegistry := mcp.NewMCPToolRegistry(mcpServer)
-
-	// Initialize integration manager (always enabled with default config path)
+	// Note: MCP server will be created AFTER API server so it can access TimelineService
+	// Integration manager will be initialized after MCP server is ready
+	var mcpServer *server.MCPServer
+	var mcpRegistry *mcp.MCPToolRegistry
 	var integrationMgr *integration.Manager
+
+	// Prepare default integrations config file if needed
 	if integrationsConfigPath != "" {
 		// Create default config file if it doesn't exist
 		if _, err := os.Stat(integrationsConfigPath); os.IsNotExist(err) {
@@ -207,23 +195,6 @@ func runServer(cmd *cobra.Command, args []string) {
 				HandleError(err, "Integration config creation error")
 			}
 		}
-
-		logger.Info("Initializing integration manager from: %s", integrationsConfigPath)
-		integrationMgr, err = integration.NewManagerWithMCPRegistry(integration.ManagerConfig{
-			ConfigPath:            integrationsConfigPath,
-			MinIntegrationVersion: minIntegrationVersion,
-		}, mcpRegistry)
-		if err != nil {
-			logger.Error("Failed to create integration manager: %v", err)
-			HandleError(err, "Integration manager initialization error")
-		}
-
-		// Register integration manager with lifecycle manager (no dependencies)
-		if err := manager.Register(integrationMgr); err != nil {
-			logger.Error("Failed to register integration manager: %v", err)
-			HandleError(err, "Integration manager registration error")
-		}
-		logger.Info("Integration manager registered")
 	}
 
 	// Initialize tracing provider
@@ -458,6 +429,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			logging.Field("total_duration", totalDuration))
 	}
 
+	// Create API server first (without MCP server) to initialize TimelineService
 	apiComponent := apiserver.NewWithStorageGraphAndPipeline(
 		cfg.APIPort,
 		nil, // No storage executor
@@ -476,9 +448,55 @@ func runServer(cmd *cobra.Command, args []string) {
 		},
 		integrationsConfigPath, // Pass config path for REST API handlers
 		integrationMgr,         // Pass integration manager for REST API handlers
-		mcpServer,              // Pass MCP server for /v1/mcp endpoint
+		nil,                    // MCP server will be registered after creation
 	)
 	logger.Info("API server component created (graph-only)")
+
+	// Now create MCP server with TimelineService from API server
+	logger.Info("Initializing MCP server with TimelineService")
+	timelineService := apiComponent.GetTimelineService()
+	spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
+		SpectreURL:      fmt.Sprintf("http://localhost:%d", cfg.APIPort),
+		Version:         Version,
+		Logger:          logger,
+		TimelineService: timelineService, // Direct service access for tools
+	})
+	if err != nil {
+		logger.Error("Failed to create MCP server: %v", err)
+		HandleError(err, "MCP server initialization error")
+	}
+	mcpServer = spectreServer.GetMCPServer()
+	logger.Info("MCP server created with direct TimelineService access")
+
+	// Create MCPToolRegistry adapter for integration tools
+	mcpRegistry = mcp.NewMCPToolRegistry(mcpServer)
+
+	// Initialize integration manager now that MCP registry is available
+	if integrationsConfigPath != "" {
+		logger.Info("Initializing integration manager from: %s", integrationsConfigPath)
+		integrationMgr, err = integration.NewManagerWithMCPRegistry(integration.ManagerConfig{
+			ConfigPath:            integrationsConfigPath,
+			MinIntegrationVersion: minIntegrationVersion,
+		}, mcpRegistry)
+		if err != nil {
+			logger.Error("Failed to create integration manager: %v", err)
+			HandleError(err, "Integration manager initialization error")
+		}
+
+		// Register integration manager with lifecycle manager (no dependencies)
+		if err := manager.Register(integrationMgr); err != nil {
+			logger.Error("Failed to register integration manager: %v", err)
+			HandleError(err, "Integration manager registration error")
+		}
+		logger.Info("Integration manager registered")
+	}
+
+	// Register MCP endpoint on API server now that MCP server is ready
+	if err := apiComponent.RegisterMCPEndpoint(mcpServer); err != nil {
+		logger.Error("Failed to register MCP endpoint: %v", err)
+		HandleError(err, "MCP endpoint registration error")
+	}
+	logger.Info("MCP endpoint registered on API server")
 
 	// Register namespace graph cache with GraphService for event-driven invalidation
 	// This enables the cache to be notified when events affect specific namespaces

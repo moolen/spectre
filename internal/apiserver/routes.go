@@ -58,6 +58,7 @@ func (s *Server) registerHTTPHandlers() {
 		s.queryExecutor,
 		s.graphExecutor,
 		s.querySource,
+		s.timelineService, // Pass shared timeline service
 		s.graphClient,
 		s.graphPipeline,
 		s.metadataCache,

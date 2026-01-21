@@ -40,6 +40,7 @@ type Server struct {
 	querySource      api.TimelineQuerySource // Which executor to use for timeline queries
 	graphClient      graph.Client
 	graphPipeline    sync.Pipeline               // Graph sync pipeline for imports
+	timelineService  *api.TimelineService        // Shared timeline service for REST handlers and MCP tools
 	metadataCache    *api.MetadataCache          // In-memory metadata cache for fast responses
 	nsGraphCache     *namespacegraph.Cache       // In-memory namespace graph cache for fast responses
 	staticCache      *staticFileCache            // In-memory static file cache for fast UI serving
@@ -112,6 +113,20 @@ func NewWithStorageGraphAndPipeline(
 		// Create cache with configurable refresh period
 		s.metadataCache = api.NewMetadataCache(metadataExecutor, s.logger, metadataRefreshPeriod)
 		s.logger.Info("Metadata cache created with refresh period %v (will initialize on server start)", metadataRefreshPeriod)
+	}
+
+	// Create timeline service with appropriate executor(s)
+	// This service is shared by REST handlers and MCP tools
+	tracer := s.getTracer("spectre.api.timeline")
+	if graphExecutor != nil && querySource == api.TimelineQuerySourceGraph {
+		s.logger.Info("Timeline service using GRAPH query executor")
+		s.timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, querySource, s.logger, tracer)
+	} else if graphExecutor != nil {
+		s.logger.Info("Timeline service using STORAGE query executor (graph available for comparison)")
+		s.timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, api.TimelineQuerySourceStorage, s.logger, tracer)
+	} else {
+		s.logger.Info("Timeline service using STORAGE query executor only")
+		s.timelineService = api.NewTimelineService(storageExecutor, s.logger, tracer)
 	}
 
 	// Create namespace graph cache if enabled and graph client is available
@@ -311,4 +326,23 @@ func (s *Server) Name() string {
 // Returns nil if caching is disabled.
 func (s *Server) GetNamespaceGraphCache() *namespacegraph.Cache {
 	return s.nsGraphCache
+}
+
+// GetTimelineService returns the shared timeline service for use by MCP tools.
+// This enables MCP tools to call the service directly instead of making HTTP requests.
+func (s *Server) GetTimelineService() *api.TimelineService {
+	return s.timelineService
+}
+
+// RegisterMCPEndpoint registers the MCP server endpoint after server initialization.
+// This allows the MCP server to be created with the TimelineService from this API server.
+func (s *Server) RegisterMCPEndpoint(mcpServer *server.MCPServer) error {
+	if mcpServer == nil {
+		return fmt.Errorf("mcpServer cannot be nil")
+	}
+	s.mcpServer = mcpServer
+
+	// Register the MCP endpoint using the existing method
+	s.registerMCPHandler()
+	return nil
 }

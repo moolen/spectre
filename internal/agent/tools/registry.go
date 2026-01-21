@@ -532,7 +532,7 @@ type ClusterHealthToolWrapper struct {
 
 func NewClusterHealthToolWrapper(client *client.SpectreClient) *ClusterHealthToolWrapper {
 	return &ClusterHealthToolWrapper{
-		inner: mcptools.NewClusterHealthTool(client),
+		inner: mcptools.NewClusterHealthToolWithClient(client),
 	}
 }
 
@@ -685,7 +685,7 @@ type ResourceTimelineToolWrapper struct {
 
 func NewResourceTimelineToolWrapper(client *client.SpectreClient) *ResourceTimelineToolWrapper {
 	return &ResourceTimelineToolWrapper{
-		inner: mcptools.NewResourceTimelineTool(client),
+		inner: mcptools.NewResourceTimelineToolWithClient(client),
 	}
 }
 

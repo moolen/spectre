@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analyzer"
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/models"
 )
 
 const (
@@ -24,13 +26,23 @@ const (
 
 // ClusterHealthTool implements the cluster_health MCP tool
 type ClusterHealthTool struct {
-	client *client.SpectreClient
+	timelineService *api.TimelineService
+	client          *client.SpectreClient // Deprecated: for backwards compatibility
 }
 
-// NewClusterHealthTool creates a new cluster health tool
-func NewClusterHealthTool(client *client.SpectreClient) *ClusterHealthTool {
+// NewClusterHealthTool creates a new cluster health tool using TimelineService (direct service call)
+func NewClusterHealthTool(timelineService *api.TimelineService) *ClusterHealthTool {
 	return &ClusterHealthTool{
-		client: client,
+		timelineService: timelineService,
+		client:          nil,
+	}
+}
+
+// NewClusterHealthToolWithClient creates a cluster health tool using HTTP client (deprecated)
+func NewClusterHealthToolWithClient(client *client.SpectreClient) *ClusterHealthTool {
+	return &ClusterHealthTool{
+		timelineService: nil,
+		client:          client,
 	}
 }
 
@@ -114,15 +126,35 @@ func (t *ClusterHealthTool) Execute(ctx context.Context, input json.RawMessage) 
 	}
 
 	start := time.Now()
-	filters := make(map[string]string)
+
+	// Build filter parameters
+	filterParams := make(map[string][]string)
 	if params.Namespace != "" {
-		filters["namespace"] = params.Namespace
+		filterParams["namespace"] = []string{params.Namespace}
 	}
 
-	response, err := t.client.QueryTimeline(startTime, endTime, filters, 10000) // Large page size to get all resources
+	// Use TimelineService to parse and execute query
+	startStr := fmt.Sprintf("%d", startTime)
+	endStr := fmt.Sprintf("%d", endTime)
+
+	query, err := t.timelineService.ParseQueryParameters(ctx, startStr, endStr, filterParams)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query timeline: %w", err)
+		return nil, fmt.Errorf("failed to parse query: %w", err)
 	}
+
+	// Set large page size to get all resources
+	query.Pagination = &models.PaginationRequest{
+		PageSize: 10000,
+	}
+
+	// Execute query using service
+	queryResult, eventResult, err := t.timelineService.ExecuteConcurrentQueries(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute timeline query: %w", err)
+	}
+
+	// Build timeline response using service
+	response := t.timelineService.BuildTimelineResponse(queryResult, eventResult)
 
 	// Apply default limit: 100 (default), max 500
 	maxResources := ApplyDefaultLimit(params.MaxResources, 100, 500)
@@ -134,7 +166,7 @@ func (t *ClusterHealthTool) Execute(ctx context.Context, input json.RawMessage) 
 }
 
 // analyzeHealth analyzes cluster health from timeline response
-func analyzeHealth(response *client.TimelineResponse, maxResources int) *ClusterHealthOutput {
+func analyzeHealth(response *models.SearchResponse, maxResources int) *ClusterHealthOutput {
 	output := &ClusterHealthOutput{
 		ResourcesByKind: make([]ResourceStatusCount, 0),
 	}
