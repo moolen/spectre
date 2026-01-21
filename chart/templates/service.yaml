@@ -36,12 +36,6 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
-    {{- if .Values.mcp.enabled }}
-    - port: {{ .Values.mcp.port }}
-      targetPort: mcp
-      protocol: TCP
-      name: mcp
-    {{- end }}
     {{- if .Values.pprof.enabled }}
     - port: {{ .Values.pprof.port }}
       targetPort: pprof
