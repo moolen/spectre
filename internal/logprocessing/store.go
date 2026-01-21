@@ -194,6 +194,29 @@ func (ts *TemplateStore) GetNamespaces() []string {
 	return namespaces
 }
 
+// CompareTimeWindows identifies novel templates by comparing current to previous.
+// Returns map of templateID -> isNovel (true if template exists in current but not previous).
+//
+// Design decision from CONTEXT.md: "Compare current period to previous period of same duration"
+// Example: Query last 1h (current) vs hour before that (previous) to find new patterns.
+func (ts *TemplateStore) CompareTimeWindows(namespace string, currentTemplates, previousTemplates []Template) map[string]bool {
+	// Build set of template patterns from previous window
+	previousPatterns := make(map[string]bool)
+	for _, tmpl := range previousTemplates {
+		previousPatterns[tmpl.Pattern] = true
+	}
+
+	// Compare current templates to previous
+	novelty := make(map[string]bool)
+	for _, tmpl := range currentTemplates {
+		// Novel if pattern didn't exist in previous window
+		isNovel := !previousPatterns[tmpl.Pattern]
+		novelty[tmpl.ID] = isNovel
+	}
+
+	return novelty
+}
+
 // extractPattern extracts the template pattern from Drain cluster string output.
 // Drain cluster.String() format: "id={X} : size={Y} : [pattern]"
 // Returns just the pattern part.
