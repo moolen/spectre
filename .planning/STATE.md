@@ -10,28 +10,28 @@
 
 ## Current Position
 
-**Phase:** 4 - Log Template Mining (Verified ✓)
-**Plan:** 4 of 4 (04-04-PLAN.md complete)
-**Status:** Phase Verified
-**Progress:** 21/31 requirements
-**Last activity:** 2026-01-21 - Completed 04-04-PLAN.md (Template Lifecycle & Testing)
+**Phase:** 5 - Progressive Disclosure MCP Tools (In Progress)
+**Plan:** 1 of 4 (05-01-PLAN.md complete)
+**Status:** In Progress
+**Progress:** 22/31 requirements
+**Last activity:** 2026-01-21 - Completed 05-01-PLAN.md (MCP Tool Registration Infrastructure)
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
 [██████████] 100% Phase 2 (Complete ✓)
 [██████████] 100% Phase 3 (Verified ✓)
 [██████████] 100% Phase 4 (Verified ✓)
-[░░░░░░░░░░]   0% Phase 5 (Not Started)
-[██████████]  68% Overall (21/31 requirements)
+[██░░░░░░░░]  25% Phase 5 (In Progress)
+[███████████]  71% Overall (22/31 requirements)
 ```
 
 ## Performance Metrics
 
 | Metric | Current | Target | Status |
 |--------|---------|--------|--------|
-| Requirements Complete | 21/31 | 31/31 | In Progress |
+| Requirements Complete | 22/31 | 31/31 | In Progress |
 | Phases Complete | 4/5 | 5/5 | In Progress |
-| Plans Complete | 15/15 | 15/15 (Phases 1-4) | Phases 1-4 Complete ✓ |
+| Plans Complete | 16/19 | 19/19 (Phases 1-5) | Phase 5 In Progress |
 | Blockers | 0 | 0 | On Track |
 
 ## Accumulated Context
@@ -116,6 +116,10 @@
 | Default rebalancing config: prune threshold 10, merge interval 5min, similarity 0.7 | 04-04 | Prune threshold catches rare but important patterns; 5min matches persistence; 0.7 for loose clustering per CONTEXT.md |
 | Namespace lock protects entire Drain.Train() operation | 04-04 | Drain library not thread-safe; race condition fix - lock before Train() not after |
 | Existing test suite organization kept as-is | 04-04 | Tests already comprehensive at 85.2% coverage; better organized than plan suggested (rebalancer_test.go vs store_test.go) |
+| MCPToolRegistry uses generic JSON schema | 05-01 | Integration handlers validate their own arguments; keeps adapter simple and flexible |
+| RegisterTools() called for all instances including degraded | 05-01 | Degraded backends can still expose tools that return service unavailable; AI can discover available tools |
+| NewManagerWithMCPRegistry for backward compatibility | 05-01 | Existing code works unchanged; only MCP-enabled servers use new constructor |
+| Tool registration errors don't fail startup | 05-01 | Resilience - one integration's failure shouldn't crash server; logged for debugging |
 
 **Scope Boundaries:**
 - Progressive disclosure: 3 levels maximum (global → aggregated → detail)
@@ -148,9 +152,15 @@
 - 04-03: Namespace-scoped template storage with periodic persistence (MINE-03, MINE-04)
 - 04-04: Template lifecycle management with pruning, auto-merge, and comprehensive testing (85.2% coverage)
 
+**Phase 5: Progressive Disclosure MCP Tools** (In Progress)
+- 05-01: MCP tool registration infrastructure ✓
+- 05-02: Overview tool (in progress)
+- 05-03: Patterns tool
+- 05-04: Detail logs tool
+
 ### Active Todos
 
-None - Phase 4 complete. Ready to plan Phase 5 (Progressive Disclosure MCP Tools).
+None - Phase 5 Plan 1 complete. Ready for Plan 2 (Overview Tool).
 
 ### Known Blockers
 
@@ -169,34 +179,31 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 04-04-PLAN.md (Template Lifecycle & Testing)
+**Stopped at:** Completed 05-01-PLAN.md (MCP Tool Registration Infrastructure)
 
 **What just happened:**
-- Executed plan 04-04: Template lifecycle management and comprehensive testing
-- Created TemplateRebalancer with count-based pruning and similarity-based auto-merge
-- Added levenshtein library for edit distance calculation in template similarity
-- Fixed critical race condition: Drain library not thread-safe, moved lock before Train() call
-- Achieved 85.2% test coverage across entire logprocessing package (exceeds 80% target)
-- All tests pass with race detector enabled
-- Phase 4 COMPLETE: Production-ready log template mining package
-- All tasks completed in ~4 minutes
-- SUMMARY: .planning/phases/04-log-template-mining/04-04-SUMMARY.md
+- Executed plan 05-01: MCP tool registration infrastructure
+- Created MCPToolRegistry adapter implementing integration.ToolRegistry
+- Wired RegisterTools() into Manager lifecycle (called after Start() for all instances)
+- VictoriaLogs integration stores registry reference for Plans 2-4
+- All tasks completed in 2 minutes with atomic commits
+- SUMMARY: .planning/phases/05-progressive-disclosure-mcp-tools/05-01-SUMMARY.md
 
 **What's next:**
-- Phase 4 COMPLETE (all 4 plans done)
-- Ready to plan Phase 5: Progressive Disclosure MCP Tools
-- Log processing foundation complete: Drain + storage + persistence + rebalancing
-- Next phase will integrate template mining with VictoriaLogs and build MCP tools
+- Phase 5 Plan 1 COMPLETE
+- Ready for Plan 2: Overview Tool (victorialogs_{name}_overview)
+- Infrastructure in place for dynamic tool registration
+- Next plans will implement actual MCP tools using stored registry reference
 
 **Context for next agent:**
-- Complete log processing pipeline: PreProcess → Drain → AggressiveMask → Normalize → Store → Rebalance
-- TemplateStore interface: Process(), GetTemplate(), ListTemplates(), GetNamespaces()
-- PersistenceManager: 5-minute JSON snapshots with atomic writes
-- TemplateRebalancer: 5-minute rebalancing with pruning (threshold 10) and auto-merge (similarity 0.7)
-- Thread-safe with proper locking (race condition fixed)
-- Test coverage: 85.2% with comprehensive test suite
-- VictoriaLogs integration from Phase 3 ready for log source
-- Integration framework from Phases 1-2 provides config management
+- MCPToolRegistry adapter: integration.ToolHandler -> server.ToolHandlerFunc
+- Manager.mcpRegistry field: optional ToolRegistry for MCP integration
+- NewManagerWithMCPRegistry: constructor for MCP-enabled servers
+- VictoriaLogs.registry field: stored for deferred tool implementation
+- Tool naming convention: {integration_type}_{instance_name}_{tool}
+- RegisterTools() called after Start() regardless of health status (even degraded)
+- Generic JSON schema in adapter: integrations validate their own arguments
+- Foundation complete for Plans 2-4 tool implementations
 
 ---
 
