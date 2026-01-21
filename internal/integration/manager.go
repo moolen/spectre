@@ -48,6 +48,9 @@ type Manager struct {
 
 	// minVersion is the parsed minimum version constraint
 	minVersion *version.Version
+
+	// mcpRegistry is the optional MCP tool registry for integrations
+	mcpRegistry ToolRegistry
 }
 
 // NewManager creates a new integration lifecycle manager.
@@ -82,6 +85,17 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		m.logger.Debug("Minimum integration version: %s", cfg.MinIntegrationVersion)
 	}
 
+	return m, nil
+}
+
+// NewManagerWithMCPRegistry creates a new integration lifecycle manager with MCP tool registration.
+// This is a convenience constructor for servers that want to enable MCP integration.
+func NewManagerWithMCPRegistry(cfg ManagerConfig, mcpRegistry ToolRegistry) (*Manager, error) {
+	m, err := NewManager(cfg)
+	if err != nil {
+		return nil, err
+	}
+	m.mcpRegistry = mcpRegistry
 	return m, nil
 }
 
@@ -211,11 +225,21 @@ func (m *Manager) startInstances(ctx context.Context, integrationsFile *config.I
 		if err := instance.Start(ctx); err != nil {
 			m.logger.Error("Failed to start instance %s: %v (marking as degraded)", instanceConfig.Name, err)
 			// Instance is registered but degraded - continue with other instances
-			continue
+			// Fall through to register tools even for degraded instances
+		} else {
+			m.logger.Info("Started instance: %s (type: %s, version: %s)",
+				instanceConfig.Name, instanceConfig.Type, instance.Metadata().Version)
 		}
 
-		m.logger.Info("Started instance: %s (type: %s, version: %s)",
-			instanceConfig.Name, instanceConfig.Type, instance.Metadata().Version)
+		// Register MCP tools if registry provided
+		// This happens after Start() regardless of status (Healthy or Degraded)
+		// Degraded instances can still expose tools that return service unavailable errors
+		if m.mcpRegistry != nil {
+			if err := instance.RegisterTools(m.mcpRegistry); err != nil {
+				m.logger.Error("Failed to register tools for %s: %v", instanceConfig.Name, err)
+				// Don't fail startup - log and continue
+			}
+		}
 	}
 
 	return nil
