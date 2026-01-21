@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-01-21)
 
 ## Current Position
 
-Phase: Phase 7 — Service Layer Extraction (2 of 4) — IN PROGRESS
-Plan: 07-04 complete (4 of 5 plans in phase)
-Status: In progress - Timeline, Graph, and Metadata services extracted
-Last activity: 2026-01-21 — Completed 07-04-PLAN.md (MetadataService extraction)
+Phase: Phase 7 — Service Layer Extraction (2 of 4) — COMPLETE
+Plan: 07-05 complete (5 of 5 plans in phase)
+Status: Complete - Service layer extraction finished, HTTP client removed
+Last activity: 2026-01-21 — Completed 07-05-PLAN.md (HTTP client removal)
 
-Progress: ██████░░░░░░░░░░░░░░ 30% (6/20 total plans estimated)
+Progress: ███████░░░░░░░░░░░░░ 35% (7/20 total plans estimated)
 
 ## Milestone: v1.1 Server Consolidation
 
@@ -22,7 +22,7 @@ Progress: ██████░░░░░░░░░░░░░░ 30% (6/20
 
 **Phases:**
 - Phase 6: Consolidated Server & Integration Manager (7 reqs) — COMPLETE (2/2 plans complete)
-- Phase 7: Service Layer Extraction (5 reqs) — IN PROGRESS (4/5 plans complete)
+- Phase 7: Service Layer Extraction (5 reqs) — COMPLETE (5/5 plans complete)
 - Phase 8: Cleanup & Helm Chart Update (5 reqs) — Pending
 - Phase 9: E2E Test Validation (4 reqs) — Pending
 
@@ -42,23 +42,26 @@ None
 
 - DateAdded field not persisted in integration config (from v1)
 - GET /{name} endpoint unused by UI (from v1)
+- Standalone MCP command disabled (needs gRPC/Connect refactor)
+- Agent command disabled (needs gRPC/Connect refactor)
+- Agent package excluded from build (build constraints added)
 
 ## Next Steps
 
-1. `/gsd:plan-phase 7` — Plan service layer extraction
-2. Execute Phase 7 plans (convert MCP tools to use direct service calls)
-3. Continue through phases 8-9
+1. `/gsd:plan-phase 8` — Plan cleanup and Helm chart updates
+2. Execute Phase 8 plans (remove old ports, update charts, documentation)
+3. Phase 9: E2E test validation
 
 ## Performance Metrics
 
 **v1.1 Milestone:**
-- Phases complete: 1/4 (Phase 6 ✅)
-- Plans complete: 6/20 (estimated)
-- Requirements satisfied: 13/21 (SRVR-01 through INTG-03, SVCE-01 through SVCE-04)
+- Phases complete: 2/4 (Phase 6 ✅, Phase 7 ✅)
+- Plans complete: 7/20 (estimated)
+- Requirements satisfied: 18/21 (SRVR-01 through SVCE-05)
 
 **Session metrics:**
 - Current session: 2026-01-21
-- Plans executed this session: 6
+- Plans executed this session: 7
 - Blockers hit this session: 0
 
 ## Accumulated Context
@@ -81,6 +84,9 @@ None
 | 07-04 | MetadataService returns cache hit status | Service returns (response, cacheHit bool, error) tuple | Handler uses cacheHit for X-Cache header, cleaner than handler inspecting cache |
 | 07-04 | useCache hardcoded to true in handler | Metadata changes infrequently, always prefer cache | Simplifies API surface, cache fallback handled by service |
 | 07-04 | Service handles both efficient and fallback query paths | Check for MetadataQueryExecutor interface, fallback if unavailable | Centralizes query path selection in service layer |
+| 07-05 | Delete HTTP client completely | HTTP client only used for self-calls in integrated server | Eliminates localhost HTTP overhead, cleaner service-only architecture |
+| 07-05 | Disable standalone MCP and agent commands | Commands require HTTP to remote server, out of scope for Phase 7 | Breaking change acceptable, can refactor with gRPC/Connect in future |
+| 07-05 | Build constraints on agent package | Agent depends on deleted HTTP client | Excludes agent from compilation, documents need for refactoring |
 
 ### Active TODOs
 
@@ -93,17 +99,19 @@ None
 
 ## Session Continuity
 
-**Last command:** Executed 07-04-PLAN.md (MetadataService extraction)
-**Last output:** 07-04-SUMMARY.md created, STATE.md updated
-**Context preserved:** MetadataService created with cache integration, REST metadata handler refactored to thin adapter
+**Last command:** Executed 07-05-PLAN.md (HTTP client removal)
+**Last output:** 07-05-SUMMARY.md created, STATE.md updated
+**Context preserved:** HTTP client deleted, all MCP tools use service layer exclusively, no HTTP self-calls remain
 
 **On next session:**
-- Phase 7 IN PROGRESS — 4 of 5 plans complete (SVCE-01 through SVCE-04 satisfied)
-- Service layer pattern complete for all core API operations (Timeline, Graph, Metadata)
-- REST handlers follow thin adapter pattern, delegate all business logic to services
-- Services encapsulate cache integration and query path selection
-- Next: Plan 07-05 (final plan) - Wire MCP metadata tool to use MetadataService directly
-- After Phase 7: Phase 8 cleanup and Helm chart updates
+- Phase 7 COMPLETE — All 5 plans executed (SVCE-01 through SVCE-05 satisfied)
+- Service layer extraction complete: TimelineService, GraphService, MetadataService
+- REST handlers are thin adapters delegating to services
+- MCP tools use direct service calls (no HTTP overhead)
+- HTTP client package removed, clean service-only architecture
+- Standalone mcp and agent commands disabled (need gRPC refactor)
+- Next: Phase 8 - Cleanup and Helm chart updates
+- After Phase 8: Phase 9 - E2E test validation
 
 ---
-*Last updated: 2026-01-21 — Completed Phase 7 Plan 4*
+*Last updated: 2026-01-21 — Completed Phase 7 (all 5 plans)*
