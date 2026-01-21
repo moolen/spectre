@@ -56,15 +56,20 @@ Plans:
 2. User configures integration connection details (e.g., VictoriaLogs URL) via UI
 3. REST API persists integration config to disk and triggers hot-reload
 
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (awaiting `/gsd:plan-phase 2`)
+- [ ] 02-01-PLAN.md — REST API for integration config CRUD with atomic writes
+- [ ] 02-02-PLAN.md — React UI components (modal, table, forms)
+- [ ] 02-03-PLAN.md — Server integration and end-to-end verification
 
 **Notes:**
 - REST API endpoints for reading/writing integration configs
+- Atomic YAML writes using temp-file-then-rename pattern
 - Reuses existing React UI patterns from Spectre
-- Config format: JSON/YAML on disk
+- Modal-based add/edit flow with connection testing
+- Table view with health status indicators
+- Hot-reload automatic via Phase 1 file watcher
 
 ---
 
@@ -160,7 +165,7 @@ Plans:
 | Phase | Status | Requirements | Plans | Completion |
 |-------|--------|--------------|-------|------------|
 | 1 - Plugin Infrastructure Foundation | ✓ Complete | 8/8 | 4/4 | 100% |
-| 2 - Config Management & UI | Pending | 3/3 | 0/0 | 0% |
+| 2 - Config Management & UI | In Planning | 3/3 | 3/3 | 0% |
 | 3 - VictoriaLogs Client & Basic Pipeline | Pending | 6/6 | 0/0 | 0% |
 | 4 - Log Template Mining | Pending | 6/6 | 0/0 | 0% |
 | 5 - Progressive Disclosure MCP Tools | Pending | 8/8 | 0/0 | 0% |
@@ -187,4 +192,4 @@ All v1 requirements covered. No orphaned requirements.
 
 ---
 
-*Last updated: 2026-01-21 (Phase 1 complete)*
+*Last updated: 2026-01-21 (Phase 2 planning complete)*
