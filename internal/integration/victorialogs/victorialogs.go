@@ -137,14 +137,34 @@ func (v *VictoriaLogsIntegration) Health(ctx context.Context) integration.Health
 func (v *VictoriaLogsIntegration) RegisterTools(registry integration.ToolRegistry) error {
 	v.logger.Info("Registering VictoriaLogs MCP tools for instance: %s", v.name)
 
-	// Store registry for future tool implementations (Plans 2-4)
+	// Store registry reference for future tool implementations (Plans 3-4)
 	v.registry = registry
 
-	// TODO Phase 5 Plans 2-4: Register overview, patterns, logs tools
-	// Tool naming convention: victorialogs_{name}_{tool}
-	// Example: victorialogs_prod_overview, victorialogs_prod_patterns, victorialogs_prod_logs
+	// Check if client is initialized (might be nil if integration is stopped or degraded)
+	if v.client == nil {
+		v.logger.Warn("Client not initialized, skipping tool registration")
+		return nil
+	}
 
-	v.logger.Info("VictoriaLogs tools registration complete (tools in Plans 2-4)")
+	// Create tool context shared across all tools
+	toolCtx := ToolContext{
+		Client:   v.client,
+		Logger:   v.logger,
+		Instance: v.name,
+	}
+
+	// Register overview tool: victorialogs_{name}_overview
+	overviewTool := &OverviewTool{ctx: toolCtx}
+	overviewName := fmt.Sprintf("victorialogs_%s_overview", v.name)
+	if err := registry.RegisterTool(overviewName, overviewTool.Execute); err != nil {
+		return fmt.Errorf("failed to register overview tool: %w", err)
+	}
+	v.logger.Info("Registered tool: %s", overviewName)
+
+	// TODO Phase 5 Plan 3: Register patterns tool (victorialogs_{name}_patterns)
+	// TODO Phase 5 Plan 4: Register logs tool (victorialogs_{name}_logs)
+
+	v.logger.Info("VictoriaLogs tools registration complete")
 	return nil
 }
 
