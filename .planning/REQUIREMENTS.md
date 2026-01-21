@@ -19,10 +19,10 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Config Management
 
 - [x] **CONF-01**: Integration configs stored on disk (JSON/YAML)
-- [ ] **CONF-02**: REST API endpoints for reading/writing integration configs
+- [x] **CONF-02**: REST API endpoints for reading/writing integration configs
 - [x] **CONF-03**: MCP server hot-reloads config when file changes
-- [ ] **CONF-04**: UI displays available integrations with enable/disable toggle
-- [ ] **CONF-05**: UI allows configuring integration connection details (e.g., VictoriaLogs URL)
+- [x] **CONF-04**: UI displays available integrations with enable/disable toggle
+- [x] **CONF-05**: UI allows configuring integration connection details (e.g., VictoriaLogs URL)
 
 ### VictoriaLogs Integration
 
@@ -100,10 +100,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLUG-05 | Phase 1 | Complete |
 | PLUG-06 | Phase 1 | Complete |
 | CONF-01 | Phase 1 | Complete |
-| CONF-02 | Phase 2 | Pending |
+| CONF-02 | Phase 2 | Complete |
 | CONF-03 | Phase 1 | Complete |
-| CONF-04 | Phase 2 | Pending |
-| CONF-05 | Phase 2 | Pending |
+| CONF-04 | Phase 2 | Complete |
+| CONF-05 | Phase 2 | Complete |
 | VLOG-01 | Phase 3 | Pending |
 | VLOG-02 | Phase 3 | Pending |
 | VLOG-03 | Phase 3 | Pending |
@@ -132,4 +132,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-20*
-*Last updated: 2026-01-21 (Phase 1 requirements marked complete)*
+*Last updated: 2026-01-21 (Phase 2 requirements marked complete)*
