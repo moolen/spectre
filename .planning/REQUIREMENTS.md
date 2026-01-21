@@ -26,12 +26,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### VictoriaLogs Integration
 
-- [ ] **VLOG-01**: VictoriaLogs plugin connects to VictoriaLogs instance via HTTP
-- [ ] **VLOG-02**: Plugin queries logs using LogsQL syntax
-- [ ] **VLOG-03**: Plugin supports time range filtering (default: last 60min, min: 15min)
-- [ ] **VLOG-04**: Plugin supports field-based filtering (namespace, pod, level)
-- [ ] **VLOG-05**: Plugin returns log count aggregated by time window (histograms)
-- [ ] **VLOG-06**: Plugin returns log count grouped by namespace/pod/deployment
+- [x] **VLOG-01**: VictoriaLogs plugin connects to VictoriaLogs instance via HTTP
+- [x] **VLOG-02**: Plugin queries logs using LogsQL syntax
+- [x] **VLOG-03**: Plugin supports time range filtering (default: last 60min, min: 15min)
+- [x] **VLOG-04**: Plugin supports field-based filtering (namespace, pod, level)
+- [x] **VLOG-05**: Plugin returns log count aggregated by time window (histograms)
+- [x] **VLOG-06**: Plugin returns log count grouped by namespace/pod/deployment
 
 ### Log Template Mining
 
@@ -104,12 +104,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONF-03 | Phase 1 | Complete |
 | CONF-04 | Phase 2 | Complete |
 | CONF-05 | Phase 2 | Complete |
-| VLOG-01 | Phase 3 | Pending |
-| VLOG-02 | Phase 3 | Pending |
-| VLOG-03 | Phase 3 | Pending |
-| VLOG-04 | Phase 3 | Pending |
-| VLOG-05 | Phase 3 | Pending |
-| VLOG-06 | Phase 3 | Pending |
+| VLOG-01 | Phase 3 | Complete |
+| VLOG-02 | Phase 3 | Complete |
+| VLOG-03 | Phase 3 | Complete |
+| VLOG-04 | Phase 3 | Complete |
+| VLOG-05 | Phase 3 | Complete |
+| VLOG-06 | Phase 3 | Complete |
 | MINE-01 | Phase 4 | Pending |
 | MINE-02 | Phase 4 | Pending |
 | MINE-03 | Phase 4 | Pending |
@@ -132,4 +132,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-20*
-*Last updated: 2026-01-21 (Phase 2 requirements marked complete)*
+*Last updated: 2026-01-21 (Phase 3 requirements marked complete)*
