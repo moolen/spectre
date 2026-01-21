@@ -29,8 +29,7 @@ resources:
 
 # Service configuration
 # Port allocation:
-#   - 8080: HTTP REST API with gRPC-Web support (main service)
-#   - 8082: MCP HTTP server (sidecar)
+#   - 8080: HTTP REST API with gRPC-Web support, MCP at /v1/mcp (main service)
 #   - 9999: pprof profiling endpoint
 service:
   type: ClusterIP
@@ -53,56 +52,6 @@ pprof:
 tracing:
   enabled: false
   endpoint: ""  # OTLP gRPC endpoint (e.g., "victorialogs:4317")
-
-# MCP (Model Context Protocol) sidecar configuration
-mcp:
-  enabled: true
-  spectreURL: "http://localhost:8080"  # Connect to main container via localhost (REST API)
-  httpAddr: ":8082"
-  port: 8082
-  resources:
-    requests:
-      memory: "64Mi"
-      cpu: "50m"
-    limits:
-      memory: "256Mi"
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
-    readOnlyRootFilesystem: false
-    runAsNonRoot: true
-    runAsUser: 1000
-  # Extra arguments to pass to the MCP container
-  extraArgs: []
-  # Extra volume mounts for the MCP container
-  extraVolumeMounts: []
-  # Example:
-  # extraVolumeMounts:
-  #   - name: integrations-config
-  #     mountPath: /etc/spectre
-  #     readOnly: true
-  livenessProbe:
-    enabled: true
-    httpGet:
-      path: /health
-      port: mcp
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    timeoutSeconds: 3
-    failureThreshold: 3
-    successThreshold: 1
-  readinessProbe:
-    enabled: true
-    httpGet:
-      path: /health
-      port: mcp
-    initialDelaySeconds: 3
-    periodSeconds: 5
-    timeoutSeconds: 2
-    failureThreshold: 3
-    successThreshold: 1
 
 # Graph reasoning layer configuration
 graph:
