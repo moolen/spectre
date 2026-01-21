@@ -11,25 +11,25 @@
 ## Current Position
 
 **Phase:** 3 - VictoriaLogs Client & Basic Pipeline
-**Plan:** 1 of 3 (03-01-PLAN.md - just completed)
+**Plan:** 2 of 3 (03-02-PLAN.md - just completed)
 **Status:** In Progress
-**Progress:** 12/31 requirements
-**Last activity:** 2026-01-21 - Completed 03-01-PLAN.md (VictoriaLogs Client & Query Builder)
+**Progress:** 13/31 requirements
+**Last activity:** 2026-01-21 - Completed 03-02-PLAN.md (Pipeline with Backpressure)
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
 [██████████] 100% Phase 2 (Complete ✓)
-[███▓░░░░░░] 33% Phase 3 (1/3 plans complete)
-[██████░░░░] 39% Overall (12/31 requirements)
+[██████▓░░░] 67% Phase 3 (2/3 plans complete)
+[████████░░] 42% Overall (13/31 requirements)
 ```
 
 ## Performance Metrics
 
 | Metric | Current | Target | Status |
 |--------|---------|--------|--------|
-| Requirements Complete | 12/31 | 31/31 | In Progress |
+| Requirements Complete | 13/31 | 31/31 | In Progress |
 | Phases Complete | 2/5 | 5/5 | In Progress |
-| Plans Complete | 8/10 | 10/10 (Phases 1-3) | Phase 3 in progress |
+| Plans Complete | 9/10 | 10/10 (Phases 1-3) | Phase 3 in progress |
 | Blockers | 0 | 0 | On Track |
 
 ## Accumulated Context
@@ -82,6 +82,13 @@
 | MaxIdleConnsPerHost set to 10 (up from default 2) | 03-01 | Prevents connection churn under load for production workloads |
 | Use RFC3339 for VictoriaLogs timestamps | 03-01 | ISO 8601-compliant time format for API requests |
 | Empty field values omitted from LogsQL queries | 03-01 | Cleaner queries - only include non-empty filter parameters |
+| Bounded channel with size 1000 provides natural backpressure | 03-02 | Blocking send when full prevents memory overflow without explicit flow control |
+| No default case in Ingest select - intentional blocking | 03-02 | Prevents data loss (alternative would be to drop logs) |
+| Batch size fixed at 100 entries | 03-02 | Consistent memory usage and reasonable HTTP payload size |
+| 1-second flush ticker for partial batches | 03-02 | Prevents logs from stalling indefinitely while waiting for full batch |
+| BatchesTotal counter tracks log count, not batch count | 03-02 | Increments by len(batch) for accurate throughput metrics |
+| ConstLabels with instance name for metrics | 03-02 | Enables multiple VictoriaLogs pipeline instances with separate metrics |
+| Pipeline errors logged and counted but don't crash | 03-02 | Temporary VictoriaLogs unavailability doesn't stop processing |
 
 **Scope Boundaries:**
 - Progressive disclosure: 3 levels maximum (global → aggregated → detail)
@@ -104,10 +111,10 @@
 
 **Phase 3: VictoriaLogs Client & Basic Pipeline** (In Progress)
 - 03-01: VictoriaLogs HTTP client with LogsQL query builder ✓
+- 03-02: Backpressure-aware pipeline with batch processing and Prometheus metrics ✓
 
 ### Active Todos
 
-- [ ] Implement log ingestion pipeline with backpressure handling (Plan 03-02)
 - [ ] Wire VictoriaLogs integration with client and pipeline (Plan 03-03)
 
 ### Known Blockers
@@ -126,29 +133,29 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 03-01-PLAN.md (VictoriaLogs Client & Query Builder)
+**Stopped at:** Completed 03-02-PLAN.md (Pipeline with Backpressure)
 
 **What just happened:**
-- Executed plan 03-01: VictoriaLogs HTTP client with LogsQL query builder
-- Created types.go with QueryParams, TimeRange, LogEntry, and response types
-- Implemented query.go with BuildLogsQLQuery, BuildHistogramQuery, BuildAggregationQuery
-- Implemented client.go with QueryLogs, QueryHistogram, QueryAggregation, IngestBatch methods
-- Tuned HTTP transport settings (MaxIdleConnsPerHost: 10) for production workloads
-- Ensured connection reuse pattern (io.ReadAll before close) in all methods
-- All tasks completed in 3 minutes with no deviations
-- SUMMARY: .planning/phases/03-victorialogs-client-pipeline/03-01-SUMMARY.md
+- Executed plan 03-02: Backpressure-aware log ingestion pipeline with Prometheus metrics
+- Created metrics.go with Prometheus metrics (QueueDepth gauge, BatchesTotal counter, ErrorsTotal counter)
+- Implemented pipeline.go with bounded channel (1000 buffer), batch processor, graceful shutdown
+- Pipeline uses blocking backpressure pattern (no default case in select) to prevent data loss
+- Batch processor accumulates 100 entries or flushes on 1-second timeout
+- Pipeline integrates with client.IngestBatch for actual VictoriaLogs ingestion
+- All tasks completed in 2 minutes with no deviations
+- SUMMARY: .planning/phases/03-victorialogs-client-pipeline/03-02-SUMMARY.md
 
 **What's next:**
-- Phase 3 in progress (1 of 3 plans complete)
-- Next: Plan 03-02 (Pipeline with Backpressure)
-- Next: Execute `/gsd:execute-phase 3 --plan 2` when ready
+- Phase 3 in progress (2 of 3 plans complete)
+- Next: Plan 03-03 (Wire VictoriaLogs Integration)
+- Next: Execute `/gsd:execute-phase 3 --plan 3` when ready
 
 **Context for next agent:**
-- HTTP client foundation complete with four operations (query, histogram, aggregation, ingestion)
-- Query builder uses structured parameters (no raw LogsQL exposure)
-- Connection pooling tuned for high-throughput queries
-- IngestBatch method ready for pipeline integration (Plan 03-02)
-- All error responses include VictoriaLogs details for debugging
+- Pipeline provides Ingest method for log entry ingestion with automatic batching
+- Prometheus metrics ready for registration with global registry
+- Pipeline lifecycle (Start/Stop) integrates with integration framework from Phase 1
+- Pipeline calls client.IngestBatch to send batched logs to VictoriaLogs
+- Error resilience built-in - temporary VictoriaLogs unavailability doesn't crash pipeline
 
 ---
 
