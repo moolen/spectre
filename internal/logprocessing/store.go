@@ -71,6 +71,11 @@ func (ts *TemplateStore) Process(namespace, logMessage string) (string, error) {
 	// Step 1: Normalize log (lowercase, trim, extract message from JSON)
 	normalized := PreProcess(logMessage)
 
+	// Step 2-6: Train Drain and process pattern
+	// Lock namespace for entire operation because Drain library is not thread-safe
+	ns.mu.Lock()
+	defer ns.mu.Unlock()
+
 	// Step 2: Train Drain to get cluster
 	cluster := ns.drain.Train(normalized)
 
@@ -94,8 +99,6 @@ func (ts *TemplateStore) Process(namespace, logMessage string) (string, error) {
 	tokens := strings.Fields(maskedPattern)
 
 	// Step 7: Store/update template
-	ns.mu.Lock()
-	defer ns.mu.Unlock()
 
 	// Check if template exists
 	if template, exists := ns.templates[templateID]; exists {

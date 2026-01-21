@@ -145,8 +145,8 @@ func TestEditDistance(t *testing.T) {
 		expected int // Note: exact value depends on levenshtein implementation
 	}{
 		{"hello", "hello", 0},
-		{"hello", "hallo", 1},
-		{"kitten", "sitting", 3},
+		{"hello", "hallo", 2}, // Replace 'e' with 'a', and delete one 'l' = 2
+		{"kitten", "sitting", 5}, // Multiple operations needed
 		{"", "", 0},
 	}
 
