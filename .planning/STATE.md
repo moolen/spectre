@@ -10,29 +10,29 @@
 
 ## Current Position
 
-**Phase:** 5 - Progressive Disclosure MCP Tools (In Progress)
-**Plan:** 2 of 4 (05-02-PLAN.md complete)
-**Status:** In Progress
-**Progress:** 23/31 requirements
-**Last activity:** 2026-01-21 - Completed 05-02-PLAN.md (Overview Tool)
+**Phase:** 5 - Progressive Disclosure MCP Tools (Complete ✓)
+**Plan:** 4 of 4 (05-04-PLAN.md complete)
+**Status:** Phase Complete
+**Progress:** 31/31 requirements (100%)
+**Last activity:** 2026-01-21 - Completed 05-04-PLAN.md (Logs Tool & MCP Server Integration)
 
 ```
 [██████████] 100% Phase 1 (Complete ✓)
 [██████████] 100% Phase 2 (Complete ✓)
 [██████████] 100% Phase 3 (Verified ✓)
 [██████████] 100% Phase 4 (Verified ✓)
-[███████░░░]  75% Phase 5 (In Progress)
-[████████████]  77% Overall (24/31 requirements)
+[██████████] 100% Phase 5 (Complete ✓)
+[██████████] 100% Overall (31/31 requirements)
 ```
 
 ## Performance Metrics
 
 | Metric | Current | Target | Status |
 |--------|---------|--------|--------|
-| Requirements Complete | 24/31 | 31/31 | In Progress |
-| Phases Complete | 4/5 | 5/5 | In Progress |
-| Plans Complete | 18/19 | 19/19 (Phases 1-5) | Phase 5 In Progress |
-| Blockers | 0 | 0 | On Track |
+| Requirements Complete | 31/31 | 31/31 | Complete ✓ |
+| Phases Complete | 5/5 | 5/5 | Complete ✓ |
+| Plans Complete | 19/19 | 19/19 (Phases 1-5) | Complete ✓ |
+| Blockers | 0 | 0 | None |
 
 ## Accumulated Context
 
@@ -127,6 +127,10 @@
 | CompareTimeWindows compares by Pattern not ID | 05-03 | Semantic novelty detection - "this log message never appeared before" regardless of namespace |
 | Per-instance template store (not global) | 05-03 | Different VictoriaLogs instances have different log characteristics; independent mining |
 | Stateless template mining per query | 05-03 | TemplateStore ephemeral (created in Start, cleared in Stop); no persistence for on-demand queries |
+| Logs tool default limit 100, max 500 | 05-04 | Prevents AI assistant context overflow with sensible defaults and hard limits |
+| Truncation flag instead of pagination | 05-04 | CONTEXT.md specified "no pagination"; truncation flag guides AI to narrow time range or use patterns tool |
+| Integration manager runs in MCP server command | 05-04 | MCP server separate process from main server, needs own integration manager for tool registration |
+| All three tools registered together in RegisterTools() | 05-04 | Tools work as progressive disclosure system, registered as unit with all-or-nothing lifecycle |
 | Sampling threshold = targetSamples * 10 | 05-03 | Default 500 logs triggers sampling; balances accuracy with performance for high-volume namespaces |
 
 **Scope Boundaries:**
@@ -160,15 +164,15 @@
 - 04-03: Namespace-scoped template storage with periodic persistence (MINE-03, MINE-04)
 - 04-04: Template lifecycle management with pruning, auto-merge, and comprehensive testing (85.2% coverage)
 
-**Phase 5: Progressive Disclosure MCP Tools** (In Progress)
+**Phase 5: Progressive Disclosure MCP Tools** ✓ (Complete)
 - 05-01: MCP tool registration infrastructure ✓
-- 05-02: Overview tool ✓
-- 05-03: Patterns tool (ready)
-- 05-04: Detail logs tool (ready to execute)
+- 05-02: Overview tool (namespace-level severity aggregation) ✓
+- 05-03: Patterns tool (template mining with novelty detection) ✓
+- 05-04: Logs tool and MCP server integration ✓
 
 ### Active Todos
 
-None - Phase 5 Plan 2 complete. Ready for Plan 3 (Patterns Tool).
+None - All Phase 5 plans complete. All 31 requirements satisfied.
 
 ### Known Blockers
 
@@ -187,27 +191,30 @@ None currently.
 ## Session Continuity
 
 **Last session:** 2026-01-21
-**Stopped at:** Completed 05-03-PLAN.md (Patterns Tool with Novelty Detection)
+**Stopped at:** Completed 05-04-PLAN.md (Logs Tool & MCP Server Integration)
 
 **What just happened:**
-- Executed plan 05-03: Patterns tool with template mining and novelty detection
-- Added CompareTimeWindows method to TemplateStore for novelty detection
-- Integrated TemplateStore into VictoriaLogs lifecycle (Start/Stop)
-- Implemented PatternsTool with sampling and time-window comparison
-- All tasks completed in 3 minutes with atomic commits
-- SUMMARY: .planning/phases/05-progressive-disclosure-mcp-tools/05-03-SUMMARY.md
+- Executed plan 05-04: Logs tool and complete MCP server integration
+- Implemented LogsTool for raw log viewing with pagination (default 100, max 500)
+- Registered all three progressive disclosure tools in VictoriaLogs RegisterTools()
+- Wired integration manager into MCP server command with MCPToolRegistry
+- Integration manager starts before MCP transport, calls RegisterTools() dynamically
+- All tasks completed in 6 minutes with atomic commits
+- SUMMARY: .planning/phases/05-progressive-disclosure-mcp-tools/05-04-SUMMARY.md
 
 **What's next:**
-- Phase 5 Plan 3 COMPLETE
-- Ready for Plan 4: Detail logs tool (victorialogs_{name}_logs)
-- Patterns tool provides template aggregation as second level of progressive disclosure
-- Novelty detection compares current to previous time windows
-- Infrastructure complete for final tool (raw log viewing)
+- **PHASE 5 COMPLETE** - All 4 plans executed, all 10 requirements satisfied
+- **ALL PROJECT REQUIREMENTS COMPLETE** - 31/31 requirements delivered (100%)
+- Progressive disclosure workflow fully operational: overview → patterns → logs
+- MCP tools dynamically registered at server startup
+- Ready for production deployment, end-to-end testing, and documentation
 
-**Context for next agent:**
-- CompareTimeWindows: Compares templates by Pattern for semantic novelty
-- TemplateStore: Per-instance, ephemeral (created in Start, cleared in Stop)
-- Sampling: threshold = targetSamples * 10 (default 500 logs)
+**Context for next phase:**
+- Progressive disclosure tools: victorialogs_{instance}_overview/patterns/logs
+- MCP command integration: `spectre mcp --integrations-config integrations.yaml`
+- Tool limits: overview unlimited, patterns 50/200, logs 100/500
+- Truncation detection: AI assistant guided to narrow time range when results truncated
+- Integration manager lifecycle: Start() → RegisterTools() → tools available via MCP
 - Time-window batching: Single QueryLogs per window (not streaming)
 - PatternsTool: On-demand mining, no persistence required
 
