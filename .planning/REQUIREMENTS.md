@@ -9,10 +9,10 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 ### Server Consolidation
 
-- [ ] **SRVR-01**: Single HTTP server on port 8080 serves REST API, UI, and MCP
-- [ ] **SRVR-02**: MCP endpoint available at `/mcp` path on main server
-- [ ] **SRVR-03**: MCP stdio transport remains available via `--transport=stdio` flag
-- [ ] **SRVR-04**: Graceful shutdown handles all components (REST, MCP, integrations)
+- [x] **SRVR-01**: Single HTTP server on port 8080 serves REST API, UI, and MCP
+- [x] **SRVR-02**: MCP endpoint available at `/v1/mcp` path on main server
+- [x] **SRVR-03**: MCP stdio transport remains available via `--stdio` flag
+- [x] **SRVR-04**: Graceful shutdown handles all components (REST, MCP, integrations)
 - [ ] **SRVR-05**: Remove standalone `mcp` command from CLI
 
 ### Service Layer
@@ -25,9 +25,9 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 ### Integration Manager
 
-- [ ] **INTG-01**: Integration manager initializes with MCP server in consolidated mode
-- [ ] **INTG-02**: Dynamic tool registration works on consolidated server
-- [ ] **INTG-03**: Config hot-reload continues to work for integrations
+- [x] **INTG-01**: Integration manager initializes with MCP server in consolidated mode
+- [x] **INTG-02**: Dynamic tool registration works on consolidated server
+- [x] **INTG-03**: Config hot-reload continues to work for integrations
 
 ### Helm Chart
 
@@ -56,13 +56,13 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRVR-01 | Phase 6 | Pending |
-| SRVR-02 | Phase 6 | Pending |
-| SRVR-03 | Phase 6 | Pending |
-| SRVR-04 | Phase 6 | Pending |
-| INTG-01 | Phase 6 | Pending |
-| INTG-02 | Phase 6 | Pending |
-| INTG-03 | Phase 6 | Pending |
+| SRVR-01 | Phase 6 | Complete |
+| SRVR-02 | Phase 6 | Complete |
+| SRVR-03 | Phase 6 | Complete |
+| SRVR-04 | Phase 6 | Complete |
+| INTG-01 | Phase 6 | Complete |
+| INTG-02 | Phase 6 | Complete |
+| INTG-03 | Phase 6 | Complete |
 | SRVC-01 | Phase 7 | Pending |
 | SRVC-02 | Phase 7 | Pending |
 | SRVC-03 | Phase 7 | Pending |
@@ -85,4 +85,4 @@ Requirements for server consolidation. Each maps to roadmap phases.
 
 ---
 *Requirements defined: 2026-01-21*
-*Last updated: 2026-01-21 — traceability updated with phase 6-9 mappings*
+*Last updated: 2026-01-21 — Phase 6 requirements marked Complete (7/21)*

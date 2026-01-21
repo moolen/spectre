@@ -30,10 +30,10 @@ This roadmap delivers 21 v1.1 requirements across 4 phases, progressing from ser
 **Plans:** 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Integrate MCP server into main server with StreamableHTTP transport and integration manager
-- [ ] 06-02-PLAN.md — Verify consolidated server with MCP endpoint, integrations, and graceful shutdown
+- [x] 06-01-PLAN.md — Integrate MCP server into main server with StreamableHTTP transport and integration manager
+- [x] 06-02-PLAN.md — Verify consolidated server with MCP endpoint, integrations, and graceful shutdown
 
-**Status:** Ready to execute
+**Status:** ✓ Complete (2026-01-21)
 
 ---
 
@@ -102,12 +102,12 @@ Plans:
 
 | Phase | Status | Plans | Requirements |
 |-------|--------|-------|--------------|
-| 6 - Consolidated Server & Integration Manager | Ready to execute | 0/2 | 7 |
-| 7 - Service Layer Extraction | Pending | 0/0 | 5 |
+| 6 - Consolidated Server & Integration Manager | ✓ Complete | 2/2 | 7 |
+| 7 - Service Layer Extraction | Ready | 0/0 | 5 |
 | 8 - Cleanup & Helm Chart Update | Pending | 0/0 | 5 |
 | 9 - E2E Test Validation | Pending | 0/0 | 4 |
 
-**Total:** 0/2 plans complete, 21 requirements
+**Total:** 2/2 Phase 6 plans complete, 7/21 requirements satisfied
 
 ---
 
@@ -116,7 +116,9 @@ Plans:
 **Decimal Phases:** None
 
 **Key Decisions:**
-- TBD (updated as phases execute)
+- Phase 6: Use /v1/mcp path (not /mcp) for API versioning consistency
+- Phase 6: Use --stdio flag (not --transport=stdio) for simpler interface
+- Phase 6: StreamableHTTP with stateless mode for client compatibility
 
 **Issues Resolved:**
 - TBD
@@ -135,4 +137,4 @@ Plans:
 ---
 
 *Created: 2026-01-21*
-*Last updated: 2026-01-21 — Phase 6 plans created (2 plans in 2 waves)*
+*Last updated: 2026-01-21 — Phase 6 complete (2/2 plans executed, 7 requirements satisfied)*
