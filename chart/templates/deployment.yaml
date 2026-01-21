@@ -171,6 +171,13 @@ spec:
         - /app/spectre
         - mcp
         - --log-level=debug
+        {{- range .Values.mcp.extraArgs }}
+        - {{ . }}
+        {{- end }}
+        {{- with .Values.mcp.extraVolumeMounts }}
+        volumeMounts:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         env:
         - name: SPECTRE_URL
           value: {{ .Values.mcp.spectreURL | quote }}

@@ -74,6 +74,15 @@ mcp:
     readOnlyRootFilesystem: false
     runAsNonRoot: true
     runAsUser: 1000
+  # Extra arguments to pass to the MCP container
+  extraArgs: []
+  # Extra volume mounts for the MCP container
+  extraVolumeMounts: []
+  # Example:
+  # extraVolumeMounts:
+  #   - name: integrations-config
+  #     mountPath: /etc/spectre
+  #     readOnly: true
   livenessProbe:
     enabled: true
     httpGet:
