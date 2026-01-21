@@ -137,12 +137,12 @@ func (v *VictoriaLogsIntegration) Health(ctx context.Context) integration.Health
 func (v *VictoriaLogsIntegration) RegisterTools(registry integration.ToolRegistry) error {
 	v.logger.Info("Registering VictoriaLogs MCP tools for instance: %s", v.name)
 
-	// Store registry reference for future tool implementations (Plans 3-4)
+	// Store registry reference
 	v.registry = registry
 
-	// Check if client is initialized (might be nil if integration is stopped or degraded)
-	if v.client == nil {
-		v.logger.Warn("Client not initialized, skipping tool registration")
+	// Check if client and template store are initialized
+	if v.client == nil || v.templateStore == nil {
+		v.logger.Warn("Client or template store not initialized, skipping tool registration")
 		return nil
 	}
 
@@ -161,10 +161,26 @@ func (v *VictoriaLogsIntegration) RegisterTools(registry integration.ToolRegistr
 	}
 	v.logger.Info("Registered tool: %s", overviewName)
 
-	// TODO Phase 5 Plan 3: Register patterns tool (victorialogs_{name}_patterns)
-	// TODO Phase 5 Plan 4: Register logs tool (victorialogs_{name}_logs)
+	// Register patterns tool: victorialogs_{name}_patterns
+	patternsTool := &PatternsTool{
+		ctx:           toolCtx,
+		templateStore: v.templateStore,
+	}
+	patternsName := fmt.Sprintf("victorialogs_%s_patterns", v.name)
+	if err := registry.RegisterTool(patternsName, patternsTool.Execute); err != nil {
+		return fmt.Errorf("failed to register patterns tool: %w", err)
+	}
+	v.logger.Info("Registered tool: %s", patternsName)
 
-	v.logger.Info("VictoriaLogs tools registration complete")
+	// Register logs tool: victorialogs_{name}_logs
+	logsTool := &LogsTool{ctx: toolCtx}
+	logsName := fmt.Sprintf("victorialogs_%s_logs", v.name)
+	if err := registry.RegisterTool(logsName, logsTool.Execute); err != nil {
+		return fmt.Errorf("failed to register logs tool: %w", err)
+	}
+	v.logger.Info("Registered tool: %s", logsName)
+
+	v.logger.Info("VictoriaLogs progressive disclosure tools registered: overview, patterns, logs")
 	return nil
 }
 
