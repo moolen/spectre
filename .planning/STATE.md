@@ -103,17 +103,18 @@ None
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan .planning/phases/08-cleanup-helm-update/08-03-PLAN.md
-**Last output:** Plan 08-03 complete - README documentation updated
-**Context preserved:** Project README documents consolidated single-container architecture, MCP at port 8080 /v1/mcp
+**Last command:** /gsd:execute-plan .planning/phases/08-cleanup-helm-update/08-02-PLAN.md
+**Last output:** Plan 08-02 complete - Helm chart MCP sidecar removed
+**Context preserved:** Removed MCP sidecar from Helm chart, 133 lines deleted across 5 files
 
 **On next session:**
-- Phase 8 IN PROGRESS — Plan 08-01 complete (dead code cleanup)
-- Deleted commands: mcp, agent, mock
-- Deleted package: internal/agent/ (entire package with 70 files)
-- Removed tech debt: standalone MCP/agent commands and build-disabled agent package
-- CLI surface: only `spectre server` and `spectre debug` commands
-- Next: Execute 08-02-PLAN.md for Helm chart updates
+- Phase 8 COMPLETE ✓ — All plans executed (08-01 dead code cleanup, 08-02 Helm chart update, 08-03 README)
+- Helm chart deploys single Spectre container with integrated MCP on port 8080
+- Removed 133 lines: MCP sidecar container, port 8082 exposure, mcp: section from values
+- Test fixtures updated for single-container architecture
+- All v1.1 requirements satisfied (21/21: SRVR-01 through HELM-04)
+- Ready for Phase 9: E2E test validation
+- Next: `/gsd:discuss-phase 9` for E2E test context
 
 ---
-*Last updated: 2026-01-21 — Completed 08-01-PLAN.md execution*
+*Last updated: 2026-01-21 — Completed Phase 8 execution (cleanup and Helm chart updates)*
