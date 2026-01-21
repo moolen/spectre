@@ -7,7 +7,6 @@ import (
 
 	"github.com/moolen/spectre/internal/analysis/anomaly"
 	"github.com/moolen/spectre/internal/api"
-	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -15,19 +14,19 @@ import (
 
 // AnomalyHandler handles /v1/anomalies requests
 type AnomalyHandler struct {
-	detector  *anomaly.AnomalyDetector
-	logger    *logging.Logger
-	validator *api.Validator
-	tracer    trace.Tracer
+	graphService *api.GraphService
+	logger       *logging.Logger
+	validator    *api.Validator
+	tracer       trace.Tracer
 }
 
 // NewAnomalyHandler creates a new handler
-func NewAnomalyHandler(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *AnomalyHandler {
+func NewAnomalyHandler(graphService *api.GraphService, logger *logging.Logger, tracer trace.Tracer) *AnomalyHandler {
 	return &AnomalyHandler{
-		detector:  anomaly.NewDetector(graphClient),
-		logger:    logger,
-		validator: api.NewValidator(),
-		tracer:    tracer,
+		graphService: graphService,
+		logger:       logger,
+		validator:    api.NewValidator(),
+		tracer:       tracer,
 	}
 }
 
@@ -72,8 +71,8 @@ func (h *AnomalyHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Execute anomaly detection
-	result, err := h.detector.Detect(ctx, input)
+	// 3. Execute anomaly detection via GraphService
+	result, err := h.graphService.DetectAnomalies(ctx, input)
 	if err != nil {
 		if span != nil {
 			span.RecordError(err)
