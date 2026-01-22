@@ -174,10 +174,10 @@ Plans:
   3. Helm values.yaml includes extraVolumes example for mounting Kubernetes Secrets
   4. Documentation covers complete secret rotation workflow (create Secret → mount → rotate → verify)
   5. Example Kubernetes Secret manifest provided in docs with correct file structure
-**Plans**: TBD
+**Plans**: 1 plan in 2 waves
 
 Plans:
-- [ ] 14-01: TBD
+- [ ] 14-01-PLAN.md — Logzio UI form and Helm Secret documentation (Wave 1: auto tasks, Wave 2: human-verify checkpoint)
 
 ## Progress
 
@@ -199,8 +199,8 @@ Phases execute in numeric order: 10 → 11 → 12 → 13 → 14
 | 11. Secret File Management | v1.2 | 4/4 | Complete | 2026-01-22 |
 | 12. MCP Tools - Overview and Logs | v1.2 | 2/2 | Complete | 2026-01-22 |
 | 13. MCP Tools - Patterns | v1.2 | 1/1 | Complete | 2026-01-22 |
-| 14. UI and Helm Chart | v1.2 | 0/TBD | Not started | - |
+| 14. UI and Helm Chart | v1.2 | 0/1 | Not started | - |
 
 ---
 *Created: 2026-01-22*
-*Last updated: 2026-01-22 - Phase 13 complete*
+*Last updated: 2026-01-22 - Phase 13 complete, Phase 14 planned*
