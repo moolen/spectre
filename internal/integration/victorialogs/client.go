@@ -20,15 +20,17 @@ import (
 // Client is an HTTP client wrapper for VictoriaLogs API.
 // It supports log queries, histogram aggregation, stats aggregation, and batch ingestion.
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
-	logger     *logging.Logger
+	baseURL       string
+	httpClient    *http.Client
+	logger        *logging.Logger
+	secretWatcher *SecretWatcher // Optional: for dynamic token fetch
 }
 
 // NewClient creates a new VictoriaLogs HTTP client with tuned connection pooling.
 // baseURL: VictoriaLogs instance URL (e.g., "http://victorialogs:9428")
 // queryTimeout: Maximum time for query execution (e.g., 30s)
-func NewClient(baseURL string, queryTimeout time.Duration) *Client {
+// secretWatcher: Optional SecretWatcher for dynamic token authentication (may be nil)
+func NewClient(baseURL string, queryTimeout time.Duration, secretWatcher *SecretWatcher) *Client {
 	// Create tuned HTTP transport for high-throughput queries
 	transport := &http.Transport{
 		// Connection pool settings
@@ -45,13 +47,21 @@ func NewClient(baseURL string, queryTimeout time.Duration) *Client {
 		}).DialContext,
 	}
 
+	logger := logging.GetLogger("victorialogs.client")
+
+	// Log warning if secretWatcher is provided (VictoriaLogs doesn't support auth yet)
+	if secretWatcher != nil {
+		logger.Info("SecretWatcher provided to client (prepared for future authentication support)")
+	}
+
 	return &Client{
 		baseURL: strings.TrimSuffix(baseURL, "/"), // Remove trailing slash
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   queryTimeout, // Overall request timeout
 		},
-		logger: logging.GetLogger("victorialogs.client"),
+		logger:        logger,
+		secretWatcher: secretWatcher,
 	}
 }
 
@@ -76,6 +86,17 @@ func (c *Client) QueryLogs(ctx context.Context, params QueryParams) (*QueryRespo
 		return nil, fmt.Errorf("create query request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// Add authentication header if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API token: %w", err)
+		}
+		// Note: VictoriaLogs doesn't currently require authentication
+		// This is prepared for future use (e.g., Logz.io integration in Phase 12)
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -127,6 +148,15 @@ func (c *Client) QueryHistogram(ctx context.Context, params QueryParams, step st
 		return nil, fmt.Errorf("create histogram request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// Add authentication header if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -182,6 +212,15 @@ func (c *Client) QueryAggregation(ctx context.Context, params QueryParams, group
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
+	// Add authentication header if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
 	// Execute request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -201,13 +240,54 @@ func (c *Client) QueryAggregation(ctx context.Context, params QueryParams, group
 		return nil, fmt.Errorf("aggregation query failed (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	// Parse JSON response
-	var result AggregationResponse
-	if err := json.Unmarshal(body, &result); err != nil {
+	// Parse VictoriaLogs stats_query response (Prometheus-compatible format)
+	var statsResp statsQueryResponse
+	if err := json.Unmarshal(body, &statsResp); err != nil {
 		return nil, fmt.Errorf("parse aggregation response: %w", err)
 	}
 
-	return &result, nil
+	// Check response status
+	if statsResp.Status != "success" {
+		return nil, fmt.Errorf("aggregation query returned status: %s", statsResp.Status)
+	}
+
+	// Convert to AggregationResponse format
+	result := &AggregationResponse{
+		Groups: make([]AggregationGroup, 0, len(statsResp.Data.Result)),
+	}
+
+	// Determine the grouped field name from the query groupBy parameter
+	// The field is stored in the metric labels with the kubernetes.* prefix
+	groupField := ""
+	if len(groupBy) > 0 {
+		groupField = mapFieldName(groupBy[0])
+	}
+
+	for _, item := range statsResp.Data.Result {
+		// Extract the grouped field value from metric labels
+		value := ""
+		if groupField != "" {
+			value = item.Metric[groupField]
+		}
+
+		// Extract count from value array [timestamp, count_string]
+		count := 0
+		if len(item.Value) >= 2 {
+			if countStr, ok := item.Value[1].(string); ok {
+				fmt.Sscanf(countStr, "%d", &count)
+			} else if countFloat, ok := item.Value[1].(float64); ok {
+				count = int(countFloat)
+			}
+		}
+
+		result.Groups = append(result.Groups, AggregationGroup{
+			Dimension: groupBy[0], // Use the requested dimension name
+			Value:     value,
+			Count:     count,
+		})
+	}
+
+	return result, nil
 }
 
 // IngestBatch sends a batch of log entries to VictoriaLogs for ingestion.
@@ -231,6 +311,15 @@ func (c *Client) IngestBatch(ctx context.Context, entries []LogEntry) error {
 		return fmt.Errorf("create ingestion request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	// Add authentication header if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return fmt.Errorf("failed to get API token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)

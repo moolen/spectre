@@ -3,13 +3,18 @@ package victorialogs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/logprocessing"
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 func init() {
@@ -24,30 +29,44 @@ func init() {
 // VictoriaLogsIntegration implements the Integration interface for VictoriaLogs.
 type VictoriaLogsIntegration struct {
 	name          string
-	url           string
+	config        Config                       // Full configuration (includes URL and SecretRef)
 	client        *Client                      // VictoriaLogs HTTP client
 	pipeline      *Pipeline                    // Backpressure-aware ingestion pipeline
 	metrics       *Metrics                     // Prometheus metrics for observability
 	logger        *logging.Logger
 	registry      integration.ToolRegistry     // MCP tool registry for dynamic tool registration
 	templateStore *logprocessing.TemplateStore // Template store for pattern mining
+	secretWatcher *SecretWatcher               // Optional: manages API token from Kubernetes Secret
 }
 
 // NewVictoriaLogsIntegration creates a new VictoriaLogs integration instance.
 // Note: Client, pipeline, and metrics are initialized in Start() to follow lifecycle pattern.
-func NewVictoriaLogsIntegration(name string, config map[string]interface{}) (integration.Integration, error) {
-	url, ok := config["url"].(string)
-	if !ok || url == "" {
-		return nil, fmt.Errorf("victorialogs integration requires 'url' in config")
+func NewVictoriaLogsIntegration(name string, configMap map[string]interface{}) (integration.Integration, error) {
+	// Parse config map into Config struct
+	// First marshal to JSON, then unmarshal to Config (handles nested structures)
+	configJSON, err := json.Marshal(configMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	var config Config
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Validate config
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	return &VictoriaLogsIntegration{
 		name:          name,
-		url:           url,
-		client:        nil, // Initialized in Start()
-		pipeline:      nil, // Initialized in Start()
-		metrics:       nil, // Initialized in Start()
-		templateStore: nil, // Initialized in Start()
+		config:        config,
+		client:        nil,        // Initialized in Start()
+		pipeline:      nil,        // Initialized in Start()
+		metrics:       nil,        // Initialized in Start()
+		templateStore: nil,        // Initialized in Start()
+		secretWatcher: nil,        // Initialized in Start() if config uses SecretRef
 		logger:        logging.GetLogger("integration.victorialogs." + name),
 	}, nil
 }
@@ -64,13 +83,55 @@ func (v *VictoriaLogsIntegration) Metadata() integration.IntegrationMetadata {
 
 // Start initializes the integration and validates connectivity.
 func (v *VictoriaLogsIntegration) Start(ctx context.Context) error {
-	v.logger.Info("Starting VictoriaLogs integration: %s (url: %s)", v.name, v.url)
+	v.logger.Info("Starting VictoriaLogs integration: %s (url: %s)", v.name, v.config.URL)
 
 	// Create Prometheus metrics (registers with global registry)
 	v.metrics = NewMetrics(prometheus.DefaultRegisterer, v.name)
 
-	// Create HTTP client with 30-second query timeout
-	v.client = NewClient(v.url, 30*time.Second)
+	// Create SecretWatcher if config uses secret ref
+	if v.config.UsesSecretRef() {
+		v.logger.Info("Creating SecretWatcher for secret: %s, key: %s",
+			v.config.APITokenRef.SecretName, v.config.APITokenRef.Key)
+
+		// Create in-cluster Kubernetes client
+		k8sConfig, err := rest.InClusterConfig()
+		if err != nil {
+			return fmt.Errorf("failed to get in-cluster config: %w", err)
+		}
+		clientset, err := kubernetes.NewForConfig(k8sConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create Kubernetes clientset: %w", err)
+		}
+
+		// Get current namespace (read from ServiceAccount mount)
+		namespace, err := getCurrentNamespace()
+		if err != nil {
+			return fmt.Errorf("failed to determine namespace: %w", err)
+		}
+
+		// Create SecretWatcher
+		secretWatcher, err := NewSecretWatcher(
+			clientset,
+			namespace,
+			v.config.APITokenRef.SecretName,
+			v.config.APITokenRef.Key,
+			v.logger,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create secret watcher: %w", err)
+		}
+
+		// Start SecretWatcher
+		if err := secretWatcher.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start secret watcher: %w", err)
+		}
+
+		v.secretWatcher = secretWatcher
+		v.logger.Info("SecretWatcher started successfully")
+	}
+
+	// Create HTTP client (pass secretWatcher if exists)
+	v.client = NewClient(v.config.URL, 60*time.Second, v.secretWatcher)
 
 	// Create and start pipeline
 	v.pipeline = NewPipeline(v.client, v.metrics, v.name)
@@ -108,11 +169,24 @@ func (v *VictoriaLogsIntegration) Stop(ctx context.Context) error {
 		}
 	}
 
+	// Stop secret watcher if it exists
+	if v.secretWatcher != nil {
+		if err := v.secretWatcher.Stop(); err != nil {
+			v.logger.Error("Error stopping secret watcher: %v", err)
+		}
+	}
+
+	// Unregister metrics before clearing reference to avoid duplicate registration on restart
+	if v.metrics != nil {
+		v.metrics.Unregister()
+	}
+
 	// Clear references
 	v.client = nil
 	v.pipeline = nil
 	v.metrics = nil
 	v.templateStore = nil
+	v.secretWatcher = nil
 
 	v.logger.Info("VictoriaLogs integration stopped")
 	return nil
@@ -123,6 +197,12 @@ func (v *VictoriaLogsIntegration) Health(ctx context.Context) integration.Health
 	// If client is nil, integration hasn't been started or has been stopped
 	if v.client == nil {
 		return integration.Stopped
+	}
+
+	// If using secret ref, check if token is available
+	if v.secretWatcher != nil && !v.secretWatcher.IsHealthy() {
+		v.logger.Warn("Integration degraded: SecretWatcher has no valid token")
+		return integration.Degraded
 	}
 
 	// Test connectivity
@@ -156,7 +236,24 @@ func (v *VictoriaLogsIntegration) RegisterTools(registry integration.ToolRegistr
 	// Register overview tool: victorialogs_{name}_overview
 	overviewTool := &OverviewTool{ctx: toolCtx}
 	overviewName := fmt.Sprintf("victorialogs_%s_overview", v.name)
-	if err := registry.RegisterTool(overviewName, overviewTool.Execute); err != nil {
+	overviewSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"start_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "Start timestamp (Unix seconds or milliseconds). Default: 1 hour ago",
+			},
+			"end_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "End timestamp (Unix seconds or milliseconds). Default: now",
+			},
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional: filter to specific Kubernetes namespace",
+			},
+		},
+	}
+	if err := registry.RegisterTool(overviewName, "Get global overview of log volume and severity counts by namespace", overviewTool.Execute, overviewSchema); err != nil {
 		return fmt.Errorf("failed to register overview tool: %w", err)
 	}
 	v.logger.Info("Registered tool: %s", overviewName)
@@ -167,7 +264,34 @@ func (v *VictoriaLogsIntegration) RegisterTools(registry integration.ToolRegistr
 		templateStore: v.templateStore,
 	}
 	patternsName := fmt.Sprintf("victorialogs_%s_patterns", v.name)
-	if err := registry.RegisterTool(patternsName, patternsTool.Execute); err != nil {
+	patternsSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Kubernetes namespace to query (required)",
+			},
+			"severity": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional: filter by severity level (error, warn). Only logs matching the severity pattern will be processed.",
+				"enum":        []string{"error", "warn"},
+			},
+			"start_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "Start timestamp (Unix seconds or milliseconds). Default: 1 hour ago",
+			},
+			"end_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "End timestamp (Unix seconds or milliseconds). Default: now",
+			},
+			"limit": map[string]interface{}{
+				"type":        "integer",
+				"description": "Max templates to return (default 50)",
+			},
+		},
+		"required": []string{"namespace"},
+	}
+	if err := registry.RegisterTool(patternsName, "Get aggregated log patterns with novelty detection for a namespace", patternsTool.Execute, patternsSchema); err != nil {
 		return fmt.Errorf("failed to register patterns tool: %w", err)
 	}
 	v.logger.Info("Registered tool: %s", patternsName)
@@ -175,7 +299,41 @@ func (v *VictoriaLogsIntegration) RegisterTools(registry integration.ToolRegistr
 	// Register logs tool: victorialogs_{name}_logs
 	logsTool := &LogsTool{ctx: toolCtx}
 	logsName := fmt.Sprintf("victorialogs_%s_logs", v.name)
-	if err := registry.RegisterTool(logsName, logsTool.Execute); err != nil {
+	logsSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Kubernetes namespace to query (required)",
+			},
+			"start_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "Start timestamp (Unix seconds or milliseconds). Default: 1 hour ago",
+			},
+			"end_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "End timestamp (Unix seconds or milliseconds). Default: now",
+			},
+			"limit": map[string]interface{}{
+				"type":        "integer",
+				"description": "Max logs to return (default 100, max 500)",
+			},
+			"level": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional: filter by log level (error, warn, info, debug)",
+			},
+			"pod": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional: filter by pod name",
+			},
+			"container": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional: filter by container name",
+			},
+		},
+		"required": []string{"namespace"},
+	}
+	if err := registry.RegisterTool(logsName, "Get raw logs from a namespace with optional filters", logsTool.Execute, logsSchema); err != nil {
 		return fmt.Errorf("failed to register logs tool: %w", err)
 	}
 	v.logger.Info("Registered tool: %s", logsName)
@@ -199,4 +357,15 @@ func (v *VictoriaLogsIntegration) testConnection(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// getCurrentNamespace reads the namespace from the ServiceAccount mount.
+// This file is automatically mounted by Kubernetes in all pods at a well-known path.
+func getCurrentNamespace() (string, error) {
+	const namespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	data, err := os.ReadFile(namespaceFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read namespace file: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
