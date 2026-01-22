@@ -115,7 +115,7 @@ Plans:
 - [ ] 10-01: TBD
 - [ ] 10-02: TBD
 
-#### Phase 11: Secret File Management
+#### ✅ Phase 11: Secret File Management
 **Goal**: Kubernetes-native secret fetching with hot-reload for zero-downtime credential rotation
 **Depends on**: Phase 10
 **Requirements**: SECR-01, SECR-02, SECR-03, SECR-04, SECR-05
@@ -125,13 +125,13 @@ Plans:
   3. Token updates are thread-safe - concurrent queries continue with old token until update completes
   4. API token values never appear in logs, error messages, or HTTP debug output
   5. Watch re-establishes automatically after disconnection (Kubernetes informer pattern)
-**Plans**: 4 plans in 3 waves
+**Plans**: 4 plans in 2 waves
 
 Plans:
-- [ ] 11-01-PLAN.md — SecretWatcher with SharedInformerFactory (Wave 1)
-- [ ] 11-02-PLAN.md — Config types with SecretRef field (Wave 1)
-- [ ] 11-03-PLAN.md — Integration wiring and client token auth (Wave 2)
-- [ ] 11-04-PLAN.md — RBAC setup in Helm chart (Wave 1)
+- [x] 11-01-PLAN.md — SecretWatcher with SharedInformerFactory (Wave 1)
+- [x] 11-02-PLAN.md — Config types with SecretRef field (Wave 1)
+- [x] 11-03-PLAN.md — Integration wiring and client token auth (Wave 2)
+- [x] 11-04-PLAN.md — RBAC setup in Helm chart (Wave 1)
 
 #### Phase 12: MCP Tools - Overview and Logs
 **Goal**: MCP tools expose Logz.io data with progressive disclosure (overview → logs)
@@ -196,11 +196,11 @@ Phases execute in numeric order: 10 → 11 → 12 → 13 → 14
 | 8. Helm Chart Update | v1.1 | 1/1 | Complete | 2026-01-21 |
 | 9. E2E Test Validation | v1.1 | 2/2 | Complete | 2026-01-21 |
 | 10. Logz.io Client Foundation | v1.2 | 0/TBD | Not started | - |
-| 11. Secret File Management | v1.2 | 0/4 | Not started | - |
+| 11. Secret File Management | v1.2 | 4/4 | Complete | 2026-01-22 |
 | 12. MCP Tools - Overview and Logs | v1.2 | 0/TBD | Not started | - |
 | 13. MCP Tools - Patterns | v1.2 | 0/TBD | Not started | - |
 | 14. UI and Helm Chart | v1.2 | 0/TBD | Not started | - |
 
 ---
 *Created: 2026-01-22*
-*Last updated: 2026-01-22 - Phase 11 planned*
+*Last updated: 2026-01-22 - Phase 11 complete*

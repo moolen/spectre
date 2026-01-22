@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Enable AI assistants to explore logs from multiple backends through unified MCP interface
-**Current focus:** Phase 11 - Secret File Management
+**Current focus:** Phase 12 - MCP Tools Overview and Logs
 
 ## Current Position
 
-Phase: 11 of 14 (Secret File Management)
-Plan: 3 of 4 complete
-Status: In progress
-Last activity: 2026-01-22 — Completed 11-03-PLAN.md (Secret File Integration)
+Phase: 12 of 14 (MCP Tools - Overview and Logs)
+Plan: Ready to plan
+Status: Ready to plan Phase 12
+Last activity: 2026-01-22 — Phase 11 complete
 
-Progress: [████████████░░] 66% (9 of 14 phases complete, Phase 11 3/4 plans)
+Progress: [████████████░░] 71% (10 of 14 phases complete)
 
 ## Milestone History
 
@@ -42,30 +42,44 @@ None
 - DateAdded field not persisted in integration config (from v1)
 - GET /{name} endpoint unused by UI (from v1)
 
+## Phase 11 Deliverables (Available for Phase 12)
+
+- **SecretWatcher**: `internal/integration/victorialogs/secret_watcher.go`
+  - NewSecretWatcher(client, namespace, secretName, key) creates watcher
+  - GetToken() returns current token (thread-safe)
+  - IsHealthy() returns true when token available
+  - Start()/Stop() for lifecycle management
+
+- **Config Types**: `internal/integration/victorialogs/types.go`
+  - SecretRef{SecretName, Key} for referencing Kubernetes secrets
+  - Config{URL, APITokenRef} with mutual exclusivity validation
+  - UsesSecretRef() helper method
+
+- **Helm RBAC**: `chart/templates/role.yaml`, `chart/templates/rolebinding.yaml`
+  - Namespace-scoped Role with get/watch/list on secrets
+  - Conditional via rbac.secretAccess.enabled (default true)
+
 ## Next Steps
 
-1. Complete Phase 11 (1 plan remaining: 11-04 End-to-End Integration Testing)
-2. After Phase 11 complete: Plan Phase 12 (Logz.io Integration Bootstrap)
+1. `/gsd:plan-phase 12` — Plan MCP Tools Overview and Logs phase
 
 ## Cumulative Stats
 
 - Milestones: 2 shipped (v1, v1.1), 1 in progress (v1.2)
-- Total phases: 14 planned (9 complete, 5 pending)
-- Total plans: 34 complete (31 from v1/v1.1, 3 from v1.2 Phase 11)
+- Total phases: 14 planned (10 complete, 4 pending)
+- Total plans: 35 complete (31 from v1/v1.1, 4 from v1.2 Phase 11)
 - Total requirements: 73 (52 complete, 21 pending)
-- Total LOC: ~121k (Go + TypeScript)
+- Total LOC: ~122k (Go + TypeScript)
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 11-03 (plan execution)
-**Context preserved:** Phase 11 in progress, 3 of 4 plans complete
+**Last command:** /gsd:execute-phase 11
+**Context preserved:** Phase 11 complete, Phase 12 ready to plan
 
 **On next session:**
-- Phase 11: Plan 11-04 remains (End-to-End Integration Testing)
-- 11-01 delivered: SecretWatcher component with hot-reload support
-- 11-02 delivered: Config struct with SecretRef and validation
-- 11-03 delivered: SecretWatcher wired into VictoriaLogs integration lifecycle
-- Complete Phase 11 with 11-04, then plan Phase 12
+- Phase 11 complete: SecretWatcher, Config types, Helm RBAC all delivered
+- Phase 12 ready for planning
+- Start with `/gsd:discuss-phase 12` or `/gsd:plan-phase 12`
 
 ---
-*Last updated: 2026-01-22 — Completed 11-03-PLAN.md*
+*Last updated: 2026-01-22 — Phase 11 complete*
