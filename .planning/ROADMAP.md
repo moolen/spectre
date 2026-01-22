@@ -86,10 +86,12 @@ Plans:
   3. Dashboards are classified as overview, drill-down, or detail based on tags
   4. Variables are classified as scoping (cluster/region), entity (service/namespace), or detail (pod/instance)
   5. UI allows configuration of hierarchy mapping fallback (when tags not present)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 17-01: TBD
+- [ ] 17-01-PLAN.md — Service inference from labels and variable classification
+- [ ] 17-02-PLAN.md — Dashboard hierarchy classification with tag-first logic
+- [ ] 17-03-PLAN.md — UI hierarchy mapping configuration
 
 #### Phase 18: Query Execution & MCP Tools Foundation
 **Goal**: AI can execute Grafana queries and discover dashboards through three MCP tools.
@@ -132,7 +134,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 |-------|----------------|--------|-----------|
 | 15. Foundation | 3/3 | ✓ Complete | 2026-01-22 |
 | 16. Ingestion Pipeline | 3/3 | ✓ Complete | 2026-01-22 |
-| 17. Semantic Layer | 0/TBD | Not started | - |
+| 17. Semantic Layer | 0/3 | Not started | - |
 | 18. Query Execution & MCP Tools | 0/TBD | Not started | - |
 | 19. Anomaly Detection | 0/TBD | Not started | - |
 
