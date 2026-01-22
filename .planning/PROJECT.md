@@ -8,7 +8,17 @@ A Kubernetes observability platform with an MCP server for AI assistants. Provid
 
 Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, and log exploration in one server.
 
-## Current State (v1.1 Shipped)
+## Current Milestone: v1.2 Logz.io Integration + Secret Management
+
+**Goal:** Add Logz.io as a second log integration with secret management infrastructure for authenticated APIs.
+
+**Target features:**
+- Logz.io integration with same progressive disclosure tools (overview, patterns, logs)
+- Secret management via Kubernetes Secrets mounted as files
+- Multi-region support for Logz.io API endpoints (US, EU, UK, AU, CA)
+- UI updates for Logz.io configuration with region selector and secret path
+
+## Previous State (v1.1 Shipped)
 
 **Shipped 2026-01-21:**
 - Single-port deployment with REST API, UI, and MCP on port 8080 (/v1/mcp endpoint)
@@ -59,11 +69,15 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 
 ### Active
 
-(No active requirements — planning next milestone)
+- [ ] Logz.io integration with Elasticsearch DSL query client
+- [ ] Secret management infrastructure (file-based K8s secrets)
+- [ ] Logz.io progressive disclosure tools (overview, patterns, logs)
+- [ ] Multi-region API endpoint support
+- [ ] UI for Logz.io configuration (region selector, API token path)
+- [ ] Helm chart updates for secret mounting
 
 ### Out of Scope
 
-- Logz.io integration — defer to later milestone
 - Grafana Cloud integration — defer to later milestone
 - VictoriaMetrics (metrics) integration — defer to later milestone
 - Long-term pattern baseline tracking — keep simple, compare to previous time window only
@@ -100,9 +114,12 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 ## Constraints
 
 - **Tech stack**: Go backend, TypeScript/React frontend — established patterns
-- **No auth**: VictoriaLogs uses no authentication, just base URL
+- **No auth for VictoriaLogs**: VictoriaLogs uses no authentication, just base URL
+- **API token for Logz.io**: Requires X-API-TOKEN header, Pro/Enterprise plan only
 - **Client-side mining**: Template mining happens in Go (not dependent on log store features)
 - **Reusability**: Log processing package is integration-agnostic
+- **Logz.io rate limit**: 100 concurrent API requests per account
+- **Logz.io result limits**: 1,000 aggregated results, 10,000 non-aggregated results per query
 
 ## Key Decisions
 
@@ -129,4 +146,4 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - GET /{name} endpoint available but unused by UI (uses list endpoint instead)
 
 ---
-*Last updated: 2026-01-21 after v1.1 milestone*
+*Last updated: 2026-01-22 after starting v1.2 milestone*
