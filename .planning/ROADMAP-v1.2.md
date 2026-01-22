@@ -120,8 +120,8 @@ Plans:
 **Depends on**: Phase 10
 **Requirements**: SECR-01, SECR-02, SECR-03, SECR-04, SECR-05
 **Success Criteria** (what must be TRUE):
-  1. Integration reads API token from Kubernetes Secret at startup (fetches via API, not file mount)
-  2. Watch API detects Secret rotation within 2 seconds without pod restart
+  1. Integration reads API token from Kubernetes Secret at startup (fetches via client-go API, not file mount)
+  2. Kubernetes Watch API detects Secret rotation within 2 seconds without pod restart (SharedInformerFactory pattern)
   3. Token updates are thread-safe - concurrent queries continue with old token until update completes
   4. API token values never appear in logs, error messages, or HTTP debug output
   5. Watch re-establishes automatically after disconnection (Kubernetes informer pattern)
@@ -131,7 +131,7 @@ Plans:
 - [ ] 11-01-PLAN.md — SecretWatcher with SharedInformerFactory (Wave 1)
 - [ ] 11-02-PLAN.md — Config types with SecretRef field (Wave 1)
 - [ ] 11-03-PLAN.md — Integration wiring and client token auth (Wave 2)
-- [ ] 11-04-PLAN.md — RBAC setup in Helm chart (Wave 3)
+- [ ] 11-04-PLAN.md — RBAC setup in Helm chart (Wave 1)
 
 #### Phase 12: MCP Tools - Overview and Logs
 **Goal**: MCP tools expose Logz.io data with progressive disclosure (overview → logs)
