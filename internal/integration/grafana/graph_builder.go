@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/moolen/spectre/internal/graph"
@@ -55,14 +56,24 @@ type PromQLParserInterface interface {
 type GraphBuilder struct {
 	graphClient graph.Client
 	parser      PromQLParserInterface
+	config      *Config
 	logger      *logging.Logger
 }
 
+// ServiceInference represents an inferred service from label selectors
+type ServiceInference struct {
+	Name         string
+	Cluster      string
+	Namespace    string
+	InferredFrom string // Label name used (app/service/job)
+}
+
 // NewGraphBuilder creates a new GraphBuilder instance
-func NewGraphBuilder(graphClient graph.Client, logger *logging.Logger) *GraphBuilder {
+func NewGraphBuilder(graphClient graph.Client, config *Config, logger *logging.Logger) *GraphBuilder {
 	return &GraphBuilder{
 		graphClient: graphClient,
 		parser:      &defaultPromQLParser{},
+		config:      config,
 		logger:      logger,
 	}
 }
@@ -73,6 +84,141 @@ type defaultPromQLParser struct{}
 // Parse extracts semantic information from a PromQL query
 func (p *defaultPromQLParser) Parse(queryStr string) (*QueryExtraction, error) {
 	return ExtractFromPromQL(queryStr)
+}
+
+// classifyHierarchy determines the hierarchy level of a dashboard based on tags and config mapping
+// Priority: 1) explicit hierarchy tags (spectre:* or hierarchy:*), 2) HierarchyMap lookup, 3) default to "detail"
+func (gb *GraphBuilder) classifyHierarchy(tags []string) string {
+	// 1. Check for explicit hierarchy tags (primary signal)
+	for _, tag := range tags {
+		tagLower := strings.ToLower(tag)
+		// Support both spectre:* and hierarchy:* formats
+		if tagLower == "spectre:overview" || tagLower == "hierarchy:overview" {
+			return "overview"
+		}
+		if tagLower == "spectre:drilldown" || tagLower == "hierarchy:drilldown" {
+			return "drilldown"
+		}
+		if tagLower == "spectre:detail" || tagLower == "hierarchy:detail" {
+			return "detail"
+		}
+	}
+
+	// 2. Fallback to HierarchyMap lookup (if config available)
+	if gb.config != nil && len(gb.config.HierarchyMap) > 0 {
+		for _, tag := range tags {
+			if level, exists := gb.config.HierarchyMap[tag]; exists {
+				return level
+			}
+		}
+	}
+
+	// 3. Default to "detail" when no signals present
+	return "detail"
+}
+
+// classifyVariable classifies a dashboard variable by its name pattern
+// Returns: "scoping", "entity", "detail", or "unknown"
+func classifyVariable(name string) string {
+	// Convert to lowercase for case-insensitive matching
+	lowerName := strings.ToLower(name)
+
+	// Scoping variables: cluster, region, env, environment, datacenter, zone
+	scopingPatterns := []string{"cluster", "region", "env", "environment", "datacenter", "zone"}
+	for _, pattern := range scopingPatterns {
+		if strings.Contains(lowerName, pattern) {
+			return "scoping"
+		}
+	}
+
+	// Entity variables: service, namespace, app, application, deployment, pod, container
+	entityPatterns := []string{"service", "namespace", "app", "application", "deployment", "pod", "container"}
+	for _, pattern := range entityPatterns {
+		if strings.Contains(lowerName, pattern) {
+			return "entity"
+		}
+	}
+
+	// Detail variables: instance, node, host, endpoint, handler, path
+	detailPatterns := []string{"instance", "node", "host", "endpoint", "handler", "path"}
+	for _, pattern := range detailPatterns {
+		if strings.Contains(lowerName, pattern) {
+			return "detail"
+		}
+	}
+
+	// Unknown if no pattern matches
+	return "unknown"
+}
+
+// createVariableNodes creates Variable nodes from dashboard Templating.List
+// Returns the number of variables created
+func (gb *GraphBuilder) createVariableNodes(ctx context.Context, dashboardUID string, variables []interface{}, now int64) int {
+	if len(variables) == 0 {
+		return 0
+	}
+
+	variableCount := 0
+	for _, v := range variables {
+		// Parse variable as JSON map
+		varMap, ok := v.(map[string]interface{})
+		if !ok {
+			gb.logger.Warn("Skipping malformed variable in dashboard %s: not a map", dashboardUID)
+			continue
+		}
+
+		// Extract name and type fields
+		name, hasName := varMap["name"].(string)
+		if !hasName || name == "" {
+			gb.logger.Warn("Skipping variable in dashboard %s: missing name field", dashboardUID)
+			continue
+		}
+
+		// Type is optional, default to "unknown"
+		varType := "unknown"
+		if typeVal, hasType := varMap["type"].(string); hasType {
+			varType = typeVal
+		}
+
+		// Classify the variable
+		classification := classifyVariable(name)
+
+		// Create Variable node with MERGE (upsert semantics)
+		variableQuery := `
+			MERGE (v:Variable {dashboardUID: $dashboardUID, name: $name})
+			ON CREATE SET
+				v.type = $type,
+				v.classification = $classification,
+				v.firstSeen = $now,
+				v.lastSeen = $now
+			ON MATCH SET
+				v.type = $type,
+				v.classification = $classification,
+				v.lastSeen = $now
+			WITH v
+			MATCH (d:Dashboard {uid: $dashboardUID})
+			MERGE (d)-[:HAS_VARIABLE]->(v)
+		`
+
+		_, err := gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+			Query: variableQuery,
+			Parameters: map[string]interface{}{
+				"dashboardUID":  dashboardUID,
+				"name":          name,
+				"type":          varType,
+				"classification": classification,
+				"now":           now,
+			},
+		})
+		if err != nil {
+			gb.logger.Warn("Failed to create variable node %s for dashboard %s: %v", name, dashboardUID, err)
+			continue
+		}
+
+		variableCount++
+	}
+
+	return variableCount
 }
 
 // CreateDashboardGraph creates or updates dashboard nodes and all related structure in the graph
@@ -89,12 +235,16 @@ func (gb *GraphBuilder) CreateDashboardGraph(ctx context.Context, dashboard *Gra
 		variablesJSON = []byte("[]")
 	}
 
+	// Classify dashboard hierarchy level
+	hierarchyLevel := gb.classifyHierarchy(dashboard.Tags)
+
 	dashboardQuery := `
 		MERGE (d:Dashboard {uid: $uid})
 		ON CREATE SET
 			d.title = $title,
 			d.version = $version,
 			d.tags = $tags,
+			d.hierarchyLevel = $hierarchyLevel,
 			d.firstSeen = $now,
 			d.lastSeen = $now,
 			d.variables = $variables
@@ -102,6 +252,7 @@ func (gb *GraphBuilder) CreateDashboardGraph(ctx context.Context, dashboard *Gra
 			d.title = $title,
 			d.version = $version,
 			d.tags = $tags,
+			d.hierarchyLevel = $hierarchyLevel,
 			d.lastSeen = $now,
 			d.variables = $variables
 	`
@@ -109,12 +260,13 @@ func (gb *GraphBuilder) CreateDashboardGraph(ctx context.Context, dashboard *Gra
 	_, err = gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
 		Query: dashboardQuery,
 		Parameters: map[string]interface{}{
-			"uid":       dashboard.UID,
-			"title":     dashboard.Title,
-			"version":   dashboard.Version,
-			"tags":      dashboard.Tags,
-			"now":       now,
-			"variables": string(variablesJSON),
+			"uid":            dashboard.UID,
+			"title":          dashboard.Title,
+			"version":        dashboard.Version,
+			"tags":           dashboard.Tags,
+			"hierarchyLevel": hierarchyLevel,
+			"now":            now,
+			"variables":      string(variablesJSON),
 		},
 	})
 	if err != nil {
@@ -129,6 +281,12 @@ func (gb *GraphBuilder) CreateDashboardGraph(ctx context.Context, dashboard *Gra
 				dashboard.UID, panel.ID, err)
 			continue
 		}
+	}
+
+	// 3. Process dashboard variables
+	variableCount := gb.createVariableNodes(ctx, dashboard.UID, dashboard.Templating.List, now)
+	if variableCount > 0 {
+		gb.logger.Debug("Created %d variables for dashboard %s", variableCount, dashboard.UID)
 	}
 
 	gb.logger.Debug("Successfully created dashboard graph for %s with %d panels",
@@ -181,6 +339,109 @@ func (gb *GraphBuilder) createPanelGraph(ctx context.Context, dashboard *Grafana
 			// Log error but continue with other queries (graceful degradation)
 			gb.logger.Warn("Failed to parse PromQL for query %s: %v (skipping query)", target.RefID, err)
 			continue
+		}
+	}
+
+	return nil
+}
+
+// inferServiceFromLabels infers service nodes from PromQL label selectors
+// Label priority: app > service > job
+// Service identity = {name, cluster, namespace}
+func inferServiceFromLabels(labelSelectors map[string]string) []ServiceInference {
+	// Extract cluster and namespace for scoping
+	cluster := labelSelectors["cluster"]
+	namespace := labelSelectors["namespace"]
+
+	// Apply label priority: app > service > job
+	// Check each label in priority order
+	var inferences []ServiceInference
+
+	if appName, hasApp := labelSelectors["app"]; hasApp {
+		inferences = append(inferences, ServiceInference{
+			Name:         appName,
+			Cluster:      cluster,
+			Namespace:    namespace,
+			InferredFrom: "app",
+		})
+	}
+
+	if serviceName, hasService := labelSelectors["service"]; hasService {
+		// Only add if different from app (if app was present)
+		if len(inferences) == 0 || inferences[0].Name != serviceName {
+			inferences = append(inferences, ServiceInference{
+				Name:         serviceName,
+				Cluster:      cluster,
+				Namespace:    namespace,
+				InferredFrom: "service",
+			})
+		}
+	}
+
+	if jobName, hasJob := labelSelectors["job"]; hasJob {
+		// Only add if different from already inferred services
+		isDuplicate := false
+		for _, inf := range inferences {
+			if inf.Name == jobName {
+				isDuplicate = true
+				break
+			}
+		}
+		if !isDuplicate {
+			inferences = append(inferences, ServiceInference{
+				Name:         jobName,
+				Cluster:      cluster,
+				Namespace:    namespace,
+				InferredFrom: "job",
+			})
+		}
+	}
+
+	// If no service labels found, return Unknown service
+	if len(inferences) == 0 {
+		inferences = append(inferences, ServiceInference{
+			Name:         "Unknown",
+			Cluster:      cluster,
+			Namespace:    namespace,
+			InferredFrom: "none",
+		})
+	}
+
+	return inferences
+}
+
+// createServiceNodes creates or updates Service nodes and TRACKS edges
+func (gb *GraphBuilder) createServiceNodes(ctx context.Context, queryID string, inferences []ServiceInference, now int64) error {
+	for _, inference := range inferences {
+		// Use MERGE for upsert semantics
+		// Service identity = {name, cluster, namespace}
+		serviceQuery := `
+			MATCH (q:Query {id: $queryID})
+			MATCH (q)-[:USES]->(m:Metric)
+			MERGE (s:Service {name: $name, cluster: $cluster, namespace: $namespace})
+			ON CREATE SET
+				s.inferredFrom = $inferredFrom,
+				s.firstSeen = $now,
+				s.lastSeen = $now
+			ON MATCH SET
+				s.inferredFrom = $inferredFrom,
+				s.lastSeen = $now
+			MERGE (m)-[:TRACKS]->(s)
+		`
+
+		_, err := gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+			Query: serviceQuery,
+			Parameters: map[string]interface{}{
+				"queryID":      queryID,
+				"name":         inference.Name,
+				"cluster":      inference.Cluster,
+				"namespace":    inference.Namespace,
+				"inferredFrom": inference.InferredFrom,
+				"now":          now,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create service node %s: %w", inference.Name, err)
 		}
 	}
 
@@ -250,6 +511,16 @@ func (gb *GraphBuilder) createQueryGraph(ctx context.Context, dashboardUID, pane
 				// Continue with other metrics
 				continue
 			}
+		}
+
+		// 3. Infer Service nodes from label selectors
+		inferences := inferServiceFromLabels(extraction.LabelSelectors)
+		gb.logger.Debug("Inferred %d services from query %s", len(inferences), queryID)
+
+		// 4. Create Service nodes and TRACKS edges
+		if err := gb.createServiceNodes(ctx, queryID, inferences, now); err != nil {
+			gb.logger.Warn("Failed to create service nodes for query %s: %v", queryID, err)
+			// Continue despite error (graceful degradation)
 		}
 	}
 

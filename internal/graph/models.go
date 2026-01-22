@@ -16,6 +16,8 @@ const (
 	NodeTypePanel            NodeType = "Panel"
 	NodeTypeQuery            NodeType = "Query"
 	NodeTypeMetric           NodeType = "Metric"
+	NodeTypeService          NodeType = "Service"
+	NodeTypeVariable         NodeType = "Variable"
 )
 
 // EdgeType represents the type of graph edge
@@ -40,9 +42,11 @@ const (
 	EdgeTypeCreatesObserved EdgeType = "CREATES_OBSERVED" // Observed creation correlation
 
 	// Dashboard relationship types
-	EdgeTypeContains EdgeType = "CONTAINS" // Dashboard -> Panel
-	EdgeTypeHas      EdgeType = "HAS"      // Panel -> Query
-	EdgeTypeUses     EdgeType = "USES"     // Query -> Metric
+	EdgeTypeContains    EdgeType = "CONTAINS"     // Dashboard -> Panel
+	EdgeTypeHas         EdgeType = "HAS"          // Panel -> Query
+	EdgeTypeUses        EdgeType = "USES"         // Query -> Metric
+	EdgeTypeTracks      EdgeType = "TRACKS"       // Metric -> Service
+	EdgeTypeHasVariable EdgeType = "HAS_VARIABLE" // Dashboard -> Variable
 )
 
 // ResourceIdentity represents a persistent Kubernetes resource node
@@ -124,6 +128,26 @@ type MetricNode struct {
 	Name      string `json:"name"`      // Metric name (e.g., http_requests_total)
 	FirstSeen int64  `json:"firstSeen"` // Unix nano timestamp
 	LastSeen  int64  `json:"lastSeen"`  // Unix nano timestamp
+}
+
+// ServiceNode represents an inferred service node in the graph
+type ServiceNode struct {
+	Name         string `json:"name"`         // Service name (from app/service/job labels)
+	Cluster      string `json:"cluster"`      // Cluster name (scoping)
+	Namespace    string `json:"namespace"`    // Namespace (scoping)
+	InferredFrom string `json:"inferredFrom"` // Label used for inference (app/service/job)
+	FirstSeen    int64  `json:"firstSeen"`    // Unix nano timestamp
+	LastSeen     int64  `json:"lastSeen"`     // Unix nano timestamp
+}
+
+// VariableNode represents a Grafana dashboard variable node in the graph
+type VariableNode struct {
+	DashboardUID   string `json:"dashboardUID"`   // Parent dashboard UID
+	Name           string `json:"name"`           // Variable name
+	Type           string `json:"type"`           // Variable type (query/textbox/custom/interval)
+	Classification string `json:"classification"` // Classification (scoping/entity/detail/unknown)
+	FirstSeen      int64  `json:"firstSeen"`      // Unix nano timestamp
+	LastSeen       int64  `json:"lastSeen"`       // Unix nano timestamp
 }
 
 // OwnsEdge represents ownership relationship properties
