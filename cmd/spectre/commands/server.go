@@ -24,6 +24,7 @@ import (
 	"github.com/moolen/spectre/internal/integration"
 
 	// Import integration implementations to register their factories
+	_ "github.com/moolen/spectre/internal/integration/logzio"
 	_ "github.com/moolen/spectre/internal/integration/victorialogs"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
@@ -136,8 +137,8 @@ func init() {
 		"Maximum resources to check per reconciliation cycle (default: 100)")
 
 	// Integration manager configuration
-	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "/tmp/integrations.yaml",
-		"Path to integrations configuration YAML file (default: integrations.yaml)")
+	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "/var/lib/spectre/config/integrations.yaml",
+		"Path to integrations configuration YAML file")
 	serverCmd.Flags().StringVar(&minIntegrationVersion, "min-integration-version", "",
 		"Minimum required integration version (e.g., '1.0.0') for version validation (optional)")
 
@@ -490,6 +491,13 @@ func runServer(cmd *cobra.Command, args []string) {
 			logger.Error("Failed to create integration manager: %v", err)
 			HandleError(err, "Integration manager initialization error")
 		}
+
+		// Register integration config handlers on API server now that manager is ready
+		if err := apiComponent.RegisterIntegrationHandlers(integrationMgr); err != nil {
+			logger.Error("Failed to register integration config handlers: %v", err)
+			HandleError(err, "Integration handler registration error")
+		}
+		logger.Info("Integration config handlers registered")
 
 		// Register integration manager with lifecycle manager (no dependencies)
 		if err := manager.Register(integrationMgr); err != nil {
