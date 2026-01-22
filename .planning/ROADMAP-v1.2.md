@@ -140,14 +140,14 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. `logzio_{name}_overview` returns namespace-level severity summary (errors, warnings, total)
   2. `logzio_{name}_logs` returns raw logs with filters (namespace, pod, container, level, time range)
-  3. Tools enforce result limits - max 500 logs to prevent MCP client overload
+  3. Tools enforce result limits - max 100 logs to prevent MCP client overload
   4. Tools reject leading wildcard queries with helpful error message (Logz.io API limitation)
   5. MCP tools handle authentication failures gracefully with degraded status
-**Plans**: TBD
+**Plans**: 2 plans in 2 waves
 
 Plans:
-- [ ] 12-01: TBD
-- [ ] 12-02: TBD
+- [ ] 12-01-PLAN.md — Logzio foundation (bootstrap, client, query builder) (Wave 1)
+- [ ] 12-02-PLAN.md — MCP tools (overview + logs with progressive disclosure) (Wave 2)
 
 #### Phase 13: MCP Tools - Patterns
 **Goal**: Pattern mining tool exposes log templates with novelty detection
@@ -197,10 +197,10 @@ Phases execute in numeric order: 10 → 11 → 12 → 13 → 14
 | 9. E2E Test Validation | v1.1 | 2/2 | Complete | 2026-01-21 |
 | 10. Logz.io Client Foundation | v1.2 | 0/TBD | Not started | - |
 | 11. Secret File Management | v1.2 | 4/4 | Complete | 2026-01-22 |
-| 12. MCP Tools - Overview and Logs | v1.2 | 0/TBD | Not started | - |
+| 12. MCP Tools - Overview and Logs | v1.2 | 0/2 | Ready to execute | - |
 | 13. MCP Tools - Patterns | v1.2 | 0/TBD | Not started | - |
 | 14. UI and Helm Chart | v1.2 | 0/TBD | Not started | - |
 
 ---
 *Created: 2026-01-22*
-*Last updated: 2026-01-22 - Phase 11 complete*
+*Last updated: 2026-01-22 - Phase 12 planned*
