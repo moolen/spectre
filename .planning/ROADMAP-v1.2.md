@@ -4,7 +4,7 @@
 
 - ✅ **v1.0 MCP Plugin System + VictoriaLogs** - Phases 1-5 (shipped 2026-01-21)
 - ✅ **v1.1 Server Consolidation** - Phases 6-9 (shipped 2026-01-21)
-- 🚧 **v1.2 Logz.io Integration + Secret Management** - Phases 10-14 (in progress)
+- ✅ **v1.2 Logz.io Integration + Secret Management** - Phases 10-14 (shipped 2026-01-22)
 
 ## Overview
 
@@ -95,7 +95,7 @@ Plans:
 
 </details>
 
-### 🚧 v1.2 Logz.io Integration + Secret Management (In Progress)
+### ✅ v1.2 Logz.io Integration + Secret Management (SHIPPED 2026-01-22)
 
 **Milestone Goal:** Add Logz.io as second log backend with Kubernetes-native secret hot-reload and multi-region API support.
 
@@ -164,7 +164,7 @@ Plans:
 Plans:
 - [x] 13-01-PLAN.md — Patterns tool with VictoriaLogs parity (Wave 1)
 
-#### Phase 14: UI and Helm Chart
+#### ✅ Phase 14: UI and Helm Chart
 **Goal**: UI configuration form and Helm chart support for Kubernetes secret mounting
 **Depends on**: Phase 13
 **Requirements**: CONF-02, CONF-03, HELM-01, HELM-02, HELM-03
@@ -174,10 +174,10 @@ Plans:
   3. Helm values.yaml includes extraVolumes example for mounting Kubernetes Secrets
   4. Documentation covers complete secret rotation workflow (create Secret → mount → rotate → verify)
   5. Example Kubernetes Secret manifest provided in docs with correct file structure
-**Plans**: 1 plan in 2 waves
+**Plans**: 1 plan in 1 wave
 
 Plans:
-- [ ] 14-01-PLAN.md — Logzio UI form and Helm Secret documentation (Wave 1: auto tasks, Wave 2: human-verify checkpoint)
+- [x] 14-01-PLAN.md — Logzio UI form and Helm Secret documentation (Wave 1: auto tasks + human-verify checkpoint)
 
 ## Progress
 
@@ -199,8 +199,8 @@ Phases execute in numeric order: 10 → 11 → 12 → 13 → 14
 | 11. Secret File Management | v1.2 | 4/4 | Complete | 2026-01-22 |
 | 12. MCP Tools - Overview and Logs | v1.2 | 2/2 | Complete | 2026-01-22 |
 | 13. MCP Tools - Patterns | v1.2 | 1/1 | Complete | 2026-01-22 |
-| 14. UI and Helm Chart | v1.2 | 0/1 | Not started | - |
+| 14. UI and Helm Chart | v1.2 | 1/1 | Complete | 2026-01-22 |
 
 ---
 *Created: 2026-01-22*
-*Last updated: 2026-01-22 - Phase 13 complete, Phase 14 planned*
+*Last updated: 2026-01-22 - v1.2 SHIPPED (Phase 14 complete)*
