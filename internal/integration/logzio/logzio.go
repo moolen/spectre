@@ -166,19 +166,98 @@ func (l *LogzioIntegration) Health(ctx context.Context) integration.HealthStatus
 		return integration.Degraded
 	}
 
-	// TODO: Test connectivity in Plan 02 (when overview tool needs it)
+	// Token is available (or not using secret ref), integration is healthy
 	return integration.Healthy
 }
 
 // RegisterTools registers MCP tools with the server for this integration instance.
-// Stub implementation - tools will be implemented in Plan 02.
 func (l *LogzioIntegration) RegisterTools(registry integration.ToolRegistry) error {
-	l.logger.Info("RegisterTools called for Logz.io integration: %s (stub - tools in Plan 02)", l.name)
+	l.logger.Info("Registering MCP tools for Logz.io integration: %s", l.name)
 
-	// Store registry reference for Plan 02
+	// Store registry reference
 	l.registry = registry
 
-	// Tools will be registered in Plan 02
+	// Create tool context for dependency injection
+	toolCtx := ToolContext{
+		Client:   l.client,
+		Logger:   l.logger,
+		Instance: l.name,
+	}
+
+	// Instantiate tools
+	overviewTool := &OverviewTool{ctx: toolCtx}
+	logsTool := &LogsTool{ctx: toolCtx}
+
+	// Register overview tool
+	overviewName := fmt.Sprintf("logzio_%s_overview", l.name)
+	overviewDesc := fmt.Sprintf("Get overview of log volume and severity by namespace for Logz.io %s. Returns namespace-level error, warning, and total log counts. Use this first to identify namespaces with high error rates before drilling into specific logs.", l.name)
+	overviewSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"start_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "Start timestamp (Unix seconds or milliseconds). Default: 1 hour ago",
+			},
+			"end_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "End timestamp (Unix seconds or milliseconds). Default: now",
+			},
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional: filter to specific namespace",
+			},
+		},
+	}
+
+	if err := registry.RegisterTool(overviewName, overviewDesc, overviewTool.Execute, overviewSchema); err != nil {
+		return fmt.Errorf("failed to register overview tool: %w", err)
+	}
+	l.logger.Info("Registered tool: %s", overviewName)
+
+	// Register logs tool
+	logsName := fmt.Sprintf("logzio_%s_logs", l.name)
+	logsDesc := fmt.Sprintf("Retrieve raw logs from Logz.io %s with filters. Namespace is required. Returns up to 100 log entries. Use after overview to investigate specific namespaces or errors.", l.name)
+	logsSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Kubernetes namespace to query (required)",
+			},
+			"start_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "Start timestamp (Unix seconds or milliseconds). Default: 1 hour ago",
+			},
+			"end_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "End timestamp (Unix seconds or milliseconds). Default: now",
+			},
+			"limit": map[string]interface{}{
+				"type":        "integer",
+				"description": "Maximum logs to return (default: 100, max: 100)",
+			},
+			"level": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by log level (e.g., error, warn, info)",
+			},
+			"pod": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by pod name",
+			},
+			"container": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by container name",
+			},
+		},
+		"required": []interface{}{"namespace"},
+	}
+
+	if err := registry.RegisterTool(logsName, logsDesc, logsTool.Execute, logsSchema); err != nil {
+		return fmt.Errorf("failed to register logs tool: %w", err)
+	}
+	l.logger.Info("Registered tool: %s", logsName)
+
+	l.logger.Info("Successfully registered 2 MCP tools for Logz.io integration: %s", l.name)
 	return nil
 }
 
