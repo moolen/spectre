@@ -167,6 +167,16 @@ func RegisterHandlers(
 				return
 			}
 
+			// Check for /sync suffix (for Grafana integrations: /api/config/integrations/{name}/sync)
+			if strings.HasSuffix(name, "/sync") {
+				if r.Method != http.MethodPost {
+					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+					return
+				}
+				configHandler.HandleSync(w, r)
+				return
+			}
+
 			// Route by method for /{name} operations
 			switch r.Method {
 			case http.MethodGet:

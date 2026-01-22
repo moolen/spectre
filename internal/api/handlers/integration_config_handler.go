@@ -33,12 +33,13 @@ func NewIntegrationConfigHandler(configPath string, manager *integration.Manager
 
 // IntegrationInstanceResponse represents a single integration instance with health status enrichment.
 type IntegrationInstanceResponse struct {
-	Name      string                 `json:"name"`
-	Type      string                 `json:"type"`
-	Enabled   bool                   `json:"enabled"`
-	Config    map[string]interface{} `json:"config"`
-	Health    string                 `json:"health"`    // "healthy", "degraded", "stopped", "not_started"
-	DateAdded string                 `json:"dateAdded"` // ISO8601 timestamp
+	Name       string                    `json:"name"`
+	Type       string                    `json:"type"`
+	Enabled    bool                      `json:"enabled"`
+	Config     map[string]interface{}    `json:"config"`
+	Health     string                    `json:"health"`               // "healthy", "degraded", "stopped", "not_started"
+	DateAdded  string                    `json:"dateAdded"`            // ISO8601 timestamp
+	SyncStatus *integration.SyncStatus   `json:"syncStatus,omitempty"` // Optional, only for integrations that sync
 }
 
 // TestConnectionRequest represents the request body for testing a connection.
@@ -79,12 +80,21 @@ func (h *IntegrationConfigHandler) HandleList(w http.ResponseWriter, r *http.Req
 			DateAdded: time.Now().Format(time.RFC3339), // TODO: Track actual creation time in config
 		}
 
-		// Query runtime health if instance is registered
+		// Query runtime health and sync status if instance is registered
 		if runtimeInstance, ok := registry.Get(instance.Name); ok {
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
 			healthStatus := runtimeInstance.Health(ctx)
 			response.Health = healthStatus.String()
+
+			// Check if instance supports sync status
+			type StatusProvider interface {
+				Status() integration.IntegrationStatus
+			}
+			if statusProvider, ok := runtimeInstance.(StatusProvider); ok {
+				status := statusProvider.Status()
+				response.SyncStatus = status.SyncStatus
+			}
 		}
 
 		responses = append(responses, response)
@@ -142,6 +152,15 @@ func (h *IntegrationConfigHandler) HandleGet(w http.ResponseWriter, r *http.Requ
 		defer cancel()
 		healthStatus := runtimeInstance.Health(ctx)
 		response.Health = healthStatus.String()
+
+		// Check if instance supports sync status
+		type StatusProvider interface {
+			Status() integration.IntegrationStatus
+		}
+		if statusProvider, ok := runtimeInstance.(StatusProvider); ok {
+			status := statusProvider.Status()
+			response.SyncStatus = status.SyncStatus
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -329,6 +348,54 @@ func (h *IntegrationConfigHandler) HandleDelete(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleSync handles POST /api/config/integrations/{name}/sync - triggers manual dashboard sync for Grafana integrations.
+func (h *IntegrationConfigHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
+	// Extract name from URL path
+	name := strings.TrimPrefix(r.URL.Path, "/api/config/integrations/")
+	name = strings.TrimSuffix(name, "/sync")
+	if name == "" || name == r.URL.Path {
+		api.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Integration name required")
+		return
+	}
+
+	// Get integration from manager registry
+	registry := h.manager.GetRegistry()
+	instance, ok := registry.Get(name)
+	if !ok {
+		api.WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("Integration %q not found or not started", name))
+		return
+	}
+
+	// Type assertion to check if integration supports sync
+	type Syncer interface {
+		TriggerSync(ctx context.Context) error
+		Status() integration.IntegrationStatus
+	}
+
+	syncer, ok := instance.(Syncer)
+	if !ok {
+		api.WriteError(w, http.StatusBadRequest, "NOT_SUPPORTED", "Sync only supported for Grafana integrations")
+		return
+	}
+
+	// Trigger sync with request context
+	ctx := r.Context()
+	if err := syncer.TriggerSync(ctx); err != nil {
+		if err.Error() == "sync already in progress" {
+			api.WriteError(w, http.StatusConflict, "SYNC_IN_PROGRESS", err.Error())
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "SYNC_FAILED", fmt.Sprintf("Sync failed: %v", err))
+		return
+	}
+
+	// Return updated status
+	status := syncer.Status()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = api.WriteJSON(w, status)
+}
+
 // HandleTest handles POST /api/config/integrations/{name}/test - tests an integration connection.
 func (h *IntegrationConfigHandler) HandleTest(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
@@ -453,13 +520,23 @@ func (h *IntegrationConfigHandler) sendStatusUpdate(w http.ResponseWriter, flush
 
 	for _, instance := range integrationsFile.Instances {
 		health := "not_started"
+		var syncStatus *integration.SyncStatus
 
-		// Query runtime health if instance is registered
+		// Query runtime health and sync status if instance is registered
 		if runtimeInstance, ok := registry.Get(instance.Name); ok {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			healthStatus := runtimeInstance.Health(ctx)
 			cancel()
 			health = healthStatus.String()
+
+			// Check if instance supports sync status
+			type StatusProvider interface {
+				Status() integration.IntegrationStatus
+			}
+			if statusProvider, ok := runtimeInstance.(StatusProvider); ok {
+				status := statusProvider.Status()
+				syncStatus = status.SyncStatus
+			}
 		}
 
 		// Check if status changed
@@ -469,12 +546,13 @@ func (h *IntegrationConfigHandler) sendStatusUpdate(w http.ResponseWriter, flush
 		}
 
 		responses = append(responses, IntegrationInstanceResponse{
-			Name:      instance.Name,
-			Type:      instance.Type,
-			Enabled:   instance.Enabled,
-			Config:    instance.Config,
-			Health:    health,
-			DateAdded: time.Now().Format(time.RFC3339),
+			Name:       instance.Name,
+			Type:       instance.Type,
+			Enabled:    instance.Enabled,
+			Config:     instance.Config,
+			Health:     health,
+			DateAdded:  time.Now().Format(time.RFC3339),
+			SyncStatus: syncStatus,
 		})
 	}
 
