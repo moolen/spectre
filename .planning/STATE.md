@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 16 of 19 (v1.3 Grafana Metrics Integration)
-Plan: 1 of 3 (Ingestion Pipeline)
-Status: In progress - 16-01 complete (PromQL Parser)
-Last activity: 2026-01-22 — Completed 16-01-PLAN.md (PromQL Parser)
+Plan: 2 of 3 (Ingestion Pipeline)
+Status: In progress - 16-02 complete (Dashboard Sync)
+Last activity: 2026-01-22 — Completed 16-02-PLAN.md (Dashboard Sync)
 
 Progress: [███░░░░░░░░░░░░░] 20% (1 of 5 phases complete in v1.3)
 
 ## Performance Metrics
 
 **v1.3 Velocity:**
-- Total plans completed: 4
-- Average duration: 2 min
-- Total execution time: 0.15 hours
+- Total plans completed: 5
+- Average duration: 3 min
+- Total execution time: 0.32 hours
 
 **Previous Milestones:**
 - v1.2: 8 plans completed
@@ -54,6 +54,12 @@ From Phase 16:
 - Detect variable syntax before parsing to handle unparseable queries gracefully — 16-01
 - Return partial extraction for queries with variables instead of error — 16-01
 - Check for variables in both metric names and label selector values — 16-01
+- MERGE-based upsert semantics for all nodes - simpler than separate CREATE/UPDATE logic — 16-02
+- Full dashboard replace pattern - simpler than incremental panel updates — 16-02
+- Metric nodes preserved on dashboard delete - shared entities across dashboards — 16-02
+- Graceful degradation: log parse errors but continue with other panels/queries — 16-02
+- Dashboard sync optional - integration works without graph client — 16-02
+- SetGraphClient injection pattern - transitional API for graph client access — 16-02
 
 ### Pending Todos
 
@@ -84,10 +90,10 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 16-01
-**Context preserved:** Phase 16-01 complete (PromQL Parser), 6 requirements satisfied (PROM-01-06)
+**Last command:** /gsd:execute-phase 16-02
+**Context preserved:** Phase 16-02 complete (Dashboard Sync), 5 requirements satisfied (FOUN-04, GRPH-02-04, GRPH-06)
 
-**Next step:** Continue Phase 16 with dashboard sync implementation (16-02)
+**Next step:** Continue Phase 16 with UI implementation (16-03)
 
 ---
-*Last updated: 2026-01-22 — Completed 16-01 PromQL Parser*
+*Last updated: 2026-01-22 — Completed 16-02 Dashboard Sync*
