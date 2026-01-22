@@ -80,6 +80,36 @@ export function IntegrationConfigForm({
     });
   };
 
+  const handleHierarchyMapChange = (newMap: Record<string, string>) => {
+    onChange({
+      ...config,
+      config: {
+        ...config.config,
+        hierarchyMap: newMap,
+      },
+    });
+  };
+
+  const addHierarchyMapping = () => {
+    const currentMap = config.config.hierarchyMap || {};
+    handleHierarchyMapChange({ ...currentMap, '': '' });
+  };
+
+  const updateHierarchyMapping = (oldTag: string, newTag: string, newLevel: string) => {
+    const currentMap = { ...config.config.hierarchyMap } || {};
+    if (oldTag !== newTag) {
+      delete currentMap[oldTag];
+    }
+    currentMap[newTag] = newLevel;
+    handleHierarchyMapChange(currentMap);
+  };
+
+  const removeHierarchyMapping = (tag: string) => {
+    const currentMap = { ...config.config.hierarchyMap } || {};
+    delete currentMap[tag];
+    handleHierarchyMapChange(currentMap);
+  };
+
   return (
     <div>
       {/* Name Field */}
@@ -600,6 +630,134 @@ export function IntegrationConfigForm({
                 Key within the Secret containing the API token
               </p>
             </div>
+          </div>
+
+          {/* Hierarchy Mapping Section */}
+          <div style={{
+            marginBottom: '20px',
+            padding: '16px',
+            borderRadius: '8px',
+            border: '1px solid var(--color-border-soft)',
+            backgroundColor: 'var(--color-surface-muted)',
+          }}>
+            <h4 style={{
+              margin: '0 0 8px 0',
+              fontSize: '14px',
+              fontWeight: 600,
+              color: 'var(--color-text-primary)',
+            }}>
+              Hierarchy Mapping (Optional)
+            </h4>
+            <p style={{
+              margin: '0 0 16px 0',
+              fontSize: '12px',
+              color: 'var(--color-text-muted)',
+            }}>
+              Map dashboard tags to hierarchy levels (overview/drilldown/detail) when explicit hierarchy tags are absent.
+              Example: Tag "prod" → "overview"
+            </p>
+
+            {/* Validation warning */}
+            {(() => {
+              const currentMap = config.config.hierarchyMap || {};
+              const validLevels = ['overview', 'drilldown', 'detail'];
+              const hasInvalidLevels = Object.values(currentMap).some(
+                (level) => level !== '' && !validLevels.includes(level)
+              );
+              if (hasInvalidLevels) {
+                return (
+                  <div style={{
+                    padding: '12px',
+                    marginBottom: '16px',
+                    borderRadius: '6px',
+                    backgroundColor: '#fef3c7',
+                    border: '1px solid #fbbf24',
+                    color: '#92400e',
+                    fontSize: '13px',
+                  }}>
+                    <strong>Warning:</strong> Some mappings use invalid levels. Valid levels are: overview, drilldown, detail.
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {/* List existing mappings */}
+            {Object.entries(config.config.hierarchyMap || {}).map(([tag, level]) => (
+              <div key={tag} style={{
+                display: 'flex',
+                gap: '8px',
+                marginBottom: '8px',
+                alignItems: 'center',
+              }}>
+                <input
+                  type="text"
+                  value={tag}
+                  onChange={(e) => updateHierarchyMapping(tag, e.target.value, level)}
+                  placeholder="Tag (e.g., prod)"
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border-soft)',
+                    backgroundColor: 'var(--color-surface-elevated)',
+                    color: 'var(--color-text-primary)',
+                    fontSize: '13px',
+                  }}
+                />
+                <select
+                  value={level}
+                  onChange={(e) => updateHierarchyMapping(tag, tag, e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border-soft)',
+                    backgroundColor: 'var(--color-surface-elevated)',
+                    color: 'var(--color-text-primary)',
+                    fontSize: '13px',
+                  }}
+                >
+                  <option value="">Select level...</option>
+                  <option value="overview">Overview</option>
+                  <option value="drilldown">Drill-down</option>
+                  <option value="detail">Detail</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => removeHierarchyMapping(tag)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    backgroundColor: '#ef4444',
+                    color: 'white',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+
+            {/* Add mapping button */}
+            <button
+              type="button"
+              onClick={addHierarchyMapping}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                border: '1px solid var(--color-border-soft)',
+                backgroundColor: 'var(--color-surface-elevated)',
+                color: 'var(--color-text-primary)',
+                fontSize: '13px',
+                cursor: 'pointer',
+                marginTop: '8px',
+              }}
+            >
+              + Add Mapping
+            </button>
           </div>
         </>
       )}
