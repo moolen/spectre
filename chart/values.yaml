@@ -328,6 +328,36 @@ extraArgs: []
 extraVolumes: []
 extraVolumeMounts: []
 
+# Example: Mount Kubernetes Secret for Logz.io API token
+#
+# 1. Create Secret in Spectre's namespace:
+#    kubectl create secret generic logzio-creds \
+#      --from-literal=api-token=YOUR_TOKEN_HERE \
+#      --namespace monitoring
+#
+# 2. Uncomment and configure:
+# extraVolumes:
+#   - name: logzio-secret
+#     secret:
+#       secretName: logzio-creds
+#       defaultMode: 0400
+#
+# extraVolumeMounts:
+#   - name: logzio-secret
+#     mountPath: /var/secrets/logzio
+#     readOnly: true
+#
+# 3. Configure Logz.io integration in UI:
+#    - Region: Select your Logz.io account region
+#    - Secret Name: logzio-creds
+#    - Key: api-token
+#
+# 4. Secret rotation workflow:
+#    a. Create new Secret version: kubectl create secret generic logzio-creds-v2 ...
+#    b. Update extraVolumes.secretName to logzio-creds-v2
+#    c. Apply: helm upgrade spectre ...
+#    d. Pods restart automatically, SecretWatcher picks up new token
+
 env: []
 envFrom: []
 lifecycle: {}
