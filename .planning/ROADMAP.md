@@ -40,7 +40,7 @@ See `.planning/milestones/v1.2-ROADMAP.md` for details.
 
 **Milestone Goal:** Use Grafana dashboards as structured operational knowledge so Spectre can detect high-level anomalies, progressively drill down, and reason about services, clusters, and metrics.
 
-#### Phase 15: Foundation - Grafana API Client & Graph Schema
+#### ✅ Phase 15: Foundation - Grafana API Client & Graph Schema
 **Goal**: Grafana integration can authenticate, retrieve dashboards, and store structure in FalkorDB graph.
 **Depends on**: Nothing (first phase of v1.3)
 **Requirements**: FOUN-01, FOUN-02, FOUN-03, FOUN-05, FOUN-06, GRPH-01, GRPH-07, UICF-01, UICF-02, UICF-03
@@ -51,11 +51,12 @@ See `.planning/milestones/v1.2-ROADMAP.md` for details.
   4. GrafanaClient can list all dashboards via search API
   5. FalkorDB schema includes Dashboard nodes with indexes on uid
 **Plans**: 3 plans
+**Completed**: 2026-01-22
 
 Plans:
-- [ ] 15-01-PLAN.md — Grafana API client backend with SecretWatcher integration
-- [ ] 15-02-PLAN.md — FalkorDB Dashboard node schema with named graph support
-- [ ] 15-03-PLAN.md — UI configuration form and test connection handler
+- [x] 15-01-PLAN.md — Grafana API client backend with SecretWatcher integration
+- [x] 15-02-PLAN.md — FalkorDB Dashboard node schema with named graph support
+- [x] 15-03-PLAN.md — UI configuration form and test connection handler
 
 #### Phase 16: Ingestion Pipeline - Dashboard Sync & PromQL Parsing
 **Goal**: Dashboards are ingested incrementally with full semantic structure extracted to graph.
@@ -126,8 +127,8 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 15. Foundation | 0/3 | Ready to execute | - |
-| 16. Ingestion Pipeline | 0/TBD | Not started | - |
+| 15. Foundation | 3/3 | ✓ Complete | 2026-01-22 |
+| 16. Ingestion Pipeline | 0/TBD | Ready to plan | - |
 | 17. Semantic Layer | 0/TBD | Not started | - |
 | 18. Query Execution & MCP Tools | 0/TBD | Not started | - |
 | 19. Anomaly Detection | 0/TBD | Not started | - |
