@@ -5,22 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Enable AI assistants to explore logs from multiple backends through unified MCP interface
-**Current focus:** Phase 13 - MCP Tools Patterns
+**Current focus:** v1.2 milestone complete
 
 ## Current Position
 
-Phase: 13 of 14 (MCP Tools - Patterns)
-Plan: Complete (13-01 of 1)
-Status: Phase 13 complete
-Last activity: 2026-01-22 — Completed 13-01-PLAN.md
+Phase: 14 of 14 (UI and Helm Chart)
+Plan: Complete (14-01 of 1)
+Status: Phase 14 complete - v1.2 SHIPPED
+Last activity: 2026-01-22 — Completed 14-01-PLAN.md
 
-Progress: [███████████████] 93% (13 of 14 phases complete)
+Progress: [████████████████] 100% (14 of 14 phases complete)
 
 ## Milestone History
 
-- **v1.2 Logz.io Integration + Secret Management** — in progress
-  - 5 phases (10-14), 21 requirements
+- **v1.2 Logz.io Integration + Secret Management** — shipped 2026-01-22
+  - 5 phases (10-14), 21 requirements COMPLETE
   - Logz.io as second log backend with secret management
+  - UI configuration, Kubernetes Secret hot-reload, 3 MCP tools
   - See .planning/ROADMAP-v1.2.md
 
 - **v1.1 Server Consolidation** — shipped 2026-01-21
@@ -42,7 +43,7 @@ None
 - DateAdded field not persisted in integration config (from v1)
 - GET /{name} endpoint unused by UI (from v1)
 
-## Phase 13 Deliverables (Available for Phase 14)
+## Phase 14 Deliverables (v1.2 Complete)
 
 - **Logzio Integration**: `internal/integration/logzio/logzio.go`
   - Factory registered as "logzio" type
@@ -77,28 +78,48 @@ None
   - Metadata collection (sample_log, pods, containers)
   - Registered as logzio_{name}_patterns
 
+- **UI Configuration Form**: `ui/src/components/IntegrationConfigForm.tsx`
+  - Logzio form section with region selector (5 regions: US, EU, UK, AU, CA)
+  - SecretRef fields (Secret Name, Key) in Authentication section
+  - Nested config structure matches backend types
+  - Follows VictoriaLogs form pattern for consistency
+
+- **Helm Secret Documentation**: `chart/values.yaml`
+  - Commented Secret mounting example after extraVolumeMounts
+  - 4-step workflow: create → mount → configure → rotate
+  - Security best practices (defaultMode: 0400, readOnly: true)
+  - Copy-paste ready for platform engineers
+
 ## Next Steps
 
-1. `/gsd:plan-phase 14` — Plan final phase (Integration Tests or Deployment)
+**v1.2 milestone complete - all phases shipped!**
+
+No immediate next steps. Potential future work:
+- Additional log backend integrations (Datadog, Sentry, etc.)
+- Secret listing/picker UI (requires RBAC additions)
+- Multi-account support in single integration
+- Performance optimization for high-volume log sources
 
 ## Cumulative Stats
 
-- Milestones: 2 shipped (v1, v1.1), 1 in progress (v1.2)
-- Total phases: 14 planned (13 complete, 1 pending)
-- Total plans: 38 complete (31 from v1/v1.1, 4 from Phase 11, 2 from Phase 12, 1 from Phase 13)
-- Total requirements: 73 (59 complete, 14 pending)
+- Milestones: 3 shipped (v1, v1.1, v1.2)
+- Total phases: 14 complete (100%)
+- Total plans: 39 complete (31 from v1/v1.1, 8 from v1.2)
+- Total requirements: 73 complete (100%)
 - Total LOC: ~124k (Go + TypeScript)
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 13
-**Context preserved:** Phase 13 complete, Phase 14 ready to plan
+**Last command:** /gsd:execute-phase 14 (continuation after checkpoint)
+**Context preserved:** v1.2 milestone complete, all 14 phases shipped
 
 **On next session:**
-- Phase 13 complete: Logzio pattern mining MCP tool with VictoriaLogs parity
-- Logzio integration now has 3 MCP tools: overview, logs, patterns
-- Phase 14 is final phase (1 of 14 phases remaining)
-- Start with `/gsd:discuss-phase 14` or `/gsd:plan-phase 14`
+- v1.2 SHIPPED: Logzio integration complete (UI + Helm + MCP tools)
+- Platform engineers can configure Logzio integrations entirely via UI
+- Kubernetes Secret hot-reload with zero-downtime credential rotation
+- Progressive disclosure: overview → logs → patterns MCP tools
+- All 73 requirements complete across v1, v1.1, and v1.2 milestones
+- Ready for production deployment with documented Secret workflow
 
 ---
-*Last updated: 2026-01-22 — Phase 13 complete*
+*Last updated: 2026-01-22 — v1.2 milestone complete (Phase 14)*
