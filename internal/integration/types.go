@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"time"
 )
 
 // Integration defines the lifecycle contract for all integrations.
@@ -80,10 +81,12 @@ func (h HealthStatus) String() string {
 // This is a placeholder interface - concrete implementation will be provided in Phase 2
 // when integrating with the existing MCP server (internal/mcp/server.go).
 type ToolRegistry interface {
-	// RegisterTool registers an MCP tool with the given name and handler.
+	// RegisterTool registers an MCP tool with the given name, handler, and input schema.
 	// name: unique tool name (e.g., "victorialogs_query")
+	// description: human-readable description of the tool
 	// handler: function that executes the tool logic
-	RegisterTool(name string, handler ToolHandler) error
+	// inputSchema: JSON Schema object defining the tool's input parameters
+	RegisterTool(name string, description string, handler ToolHandler, inputSchema map[string]interface{}) error
 }
 
 // ToolHandler is the function signature for tool execution logic.
@@ -96,3 +99,20 @@ type ToolHandler func(ctx context.Context, args []byte) (interface{}, error)
 // Each integration type provides its own concrete config struct that embeds
 // or implements this interface.
 type InstanceConfig interface{}
+
+// IntegrationStatus represents the status of an integration instance.
+type IntegrationStatus struct {
+	Name       string      `json:"name"`
+	Type       string      `json:"type"`
+	Enabled    bool        `json:"enabled"`
+	Health     string      `json:"health"`
+	SyncStatus *SyncStatus `json:"syncStatus,omitempty"` // Optional, only for integrations that sync
+}
+
+// SyncStatus represents the synchronization status for integrations that perform periodic syncing.
+type SyncStatus struct {
+	LastSyncTime   *time.Time `json:"lastSyncTime,omitempty"` // Nil if never synced
+	DashboardCount int        `json:"dashboardCount"`         // Total dashboards synced
+	LastError      string     `json:"lastError,omitempty"`    // Empty if no error
+	InProgress     bool       `json:"inProgress"`             // True during active sync
+}
