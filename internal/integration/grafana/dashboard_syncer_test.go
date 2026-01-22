@@ -93,7 +93,7 @@ func TestSyncAll_NewDashboards(t *testing.T) {
 		Rows: [][]interface{}{}, // Empty result = dashboard doesn't exist
 	}
 
-	syncer := NewDashboardSyncer(mockGrafana, mockGraph, time.Hour, logger)
+	syncer := NewDashboardSyncer(mockGrafana, mockGraph, nil, time.Hour, logger)
 
 	ctx := context.Background()
 	err := syncer.syncAll(ctx)
@@ -161,7 +161,7 @@ func TestSyncAll_UpdatedDashboard(t *testing.T) {
 		},
 	}
 
-	syncer := NewDashboardSyncer(mockGrafana, mockGraph, time.Hour, logger)
+	syncer := NewDashboardSyncer(mockGrafana, mockGraph, nil, time.Hour, logger)
 
 	ctx := context.Background()
 	err := syncer.syncAll(ctx)
@@ -212,7 +212,7 @@ func TestSyncAll_UnchangedDashboard(t *testing.T) {
 		},
 	}
 
-	syncer := NewDashboardSyncer(mockGrafana, mockGraph, time.Hour, logger)
+	syncer := NewDashboardSyncer(mockGrafana, mockGraph, nil, time.Hour, logger)
 
 	ctx := context.Background()
 	err := syncer.syncAll(ctx)
@@ -269,7 +269,7 @@ func TestSyncAll_ContinuesOnError(t *testing.T) {
 		Rows: [][]interface{}{},
 	}
 
-	syncer := NewDashboardSyncer(mockGrafana, mockGraph, time.Hour, logger)
+	syncer := NewDashboardSyncer(mockGrafana, mockGraph, nil, time.Hour, logger)
 
 	ctx := context.Background()
 	err := syncer.syncAll(ctx)
@@ -317,7 +317,7 @@ func TestDashboardSyncer_StartStop(t *testing.T) {
 	mockGrafana.dashboards = []DashboardMeta{}
 	mockGraph.results[""] = &graph.QueryResult{Rows: [][]interface{}{}}
 
-	syncer := NewDashboardSyncer(mockGrafana, mockGraph, 100*time.Millisecond, logger)
+	syncer := NewDashboardSyncer(mockGrafana, mockGraph, nil, 100*time.Millisecond, logger)
 
 	ctx := context.Background()
 	err := syncer.Start(ctx)
@@ -341,7 +341,7 @@ func TestDashboardSyncer_StartStop(t *testing.T) {
 func TestParseDashboard(t *testing.T) {
 	mockGraph := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	syncer := NewDashboardSyncer(nil, mockGraph, time.Hour, logger)
+	syncer := NewDashboardSyncer(nil, mockGraph, nil, time.Hour, logger)
 
 	// Create dashboard data with tags in the dashboard JSON
 	dashboard := map[string]interface{}{

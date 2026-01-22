@@ -78,7 +78,7 @@ func TestDashboardSyncerLifecycle(t *testing.T) {
 	logger := logging.GetLogger("test")
 
 	// Create syncer directly (bypass integration for this focused test)
-	syncer := NewDashboardSyncer(mockGrafana, mockGraph, 100*time.Millisecond, logger)
+	syncer := NewDashboardSyncer(mockGrafana, mockGraph, nil, 100*time.Millisecond, logger)
 
 	ctx := context.Background()
 	err := syncer.Start(ctx)
