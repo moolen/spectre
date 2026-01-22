@@ -1,627 +1,754 @@
-# Domain Pitfalls: MCP Plugin System + VictoriaLogs Integration
+# Pitfalls Research: Logz.io Integration + Secret Management
 
-**Domain:** MCP server plugin architecture, log template mining, config hot-reload, progressive disclosure
-**Researched:** 2026-01-20
-**Confidence:** MEDIUM (verified with official sources and production reports where available)
+**Domain:** Logz.io integration for Kubernetes observability with API token secret management
+**Researched:** 2026-01-22
+**Confidence:** MEDIUM (WebSearch verified with official docs, existing VictoriaLogs patterns examined)
 
 ## Executive Summary
 
-This research identifies critical pitfalls across four domains: Go plugin systems, log template mining, configuration hot-reload, and progressive disclosure UIs. The most severe risks involve Go's stdlib plugin versioning constraints, template mining instability with variable-starting logs, race conditions in hot-reload without atomic updates, and state loss during progressive disclosure navigation.
+Adding Logz.io integration and secret management introduces complexity across multiple dimensions: Elasticsearch DSL query limitations, multi-region configuration, rate limiting, scroll API lifecycle, fsnotify edge cases, and Kubernetes secret refresh mechanics. Critical pitfalls cluster around three areas:
 
-**Key finding:** The stdlib `plugin` package has severe production limitations. HashiCorp's go-plugin (RPC-based) is the production-proven alternative, used by Terraform, Vault, Nomad, and Packer for 4+ years.
+1. **Elasticsearch DSL query constraints** - Leading wildcards disabled, analyzed field limitations, scroll API expiration
+2. **Secret rotation mechanics** - Kubernetes subPath breaks hot-reload, fsnotify misses atomic writes, race conditions during rotation
+3. **Multi-region correctness** - Hard-coded endpoints, region-specific rate limits, credential scope confusion
+
+Many of these are subtle correctness issues that manifest in production under load, not during development. This research identifies early warning signs and prevention strategies for each.
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites or major production issues.
+Mistakes that cause rewrites, data loss, or security incidents.
 
-### CRITICAL-1: Go Stdlib Plugin Versioning Hell
+### Pitfall 1: Kubernetes Secret subPath Breaks Hot-Reload
 
 **What goes wrong:**
-Using Go's stdlib `plugin` package creates brittle deployment where plugins crash with "plugin was built with a different version of package" errors. All plugins and the host must be built with:
-- Exact same Go toolchain version
-- Exact same dependency versions (including transitive deps)
-- Exact same GOPATH
-- Exact same build flags (`-trimpath`, `-buildmode=plugin`, etc.)
+When secrets are mounted with `subPath`, Kubernetes updates the volume symlink but NOT the actual file bind-mounted into the container. Your fsnotify watcher detects no changes, application never reloads credentials, and you get authentication failures after secret rotation.
 
 **Why it happens:**
-Go's plugin system loads `.so` files into the same process space. The runtime performs strict version checking on all shared packages. Even patch version differences in dependencies cause panics.
+Kubernetes atomic writer uses symlinks for volume updates. With `subPath`, the symlink update happens at the mount point, not at the file level. The existing VictoriaLogs fsnotify watcher (`.planning/research/integration_watcher.go`) watches the file directly, which becomes stale with `subPath` mounts.
 
 **Consequences:**
-- Plugin updates require rebuilding ALL plugins and host
-- Cannot distribute third-party plugins (users can't build with your exact toolchain)
-- Go version upgrades become coordination nightmares
-- Production deployment requires lock-step versioning
+- Secret rotation causes downtime (authentication fails)
+- Monitoring alerts fire during rotation windows
+- Manual pod restarts required to pick up new secrets
+- Violates zero-downtime rotation requirement
 
 **Prevention:**
-Use HashiCorp's `go-plugin` instead of stdlib `plugin`:
-- RPC-based: plugins run as separate processes
-- Protocol versioning: increment protocol version to invalidate incompatible plugins
-- Cross-language: plugins don't need to be written in Go
-- Production-proven: 4+ years in Terraform, Vault, Nomad, Packer
-- Human-friendly errors when version mismatches occur
+1. **DO NOT use `subPath` for secret mounts** - Mount entire secret volume, reference by path
+2. Document in deployment YAML with explicit comment warning against subPath
+3. Add integration test that verifies hot-reload with volume mount (not subPath)
+4. Consider Secrets Store CSI Driver with Reloader for external vaults
 
 **Detection:**
-Early warning signs:
-- Investigating stdlib `plugin` package documentation
-- Planning to distribute plugins to users
-- Considering Go version upgrades with existing plugins
+- Warning sign: fsnotify events stop after first secret rotation
+- Warning sign: Pod logs show "authentication failed" after secret update
+- Test: Update secret, watch for fsnotify event within 60s (kubelet sync period)
 
-**Phase mapping:**
-Phase 1 (Plugin Architecture) must decide: stdlib `plugin` vs `go-plugin`. Wrong choice here forces a rewrite.
+**References:**
+- [Kubernetes Secrets and Pod Restarts](https://blog.ascendingdc.com/kubernetes-secrets-and-pod-restarts)
+- [Known Limitations - Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations)
+- [K8s Deployment Automatic Rollout Restart](https://igboie.medium.com/k8s-deployment-automatic-rollout-restart-when-referenced-secrets-and-configmaps-are-updated-0c74c85c1b4a)
 
-**Confidence:** HIGH (verified by Go issue tracker, HashiCorp docs, production reports)
-
-**Sources:**
-- [Go issue #27751: plugin panic with different package versions](https://github.com/golang/go/issues/27751)
-- [Go issue #31354: plugin versions in modules](https://github.com/golang/go/issues/31354)
-- [Things to avoid while using Golang plugins](https://alperkose.medium.com/things-to-avoid-while-using-golang-plugins-f34c0a636e8)
-- [HashiCorp go-plugin](https://github.com/hashicorp/go-plugin)
-- [RPC-based plugins in Go](https://eli.thegreenplace.net/2023/rpc-based-plugins-in-go/)
+**Which phase:**
+Phase 2 (Logz.io API Client) - Must establish secret loading pattern before MCP tools implementation
 
 ---
 
-### CRITICAL-2: Template Mining Instability with Variable-Starting Logs
+### Pitfall 2: Atomic Editor Saves Cause fsnotify Watch Loss
 
 **What goes wrong:**
-Drain and similar tree-based parsers fail when log messages start with variables instead of constants. Example:
-- "cupsd shutdown succeeded"
-- "irqbalance shutdown succeeded"
-
-These should map to template "{service} shutdown succeeded" but Drain creates separate templates because the first token differs.
+Text editors (vim, VSCode, kubectl) use atomic writes: write temp file → rename to target. fsnotify watches the inode, which changes on rename. Watch is automatically removed, fsnotify stops receiving events, and config changes are silently ignored.
 
 **Why it happens:**
-Drain uses a fixed-depth tree where the first few tokens determine which branch to follow. When constants appear AFTER variables, the tree structure breaks down. Log messages with different variable values at the start get routed to different branches, preventing template consolidation.
+The existing `integration_watcher.go` handles this with Remove/Rename event re-watching (lines 140-148), BUT there's a 50ms sleep gap where the file might be written and you miss the event. Kubernetes Secret volume updates are atomic writes. VSCode triggers 5 events per save, creating race conditions in the debounce logic.
 
 **Consequences:**
-- Template explosion: thousands of unique templates for the same pattern
-- Inaccurate "new pattern" detection (false positives)
-- High memory usage from redundant templates
-- Degraded anomaly detection (signal lost in noise)
-- Production accuracy drops below 90% on variable-starting logs
+- Secret rotation silently fails (no reload triggered)
+- Integration continues using expired credentials until health check fails
+- Gap between rotation and detection creates security window
+- Difficult to debug (no error, just missing events)
 
 **Prevention:**
-1. **Pre-tokenize with masking:** Replace known variable patterns (IPs, UUIDs, numbers) BEFORE feeding to Drain
-2. **Use Drain3 with masking:** The Drain3 implementation includes built-in masking for common patterns
-3. **Consider XDrain:** Uses fixed-depth forest (not tree) with majority voting for better stability
-4. **Sampling + validation:** Sample 10K logs from each namespace, validate template count is reasonable (<1000 for typical app logs)
-5. **Fallback detection:** If template count exceeds threshold, flag namespace for manual review
+1. **Verify existing re-watch logic handles Kubernetes volume updates** - Test with actual Secret mount
+2. **Increase re-watch delay from 50ms to 200ms** for Kubernetes atomic writes (slower than editor saves)
+3. **Watch parent directory, not file** - Recommended by fsnotify docs (avoids inode change problem)
+4. **Add file existence check after re-watch** - Verify file exists before continuing
+5. **Log all watch removals and re-additions** - Make missing events visible
 
 **Detection:**
-Warning signs:
-- Template count growing unbounded (monitor templates-per-1000-logs metric)
-- Most templates have only 1-5 instances (indicates over-fragmentation)
-- "New pattern" alerts firing constantly
-- High cardinality in first token position during analysis
+- Warning sign: Watcher logs show Remove/Rename events but no subsequent reload
+- Warning sign: Time gap between secret update and reload > 500ms
+- Test: Simulate atomic write (write temp → rename), verify fsnotify event within 200ms
 
-**Phase mapping:**
-- Phase 2 (Template Mining): Algorithm selection must account for variable-starting logs
-- Phase 3 (VictoriaLogs Integration): Need sampling and validation before production use
-- Phase 4 (Progressive Disclosure): Template count explosion breaks aggregated view
+**References:**
+- [fsnotify Issue #372: Robustly watching a single file](https://github.com/fsnotify/fsnotify/issues/372)
+- [Building a cross-platform File Watcher in Go](https://dev.to/asoseil/building-a-cross-platform-file-watcher-in-go-what-i-learned-from-scratch-1dbj)
 
-**Confidence:** HIGH (verified by academic papers, Drain3 documentation, production stability reports)
-
-**Sources:**
-- [Investigating and Improving Log Parsing in Practice](https://yanmeng.github.io/papers/FSE221.pdf)
-- [Drain3: Robust streaming log template miner](https://github.com/logpai/Drain3)
-- [XDrain: Effective log parsing with fixed-depth forest](https://www.sciencedirect.com/science/article/abs/pii/S0950584924001514)
-- [Tools and Benchmarks for Automated Log Parsing](https://arxiv.org/pdf/1811.03509)
+**Which phase:**
+Phase 2 (Logz.io API Client) - Critical for secret hot-reload, blocks production deployment
 
 ---
 
-### CRITICAL-3: Race Conditions in Config Hot-Reload Without Atomic Swap
+### Pitfall 3: Leading Wildcard Queries Disabled by Logz.io
 
 **What goes wrong:**
-Naive hot-reload implementations use `sync.RWMutex` to guard a config struct, then modify it in place during reload. This creates race conditions:
-1. Goroutine A reads `config.VictoriaLogsURL`
-2. Reload happens, sets `config.VictoriaLogsURL = newURL`
-3. Goroutine A reads `config.VictoriaLogsAPIKey` (now inconsistent with URL)
-4. Request goes to newURL with oldAPIKey → authentication failure
-
-Even with RWMutex, readers can observe partially-updated config state.
+Logz.io API enforces `allow_leading_wildcard: false` on query_string queries. User tries query like `*-service` to find all services, gets error. This is NOT documented clearly in their API docs, only buried in their UI help.
 
 **Why it happens:**
-RWMutex only prevents concurrent reads/writes, not partial reads across field updates. If reload updates multiple fields, readers may see:
-- Some old fields, some new fields (torn reads)
-- Config in invalid intermediate state (e.g., URL points to prod but timeout is still dev value)
+Leading wildcards require scanning every term in the index (extremely expensive). Logz.io disables this for performance/cost reasons. Standard Elasticsearch clients default to allowing it, creating mismatch with Logz.io API expectations.
 
 **Consequences:**
-- Intermittent request failures during config reload
-- Authentication errors with mismatched credentials
-- Timeouts with wrong timeout values
-- Silent data corruption if config fields are interdependent
-- Difficult to reproduce (timing-sensitive)
+- MCP tool queries fail with cryptic errors
+- Users familiar with Elasticsearch expect this to work
+- Workarounds (use filters, analyzed fields) are non-obvious
+- Degrades user experience of AI assistant tools
 
 **Prevention:**
-Use **atomic pointer swap pattern**:
-
-```go
-type Config struct {
-    // config fields
-}
-
-type HotReloadable struct {
-    config atomic.Value // stores *Config
-}
-
-func (h *HotReloadable) Get() *Config {
-    return h.config.Load().(*Config)
-}
-
-func (h *HotReloadable) Reload(newConfig *Config) {
-    // Validate newConfig first
-    if err := newConfig.Validate(); err != nil {
-        log.Warn("Config validation failed, keeping old config", "error", err)
-        return
-    }
-
-    // Single atomic swap - readers see old OR new, never partial
-    h.config.Store(newConfig)
-}
-```
-
-Additional safeguards:
-1. **Validate before swap:** Never store invalid config
-2. **Deep copy on read if mutating:** Prevent readers from mutating shared config
-3. **Version numbering:** Include config version for debugging
-4. **Rollback on partial failure:** If plugin initialization fails with new config, revert to old
+1. **Document leading wildcard limitation prominently** in MCP tool descriptions
+2. **Validate queries before sending to API** - Reject leading wildcards with helpful error
+3. **Suggest alternatives in error message** - "Use field filters instead of leading wildcards"
+4. **Pre-query field mapping check** - Identify analyzed fields that support tokenized search
+5. **Add query builder helper** that constructs valid Logz.io queries
 
 **Detection:**
-Warning signs:
-- Planning to use `sync.RWMutex` with multi-field config struct
-- Reload logic updates fields one-by-one
-- No validation before applying new config
-- No rollback mechanism for failed reloads
+- Warning sign: API returns 400 errors on wildcard queries
+- Test: Attempt query with leading wildcard, verify helpful error message
 
-**Phase mapping:**
-Phase 1 (Config Hot-Reload) must use atomic swap from day 1. Retrofitting is painful.
+**References:**
+- [Logz.io Wildcard Searches](https://docs.logz.io/kibana/wildcards/)
+- [Logz.io Search Logs API](https://api-docs.logz.io/docs/logz/search/)
+- [Elasticsearch Query DSL Guide](https://logz.io/blog/elasticsearch-queries/)
 
-**Confidence:** HIGH (verified by Go docs, production guidance, atomic package documentation)
-
-**Sources:**
-- [Golang Hot Configuration Reload](https://www.openmymind.net/Golang-Hot-Configuration-Reload/)
-- [Mastering Go Atomic Operations](https://jsschools.com/golang/mastering-go-atomic-operations-build-high-perform/)
-- [aah framework hot-reload implementation](https://github.com/go-aah/docs/blob/v0.12/configuration-hot-reload.md)
+**Which phase:**
+Phase 3 (MCP Tool Implementation) - Query validation layer before API client calls
 
 ---
 
-### CRITICAL-4: Template Drift Without Rebalancing Mechanism
+### Pitfall 4: Scroll API Context Expiration After 20 Minutes
 
 **What goes wrong:**
-Log formats evolve over time (syntactic drift): new services start emitting logs, existing services change log formats during deployments, dependencies upgrade and change message structure. Template miners trained on old logs fail to recognize new patterns, causing:
-- Template explosion as drift occurs
-- Accuracy degradation from 90%+ to <70%
-- False "new pattern" alerts (actually old pattern with new format)
-- Stale templates never merged with similar new ones
+Logz.io scroll API contexts expire after 20 minutes. If MCP tool takes >20min to process results (e.g., pattern mining large dataset), scroll_id becomes invalid. Subsequent scroll requests fail with "expired scroll ID" error, and you lose your pagination state.
 
 **Why it happens:**
-Initial clustering creates boundaries. New logs that are semantically similar but syntactically different (e.g., "ERROR: connection timeout" becomes "ERROR connection timeout" after log library upgrade) land in separate clusters. Without rebalancing, these never merge.
+Scroll contexts hold cluster resources (search state, results cache). 20-minute timeout is aggressive compared to Elasticsearch default (1 minute, but adjustable). The project context mentions this limit but doesn't explain implications for long-running operations.
 
 **Consequences:**
-- Production accuracy drops from 90% to <70% after 30-60 days
-- Template count grows unbounded (memory leak)
-- "New pattern" detection becomes useless (too many false positives)
-- Pattern comparison vs previous window breaks (formats don't match)
-- Requires manual intervention or service restart to fix
+- Pattern mining tool fails mid-operation on large namespaces
+- Partial results without clear indication of incompleteness
+- User retries query, hits rate limit, degrades service
+- Cannot paginate through large result sets (>10,000 logs)
 
 **Prevention:**
-1. **Periodic rebalancing:** Drain3's HELP implementation includes iterative rebalancing that merges similar clusters
-2. **Similarity threshold tuning:** Monitor template count growth and adjust similarity threshold if growing too fast
-3. **Template TTL:** Expire templates not seen in N days (configurable, default 30d)
-4. **Ensemble adaptation:** Use directed lifelong learning (maintain ensemble of parsers, add new one when drift detected)
-5. **Drift detection metrics:** Track templates-per-1000-logs ratio, alert if ratio exceeds threshold
+1. **Use scroll API only for result sets needing >1,000 logs** (Logz.io aggregation limit)
+2. **Set aggressive internal timeout (15 min)** - Leave 5min buffer before API expiration
+3. **Implement checkpoint/resume** - Save last processed position, allow restart
+4. **Consider Point-in-Time API** if Logz.io supports it (newer alternative to scroll)
+5. **Stream results to caller incrementally** - Don't buffer entire dataset in memory
+6. **Clear scroll context after use** - Free resources promptly
 
 **Detection:**
-Warning signs:
-- Template count growing linearly over time (not plateau)
-- Most templates created in last 7 days (indicates old templates not being reused)
-- Monitoring Population Stability Index (PSI) shows distribution shift
-- "New pattern" alerts correlate with service deployments (expected) AND with time (drift)
+- Warning sign: Long-running queries (>10min) fail with scroll errors
+- Warning sign: Memory usage grows unbounded during pattern mining
+- Test: Query with scroll, sleep 21 minutes, attempt next page (expect error handling)
 
-**Phase mapping:**
-- Phase 2 (Template Mining): Must include rebalancing mechanism from start
-- Phase 3 (Monitoring): Track drift metrics (template count, PSI, creation timestamps)
-- Phase 4 (Production hardening): Add template TTL and ensemble adaptation
+**References:**
+- [Elasticsearch Scroll API](https://www.elastic.co/guide/en/elasticsearch/reference/current/scroll-api.html)
+- [Elasticsearch Error: Cannot retrieve scroll context](https://pulse.support/kb/elasticsearch-cannot-retrieve-scroll-context-expired-scroll-id)
+- [Elasticsearch Pagination by Scroll API](https://medium.com/eatclub-tech/elasticsearch-pagination-by-scroll-api-68d36b8f4972)
 
-**Confidence:** HIGH (verified by academic research, production log analysis systems, Drain3 documentation)
+**Which phase:**
+Phase 3 (MCP Tool Implementation) - Affects patterns tool querying large datasets
 
-**Sources:**
-- [Adaptive Log Anomaly Detection through Drift Characterization](https://openreview.net/pdf?id=6QXrawkcrX)
-- [HELP: Hierarchical Embeddings-based Log Parsing](https://www.themoonlight.io/en/review/help-hierarchical-embeddings-based-log-parsing)
-- [System Log Parsing with LLMs: A Review](https://arxiv.org/pdf/2504.04877)
+---
+
+### Pitfall 5: Hard-Coded API Region Endpoint
+
+**What goes wrong:**
+Logz.io uses different API endpoints per region (us-east-1, eu-central-1, ap-southeast-2, etc.). If you hard-code the endpoint URL in config or default to US region, users in other regions get authentication failures or routing errors.
+
+**Why it happens:**
+Multi-region architecture is common in observability SaaS, but not obvious to new integrators. The project context mentions "multi-region: different API endpoints" but doesn't specify how to determine correct endpoint. Users expect a single API domain.
+
+**Consequences:**
+- Authentication fails for non-US users (wrong region, token not valid)
+- Higher latency for users far from hard-coded region
+- Data sovereignty violations (EU data routed through US)
+- Support burden ("integration doesn't work for me")
+
+**Prevention:**
+1. **Require region as explicit config parameter** - No defaults, force user to specify
+2. **Validate region against known list** - Reject invalid regions early with helpful message
+3. **Construct endpoint URL from region** - `https://api-{region}.logz.io` pattern
+4. **Document region discovery process** - Link to Logz.io docs showing how to find your region
+5. **Add region to MCP tool descriptions** - Make it visible which instance serves which region
+
+**Detection:**
+- Warning sign: Authentication works in staging but fails in production (different regions)
+- Warning sign: High latency in API calls (cross-region routing)
+- Test: Configure integration for each known region, verify correct endpoint construction
+
+**References:**
+- [Azure APIM Multi-Region Concepts](https://github.com/MicrosoftDocs/azure-docs/blob/main/includes/api-management-multi-region-concepts.md)
+- [Multi-Region API Gateway Deployment Guide](https://www.eyer.ai/blog/multi-region-api-gateway-deployment-guide/)
+
+**Which phase:**
+Phase 1 (Planning & Research) - Architecture decision before implementation starts
+
+---
+
+### Pitfall 6: Secret Value Logging During Debug
+
+**What goes wrong:**
+During development/debugging, developers add log statements that inadvertently log secret values (API tokens, connection strings with passwords). These end up in pod logs, aggregated into VictoriaLogs/Logz.io, and become searchable by anyone with log access.
+
+**Why it happens:**
+Secrets are just strings, no type-level protection. Generic error messages include full context ("failed to connect with token=abc123..."). Structured logging makes it easy to log entire config objects. Existing VictoriaLogs integration has generic logging, no secret scrubbing.
+
+**Consequences:**
+- Credential leakage to logs (security incident)
+- Compliance violation (secrets in plaintext in log storage)
+- Difficult to detect/remediate (secrets may be in historical logs)
+- Incident response requires log deletion (may violate retention policies)
+
+**Prevention:**
+1. **Mark secret fields with struct tags** - `json:"-" yaml:"api_token"` prevents marshaling
+2. **Implement String() method for config** - Return redacted version for logging
+3. **Log config validation only** - Log "token present: yes" not token value
+4. **Add linter rule** - Detect `log.*config` patterns in code review
+5. **Sanitize error messages** - Wrap API errors, strip credentials from strings
+6. **Log audit** - Search existing logs for exposed tokens before production
+
+**Detection:**
+- Warning sign: Log entries contain "token=" or "api_key=" followed by values
+- Test: Grep application logs for known test secret values
+- Test: Log config object, verify secrets are redacted
+
+**References:**
+- [Kubernetes Secrets Management Best Practices](https://www.cncf.io/blog/2023/09/28/kubernetes-security-best-practices-for-kubernetes-secrets-management/)
+- [Kubernetes Secrets: Best Practices](https://blog.gitguardian.com/how-to-handle-secrets-in-kubernetes/)
+
+**Which phase:**
+Phase 2 (Logz.io API Client) - Establish logging patterns before building MCP tools
 
 ---
 
 ## Moderate Pitfalls
 
-Mistakes that cause delays or technical debt.
+Mistakes that cause delays, technical debt, or intermittent issues.
 
-### MODERATE-1: MCP Protocol Version Mismatch Without Graceful Degradation
-
-**What goes wrong:**
-MCP protocol evolves rapidly (2025-03-26, 2025-06-18, 2025-11-25 releases). Plugin built against 2025-06-18 fails to connect to client supporting only 2025-03-26. Instead of graceful degradation, connection fails silently or with cryptic error.
-
-**Why it happens:**
-MCP protocol version negotiation happens during initialization. If server declares only newer protocol version and client supports only older version, they cannot agree on common version. Without explicit handling, this manifests as connection timeout or protocol error.
-
-**Prevention:**
-1. **Multi-version support:** Server declares all supported protocol versions: `["2025-11-25", "2025-06-18", "2025-03-26"]`
-2. **Feature detection, not version checking:** Check for specific capabilities (e.g., async tasks) rather than version string
-3. **Graceful fallback:** If client only supports old version, use subset of features available in that version
-4. **Clear error messages:** If no common version, return human-friendly error: "Server requires MCP 2025-06-18+, client supports 2025-03-26"
-5. **Version in health endpoint:** Expose supported protocol versions in status endpoint for debugging
-
-**Detection:**
-- Planning single protocol version support
-- Hard-coding protocol version checks
-- No fallback for missing features
-- Connection errors without version information
-
-**Phase mapping:**
-Phase 1 (Plugin Architecture): Design plugin interface to support multiple MCP protocol versions.
-
-**Confidence:** MEDIUM (MCP spec documentation, production deployment reports)
-
-**Sources:**
-- [MCP Versioning Specification](https://modelcontextprotocol.io/specification/versioning)
-- [MCP 2025-11-25 Release](https://blog.modelcontextprotocol.io/posts/2025-11-25-first-mcp-anniversary/)
-- [MCP Best Practices](https://modelcontextprotocol.info/docs/best-practices/)
-
----
-
-### MODERATE-2: Cross-Client Template Inconsistency Without Canonical Storage
+### Pitfall 7: Rate Limit Handling Without Exponential Backoff
 
 **What goes wrong:**
-Two clients (IDE plugin, CLI) mine templates independently. Same log message gets template ID "a7b3c4" in IDE but "f9e2d1" in CLI. User asks "show me instances of template a7b3c4" in CLI → no results (CLI doesn't have that ID).
+Logz.io enforces 100 concurrent requests per account. Without exponential backoff, multiple MCP tools hitting rate limit will retry immediately, amplifying the problem. Fixed-delay retries create thundering herd when rate limit resets.
 
 **Why it happens:**
-Template mining is sensitive to:
-- Processing order (first-seen logs influence tree structure)
-- Sampling (if sampling differently, see different representative logs)
-- Algorithm parameters (similarity threshold, max depth)
-- Initialization state (empty tree vs pre-populated)
-
-**Prevention:**
-1. **Canonical storage in MCP server:** Server mines templates once, stores in local cache, serves template IDs to all clients
-2. **Deterministic template IDs:** Hash normalized template string (lowercase, sorted params) → consistent ID across clients
-3. **Template sync protocol:** Clients periodically fetch template mapping from MCP server
-4. **Lazy mining:** Client sends raw logs to MCP server, server returns template ID (mines if new)
-5. **Template versioning:** Include timestamp or version in template ID to track evolution
-
-**Detection:**
-- Planning client-side template mining without coordination
-- Using random IDs or sequential counters for templates
-- No shared storage for template definitions
-- Template IDs in URLs or saved queries (implies long-term identity)
-
-**Phase mapping:**
-Phase 2 (Template Mining): Must decide storage location (MCP server vs client)
-Phase 4 (Multi-client support): Cross-client consistency becomes critical
-
-**Confidence:** MEDIUM (distributed caching research, log analysis best practices)
-
-**Sources:**
-- [Distributed caching with strong consistency](https://www.frontiersin.org/journals/computer-science/articles/10.3389/fcomp.2025.1511161/full)
-- [Cache consistency patterns](https://redis.io/blog/three-ways-to-maintain-cache-consistency/)
-
----
-
-### MODERATE-3: Plugin Testing Without Process Isolation
-
-**What goes wrong:**
-Testing plugin lifecycle (load, execute, reload, unload) in-process using Go's stdlib `plugin` package. Test crashes take down entire test suite. Flaky tests due to global state pollution between plugin loads.
-
-**Why it happens:**
-Stdlib `plugin.Open()` loads `.so` into current process. Cannot unload. Global variables in plugin persist across test cases. Panic in plugin panics test runner.
-
-**Prevention:**
-1. **Use go-plugin (RPC):** Plugins run as subprocesses, crashes are isolated
-2. **Test containers:** Run each plugin test in separate container
-3. **Test utilities:** Use testify suites for setup/teardown
-4. **Resource limits:** Apply cgroups or containers to limit plugin resource usage during tests
-5. **Timeout protection:** Wrap plugin operations in timeouts
-
-Example test structure with go-plugin:
-```go
-func TestPluginLifecycle(t *testing.T) {
-    client := plugin.NewClient(&plugin.ClientConfig{
-        HandshakeConfig: handshake,
-        Plugins:        pluginMap,
-        Cmd:            exec.Command("./my-plugin"),
-    })
-    defer client.Kill()  // Clean shutdown
-
-    rpcClient, err := client.Client()
-    require.NoError(t, err)
-
-    // Test plugin operations - crash won't affect test runner
-}
-```
-
-**Detection:**
-- Using stdlib `plugin` for testing
-- No process isolation in tests
-- Tests share global state
-- Flaky tests that pass individually but fail in suite
-
-**Phase mapping:**
-Phase 1 (Plugin Architecture): Test strategy must align with plugin implementation choice.
-
-**Confidence:** MEDIUM (Go testing best practices, go-plugin documentation)
-
-**Sources:**
-- [Building a Plugin System in Go](https://skoredin.pro/blog/golang/go-plugin-system)
-- [Go integration testing guide](https://mortenvistisen.com/posts/integration-tests-with-docker-and-go)
-- [go-plugin test examples](https://github.com/hashicorp/go-plugin/blob/main/grpc_client_test.go)
-
----
-
-### MODERATE-4: VictoriaLogs Live Tailing Without Rate Limiting
-
-**What goes wrong:**
-Implementing live tail (streaming logs in real-time) with aggressive refresh intervals (e.g., 100ms). High-volume namespaces emit thousands of logs per second. UI becomes unusable, VictoriaLogs CPU spikes, websocket connections timeout.
-
-**Why it happens:**
-VictoriaLogs documentation explicitly warns: "It isn't recommended setting too low value for refresh_interval query arg, since this may increase load on VictoriaLogs without measurable benefits." Live tailing is optimized for human inspection (up to 1K logs/sec), not machine processing.
+Rate limiting is account-wide, not per-instance. Multiple users running Claude Code simultaneously share the same rate limit. Naive retry logic uses fixed delays or immediate retries. HTTP 429 responses don't include Retry-After header (not documented).
 
 **Consequences:**
-- VictoriaLogs CPU usage spikes
-- UI freezes trying to render thousands of log lines
-- Websocket connections saturate network
-- False impression that VictoriaLogs is slow (actually client abuse)
-- User cannot read logs scrolling at 10K/sec anyway
+- Request storms during rate limit periods
+- Degraded service for all users sharing account
+- MCP tools time out waiting for responses
+- Support tickets for "integration randomly fails"
 
 **Prevention:**
-1. **Minimum refresh interval:** 1 second minimum, recommend 5 seconds
-2. **Rate limiting in UI:** If logs exceed 1K/sec, show warning and suggest adding filters
-3. **Auto-pause on high rate:** Pause streaming if rate exceeds threshold, require user action to resume
-4. **Sampling for preview:** Show sampled logs (1 in N) during high-volume periods
-5. **Filter-first UX:** Require namespace + severity filter before enabling live tail
+1. **Implement exponential backoff with jitter** - Start at 1s, double each retry, max 32s
+2. **Track rate limit globally per instance** - Share state across tool invocations
+3. **Fail fast after 3 retries** - Return clear error to user, don't hang
+4. **Add rate limit metrics** - Expose `logzio_rate_limit_hits_total` counter
+5. **Document concurrent request limit** in integration configuration
+6. **Consider request queuing** - Serialize requests to stay under limit
 
 **Detection:**
-- Planning live tail feature
-- No refresh_interval limits in UI
-- No rate detection or warnings
-- Testing with low-volume logs only
+- Warning sign: Bursts of 429 errors in logs
+- Warning sign: Request latency spikes during high usage
+- Test: Send 101 concurrent requests, verify graceful handling
 
-**Phase mapping:**
-Phase 3 (VictoriaLogs Integration): Live tail is nice-to-have, defer to later phase.
-Phase 4 (Progressive Disclosure): Focus on aggregated view first, raw logs last.
+**References:**
+- [Logz.io Metrics Throttling](https://docs.logz.io/docs/user-guide/infrastructure-monitoring/metric-throttling/)
+- [API Rate Limiting Strategies](https://nhonvo.github.io/posts/2025-09-07-api-rate-limiting-and-throttling-strategies/)
+- [Exponential Backoff Strategy](https://substack.thewebscraping.club/p/rate-limit-scraping-exponential-backoff)
 
-**Confidence:** HIGH (VictoriaLogs official documentation)
-
-**Sources:**
-- [VictoriaLogs Querying Documentation](https://docs.victoriametrics.com/victorialogs/querying/)
-- [VictoriaLogs FAQ](https://docs.victoriametrics.com/victorialogs/faq/)
+**Which phase:**
+Phase 2 (Logz.io API Client) - HTTP client configuration with retry middleware
 
 ---
 
-### MODERATE-5: UI State Loss During Progressive Disclosure Navigation
+### Pitfall 8: Result Limit Confusion (1,000 vs 10,000)
 
 **What goes wrong:**
-User is in "Aggregated View" for namespace "api-gateway", drills into a specific template, clicks browser back button → loses all state, returns to global overview. Expected: return to namespace "api-gateway" aggregated view.
+Logz.io has TWO result limits: 1,000 for aggregated results, 10,000 for non-aggregated. MCP tool tries to fetch 5,000 log messages (non-aggregated), expects it to work based on 10,000 limit, but uses aggregation query by accident and gets 1,000-row limit error.
 
 **Why it happens:**
-Progressive disclosure creates three view levels (global → aggregated → full logs). If state is component-local (React useState), navigation resets it. Browser back/forward buttons don't restore component state.
+The distinction between aggregated vs non-aggregated is subtle. Aggregation happens implicitly when grouping by fields. Project context mentions both limits but doesn't explain which queries use which. Easy to hit wrong limit during development.
 
 **Consequences:**
-- Poor UX: users must manually navigate back through levels
-- Lost context: selected filters, time ranges, templates
-- Frustration: "I was just looking at that namespace, now I have to find it again"
-- Users avoid drilling down (defeats purpose of progressive disclosure)
+- Pattern mining tool silently truncates results at 1,000 (uses aggregation)
+- Raw logs tool works fine (non-aggregated, 10,000 limit)
+- Inconsistent behavior across MCP tools confuses users
+- Testing with small datasets misses the problem
 
 **Prevention:**
-1. **URL state:** Encode state in URL query params: `?view=aggregated&namespace=api-gateway&template=a7b3c4`
-2. **React Router with state:** Use `location.state` to pass context between routes
-3. **Global state manager:** Zustand or Context API for cross-component state
-4. **Session storage fallback:** Persist state to sessionStorage as backup
-5. **Breadcrumb navigation:** Show "Global > api-gateway > template-a7b3c4" with clickable links
-
-Example URL structure:
-```
-/logs                                    # Global overview
-/logs?ns=api-gateway                    # Aggregated view for namespace
-/logs?ns=api-gateway&tpl=a7b3c4         # Full logs for template
-```
+1. **Document which MCP tools hit which limit** in tool descriptions
+2. **Validate limit parameter against query type** - Reject invalid combinations early
+3. **Warn user when approaching limit** - "Returning 1,000 of 50,000 matching logs"
+4. **Use scroll API for large result sets** - Avoid hitting limits entirely
+5. **Test with large datasets** - Ensure limits are enforced correctly
 
 **Detection:**
-- Planning multi-level navigation without URL state
-- Using component-local state for navigation context
-- No breadcrumb UI
-- Browser back button not tested
+- Warning sign: Tool returns exactly 1,000 or 10,000 results (suspicious)
+- Test: Query returning >1,000 aggregated results, verify error handling
 
-**Phase mapping:**
-Phase 4 (Progressive Disclosure UI): URL-based state from day 1, hard to retrofit.
+**References:**
+- Project context: "Result limits: 1,000 aggregated, 10,000 non-aggregated"
+- [Elasticsearch Query DSL Guide](https://logz.io/blog/elasticsearch-queries/)
 
-**Confidence:** MEDIUM (SPA best practices, React state management guidance)
+**Which phase:**
+Phase 3 (MCP Tool Implementation) - Query construction and result handling
 
-**Sources:**
-- [State is hard: why SPAs will persist](https://nolanlawson.com/2022/05/29/state-is-hard-why-spas-will-persist/)
-- [React State Management 2025](https://www.developerway.com/posts/react-state-management-2025)
-- [State Management in SPAs](https://blog.pixelfreestudio.com/state-management-in-single-page-applications-spas/)
+---
+
+### Pitfall 9: Analyzed Field Sorting/Aggregation Failure
+
+**What goes wrong:**
+Elasticsearch analyzed fields (like `message`) are tokenized for full-text search. You cannot sort or aggregate on them. MCP tool tries `"sort": [{"message": "asc"}]` and gets cryptic error about "fielddata disabled on text fields."
+
+**Why it happens:**
+Field mapping determines whether field is analyzed (full-text) or keyword (exact match). Logz.io auto-maps many fields, but behavior may differ from self-hosted Elasticsearch. Sorting/aggregation requires keyword fields. Error messages are Elasticsearch internals, not user-friendly.
+
+**Consequences:**
+- MCP tools fail with confusing errors
+- Query construction logic becomes brittle (needs field mapping knowledge)
+- Different behavior between environments (mapping differences)
+
+**Prevention:**
+1. **Fetch field mappings during integration Start()** - Cache them
+2. **Validate sort/aggregation fields against mappings** - Only allow keyword fields
+3. **Provide user-friendly error** - "Cannot sort on 'message' (text field). Use 'message.keyword' instead."
+4. **Document common field suffixes** - `.keyword` for exact match, base field for search
+5. **Add field mapping explorer tool** - Let users discover available fields
+
+**Detection:**
+- Warning sign: Queries fail with "fielddata" or "aggregation not supported" errors
+- Test: Attempt sort on known text field, verify helpful error message
+
+**References:**
+- [Elasticsearch Query DSL Guide](https://logz.io/blog/elasticsearch-queries/)
+- [Understanding Common Elasticsearch Query Errors](https://moldstud.com/articles/p-understanding-common-causes-of-elasticsearch-query-errors-and-how-to-effectively-resolve-them)
+
+**Which phase:**
+Phase 3 (MCP Tool Implementation) - Query builder needs field mapping awareness
+
+---
+
+### Pitfall 10: fsnotify File Descriptor Exhaustion on macOS
+
+**What goes wrong:**
+On macOS, fsnotify uses kqueue, which requires one file descriptor per watched file. If you watch many integration config files (or watch a directory with many files), you hit the OS limit (default 256) and get "too many open files" error.
+
+**Why it happens:**
+macOS kqueue is more resource-intensive than Linux inotify. The existing integration watcher watches a single file, but if deployment pattern involves watching multiple config files (one per integration instance), the problem scales. This is a platform-specific behavior.
+
+**Consequences:**
+- Watcher fails to start on macOS (development machines)
+- Error is cryptic ("too many open files" doesn't mention fsnotify)
+- Works fine on Linux (CI/production), fails on developer laptops
+- Blocks local testing of multi-instance scenarios
+
+**Prevention:**
+1. **Watch parent directory, not individual files** - Single file descriptor for entire directory
+2. **Filter events by filename** - Ignore irrelevant files in directory
+3. **Document macOS ulimit requirement** - `ulimit -n 4096` in setup docs
+4. **Add startup check** - Verify file descriptor limit is sufficient
+5. **Log clear error** - "fsnotify failed: increase file descriptor limit (ulimit -n 4096)"
+
+**Detection:**
+- Warning sign: "too many open files" error during watcher startup
+- Warning sign: Watcher works on Linux CI, fails on macOS laptops
+- Test: Create 300 watched files, verify watcher starts successfully (or errors helpfully)
+
+**References:**
+- [fsnotify GitHub README](https://github.com/fsnotify/fsnotify)
+- [Building a cross-platform File Watcher in Go](https://dev.to/asoseil/building-a-cross-platform-file-watcher-in-go-what-i-learned-from-scratch-1dbj)
+
+**Which phase:**
+Phase 2 (Logz.io API Client) - File watching infrastructure setup
+
+---
+
+### Pitfall 11: Dual-Phase Secret Rotation Not Implemented
+
+**What goes wrong:**
+Old secret is invalidated immediately when new secret is generated. During rotation, there's a window where application has old secret cached but it's already invalid. Requests fail with 401 errors until hot-reload completes.
+
+**Why it happens:**
+Simple rotation (generate new → invalidate old) assumes instant propagation. File-based hot-reload takes time (fsnotify event → reload → HTTP client update). Kubernetes kubelet syncs volumes every 60s by default. Secret provider may not support overlapping active versions.
+
+**Consequences:**
+- Downtime during secret rotation (seconds to minutes)
+- 401 errors visible to users during rotation window
+- Rotation becomes risky, teams avoid doing it regularly
+- Security posture degrades (stale secrets stay active)
+
+**Prevention:**
+1. **Use dual-phase rotation** - Generate new, wait for propagation, invalidate old
+2. **Support multiple active tokens** - Application accepts both old and new during transition
+3. **Implement grace period** - Keep old secret valid for 5 minutes after new one deployed
+4. **Monitor rotation health** - Alert if 401 errors spike during rotation
+5. **Document rotation procedure** - Step-by-step with verification checkpoints
+6. **Test rotation in staging** - Verify zero-downtime before production
+
+**Detection:**
+- Warning sign: 401 errors during known rotation windows
+- Test: Rotate secret while load testing, verify no 401s
+
+**References:**
+- [Zero Downtime Secrets Rotation: 10-Step Guide](https://www.doppler.com/blog/10-step-secrets-rotation-guide)
+- [AWS: Rotate database credentials without restarting containers](https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/rotate-database-credentials-without-restarting-containers.html)
+- [Secrets rotation strategies for long-lived services](https://technori.com/news/secrets-rotation-long-lived-services/)
+
+**Which phase:**
+Phase 2 (Logz.io API Client) - Client initialization and credential refresh logic
 
 ---
 
 ## Minor Pitfalls
 
-Mistakes that cause annoyance but are fixable.
+Mistakes that cause inconvenience but are easily fixable.
 
-### MINOR-1: No Config Validation Before Hot-Reload
+### Pitfall 12: Time Range Default Confusion (Seconds vs Milliseconds)
 
 **What goes wrong:**
-Hot-reload picks up new config file with typo in VictoriaLogs URL: `http://victorialogs:8428/selec` (missing 't' in 'select'). MCP server reloads config, tools break with 404 errors. No warning logged, just silent failure.
+Logz.io API accepts Unix timestamps in milliseconds. Developer defaults to Go's `time.Now().Unix()` (seconds), queries return no results. Error is silent (valid query, just wrong time range).
+
+**Why it happens:**
+Go standard library uses seconds for Unix timestamps. JavaScript uses milliseconds. Elasticsearch can accept both but prefers milliseconds. Easy to forget conversion. Project context doesn't specify which format to use.
+
+**Consequences:**
+- MCP tools return empty results for valid queries
+- Confusing user experience ("I know there are logs in that timeframe")
+- Hard to debug (no error, just wrong results)
 
 **Prevention:**
-1. **Validate before swap:** Parse and validate config completely before applying
-2. **Health check endpoints:** For integrations with base URLs, ping health endpoint before activating
-3. **Dry-run mode:** Test config without applying (config validate command)
-4. **Schema validation:** Use JSON schema or struct tags to enforce required fields
-5. **Keep old config on failure:** Log warning, continue using old config
+1. **Use milliseconds consistently** - Convert at input boundary
+2. **Add unit tests** - Verify timestamp format in queries
+3. **Validate time ranges** - Reject timestamps in the future or too far past
+4. **Log effective time range** - "Querying logs from 2024-01-20T10:00:00Z to 2024-01-20T11:00:00Z"
+5. **Accept both formats, normalize internally** - Check magnitude, convert if needed
 
 **Detection:**
-- No validation in reload path
-- Assuming config is always valid
-- No health checks for external services
+- Warning sign: Queries return 0 results when logs exist
+- Test: Query with known log entry timestamp, verify it's found
 
-**Phase mapping:**
-Phase 1 (Config Hot-Reload): Add validation in initial implementation.
+**References:**
+- [Logz.io Search API](https://api-docs.logz.io/docs/logz/search/)
+
+**Which phase:**
+Phase 3 (MCP Tool Implementation) - Time range parameter handling
 
 ---
 
-### MINOR-2: Overly Deep Progressive Disclosure (>2 Levels)
+### Pitfall 13: Integration Name Used Directly in Tool Names
 
 **What goes wrong:**
-Designing 4+ levels: Global → Namespace → Service → Pod → Template → Instance. User gets lost in navigation, clicks back 5 times to start over.
+If integration name contains spaces or special characters (e.g., "Logz.io Production"), tool name becomes `logzio_Logz.io Production_overview` (invalid MCP tool name). Registration fails.
+
+**Why it happens:**
+The existing VictoriaLogs integration uses name directly in tool name construction: `fmt.Sprintf("victorialogs_%s_overview", v.name)`. Assumes name is kebab-case or snake_case. No validation of integration name format.
+
+**Consequences:**
+- Tool registration fails silently or with cryptic error
+- Integration starts but MCP tools don't work
+- Hard to debug (error is far from name definition)
 
 **Prevention:**
-UX research shows "more than two levels of information disclosure usually negatively affect the user experience." Limit to 3 levels maximum:
-1. Global overview (signals by namespace)
-2. Aggregated view (templates in selected namespace)
-3. Full logs (instances of selected template)
+1. **Sanitize name for tool construction** - Replace spaces with underscores, lowercase
+2. **Validate name at config load** - Reject names with special characters
+3. **Document name format requirement** - "Name must be lowercase alphanumeric with hyphens"
+4. **Add test case** - Verify tool registration with various name formats
+5. **Log generated tool names** - Make it visible what names were registered
 
 **Detection:**
-- UI mockups showing 4+ navigation levels
-- No breadcrumb UI (indicates too many levels)
-- User testing shows confusion
+- Warning sign: Integration starts but `mcp tools list` doesn't show expected tools
+- Test: Configure integration with name containing spaces, verify error or sanitization
 
-**Phase mapping:**
-Phase 4 (Progressive Disclosure): Design review before implementation.
+**References:**
+- Existing code: `/home/moritz/dev/spectre-via-ssh/internal/integration/victorialogs/victorialogs.go` line 163
 
-**Confidence:** HIGH (UX research on progressive disclosure)
-
-**Sources:**
-- [Progressive Disclosure Examples](https://medium.com/@Flowmapp/progressive-disclosure-10-great-examples-to-check-5e54c5e0b5b6)
-- [Progressive Disclosure in UX Design](https://blog.logrocket.com/ux-design/progressive-disclosure-ux-types-use-cases/)
+**Which phase:**
+Phase 3 (MCP Tool Implementation) - Tool registration logic
 
 ---
 
-### MINOR-3: Template Normalization Inconsistency
+### Pitfall 14: Debounce Too Short for Kubernetes Secret Updates
 
 **What goes wrong:**
-Normalizing UUIDs to wildcards: `req-550e8400-e29b-41d4-a716-446655440000` → `req-{uuid}`. But IPv6 addresses also have hyphens: `2001:0db8:85a3:0000:0000:8a2e:0370:7334`. Naive UUID regex matches IPv6, breaks template.
+Integration watcher uses 500ms debounce (existing code line 59). Kubernetes Secret volume updates trigger multiple events (Remove → Create → Write) within 1 second as kubelet syncs. Reload triggers multiple times, causing unnecessary restarts.
+
+**Why it happens:**
+Kubelet sync isn't atomic from fsnotify's perspective. Atomic writer updates symlink, then rewrites target file. 500ms debounce is tuned for editor saves (many fast events), not Kubernetes volume updates (slower but still multiple events).
+
+**Consequences:**
+- Secret reload triggers 2-3 times for single update
+- Unnecessary churn in HTTP client reconnection
+- Metrics show inflated reload counts
+- Log noise
 
 **Prevention:**
-1. **Order normalization rules:** Most specific first (IPv6 before UUID)
-2. **Use proven masking libraries:** Don't write regex from scratch
-3. **Test with edge cases:** IPv6, scientific notation, negative numbers, etc.
-4. **Drain3 built-in masking:** Includes battle-tested patterns
-5. **Validate templates:** Sample 1000 logs, ensure template coverage is reasonable (>80%)
+1. **Increase debounce to 2 seconds** for Kubernetes environments
+2. **Make debounce configurable** - Different values for dev (editor) vs prod (K8s)
+3. **Add reload deduplication** - Track content hash, skip if unchanged
+4. **Log debounce behavior** - "Received 3 events, coalesced into 1 reload"
+5. **Test with real Kubernetes Secret updates** - Not just local file edits
 
 **Detection:**
-- Writing custom normalization regex
-- No test cases for edge cases
-- Template validation shows unexpected patterns
+- Warning sign: Multiple reload log entries within seconds
+- Test: Update secret once, verify exactly one reload (after debounce period)
 
-**Phase mapping:**
-Phase 2 (Template Mining): Use proven library from start.
+**References:**
+- Existing code: `/home/moritz/dev/spectre-via-ssh/internal/config/integration_watcher.go` line 59
+- [fsnotify Issue #372](https://github.com/fsnotify/fsnotify/issues/372)
+
+**Which phase:**
+Phase 2 (Logz.io API Client) - Watcher configuration tuning
 
 ---
 
-### MINOR-4: Ignoring VictoriaLogs Time Filter Optimization
+### Pitfall 15: No Index Specification (Defaults May Surprise)
 
 **What goes wrong:**
-Querying "show logs with severity=ERROR for the last 7 days" without explicit time filter, relying only on day_range. VictoriaLogs scans all time partitions unnecessarily.
+Logz.io search API documentation says "two consecutive indexes only (today + yesterday default)." If user expects to query logs from 3 days ago, they get empty results. API silently ignores logs outside the default index range.
+
+**Why it happens:**
+Elasticsearch uses date-based index rotation. Logz.io default is recent 2 days for performance. Querying older logs requires explicit index specification. This is mentioned in project context but not enforced in API client.
+
+**Consequences:**
+- Historical log queries return incomplete results
+- Users don't understand why old logs aren't visible
+- Workaround (specify indexes) is not discoverable
 
 **Prevention:**
-VictoriaLogs docs recommend: "it is recommended to specify a regular time filter additionally to the day_range filter." Combine both:
-```
-_time:[now-7d, now] AND day_range[now-7d, now] AND severity:ERROR
-```
+1. **Validate time range against index coverage** - Warn if querying >2 days
+2. **Auto-calculate index names from time range** - `logzio-YYYY-MM-DD` pattern
+3. **Document index limitation prominently** - In MCP tool descriptions
+4. **Add index parameter to MCP tools** - Advanced users can override
+5. **Log effective index range** - "Querying indexes: logzio-2024-01-20, logzio-2024-01-21"
 
 **Detection:**
-- Using day_range without _time filter
-- Slow queries despite correct day_range
+- Warning sign: Historical queries (>2 days ago) return 0 results
+- Test: Query with 3-day-old timestamp, verify warning or index specification
 
-**Phase mapping:**
-Phase 3 (VictoriaLogs Integration): Query construction must follow docs.
+**References:**
+- Project context: "Two consecutive indexes only (today + yesterday default)"
+- [Logz.io Search API](https://api-docs.logz.io/docs/logz/search/)
 
-**Confidence:** HIGH (VictoriaLogs official documentation)
+**Which phase:**
+Phase 3 (MCP Tool Implementation) - Query construction with index awareness
 
-**Sources:**
-- [VictoriaLogs Querying Documentation](https://docs.victoriametrics.com/victorialogs/querying/)
+---
+
+## Secret Management Pitfalls
+
+Security-specific issues to avoid.
+
+### Pitfall 16: Secret Leakage in Error Messages
+
+**What goes wrong:**
+HTTP client error includes full request details: `GET https://api.logz.io/logs?X-API-TOKEN=abc123...`. Error is logged, bubbles up to MCP tool response, ends up in Claude Code conversation history.
+
+**Why it happens:**
+Standard HTTP libraries include full request in errors for debugging. Headers contain credentials. Error wrapping preserves original error. No sanitization layer between HTTP client and caller.
+
+**Consequences:**
+- API token visible in application logs
+- Token visible in MCP tool error responses
+- Token may be transmitted to Anthropic via Claude Code (conversation history)
+- Credential rotation required if leak detected
+
+**Prevention:**
+1. **Implement HTTP client error wrapper** - Strip `X-API-TOKEN` header from errors
+2. **Redact credentials in request logs** - `X-API-TOKEN: [REDACTED]`
+3. **Never log full HTTP requests** - Log method + path only, not headers
+4. **Sanitize errors before MCP response** - Generic "authentication failed" message
+5. **Add security test** - Simulate auth failure, verify token not in error
+
+**Detection:**
+- Warning sign: Grep logs for "X-API-TOKEN" finds matches
+- Test: Trigger auth error, verify token not in error message
+
+**References:**
+- [Kubernetes Secrets Management Best Practices](https://www.cncf.io/blog/2023/09/28/kubernetes-security-best-practices-for-kubernetes-secrets-management/)
+
+**Which phase:**
+Phase 2 (Logz.io API Client) - HTTP client error handling
+
+---
+
+### Pitfall 17: Base64 Encoding Is Not Encryption
+
+**What goes wrong:**
+Kubernetes Secrets are base64-encoded, not encrypted. Developer assumes this provides security, stores API token in Secret without enabling encryption-at-rest in etcd. Anyone with etcd access can decode secrets.
+
+**Why it happens:**
+Base64 looks like encryption (random characters). Kubernetes documentation mentions "Secrets" which implies security. Encryption-at-rest is not enabled by default. This is a Kubernetes platform issue, but affects integration security.
+
+**Consequences:**
+- Secrets vulnerable to etcd compromise
+- Compliance violations (secrets stored in plaintext)
+- Cluster-wide security issue (affects all secrets)
+
+**Prevention:**
+1. **Document encryption-at-rest requirement** - In deployment docs
+2. **Recommend External Secrets Operator** - Fetch from Vault/AWS Secrets Manager
+3. **Verify encryption during setup** - Check etcd encryption config
+4. **Use least-privilege RBAC** - Limit who can read Secrets
+5. **Consider sealed secrets** - Encrypt before committing to Git
+
+**Detection:**
+- Check: `kubectl describe secret` shows base64 data (not encrypted)
+- Check: etcd encryption provider config exists
+- Audit: Review who has `get secrets` RBAC permission
+
+**References:**
+- [Kubernetes Secrets Good Practices](https://kubernetes.io/docs/concepts/security/secrets-good-practices/)
+- [Kubernetes Secrets Management Limitations](https://www.groundcover.com/blog/kubernetes-secret-management)
+
+**Which phase:**
+Phase 1 (Planning & Research) - Security architecture decision, documented before implementation
+
+---
+
+### Pitfall 18: Secret Rotation Without Monitoring
+
+**What goes wrong:**
+Secret is rotated (new token deployed), but no monitoring verifies that rotation succeeded. Old token expired, new token has typo, all API calls fail silently until next health check (could be minutes).
+
+**Why it happens:**
+Rotation is treated as deployment task, not operational concern. No metrics track rotation events. Health checks run infrequently (default 30s-60s). Gap between rotation and detection creates downtime.
+
+**Consequences:**
+- Undetected authentication failures during rotation
+- Users experience intermittent errors
+- Difficult to correlate errors with rotation events
+
+**Prevention:**
+1. **Add rotation event metric** - `logzio_secret_reload_total{status="success|failure"}`
+2. **Trigger health check immediately after reload** - Don't wait for next periodic check
+3. **Alert on reload failures** - Prometheus alert: `rate(logzio_secret_reload_total{status="failure"}) > 0`
+4. **Log before/after token prefix** - "Reloaded token: old=abc123..., new=def456..." (first 6 chars only)
+5. **Test connection after reload** - Verify new credentials work before considering reload successful
+
+**Detection:**
+- Warning sign: No metrics for secret reload events
+- Test: Rotate to invalid token, verify immediate health check failure
+
+**References:**
+- [Zero Downtime Secrets Rotation](https://www.doppler.com/blog/10-step-secrets-rotation-guide)
+
+**Which phase:**
+Phase 2 (Logz.io API Client) - Metrics and health check integration
 
 ---
 
 ## Phase-Specific Warnings
 
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| Plugin Architecture | Using stdlib `plugin` instead of go-plugin | Research go-plugin first, understand RPC trade-offs |
-| Config Hot-Reload | RWMutex instead of atomic.Value | Use atomic pointer swap pattern from day 1 |
-| Template Mining | Choosing Drain without understanding variable-starting logs | Test with production log samples, validate template count |
-| VictoriaLogs API | Hardcoding protocol version, no multi-version support | Support multiple MCP protocol versions |
-| Progressive Disclosure | Component-local state without URL persistence | Encode state in URL from day 1 |
-| Cross-Client Consistency | Client-side template mining without canonical storage | Store templates in MCP server, use deterministic IDs |
-| Testing Strategy | In-process plugin testing without isolation | Align testing with plugin architecture (RPC = subprocess tests) |
-| Live Tailing | No rate limiting on websocket streaming | Min 1s refresh, warn at >1K logs/sec |
-| Template Stability | No rebalancing mechanism for drift | Use Drain3 with iterative rebalancing |
-| Config Validation | Accepting invalid config during hot-reload | Validate before swap, keep old config on failure |
+Recommendations for which phases need deeper investigation or risk mitigation.
+
+| Phase | Likely Pitfall | Mitigation Strategy |
+|-------|---------------|---------------------|
+| **Phase 1: Planning** | Multi-region config complexity | Research region discovery, document region parameter requirement explicitly |
+| **Phase 2: API Client** | Kubernetes Secret subPath + fsnotify atomic writes | Prototype secret hot-reload early, test with real K8s Secret volume (not local file) |
+| **Phase 2: API Client** | Secret leakage in logs | Implement sanitization/redaction before any MCP tool integration |
+| **Phase 2: API Client** | Rate limiting without backoff | Add retry middleware to HTTP client with exponential backoff + jitter |
+| **Phase 3: MCP Tools** | Leading wildcard queries fail | Add query validator that rejects leading wildcards with helpful error |
+| **Phase 3: MCP Tools** | Scroll API expiration on large datasets | Set 15min timeout for pattern mining, implement checkpoint/resume |
+| **Phase 3: MCP Tools** | Result limit confusion (1K vs 10K) | Document which tools use aggregation, validate limits against query type |
+| **Phase 4: Testing** | Integration tests miss K8s-specific issues | Add E2E test with real Kubernetes Secret mount (not mocked file) |
+| **Phase 4: Testing** | Rate limit testing requires shared state | Mock rate limiter in tests, verify backoff behavior without hitting real API |
 
 ---
 
-## Research Confidence Assessment
+## Open Questions for Further Research
 
-| Area | Confidence | Notes |
-|------|-----------|-------|
-| Go Plugin Systems | HIGH | Verified with Go issue tracker, HashiCorp docs, production reports |
-| Template Mining | HIGH | Verified with academic papers, Drain3 docs, production stability reports |
-| Config Hot-Reload | HIGH | Verified with Go atomic package docs, production guides |
-| Progressive Disclosure | MEDIUM | Verified with UX research, React state management guides (web search only) |
-| VictoriaLogs | HIGH | Verified with official documentation |
-| MCP Protocol | MEDIUM | Verified with spec documentation (web search only) |
-| Cross-Client Caching | MEDIUM | Verified with distributed systems research (web search only) |
+1. **Does Logz.io API return Retry-After header on 429 responses?** - Not documented, need to test
+2. **What's the exact index naming pattern?** - `logzio-YYYY-MM-DD` is assumed, need to verify
+3. **Can we use Point-in-Time API instead of scroll?** - Newer Elasticsearch feature, may not be available
+4. **Does Logz.io support multiple active API tokens?** - Critical for dual-phase rotation
+5. **What's the actual kubelet Secret sync period?** - Default is 60s, but can be configured
+6. **How to discover user's Logz.io region programmatically?** - May need to parse account details
+
+---
+
+## Confidence Assessment
+
+| Area | Confidence | Source | Notes |
+|------|-----------|--------|-------|
+| **Elasticsearch DSL limitations** | HIGH | Official Logz.io docs, Elasticsearch reference | Leading wildcard restriction confirmed in docs |
+| **Kubernetes Secret mechanics** | HIGH | Kubernetes docs, community blog posts | subPath limitation well-documented |
+| **fsnotify edge cases** | HIGH | fsnotify GitHub issues, community experiences | Atomic write problem is known issue #372 |
+| **Scroll API behavior** | MEDIUM | Elasticsearch docs, Stack Overflow | 20min timeout from project context, not directly verified |
+| **Rate limiting details** | LOW | Logz.io docs (metrics only, not logs API) | 100 concurrent requests from project context, needs verification |
+| **Multi-region configuration** | MEDIUM | Generic multi-region patterns, not Logz.io-specific | Need to verify exact endpoint format |
+| **Secret rotation patterns** | HIGH | Multiple authoritative sources (AWS, HashiCorp, Doppler) | Dual-phase rotation well-established pattern |
+| **Result limits** | MEDIUM | Project context states 1K/10K | Need to verify if aggregation detection is automatic |
+
+---
+
+## Summary: Top 5 Pitfalls to Address First
+
+1. **Kubernetes Secret subPath breaks hot-reload** - Critical for production deployments, affects security posture
+2. **fsnotify atomic write edge cases** - Silent failures hard to debug, blocks reliable secret rotation
+3. **Leading wildcard queries disabled** - User-facing errors, degrades MCP tool experience
+4. **Secret value leakage in logs/errors** - Security incident risk, compliance violation
+5. **Multi-region endpoint hard-coding** - Breaks integration for non-US users, support burden
+
+These five pitfalls represent the highest risk and should be addressed in Phase 2 (API Client) before implementing MCP tools in Phase 3.
 
 ---
 
 ## Sources
 
-### Go Plugin Systems
-- [Go issue #27751: plugin panic with different package versions](https://github.com/golang/go/issues/27751)
-- [Go issue #31354: plugin versions in modules](https://github.com/golang/go/issues/31354)
-- [Things to avoid while using Golang plugins](https://alperkose.medium.com/things-to-avoid-while-using-golang-plugins-f34c0a636e8)
-- [HashiCorp go-plugin](https://github.com/hashicorp/go-plugin)
-- [RPC-based plugins in Go](https://eli.thegreenplace.net/2023/rpc-based-plugins-in-go/)
-- [HashiCorp Plugin System Design](https://zerofruit-web3.medium.com/hashicorp-plugin-system-design-and-implementation-5f939f09e3b3)
+**Logz.io-Specific:**
+- [Logz.io Wildcard Searches](https://docs.logz.io/kibana/wildcards/)
+- [Logz.io Search Logs API](https://api-docs.logz.io/docs/logz/search/)
+- [Elasticsearch Query DSL Guide by Logz.io](https://logz.io/blog/elasticsearch-queries/)
+- [Logz.io Metrics Throttling](https://docs.logz.io/docs/user-guide/infrastructure-monitoring/metric-throttling/)
 
-### Log Template Mining
-- [Investigating and Improving Log Parsing in Practice](https://yanmeng.github.io/papers/FSE221.pdf)
-- [Drain3: Robust streaming log template miner](https://github.com/logpai/Drain3)
-- [XDrain: Effective log parsing with fixed-depth forest](https://www.sciencedirect.com/science/article/abs/pii/S0950584924001514)
-- [Tools and Benchmarks for Automated Log Parsing](https://arxiv.org/pdf/1811.03509)
-- [Adaptive Log Anomaly Detection through Drift Characterization](https://openreview.net/pdf?id=6QXrawkcrX)
-- [HELP: Hierarchical Embeddings-based Log Parsing](https://www.themoonlight.io/en/review/help-hierarchical-embeddings-based-log-parsing)
-- [System Log Parsing with LLMs: A Review](https://arxiv.org/pdf/2504.04877)
+**Elasticsearch DSL:**
+- [Elasticsearch Query DSL](https://www.elastic.co/docs/explore-analyze/query-filter/languages/querydsl)
+- [Query string query Reference](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html)
+- [Understanding Elasticsearch Query Errors](https://moldstud.com/articles/p-understanding-common-causes-of-elasticsearch-query-errors-and-how-to-effectively-resolve-them)
+- [Elasticsearch Scroll API](https://www.elastic.co/guide/en/elasticsearch/reference/current/scroll-api.html)
+- [Elasticsearch Error: Expired Scroll ID](https://pulse.support/kb/elasticsearch-cannot-retrieve-scroll-context-expired-scroll-id)
 
-### Configuration Hot-Reload
-- [Golang Hot Configuration Reload](https://www.openmymind.net/Golang-Hot-Configuration-Reload/)
-- [Mastering Go Atomic Operations](https://jsschools.com/golang/mastering-go-atomic-operations-build-high-perform/)
-- [aah framework hot-reload implementation](https://github.com/go-aah/docs/blob/v0.12/configuration-hot-reload.md)
+**Kubernetes Secrets:**
+- [Kubernetes Secrets Good Practices](https://kubernetes.io/docs/concepts/security/secrets-good-practices/)
+- [Secrets Management in Kubernetes Best Practices](https://dev.to/rubixkube/secrets-management-in-kubernetes-best-practices-for-security-1df0)
+- [Kubernetes Secret Management Limitations](https://www.groundcover.com/blog/kubernetes-secret-management)
+- [Kubernetes Secrets: Best Practices (GitGuardian)](https://blog.gitguardian.com/how-to-handle-secrets-in-kubernetes/)
+- [Kubernetes CNCF: Secrets Management Best Practices](https://www.cncf.io/blog/2023/09/28/kubernetes-security-best-practices-for-kubernetes-secrets-management/)
+- [Kubernetes Secrets and Pod Restarts](https://blog.ascendingdc.com/kubernetes-secrets-and-pod-restarts)
+- [K8s Deployment Automatic Rollout Restart](https://igboie.medium.com/k8s-deployment-automatic-rollout-restart-when-referenced-secrets-and-configmaps-are-updated-0c74c85c1b4a)
+- [Secrets Store CSI Driver Known Limitations](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations)
 
-### Progressive Disclosure & State Management
-- [State is hard: why SPAs will persist](https://nolanlawson.com/2022/05/29/state-is-hard-why-spas-will-persist/)
-- [React State Management 2025](https://www.developerway.com/posts/react-state-management-2025)
-- [State Management in SPAs](https://blog.pixelfreestudio.com/state-management-in-single-page-applications-spas/)
-- [Progressive Disclosure Examples](https://medium.com/@Flowmapp/progressive-disclosure-10-great-examples-to-check-5e54c5e0b5b6)
-- [Progressive Disclosure in UX Design](https://blog.logrocket.com/ux-design/progressive-disclosure-ux-types-use-cases/)
+**Secret Rotation:**
+- [Zero Downtime Secrets Rotation: 10-Step Guide (Doppler)](https://www.doppler.com/blog/10-step-secrets-rotation-guide)
+- [AWS: Rotate database credentials without restarting containers](https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/rotate-database-credentials-without-restarting-containers.html)
+- [Secrets rotation strategies for long-lived services](https://technori.com/news/secrets-rotation-long-lived-services/)
+- [Orchestrating Automated Secret Rotation](https://medium.com/@eren.c.uysal/orchestrating-automated-secret-rotation-for-custom-applications-67d0869d6c5f)
+- [HashiCorp: Automated secrets rotation](https://developer.hashicorp.com/hcp/docs/vault-secrets/auto-rotation)
 
-### VictoriaLogs
-- [VictoriaLogs Documentation](https://docs.victoriametrics.com/victorialogs/)
-- [VictoriaLogs Querying](https://docs.victoriametrics.com/victorialogs/querying/)
-- [VictoriaLogs FAQ](https://docs.victoriametrics.com/victorialogs/faq/)
-- [VictoriaLogs vs Loki Benchmarks](https://www.truefoundry.com/blog/victorialogs-vs-loki)
+**fsnotify:**
+- [fsnotify Issue #372: Robustly watching a single file](https://github.com/fsnotify/fsnotify/issues/372)
+- [fsnotify GitHub Repository](https://github.com/fsnotify/fsnotify)
+- [Building a cross-platform File Watcher in Go](https://dev.to/asoseil/building-a-cross-platform-file-watcher-in-go-what-i-learned-from-scratch-1dbj)
 
-### MCP Protocol
-- [MCP Versioning Specification](https://modelcontextprotocol.io/specification/versioning)
-- [MCP 2025-11-25 Release](https://blog.modelcontextprotocol.io/posts/2025-11-25-first-mcp-anniversary/)
-- [MCP Best Practices](https://modelcontextprotocol.info/docs/best-practices/)
+**Rate Limiting:**
+- [API Rate Limiting and Throttling Strategies](https://nhonvo.github.io/posts/2025-09-07-api-rate-limiting-and-throttling-strategies/)
+- [Exponential Backoff Strategy](https://substack.thewebscraping.club/p/rate-limit-scraping-exponential-backoff)
+- [API Rate Limits Best Practices 2025](https://orq.ai/blog/api-rate-limit)
 
-### Distributed Caching & Consistency
-- [Distributed caching with strong consistency](https://www.frontiersin.org/journals/computer-science/articles/10.3389/fcomp.2025.1511161/full)
-- [Cache consistency patterns](https://redis.io/blog/three-ways-to-maintain-cache-consistency/)
-- [Comparative Analysis of Distributed Caching Algorithms](https://arxiv.org/html/2504.02220v1)
-
-### Testing & Development
-- [Building a Plugin System in Go](https://skoredin.pro/blog/golang/go-plugin-system)
-- [Go integration testing guide](https://mortenvistisen.com/posts/integration-tests-with-docker-and-go)
-- [go-plugin test examples](https://github.com/hashicorp/go-plugin/blob/main/grpc_client_test.go)
+**Multi-Region:**
+- [Azure APIM Multi-Region Concepts](https://github.com/MicrosoftDocs/azure-docs/blob/main/includes/api-management-multi-region-concepts.md)
+- [Multi-Region API Gateway Deployment Guide](https://www.eyer.ai/blog/multi-region-api-gateway-deployment-guide/)
+- [Google Cloud: Multi-region deployments for API Gateway](https://cloud.google.com/api-gateway/docs/multi-region-deployment)

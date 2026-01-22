@@ -1,940 +1,1005 @@
-# Architecture Patterns: MCP Plugin System + Log Processing Integration
+# Architecture Research: Logz.io Integration + Secret Management
 
-**Domain:** MCP server extension with plugin system and VictoriaLogs integration
-**Researched:** 2026-01-20
-**Confidence:** HIGH (existing codebase + verified external patterns)
+**Project:** Spectre v1.2 - Logz.io Integration
+**Researched:** 2026-01-22
+**Confidence:** HIGH
 
 ## Executive Summary
 
-This architecture extends the existing Spectre MCP server with a plugin system for dynamic tool registration and a log processing pipeline for VictoriaLogs integration. The design follows interface-based plugin patterns proven in Go ecosystems, separates concerns between log ingestion/mining/storage, and enables hot-reload for configuration changes.
+Logz.io integration follows the existing VictoriaLogs plugin pattern with three architectural additions:
+1. **Multi-region client** with region-aware endpoint selection
+2. **Secret file watcher** for hot-reload of API tokens from Kubernetes-mounted secrets
+3. **Elasticsearch DSL query builder** instead of LogsQL
 
-**Key Decision:** Use compile-time plugin registration (not runtime .so loading) for reliability and testability. Interface-based registry pattern with config-driven enablement.
+The architecture leverages existing patterns (factory registry, integration lifecycle, hot-reload via fsnotify) with zero changes to core plugin infrastructure. Secret management follows Kubernetes-native volume mount pattern with application-level file watching.
 
-## Recommended Architecture
+## Component Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          MCP Server Layer                            │
-│  ┌────────────────────────────────────────────────────────────────┐ │
-│  │  MCP Server (existing)                                         │ │
-│  │  - Tool registration                                           │ │
-│  │  - Prompt registration                                         │ │
-│  └────────────────────────────────────────────────────────────────┘ │
-│           │ uses                                                     │
-│           ▼                                                          │
-│  ┌────────────────────────────────────────────────────────────────┐ │
-│  │  Plugin Manager (NEW)                                          │ │
-│  │  - Interface-based registry                                    │ │
-│  │  - Config-driven enablement                                    │ │
-│  │  - Dynamic tool/prompt registration                            │ │
-│  └────────────────────────────────────────────────────────────────┘ │
-│           │ manages                                                  │
-│           ▼                                                          │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────┐  │
-│  │ Kubernetes Plugin│  │ VictoriaLogs     │  │  Future Plugin  │  │
-│  │ (existing tools) │  │ Plugin (NEW)     │  │  (template)     │  │
-│  └──────────────────┘  └──────────────────┘  └─────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Log Processing Pipeline (NEW)                     │
-│                                                                       │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  1. Ingestion Layer                                           │  │
-│  │  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐ │  │
-│  │  │ Kubernetes   │────▶│  Normalizer  │────▶│   Buffer     │ │  │
-│  │  │ Event Stream │     │  (timestamp, │     │  (channel)   │ │  │
-│  │  │              │     │   metadata)  │     │              │ │  │
-│  │  └──────────────┘     └──────────────┘     └──────────────┘ │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-│           │                                                          │
-│           ▼                                                          │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  2. Processing Layer                                          │  │
-│  │  ┌──────────────┐     ┌──────────────┐                       │  │
-│  │  │ Template     │────▶│  Template    │                       │  │
-│  │  │ Miner        │     │  Cache       │                       │  │
-│  │  │ (Drain3-like)│     │  (in-memory) │                       │  │
-│  │  └──────────────┘     └──────────────┘                       │  │
-│  │        │                     │                                │  │
-│  │        │                     │ template lookup                │  │
-│  │        ▼                     ▼                                │  │
-│  │  ┌──────────────────────────────────────┐                    │  │
-│  │  │  Structured Log Builder              │                    │  │
-│  │  │  - Apply template                    │                    │  │
-│  │  │  - Extract variables                 │                    │  │
-│  │  │  - Add metadata                      │                    │  │
-│  │  └──────────────────────────────────────┘                    │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-│           │                                                          │
-│           ▼                                                          │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  3. Storage Layer                                             │  │
-│  │  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐ │  │
-│  │  │ Batch        │────▶│ VictoriaLogs │────▶│  Persistent  │ │  │
-│  │  │ Aggregator   │     │ HTTP Client  │     │  Template    │ │  │
-│  │  │              │     │ (NDJSON)     │     │  Store       │ │  │
-│  │  └──────────────┘     └──────────────┘     └──────────────┘ │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Configuration Hot-Reload (NEW)                    │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  File Watcher (fsnotify)                                      │  │
-│  │  - Watches config files (watcher.yaml + integrations.yaml)    │  │
-│  │  - Debounces rapid changes (100ms window)                     │  │
-│  │  - Triggers SIGHUP on change                                  │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-│           │                                                          │
-│           ▼                                                          │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  Signal Handler                                               │  │
-│  │  - SIGHUP: Reload config, re-register plugins                │  │
-│  │  - SIGTERM/SIGINT: Graceful shutdown                          │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      Integration Manager                         │
+│  (internal/integration/manager.go)                              │
+│                                                                   │
+│  - Factory registry for integration types                        │
+│  - Config hot-reload via fsnotify (integrations.yaml)          │
+│  - Lifecycle orchestration (Start/Stop/Health/RegisterTools)   │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         │ Creates instances via factory
+                         │
+        ┌────────────────┴────────────────┐
+        │                                  │
+        v                                  v
+┌──────────────────┐            ┌──────────────────────┐
+│  VictoriaLogs    │            │    Logz.io           │
+│  Integration     │            │    Integration       │ ◄── NEW
+│                  │            │                      │
+│  - Client        │            │  - RegionalClient    │
+│  - Pipeline      │            │  - SecretWatcher     │
+│  - Tools         │            │  - Tools             │
+└──────────────────┘            └──────────────────────┘
+        │                                  │
+        │                                  │
+        v                                  v
+┌──────────────────┐            ┌──────────────────────┐
+│  MCP Server      │            │  MCP Server          │
+│  (mcp/server.go) │            │  (mcp/server.go)     │
+│                  │            │                      │
+│  RegisterTool()  │            │  RegisterTool()      │
+└──────────────────┘            └──────────────────────┘
+        │                                  │
+        └──────────────┬───────────────────┘
+                       │
+                       v
+        ┌──────────────────────────┐
+        │  MCP Clients (Claude,   │
+        │  Cline, etc.)            │
+        └──────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│              Secret Management Flow (Kubernetes)                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Kubernetes Secret                   Logz.io Integration
+(logzio-api-token)                 (internal/integration/logzio/)
+        │                                    │
+        │ Volume mount                       │
+        │ (extraVolumes)                     │
+        v                                    │
+/var/lib/spectre/secrets/          SecretWatcher (fsnotify)
+logzio-token                                │
+        │                                    │
+        │ File read                          │
+        │ (at startup)                       │
+        └───────────────────────────────────>│
+                                             │
+        ┌────────────────────────────────────┤
+        │ File change event                  │
+        │ (on secret rotation)               │
+        └───────────────────────────────────>│
+                                             │
+                                        Hot-reload
+                                        (re-read file,
+                                         update client)
 ```
 
-## Component Boundaries
+## Logz.io Client Architecture
 
-### 1. Plugin Manager
-**Location:** `internal/mcp/plugins/`
+### Component: RegionalClient
 
-**Responsibilities:**
-- Maintain registry of available plugins (compile-time)
-- Read configuration to determine enabled plugins
-- Initialize enabled plugins with their dependencies
-- Register tools/prompts with MCP server
-- Handle plugin lifecycle (init, reload, shutdown)
+**Location:** `internal/integration/logzio/client.go`
 
-**Interfaces:**
+**Structure:**
 ```go
-type Plugin interface {
-    Name() string
-    Enabled(config Config) bool
-    Initialize(ctx context.Context, deps Dependencies) error
-    RegisterTools(server *SpectreServer) error
-    RegisterPrompts(server *SpectreServer) error
-    Shutdown(ctx context.Context) error
+type RegionalClient struct {
+    region      string              // 2-letter region code (us, eu, au, ca, uk)
+    baseURL     string              // Computed from region
+    apiToken    string              // Loaded from secret file
+    tokenMu     sync.RWMutex        // Protects token during hot-reload
+    httpClient  *http.Client        // Standard HTTP client with connection pooling
+    logger      *logging.Logger
 }
 
-type PluginRegistry struct {
-    plugins map[string]Plugin
-    config  *Config
+// Region endpoint mapping
+var RegionEndpoints = map[string]string{
+    "us": "https://api.logz.io",
+    "eu": "https://api-eu.logz.io",
+    "au": "https://api-au.logz.io",
+    "ca": "https://api-ca.logz.io",
+    "uk": "https://api-uk.logz.io",
 }
 ```
 
-**Communicates With:**
-- MCP Server (registers tools/prompts)
-- Config loader (reads enabled integrations)
-- Individual plugins (lifecycle management)
+**Design rationale:**
+- **Region-aware URL construction:** Maps 2-letter region code to API endpoint at client creation time
+- **Thread-safe token updates:** RWMutex allows concurrent reads (queries) during token rotation
+- **Bearer token authentication:** Uses `Authorization: Bearer <token>` header on all requests
+- **Connection pooling:** Reuses HTTP client transport (same pattern as VictoriaLogs)
 
-**Configuration:**
-```yaml
-# integrations.yaml
-integrations:
-  kubernetes:
-    enabled: true
-  victorialogs:
-    enabled: true
-    endpoint: "http://victorialogs:9428"
-    batch_size: 100
-    flush_interval: "10s"
-```
-
-### 2. VictoriaLogs Plugin
-**Location:** `internal/mcp/plugins/victorialogs/`
-
-**Responsibilities:**
-- Implement Plugin interface
-- Manage log processing pipeline
-- Expose MCP tools for log querying
-- Handle template persistence/loading
-
-**Sub-components:**
-- **Ingestion Handler:** Consumes Kubernetes events
-- **Template Miner:** Drain-like algorithm for pattern extraction
-- **VictoriaLogs Client:** HTTP client for /insert/jsonline endpoint
-- **Template Cache:** In-memory template storage with persistence
-
-**Communicates With:**
-- Plugin Manager (registration)
-- Kubernetes event stream (log source)
-- VictoriaLogs HTTP API (storage)
-- Disk (template persistence)
-
-### 3. Template Miner
-**Location:** `internal/mcp/plugins/victorialogs/miner/`
-
-**Responsibilities:**
-- Parse log messages into tokens
-- Build prefix tree of templates (Drain algorithm)
-- Detect new patterns vs existing templates
-- Score template match confidence
-- Persist templates to disk for cross-restart consistency
-
-**Algorithm (Drain-inspired):**
-```
-1. Tokenize log message by whitespace
-2. Get token count → navigate to depth layer
-3. Get first token → navigate to first-token branch
-4. For each template in leaf:
-   - Calculate similarity score (matching tokens / total tokens)
-   - If score >= threshold (e.g., 0.5): Match found
-5. If no match: Create new template
-6. Extract variables from matched template
-```
-
-**Data Structure:**
+**API methods:**
 ```go
-type TemplateNode struct {
-    Depth     int
-    Token     string
-    Templates []*Template
-    Children  map[string]*TemplateNode
-}
+// Query interface (mirrors VictoriaLogs pattern)
+func (c *RegionalClient) SearchLogs(ctx context.Context, params SearchParams) (*SearchResponse, error)
+func (c *RegionalClient) Aggregations(ctx context.Context, params AggregationParams) (*AggregationResponse, error)
 
-type Template struct {
-    ID          string
-    Pattern     []TokenMatcher  // <*> for variable, literal for constant
-    Count       int64
-    FirstSeen   time.Time
-    LastSeen    time.Time
-}
+// Token management (for hot-reload)
+func (c *RegionalClient) UpdateToken(newToken string)
 ```
 
-**Communicates With:**
-- Log normalizer (receives parsed logs)
-- Template cache (updates cache)
-- Template store (persists templates)
-
-### 4. Log Processing Pipeline
-**Location:** `internal/mcp/plugins/victorialogs/pipeline/`
-
-**Responsibilities:**
-- Ingest raw Kubernetes events
-- Normalize timestamps and metadata
-- Apply template mining
-- Build structured log entries
-- Batch and forward to VictoriaLogs
-- Handle backpressure and errors
-
-**Data Flow:**
-```
-Event → Normalize → Mine/Match → Structure → Batch → VictoriaLogs
-```
-
-**Pipeline Stages:**
+**HTTP request pattern:**
 ```go
-type Stage interface {
-    Process(ctx context.Context, input <-chan LogEntry) <-chan LogEntry
+// POST /v1/search
+// Authorization: Bearer <api_token>
+// Content-Type: application/json
+// Body: Elasticsearch DSL query object
+{
+  "query": {
+    "bool": {
+      "must": [...],
+      "filter": [...]
+    }
+  },
+  "size": 100,
+  "from": 0,
+  "sort": [...]
 }
-
-// Stages:
-// 1. NormalizeStage: timestamp → UTC, add metadata
-// 2. MiningStage: extract template, extract variables
-// 3. BatchStage: accumulate until size/time threshold
-// 4. VictoriaLogsStage: HTTP POST to /insert/jsonline
 ```
 
-**Backpressure Handling:**
-- Bounded channels between stages (buffer size: 1000)
-- Drop-oldest policy when channel full
-- Metrics for dropped logs
-- Circuit breaker for VictoriaLogs failures
+**Sources:**
+- [Logz.io API Authentication](https://docs.logz.io/docs/user-guide/admin/authentication-tokens/api-tokens/)
+- [Logz.io Regions](https://docs.logz.io/docs/user-guide/admin/hosting-regions/account-region/)
+- [Logz.io Search API](https://api-docs.logz.io/docs/logz/search/)
 
-**Communicates With:**
-- Kubernetes event source (input)
-- Template miner (pattern extraction)
-- VictoriaLogs HTTP API (output)
-- Metrics collector (observability)
+### Component: Query Builder
 
-### 5. Template Storage
-**Location:** `internal/mcp/plugins/victorialogs/store/`
+**Location:** `internal/integration/logzio/query.go`
 
-**Responsibilities:**
-- Persist templates to disk (JSON or msgpack)
-- Load templates on startup
-- Update templates incrementally
-- Handle concurrent read/write
-- Provide template lookup by ID
+**Structure:**
+```go
+type SearchParams struct {
+    TimeRange   TimeRange           // Start/end timestamps
+    Namespace   string              // Kubernetes namespace filter
+    Severity    string              // Log level filter (error, warn, info, debug)
+    Pod         string              // Pod name filter
+    Container   string              // Container name filter
+    Limit       int                 // Result limit (default 100, max 10,000)
+}
 
-**Storage Format:**
+func BuildElasticsearchDSL(params SearchParams) map[string]interface{} {
+    // Returns Elasticsearch DSL query object
+}
+```
+
+**Design rationale:**
+- **Structured parameters → DSL:** Avoids exposing raw Elasticsearch DSL to MCP tools
+- **Kubernetes-aware filters:** Maps to Logz.io's Kubernetes log fields (namespace, pod, container)
+- **Time range handling:** Converts Unix timestamps to Elasticsearch range queries
+- **Bool query structure:** Uses `must` + `filter` clauses for optimal performance
+
+**Example DSL output:**
 ```json
 {
-  "version": 1,
-  "templates": [
-    {
-      "id": "tmpl_001",
-      "pattern": ["Pod", "<*>", "in", "namespace", "<*>", "failed"],
-      "count": 42,
-      "first_seen": "2026-01-20T10:00:00Z",
-      "last_seen": "2026-01-20T15:30:00Z"
+  "query": {
+    "bool": {
+      "filter": [
+        {
+          "range": {
+            "@timestamp": {
+              "gte": "2026-01-22T00:00:00Z",
+              "lte": "2026-01-22T23:59:59Z"
+            }
+          }
+        },
+        {
+          "term": {
+            "kubernetes.namespace.keyword": "production"
+          }
+        },
+        {
+          "term": {
+            "severity.keyword": "error"
+          }
+        }
+      ]
     }
+  },
+  "size": 100,
+  "sort": [
+    {"@timestamp": "desc"}
   ]
 }
 ```
 
-**Persistence Strategy:**
-- Write-ahead log for incremental updates
-- Full snapshot every N updates or on shutdown
-- Load snapshot + apply WAL on startup
-- fsync on shutdown for durability
+**Sources:**
+- [Elasticsearch Query DSL Guide](https://logz.io/blog/elasticsearch-queries/)
 
-**Communicates With:**
-- Template miner (read/write)
-- Filesystem (persistence)
-- Plugin manager (lifecycle)
+## Secret Management Architecture
 
-### 6. Configuration Hot-Reload
-**Location:** `internal/config/watcher.go` (extend existing)
+### Component: SecretWatcher
 
-**Responsibilities:**
-- Watch config files for changes (fsnotify)
-- Debounce rapid changes
-- Trigger reload signal
-- Validate new config before applying
+**Location:** `internal/integration/logzio/secret_watcher.go`
 
-**Implementation Pattern:**
+**Structure:**
 ```go
-type ConfigWatcher struct {
-    watcher   *fsnotify.Watcher
-    debouncer *time.Timer
-    reloadCh  chan struct{}
+type SecretWatcher struct {
+    filePath    string              // Path to secret file (e.g., /var/lib/spectre/secrets/logzio-token)
+    onUpdate    func(string) error  // Callback to update client with new token
+    watcher     *fsnotify.Watcher   // fsnotify file watcher
+    logger      *logging.Logger
+    cancel      context.CancelFunc
 }
 
-// Watches:
-// - watcher.yaml (existing)
-// - integrations.yaml (new)
-
-// On change:
-// 1. Debounce (100ms)
-// 2. Validate new config
-// 3. Send SIGHUP to self OR channel notify
-// 4. Plugin manager reloads enabled plugins
+func NewSecretWatcher(filePath string, onUpdate func(string) error) (*SecretWatcher, error)
+func (sw *SecretWatcher) Start(ctx context.Context) error
+func (sw *SecretWatcher) Stop() error
 ```
 
-**Signal Handling:**
-```go
-// SIGHUP: Hot reload
-// - Reload config files
-// - Determine plugin changes (enabled/disabled)
-// - Shutdown disabled plugins
-// - Initialize new plugins
-// - Re-register all tools with MCP server
+**Design rationale:**
+- **fsnotify for file watching:** Reuses pattern from `internal/config/integration_watcher.go`
+- **Callback pattern:** Integration provides `UpdateToken()` as callback
+- **Atomic write handling:** Kubernetes secrets use symlink rotation (no inotify issues)
+- **Error resilience:** Failed token updates log error but don't crash watcher
 
-// SIGTERM/SIGINT: Graceful shutdown
-// - Flush log pipeline buffers
-// - Persist templates to disk
-// - Close VictoriaLogs connections
-// - Shutdown plugins
-// - Exit
+**File watching strategy:**
+
+Kubernetes secret volume mounts use **atomic symlink rotation**:
+```
+/var/lib/spectre/secrets/
+├── logzio-token -> ..data/token   # Symlink (watched path)
+└── ..data -> ..2026_01_22_10_30_00_12345/
+    └── token                       # Actual file content
+
+# On rotation:
+1. New directory created: ..2026_01_22_11_00_00_67890/
+2. ..data symlink updated atomically
+3. Old directory removed after grace period
 ```
 
-**Communicates With:**
-- Filesystem (inotify events)
-- Plugin manager (reload trigger)
-- Signal handler (OS signals)
-
-### 7. VictoriaLogs HTTP Client
-**Location:** `internal/mcp/plugins/victorialogs/client/`
-
-**Responsibilities:**
-- POST NDJSON to /insert/jsonline endpoint
-- Handle multitenancy headers (AccountID, ProjectID)
-- Configure stream fields, message field, time field
-- Retry with exponential backoff
-- Circuit breaker for failures
-
-**Request Format:**
-```http
-POST http://victorialogs:9428/insert/jsonline
-Content-Type: application/x-ndjson
-VL-Stream-Fields: namespace,pod_name,container_name
-VL-Msg-Field: message
-VL-Time-Field: timestamp
-
-{"timestamp":"2026-01-20T15:30:00Z","namespace":"default","pod_name":"app-1","container_name":"main","message":"Started server","template_id":"tmpl_042"}
-{"timestamp":"2026-01-20T15:30:01Z","namespace":"default","pod_name":"app-1","container_name":"main","message":"Request processed in 45ms","template_id":"tmpl_043","duration_ms":45}
-```
-
-**Error Handling:**
-- 429 (rate limit): Exponential backoff
-- 5xx: Retry with backoff
-- 4xx (except 429): Log and drop (malformed data)
-- Network error: Circuit breaker, retry
-
-**Communicates With:**
-- VictoriaLogs /insert/jsonline endpoint
-- Pipeline batch stage (input)
-- Metrics collector (success/error rates)
-
-## Patterns to Follow
-
-### Pattern 1: Interface-Based Plugin Registration
-**What:** Plugins implement a common interface, register themselves in a compile-time registry
-
-**When:** Need extensibility without runtime .so loading complexity
-
-**Why Better Than Alternatives:**
-- Compile-time type safety (vs runtime .so crashes)
-- Easy testing with mocks
-- No CGO/versioning issues
-- Fast initialization
-
-**Example:**
+**fsnotify event handling:**
 ```go
-// internal/mcp/plugins/registry.go
-var builtinPlugins = []Plugin{
-    &kubernetes.Plugin{},
-    &victorialogs.Plugin{},
-}
-
-func InitializePlugins(config *Config) (*PluginRegistry, error) {
-    registry := &PluginRegistry{plugins: make(map[string]Plugin)}
-
-    for _, plugin := range builtinPlugins {
-        if plugin.Enabled(config) {
-            if err := plugin.Initialize(ctx, deps); err != nil {
-                return nil, err
-            }
-            registry.plugins[plugin.Name()] = plugin
-        }
-    }
-
-    return registry, nil
-}
-```
-
-**Reference:** [Interface-based plugin architecture in Go](https://www.dolthub.com/blog/2022-09-12-golang-interface-extension/), [Registry pattern in Golang](https://github.com/Faheetah/registry-pattern)
-
-### Pattern 2: Pipeline Stages with Bounded Channels
-**What:** Chain processing stages with buffered channels for backpressure
-
-**When:** Processing stream data with multiple transformation steps
-
-**Why Better Than Alternatives:**
-- Natural backpressure (vs unbounded queues consuming memory)
-- Easy to add/remove stages
-- Testable in isolation
-
-**Example:**
-```go
-type Pipeline struct {
-    stages []Stage
-}
-
-func (p *Pipeline) Run(ctx context.Context, input <-chan LogEntry) <-chan LogEntry {
-    current := input
-    for _, stage := range p.stages {
-        current = stage.Process(ctx, current)
-    }
-    return current
-}
-
-// Bounded channel between stages
-func (s *NormalizeStage) Process(ctx context.Context, input <-chan LogEntry) <-chan LogEntry {
-    output := make(chan LogEntry, 1000) // bounded
-    go func() {
-        defer close(output)
-        for entry := range input {
-            normalized := s.normalize(entry)
-            select {
-            case output <- normalized:
-            case <-ctx.Done():
-                return
-            default:
-                // Drop oldest if full
-                s.metrics.DroppedLogs.Inc()
-            }
-        }
-    }()
-    return output
-}
-```
-
-**Reference:** [Log processing pipeline architecture](https://aws.amazon.com/blogs/big-data/build-enterprise-scale-log-ingestion-pipelines-with-amazon-opensearch-service/), [Goxe log reduction pipeline](https://github.com/DumbNoxx/Goxe)
-
-### Pattern 3: Drain-Inspired Template Mining
-**What:** Build prefix tree by token count and first token, match logs to templates with similarity scoring
-
-**When:** Need to extract patterns from unstructured logs
-
-**Why Better Than Alternatives:**
-- O(log n) matching (vs O(n) regex list)
-- Handles variable parts naturally
-- Low memory footprint
-
-**Example:**
-```go
-type TemplateMiner struct {
-    root       *TemplateNode
-    maxDepth   int
-    similarity float64
-}
-
-func (tm *TemplateMiner) Mine(message string) (*Template, map[string]string) {
-    tokens := tokenize(message)
-    depth := min(len(tokens), tm.maxDepth)
-
-    // Navigate by token count
-    node := tm.root.Children[depth]
-
-    // Navigate by first token
-    firstToken := tokens[0]
-    node = node.Children[firstToken]
-
-    // Find best matching template
-    var bestTemplate *Template
-    var bestScore float64
-
-    for _, tmpl := range node.Templates {
-        score := tm.similarity(tokens, tmpl.Pattern)
-        if score > bestScore {
-            bestScore = score
-            bestTemplate = tmpl
-        }
-    }
-
-    if bestScore >= tm.similarity {
-        // Match found, extract variables
-        vars := extractVariables(tokens, bestTemplate.Pattern)
-        return bestTemplate, vars
-    }
-
-    // Create new template
-    newTmpl := tm.createTemplate(tokens)
-    node.Templates = append(node.Templates, newTmpl)
-    return newTmpl, nil
-}
-```
-
-**Reference:** [Drain3 algorithm](https://github.com/logpai/Drain3), [How Drain3 works](https://medium.com/@lets.see.1016/how-drain3-works-parsing-unstructured-logs-into-structured-format-3458ce05b69a)
-
-### Pattern 4: File Watcher with Debouncing
-**What:** Watch config files with fsnotify, debounce rapid changes, trigger reload
-
-**When:** Need to respond to file changes without restarting process
-
-**Why Better Than Alternatives:**
-- OS-level events (vs polling)
-- Debouncing prevents reload storms
-- Works across platforms
-
-**Example:**
-```go
-type ConfigWatcher struct {
-    watcher  *fsnotify.Watcher
-    debounce time.Duration
-    reloadFn func() error
-}
-
-func (cw *ConfigWatcher) Watch(ctx context.Context, path string) error {
-    // Watch parent directory (not file itself - editors create temp files)
-    dir := filepath.Dir(path)
-    cw.watcher.Add(dir)
-
-    var debounceTimer *time.Timer
-
-    for {
-        select {
-        case event := <-cw.watcher.Events:
-            if event.Name != path {
-                continue
-            }
-
-            // Debounce rapid changes
-            if debounceTimer != nil {
-                debounceTimer.Stop()
-            }
-            debounceTimer = time.AfterFunc(cw.debounce, func() {
-                if err := cw.reloadFn(); err != nil {
-                    log.Error("Reload failed: %v", err)
-                }
-            })
-
-        case <-ctx.Done():
-            return nil
+// From research: Kubernetes secrets emit IN_DELETE_SELF on atomic updates
+// Must re-establish watch after each update
+for {
+    select {
+    case event := <-watcher.Events:
+        if event.Op&fsnotify.Write == fsnotify.Write ||
+           event.Op&fsnotify.Remove == fsnotify.Remove {
+            // Re-add watch (atomic writes break inotify)
+            watcher.Add(filePath)
+            // Reload secret
+            newToken := readSecretFile(filePath)
+            onUpdate(newToken)
         }
     }
 }
 ```
 
-**Reference:** [fsnotify best practices](https://pkg.go.dev/github.com/fsnotify/fsnotify), [Hot reload with SIGHUP](https://rossedman.io/blog/computers/hot-reload-sighup-with-go/)
+**Sources:**
+- [Kubernetes Secret Volume Mount Behavior](https://kubernetes.io/docs/concepts/configuration/secret/)
+- [fsnotify with Kubernetes Secrets](https://ahmet.im/blog/kubernetes-inotify/)
+- [Secrets Store CSI Driver Auto Rotation](https://secrets-store-csi-driver.sigs.k8s.io/topics/secret-auto-rotation)
 
-### Pattern 5: Template Cache with Persistence
-**What:** In-memory cache backed by disk persistence, write-ahead log for updates
+### Kubernetes Deployment Pattern
 
-**When:** Need fast lookups with durability across restarts
+**Helm values.yaml:**
+```yaml
+# extraVolumes in chart/values.yaml
+extraVolumes:
+  - name: logzio-secrets
+    secret:
+      secretName: logzio-api-token
+      optional: false
 
-**Why Better Than Alternatives:**
-- Fast reads (vs hitting disk)
-- Durability (vs losing templates on crash)
-- Incremental updates (vs full rewrites)
+extraVolumeMounts:
+  - name: logzio-secrets
+    mountPath: /var/lib/spectre/secrets
+    readOnly: true
+```
 
-**Example:**
+**integrations.yaml config:**
+```yaml
+schema_version: v1
+instances:
+  - name: logzio-prod
+    type: logzio
+    enabled: true
+    config:
+      region: eu
+      api_token_path: /var/lib/spectre/secrets/logzio-token
+```
+
+**Design rationale:**
+- **No plaintext secrets in config:** Config only references file path
+- **Kubernetes-native secret rotation:** Use `kubectl apply` or external-secrets-operator
+- **Optional CSI driver:** Can use Secrets Store CSI Driver for advanced rotation (HashiCorp Vault, AWS Secrets Manager)
+- **Backward compatible:** Existing integrations without secret files continue working
+
+**Token rotation workflow:**
+```
+1. User rotates token in Logz.io UI
+2. User updates Kubernetes Secret:
+   kubectl create secret generic logzio-api-token \
+     --from-literal=logzio-token=<new-token> \
+     --dry-run=client -o yaml | kubectl apply -f -
+3. Kubernetes updates secret file in pod (atomic symlink rotation)
+4. SecretWatcher detects file change (fsnotify event)
+5. SecretWatcher reads new token from file
+6. SecretWatcher calls integration.UpdateToken(newToken)
+7. RegionalClient updates token under RWMutex
+8. Subsequent queries use new token (no pod restart required)
+```
+
+**Fallback for failed rotation:**
+- Old token continues working until Logz.io revokes it
+- Health check will detect authentication failures
+- Integration enters Degraded state (auto-recovery on next health check)
+
+## Integration Points
+
+### 1. Factory Registration
+
+**Location:** `internal/integration/logzio/logzio.go`
+
 ```go
-type TemplateStore struct {
-    cache     map[string]*Template  // in-memory
-    walFile   *os.File              // write-ahead log
-    snapFile  string                // snapshot path
-    mu        sync.RWMutex
-    dirty     int                   // updates since snapshot
+func init() {
+    integration.RegisterFactory("logzio", NewLogzioIntegration)
 }
 
-func (ts *TemplateStore) Get(id string) (*Template, bool) {
-    ts.mu.RLock()
-    defer ts.mu.RUnlock()
-    tmpl, ok := ts.cache[id]
-    return tmpl, ok
+func NewLogzioIntegration(name string, config map[string]interface{}) (integration.Integration, error) {
+    // Parse config
+    region := config["region"].(string)
+    apiTokenPath := config["api_token_path"].(string)
+
+    // Read initial token from file
+    initialToken, err := os.ReadFile(apiTokenPath)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read API token: %w", err)
+    }
+
+    // Create client
+    client := NewRegionalClient(region, string(initialToken))
+
+    // Create secret watcher
+    secretWatcher := NewSecretWatcher(apiTokenPath, client.UpdateToken)
+
+    return &LogzioIntegration{
+        name:          name,
+        client:        client,
+        secretWatcher: secretWatcher,
+    }, nil
+}
+```
+
+**Integration points:**
+- Uses existing `integration.RegisterFactory()` (no changes to factory system)
+- Follows VictoriaLogs pattern (same function signature)
+- Config validation happens in factory constructor
+
+### 2. Integration Lifecycle
+
+**Location:** `internal/integration/logzio/logzio.go`
+
+```go
+type LogzioIntegration struct {
+    name          string
+    client        *RegionalClient
+    secretWatcher *SecretWatcher
+    registry      integration.ToolRegistry
+    logger        *logging.Logger
 }
 
-func (ts *TemplateStore) Update(tmpl *Template) error {
-    ts.mu.Lock()
-    defer ts.mu.Unlock()
-
-    // Update cache
-    ts.cache[tmpl.ID] = tmpl
-
-    // Append to WAL
-    if err := ts.appendWAL(tmpl); err != nil {
-        return err
+func (l *LogzioIntegration) Start(ctx context.Context) error {
+    // Test connectivity (health check with current token)
+    if err := l.client.testConnection(ctx); err != nil {
+        l.logger.Warn("Initial connectivity test failed (degraded state): %v", err)
     }
 
-    ts.dirty++
-
-    // Snapshot if threshold reached
-    if ts.dirty >= 1000 {
-        return ts.snapshot()
+    // Start secret watcher
+    if err := l.secretWatcher.Start(ctx); err != nil {
+        return fmt.Errorf("failed to start secret watcher: %w", err)
     }
+
+    l.logger.Info("Logz.io integration started (region: %s)", l.client.region)
+    return nil
+}
+
+func (l *LogzioIntegration) Stop(ctx context.Context) error {
+    // Stop secret watcher
+    if err := l.secretWatcher.Stop(); err != nil {
+        l.logger.Error("Error stopping secret watcher: %v", err)
+    }
+
+    // Clear references
+    l.client = nil
+    l.secretWatcher = nil
 
     return nil
 }
 
-func (ts *TemplateStore) Load() error {
-    // Load snapshot
-    if err := ts.loadSnapshot(); err != nil {
-        return err
+func (l *LogzioIntegration) Health(ctx context.Context) integration.HealthStatus {
+    if l.client == nil {
+        return integration.Stopped
     }
 
-    // Replay WAL
-    return ts.replayWAL()
+    // Test connectivity (will use current token, even if rotated)
+    if err := l.client.testConnection(ctx); err != nil {
+        return integration.Degraded
+    }
+
+    return integration.Healthy
+}
+
+func (l *LogzioIntegration) RegisterTools(registry integration.ToolRegistry) error {
+    l.registry = registry
+
+    // Register MCP tools (logzio_{name}_search, logzio_{name}_aggregations, etc.)
+    // Same pattern as VictoriaLogs tools
+
+    return nil
 }
 ```
 
-**Reference:** [Distributed caching with consistency](https://dev.to/nayanraj-adhikary/deep-dive-caching-in-distributed-systems-at-scale-3h1g)
+**Integration points:**
+- Implements `integration.Integration` interface (no interface changes)
+- Start() initializes client and secret watcher
+- Stop() cleans up watchers
+- Health() tests connectivity (auth failures detected here)
+- RegisterTools() follows VictoriaLogs pattern
 
-## Anti-Patterns to Avoid
+### 3. MCP Tool Registration
 
-### Anti-Pattern 1: Runtime Plugin Loading (.so files)
-**What:** Using Go's plugin package to load .so files at runtime
+**Location:** `internal/integration/logzio/tools_search.go`
 
-**Why Bad:**
-- Platform-specific (Linux only)
-- Version sensitivity (Go version must match exactly)
-- No type safety (reflect-based APIs)
-- Debugging nightmares (crashes instead of compile errors)
-- Build complexity (need to compile plugins separately)
-
-**Instead:** Use compile-time registration with interface-based plugins
-
-**When It Might Be Okay:** Extreme isolation requirements where plugin crashes must not affect main process (but then use RPC-based plugins instead)
-
-**Reference:** [Plugins in Go - limitations](https://eli.thegreenplace.net/2021/plugins-in-go/), [Compile-time plugin architecture](https://medium.com/@mzawiejski/compile-time-plugin-architecture-in-go-923455cd2297)
-
-### Anti-Pattern 2: Unbounded Channels in Pipeline
-**What:** Using unbuffered or infinite-buffered channels between pipeline stages
-
-**Why Bad:**
-- Unbuffered: Creates artificial backpressure, slows entire pipeline to slowest stage
-- Infinite-buffered: Memory exhaustion under load, no backpressure signal
-- No visibility into queue depth
-
-**Instead:** Use bounded channels with drop-oldest policy and metrics
-
-**Example of What NOT to Do:**
 ```go
-// BAD: Unbounded channel
-output := make(chan LogEntry)  // blocks when consumer is slow
+type SearchTool struct {
+    ctx ToolContext
+}
 
-// BAD: No size limit
-var buffer []LogEntry  // grows forever under load
-```
+type ToolContext struct {
+    Client   *RegionalClient
+    Logger   *logging.Logger
+    Instance string
+}
 
-**Instead:**
-```go
-// GOOD: Bounded with overflow handling
-output := make(chan LogEntry, 1000)
-select {
-case output <- entry:
-case <-ctx.Done():
-    return
-default:
-    metrics.DroppedLogs.Inc()
-    // Drop oldest or log warning
+func (t *SearchTool) Execute(ctx context.Context, args []byte) (interface{}, error) {
+    var params SearchParams
+    if err := json.Unmarshal(args, &params); err != nil {
+        return nil, fmt.Errorf("invalid parameters: %w", err)
+    }
+
+    // Query Logz.io (uses current token, even if rotated)
+    response, err := t.ctx.Client.SearchLogs(ctx, params)
+    if err != nil {
+        return nil, fmt.Errorf("search failed: %w", err)
+    }
+
+    return response, nil
 }
 ```
 
-### Anti-Pattern 3: Watching Individual Config Files
-**What:** Using fsnotify to watch specific config files directly
-
-**Why Bad:**
-- Many editors (vim, emacs) write to temp file then rename
-- Original file watcher is lost after rename
-- Results in reload not triggering after first edit
-
-**Instead:** Watch parent directory and filter by filename
-
-**Reference:** [fsnotify best practices](https://pkg.go.dev/github.com/fsnotify/fsnotify)
-
-### Anti-Pattern 4: Synchronous VictoriaLogs Writes in Event Handler
-**What:** Blocking Kubernetes event processing to write to VictoriaLogs
-
-**Why Bad:**
-- Event processing stalls if VictoriaLogs is slow/down
-- Missed events if Kubernetes client buffer overflows
-- Tight coupling between ingestion and storage
-
-**Instead:** Async pipeline with buffering and circuit breaker
-
-### Anti-Pattern 5: Template Matching with Regex List
-**What:** Maintaining array of regex patterns, testing each sequentially
-
-**Why Bad:**
-- O(n) time complexity for n templates
-- Slow regex compilation
-- Hard to maintain as templates grow
-- No learning (static patterns)
-
-**Instead:** Use Drain prefix tree with similarity scoring
-
-## Scalability Considerations
-
-| Concern | At 100 pods | At 1K pods | At 10K pods |
-|---------|------------|------------|-------------|
-| **Event ingestion rate** | ~10 events/sec | ~100 events/sec | ~1K events/sec |
-| **Approach** | Single pipeline goroutine | Single pipeline with batching | Multiple pipeline workers (shard by namespace) |
-| **Template count** | ~50 templates | ~500 templates | ~5K templates |
-| **Approach** | In-memory tree | In-memory tree + periodic snapshot | In-memory tree + LRU eviction for rare templates |
-| **VictoriaLogs writes** | Batch every 10s | Batch every 5s or 100 entries | Batch every 1s or 1000 entries, multiple client instances |
-| **Template persistence** | Single WAL file | Single WAL file + hourly snapshots | Partitioned WAL by namespace, parallel snapshot writers |
-| **Memory footprint** | ~50MB | ~200MB | ~1GB |
-| **Approach** | Default settings | Increase channel buffers to 5K | Tune GC, use sync.Pool for log entries |
-
-## Build Order and Dependencies
-
-### Phase 1: Plugin Infrastructure (Foundation)
-**Goal:** Enable plugin-based architecture without breaking existing functionality
-
-**Components:**
-1. Plugin interface definition (`internal/mcp/plugins/interface.go`)
-2. Plugin registry (`internal/mcp/plugins/registry.go`)
-3. Config loader extension for `integrations.yaml`
-4. Migrate existing tools to Kubernetes plugin
-
-**Dependencies:**
-- Existing MCP server structure
-- Config package
-
-**Validation:**
-- Existing tools work via Kubernetes plugin
-- Can disable Kubernetes plugin via config
-- Plugin registry logs enabled plugins
-
-### Phase 2: VictoriaLogs Client (External Integration)
-**Goal:** Establish reliable communication with VictoriaLogs
-
-**Components:**
-1. HTTP client for /insert/jsonline endpoint
-2. NDJSON serialization
-3. Retry/backoff logic
-4. Circuit breaker
-
-**Dependencies:**
-- VictoriaLogs instance (test with docker-compose)
-
-**Validation:**
-- Can write test logs to VictoriaLogs
-- Handles VictoriaLogs downtime gracefully
-- Metrics show success/error rates
-
-### Phase 3: Log Processing Pipeline (Core Logic)
-**Goal:** Transform Kubernetes events into structured logs
-
-**Components:**
-1. Pipeline stages (normalize, batch)
-2. Kubernetes event ingestion
-3. Channel-based backpressure
-4. Integration with VictoriaLogs client
-
-**Dependencies:**
-- VictoriaLogs client (Phase 2)
-- Existing Kubernetes event stream
-
-**Validation:**
-- Events flow from K8s to VictoriaLogs
-- Backpressure prevents memory exhaustion
-- Logs are queryable in VictoriaLogs
-
-### Phase 4: Template Mining (Advanced Feature)
-**Goal:** Extract patterns from logs for better querying
-
-**Components:**
-1. Drain-inspired template miner
-2. Template cache (in-memory)
-3. Template persistence (disk)
-4. Integration with pipeline
-
-**Dependencies:**
-- Log processing pipeline (Phase 3)
-
-**Validation:**
-- Templates detected from event messages
-- Template IDs in VictoriaLogs logs
-- Templates persist across restarts
-
-### Phase 5: MCP Tool Exposure (User Interface)
-**Goal:** Enable AI assistants to query logs via MCP
-
-**Components:**
-1. `query_logs` tool implementation
-2. `analyze_log_patterns` tool implementation
-3. VictoriaLogs plugin registration
-
-**Dependencies:**
-- Plugin infrastructure (Phase 1)
-- VictoriaLogs client (Phase 2)
-- Template mining (Phase 4)
-
-**Validation:**
-- Can query logs via MCP tool
-- Results include template information
-- Cross-references with existing timeline tools
-
-### Phase 6: Configuration Hot-Reload (Operational Excellence)
-**Goal:** Enable config changes without restart
-
-**Components:**
-1. File watcher with debouncing
-2. Signal handler (SIGHUP)
-3. Plugin reload logic
-4. Validation before applying config
-
-**Dependencies:**
-- Plugin infrastructure (Phase 1)
-
-**Validation:**
-- Config change triggers reload
-- Invalid config rejected without restart
-- Plugins re-register tools correctly
-
-## Component Communication Matrix
-
-| From → To | Plugin Manager | VictoriaLogs Plugin | Template Miner | VictoriaLogs API | Config Watcher |
-|-----------|----------------|---------------------|----------------|------------------|----------------|
-| **MCP Server** | Calls during startup | - | - | - | - |
-| **Plugin Manager** | - | Initialize/shutdown | - | - | Receives reload signal |
-| **VictoriaLogs Plugin** | Registers self | - | Uses for mining | Uses for storage | - |
-| **Template Miner** | - | Returns templates | - | - | - |
-| **Pipeline Stages** | - | Owned by plugin | Calls for mining | - | - |
-| **Config Watcher** | Triggers reload | - | - | - | - |
-| **K8s Event Stream** | - | Sends events to plugin | - | - | - |
-
-## Data Flow Summary
-
-### 1. Startup Flow
+**Tool naming convention:**
 ```
-main()
-  → Load config (watcher.yaml, integrations.yaml)
-  → Initialize plugin registry
-  → For each enabled plugin:
-      → plugin.Initialize(deps)
-      → plugin.RegisterTools(mcpServer)
-  → Start MCP server
-  → Start config watcher
-  → Start log pipeline (if VictoriaLogs enabled)
+logzio_{instance}_search       # Raw log search
+logzio_{instance}_aggregations # Aggregated stats
+logzio_{instance}_patterns     # Log pattern mining (if Phase 2 includes)
 ```
 
-### 2. Event Processing Flow
-```
-K8s Event
-  → Normalize (UTC timestamp, add metadata)
-  → Template Mining (match or create template)
-  → Structure (template_id, extracted variables)
-  → Batch (accumulate until threshold)
-  → VictoriaLogs HTTP POST (NDJSON)
-  → Persist Template Updates (WAL)
+**Integration points:**
+- Uses `integration.ToolRegistry.RegisterTool()` (existing interface)
+- Tools reference client from ToolContext (same as VictoriaLogs)
+- MCP server adapts to mcp-go server via `MCPToolRegistry` (existing adapter)
+
+### 4. Config Hot-Reload
+
+**Existing behavior (no changes needed):**
+
+`internal/integration/manager.go` already handles config hot-reload:
+```go
+func (m *Manager) handleConfigReload(newConfig *config.IntegrationsFile) error {
+    // Stop all existing instances (including secret watchers)
+    m.stopAllInstancesLocked(ctx)
+
+    // Clear registry
+    // ...
+
+    // Start instances from new config (factories re-create clients with new paths)
+    m.startInstances(context.Background(), newConfig)
+}
 ```
 
-### 3. Reload Flow
+**Secret hot-reload vs config hot-reload:**
+- **Config hot-reload:** integrations.yaml changes → full restart (existing)
+- **Secret hot-reload:** Secret file changes → token update only (new, per-integration)
+
+Both use fsnotify but at different layers:
+- `IntegrationWatcher` watches integrations.yaml (Manager level)
+- `SecretWatcher` watches secret files (Integration instance level)
+
+## Data Flow Diagrams
+
+### Query Flow (Normal Operation)
+
 ```
-Config file changed
-  → fsnotify event
-  → Debounce (100ms)
-  → Validate new config
-  → Send SIGHUP
-  → Plugin manager:
-      → Shutdown disabled plugins
-      → Initialize new plugins
-      → Re-register all tools
-  → Log pipeline:
-      → Flush buffers
-      → Reload settings
+MCP Client (Claude)
+        │
+        │ CallTool("logzio_prod_search", {"namespace": "default", ...})
+        │
+        v
+MCP Server (internal/mcp/server.go)
+        │
+        │ Lookup tool handler
+        │
+        v
+SearchTool.Execute() (internal/integration/logzio/tools_search.go)
+        │
+        │ BuildElasticsearchDSL(params)
+        │
+        v
+RegionalClient.SearchLogs() (internal/integration/logzio/client.go)
+        │
+        │ tokenMu.RLock()
+        │ Authorization: Bearer <current_token>
+        │ tokenMu.RUnlock()
+        │
+        v
+Logz.io API (https://api-eu.logz.io/v1/search)
+        │
+        │ Elasticsearch DSL query execution
+        │
+        v
+Response (JSON)
+        │
+        v
+SearchTool formats response
+        │
+        v
+MCP Client receives results
 ```
 
-### 4. Query Flow (MCP Tool)
+### Secret Rotation Flow
+
 ```
-MCP client calls query_logs
-  → VictoriaLogs plugin
-  → Build LogsQL query
-  → HTTP GET to /select/logsql
-  → Parse results
-  → Enrich with template information
-  → Return structured response
+User updates Kubernetes Secret
+        │
+        v
+Kubernetes updates volume mount
+/var/lib/spectre/secrets/logzio-token
+        │
+        │ Atomic symlink rotation
+        │
+        v
+fsnotify emits IN_DELETE_SELF event
+        │
+        v
+SecretWatcher.watchLoop() (internal/integration/logzio/secret_watcher.go)
+        │
+        │ Re-add watch (handle broken inotify)
+        │ Read new token from file
+        │
+        v
+SecretWatcher.onUpdate(newToken)
+        │
+        │ Callback to integration
+        │
+        v
+RegionalClient.UpdateToken(newToken)
+        │
+        │ tokenMu.Lock()
+        │ apiToken = newToken
+        │ tokenMu.Unlock()
+        │
+        v
+Token updated (no pod restart)
+        │
+        │ Next query uses new token
+        │
+        v
+Health check validates new token
 ```
+
+### Error Recovery Flow
+
+```
+Token expires or is revoked
+        │
+        v
+RegionalClient.SearchLogs() returns 401 Unauthorized
+        │
+        v
+SearchTool.Execute() returns error
+        │
+        v
+Manager health check detects Degraded state
+        │
+        │ Periodic health checks (30s interval)
+        │
+        v
+LogzioIntegration.Health() returns integration.Degraded
+        │
+        v
+Manager attempts auto-recovery
+        │
+        │ Calls integration.Start() again
+        │
+        v
+Start() tests connectivity with current token
+        │
+        ├─ Success → Healthy (token was rotated by SecretWatcher)
+        │
+        └─ Failure → Degraded (token still invalid, user action needed)
+```
+
+## Suggested Build Order
+
+### Phase 1: Core Client (No Secrets)
+
+**Deliverables:**
+- `internal/integration/logzio/client.go` (RegionalClient)
+- `internal/integration/logzio/query.go` (Elasticsearch DSL builder)
+- `internal/integration/logzio/types.go` (Request/response types)
+- Unit tests with mocked HTTP responses
+
+**Config (plain token):**
+```yaml
+instances:
+  - name: logzio-dev
+    type: logzio
+    enabled: true
+    config:
+      region: us
+      api_token: "plaintext-token-for-testing"  # NOT RECOMMENDED FOR PRODUCTION
+```
+
+**Rationale:**
+- Test Logz.io API integration without secret complexity
+- Validate region endpoint mapping
+- Verify Elasticsearch DSL query generation
+- Establish baseline health checks
+
+**Dependencies:** None (uses existing plugin interfaces)
+
+### Phase 2: Secret File Reading (No Hot-Reload)
+
+**Deliverables:**
+- `internal/integration/logzio/logzio.go` (Integration lifecycle)
+- Config parsing for `api_token_path`
+- Initial token read from file at startup
+- Integration tests with file-mounted secrets
+
+**Config (file path):**
+```yaml
+instances:
+  - name: logzio-prod
+    type: logzio
+    enabled: true
+    config:
+      region: eu
+      api_token_path: /var/lib/spectre/secrets/logzio-token
+```
+
+**Rationale:**
+- De-risk secret file reading before hot-reload complexity
+- Test Kubernetes secret volume mount pattern
+- Validate file permissions and error handling
+- Pod restart rotation works (baseline before hot-reload)
+
+**Dependencies:** Phase 1 complete
+
+### Phase 3: Secret Hot-Reload
+
+**Deliverables:**
+- `internal/integration/logzio/secret_watcher.go` (SecretWatcher)
+- fsnotify integration with Kubernetes symlink behavior
+- Thread-safe token updates in RegionalClient
+- Integration tests simulating secret rotation
+
+**Rationale:**
+- Most complex component (fsnotify with atomic writes)
+- Requires careful testing of inotify edge cases
+- RWMutex must not block queries during rotation
+
+**Dependencies:** Phase 2 complete
+
+### Phase 4: MCP Tools
+
+**Deliverables:**
+- `internal/integration/logzio/tools_search.go` (Search tool)
+- `internal/integration/logzio/tools_aggregations.go` (Aggregation tool)
+- Tool registration in `RegisterTools()`
+- E2E tests with MCP server
+
+**Rationale:**
+- Tools depend on stable client (Phase 1-3 complete)
+- Can reuse VictoriaLogs tool patterns
+- Easier to debug with working client
+
+**Dependencies:** Phase 3 complete
+
+### Phase 5: Helm Chart + Documentation
+
+**Deliverables:**
+- Update `chart/values.yaml` with secret mount examples
+- Update `chart/templates/deployment.yaml` with extraVolumes/extraVolumeMounts
+- README with secret rotation workflow
+- Example Kubernetes Secret manifests
+
+**Rationale:**
+- Depends on all code being complete and tested
+- Documentation should reflect actual implementation
+
+**Dependencies:** Phase 4 complete
+
+## Dependency Graph
+
+```
+Phase 1: Core Client
+    │
+    ├─ Elasticsearch DSL query builder
+    ├─ Regional endpoint mapping
+    ├─ HTTP client with bearer auth
+    └─ Basic health checks
+    │
+    v
+Phase 2: Secret File Reading
+    │
+    ├─ Config parsing (api_token_path)
+    ├─ Initial token read from file
+    ├─ Integration lifecycle (Start/Stop/Health)
+    └─ Error handling for missing files
+    │
+    v
+Phase 3: Secret Hot-Reload
+    │
+    ├─ SecretWatcher with fsnotify
+    ├─ Atomic write handling (symlink rotation)
+    ├─ Thread-safe token updates (RWMutex)
+    └─ Watch re-establishment on IN_DELETE_SELF
+    │
+    v
+Phase 4: MCP Tools
+    │
+    ├─ Tool registration (RegisterTools)
+    ├─ Search tool (logs query)
+    ├─ Aggregation tool (stats)
+    └─ Tool naming convention (logzio_{instance}_*)
+    │
+    v
+Phase 5: Helm Chart + Documentation
+    │
+    ├─ extraVolumes/extraVolumeMounts examples
+    ├─ Secret rotation workflow docs
+    └─ Integration guide
+```
+
+## Alternative Architectures Considered
+
+### Alternative 1: Environment Variable for Token
+
+**Approach:**
+```yaml
+env:
+  - name: LOGZIO_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: logzio-api-token
+        key: token
+```
+
+**Why rejected:**
+- Environment variables are immutable after pod start
+- Token rotation requires pod restart (defeats hot-reload goal)
+- No benefit over file-mounted secrets for this use case
+
+### Alternative 2: External Secrets Operator
+
+**Approach:** Use External Secrets Operator to sync secrets from Vault/AWS Secrets Manager
+
+**Why NOT rejected (complementary):**
+- External Secrets Operator writes to Kubernetes Secrets
+- Kubernetes Secrets still mounted as files
+- SecretWatcher still detects file changes
+- **This is complementary, not alternative** (supports advanced secret backends)
+
+### Alternative 3: Sidecar for Token Management
+
+**Approach:** Deploy Vault Agent or secrets-sync sidecar
+
+**Why rejected:**
+- Adds deployment complexity (another container)
+- Same file-mount pattern (sidecar writes, app reads)
+- fsnotify in-process is simpler and sufficient
+
+### Alternative 4: Direct Secret Store API Calls
+
+**Approach:** Integration calls Vault/AWS Secrets Manager API directly
+
+**Why rejected:**
+- Tight coupling to specific secret store (not Kubernetes-native)
+- Requires credentials to access secret store (chicken-egg problem)
+- File-mount pattern works with any secret backend via Kubernetes
+
+## Known Limitations and Trade-offs
+
+### Limitation 1: fsnotify Event Delivery
+
+**Issue:** fsnotify on Kubernetes secret volumes emits `IN_DELETE_SELF` on atomic writes, breaking the watch.
+
+**Mitigation:**
+- Re-establish watch after every event
+- Add 50ms delay before re-adding watch (let rename complete)
+- Test with rapid secret rotations (stress test)
+
+**Source:** [Kubernetes inotify pitfalls](https://ahmet.im/blog/kubernetes-inotify/)
+
+### Limitation 2: Token Rotation Window
+
+**Issue:** Brief window where old token is invalid but new token not yet loaded.
+
+**Mitigation:**
+- RWMutex ensures queries block during token update (milliseconds)
+- Health checks detect auth failures and mark Degraded
+- Auto-recovery retries on next health check (30s interval)
+
+**Trade-off:** Prefer availability over strict consistency (degraded state is acceptable)
+
+### Limitation 3: Logz.io API Rate Limits
+
+**Issue:** 100 concurrent API requests per account.
+
+**Mitigation:**
+- Document rate limits in README
+- Consider connection pooling limits in HTTP client
+- MCP tools are user-driven (low concurrency expected)
+
+**Source:** [Logz.io API Rate Limits](https://docs.logz.io/docs/user-guide/admin/authentication-tokens/api-tokens/)
+
+### Limitation 4: Query Result Limits
+
+**Issue:** Logz.io returns max 10,000 results for non-aggregated queries, 1,000 for aggregated.
+
+**Mitigation:**
+- Document limits in tool descriptions
+- Implement pagination if needed (Phase 4 decision)
+- Encourage time range filtering for large datasets
+
+**Source:** [Logz.io Search API](https://api-docs.logz.io/docs/logz/search/)
+
+## Testing Strategy
+
+### Unit Tests
+
+**Component: RegionalClient**
+- Region endpoint mapping correctness
+- Bearer token header formatting
+- Thread-safe token updates (concurrent reads/writes)
+- HTTP error handling (401, 429, 500)
+
+**Component: Query Builder**
+- Elasticsearch DSL generation for various filter combinations
+- Time range conversion (Unix timestamp → ISO 8601)
+- Kubernetes field mapping (namespace, pod, container)
+
+**Component: SecretWatcher**
+- File read at startup
+- fsnotify event handling
+- Watch re-establishment after IN_DELETE_SELF
+- Callback invocation on token change
+
+### Integration Tests
+
+**Test: Secret Rotation**
+```go
+// 1. Start integration with initial token
+integration.Start(ctx)
+
+// 2. Write new token to file
+os.WriteFile(tokenPath, []byte("new-token"), 0600)
+
+// 3. Wait for fsnotify event processing
+time.Sleep(100 * time.Millisecond)
+
+// 4. Verify client uses new token
+response, err := client.SearchLogs(ctx, params)
+assert.NoError(err)
+```
+
+**Test: Config Hot-Reload with Secret Path Change**
+```go
+// 1. Start with old secret path
+manager.Start(ctx)
+
+// 2. Update integrations.yaml with new secret path
+updateConfig(newSecretPath)
+
+// 3. Wait for config reload
+time.Sleep(500 * time.Millisecond)
+
+// 4. Verify integration reads from new path
+verifySecretPath(integration, newSecretPath)
+```
+
+### E2E Tests
+
+**Test: Full Rotation Workflow**
+1. Deploy Spectre with Logz.io integration
+2. Create Kubernetes Secret with initial token
+3. Verify MCP tools work with initial token
+4. Rotate token in Logz.io UI
+5. Update Kubernetes Secret
+6. Verify MCP tools work with new token (no pod restart)
+7. Check health status remains Healthy
+
+## Confidence Assessment
+
+| Component | Confidence | Rationale |
+|-----------|------------|-----------|
+| Regional Client | **HIGH** | Logz.io API well-documented, standard REST + bearer auth, region mapping verified |
+| Elasticsearch DSL | **HIGH** | Official docs with examples, Logz.io blog posts cover common queries |
+| Secret Watcher | **MEDIUM** | fsnotify + Kubernetes symlinks have known pitfalls, needs careful testing |
+| Integration Lifecycle | **HIGH** | Reuses VictoriaLogs pattern (proven architecture) |
+| MCP Tools | **HIGH** | Same pattern as existing tools (cluster_health, resource_timeline) |
+| Config Hot-Reload | **HIGH** | Already works for VictoriaLogs, no changes needed |
+| Helm Chart | **HIGH** | extraVolumes/extraVolumeMounts are standard Kubernetes patterns |
+
+**Overall confidence: HIGH** with Medium-confidence area flagged for extra testing (SecretWatcher).
+
+## Research Gaps and Validation Needs
+
+### Gap 1: Logz.io Field Names for Kubernetes Logs
+
+**Issue:** Research found generic Kubernetes field examples but not Logz.io-specific field names.
+
+**Validation needed:**
+- Query actual Logz.io account for field names
+- Check if fields are `kubernetes.namespace` or `k8s_namespace` or `namespace`
+- Verify severity field name (`level`, `severity`, `log.level`?)
+
+**Impact:** Low (field names discovered during Phase 1 testing)
+
+### Gap 2: Logz.io Search API Pagination
+
+**Issue:** Documentation mentions result limits but not pagination mechanism.
+
+**Validation needed:**
+- Test if `from` + `size` parameters work for pagination
+- Check if cursor-based pagination is available
+- Determine if multiple pages are needed for MCP tools
+
+**Impact:** Medium (affects Phase 4 tool design if large result sets are common)
+
+### Gap 3: fsnotify Behavior on Different Kubernetes Versions
+
+**Issue:** Kubernetes secret mount behavior may vary across versions (1.25+ vs older).
+
+**Validation needed:**
+- Test on multiple Kubernetes versions (1.25, 1.27, 1.29)
+- Verify atomic symlink rotation is consistent
+- Check if ConfigMap projection behaves differently
+
+**Impact:** Low (document minimum Kubernetes version if issues found)
 
 ## Sources
 
-Architecture patterns and best practices referenced:
+**Logz.io Documentation:**
+- [Logz.io API Authentication](https://docs.logz.io/docs/user-guide/admin/authentication-tokens/api-tokens/)
+- [Logz.io Regions](https://docs.logz.io/docs/user-guide/admin/hosting-regions/account-region/)
+- [Logz.io Search API](https://api-docs.logz.io/docs/logz/search/)
+- [Elasticsearch Query DSL Guide](https://logz.io/blog/elasticsearch-queries/)
 
-### Plugin Architecture
-- [DoltHub: Golang Interface Extension](https://www.dolthub.com/blog/2022-09-12-golang-interface-extension/)
-- [Registry Pattern in Golang](https://github.com/Faheetah/registry-pattern)
-- [Sling Academy: Plugin-Based Architecture in Go](https://www.slingacademy.com/article/leveraging-interfaces-for-plugin-based-architecture-in-go-applications/)
-- [Eli Bendersky: Plugins in Go](https://eli.thegreenplace.net/2021/plugins-in-go/)
-- [Medium: Compile-Time Plugin Architecture](https://medium.com/@mzawiejski/compile-time-plugin-architecture-in-go-923455cd2297)
+**Kubernetes Secret Management:**
+- [Kubernetes Secrets Documentation](https://kubernetes.io/docs/concepts/configuration/secret/)
+- [Kubernetes inotify Pitfalls](https://ahmet.im/blog/kubernetes-inotify/)
+- [Secrets Store CSI Driver Auto Rotation](https://secrets-store-csi-driver.sigs.k8s.io/topics/secret-auto-rotation)
+- [Stakater Reloader](https://github.com/stakater/Reloader)
 
-### Log Processing Pipelines
-- [AWS: Log Ingestion Pipelines](https://aws.amazon.com/blogs/big-data/build-enterprise-scale-log-ingestion-pipelines-with-amazon-opensearch-service/)
-- [Goxe: Log Reduction Tool](https://github.com/DumbNoxx/Goxe)
-- [Dattell: Log Ingestion Best Practices 2025](https://dattell.com/data-architecture-blog/log-ingestion-best-practices-for-elasticsearch-in-2025/)
+**Go Patterns:**
+- [fsnotify Package Documentation](https://pkg.go.dev/github.com/fsnotify/fsnotify)
+- [fsnotify Issue #372: Watching Single Files](https://github.com/fsnotify/fsnotify/issues/372)
+- [Go Secrets Management for Kubernetes](https://oneuptime.com/blog/post/2026-01-07-go-secrets-management-kubernetes/view)
 
-### Template Mining (Drain Algorithm)
-- [Drain3 Repository](https://github.com/logpai/Drain3)
-- [IBM: Mining Log Templates](https://developer.ibm.com/blogs/how-mining-log-templates-can-help-ai-ops-in-cloud-scale-data-centers)
-- [Medium: How Drain3 Works](https://medium.com/@lets.see.1016/how-drain3-works-parsing-unstructured-logs-into-structured-format-3458ce05b69a)
-- [ClickHouse: Log Clustering](https://clickhouse.com/blog/improve-compression-log-clustering)
-
-### File Watching and Hot Reload
-- [fsnotify Documentation](https://pkg.go.dev/github.com/fsnotify/fsnotify)
-- [fsnotify Repository](https://github.com/fsnotify/fsnotify)
-- [rossedman: Hot Reload with SIGHUP](https://rossedman.io/blog/computers/hot-reload-sighup-with-go/)
-- [ITNEXT: Hot-Reloading Go Applications](https://itnext.io/clean-and-simple-hot-reloading-on-uninterrupted-go-applications-5974230ab4c5)
-- [Vai: Hot Reload Tool](https://github.com/sgtdi/vai)
-- [Cybozu: Graceful Restart](https://github.com/cybozu-go/well/wiki/Graceful-restart)
-
-### VictoriaLogs
-- [VictoriaLogs Documentation](https://docs.victoriametrics.com/victorialogs/)
-- [VictoriaLogs: Architecture Basics](https://victoriametrics.com/blog/victorialogs-architecture-basics/)
-- [VictoriaLogs: LogsQL](https://docs.victoriametrics.com/victorialogs/logsql/)
-- [Greptime: VictoriaLogs Source Reading](https://greptime.com/blogs/2025-02-27-victorialogs-source-reading-greptimedb)
-- [VictoriaLogs Data Ingestion](https://docs.victoriametrics.com/victorialogs/data-ingestion/)
-
-### Distributed Systems Patterns
-- [Frontiers: Distributed Caching with Strong Consistency](https://www.frontiersin.org/journals/computer-science/articles/10.3389/fcomp.2025.1511161/full)
-- [DEV: Caching in Distributed Systems](https://dev.to/nayanraj-adhikary/deep-dive-caching-in-distributed-systems-at-scale-3h1g)
-- [Baeldung: Dependency Injection vs Service Locator](https://www.baeldung.com/cs/dependency-injection-vs-service-locator)
-- [Service Locator Pattern in Go](https://softwarepatternslexicon.com/patterns-go/10/2/)
+**Existing Spectre Code:**
+- `internal/integration/victorialogs/victorialogs.go` (Integration pattern)
+- `internal/integration/victorialogs/client.go` (HTTP client pattern)
+- `internal/config/integration_watcher.go` (fsnotify pattern)
+- `internal/mcp/server.go` (Tool registration pattern)
