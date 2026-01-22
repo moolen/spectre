@@ -69,6 +69,10 @@ From Phase 17:
 - Multiple service nodes when labels disagree instead of choosing one — 17-01
 - Unknown service with empty cluster/namespace when no labels present — 17-01
 - TRACKS edges from Metric to Service (not Query to Service) — 17-01
+- Variable classification uses case-insensitive pattern matching — 17-02
+- Unknown classification for unrecognized variable names — 17-02
+- Graceful handling of malformed variables with warning logs — 17-02
+- Variable nodes use composite key: dashboardUID + name — 17-02
 - Per-tag HierarchyMap mapping (simplest, most flexible) - each tag maps to level, first match wins — 17-03
 - Support both spectre:* and hierarchy:* tag formats for flexibility — 17-03
 - Case-insensitive hierarchy tag matching for user convenience — 17-03
