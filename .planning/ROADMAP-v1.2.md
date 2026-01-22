@@ -159,10 +159,10 @@ Plans:
   3. Pattern storage is namespace-scoped (same template in different namespaces tracked separately)
   4. Tool enforces result limits - max 50 templates to prevent MCP client overload
   5. Novelty detection compares current patterns to previous time window
-**Plans**: TBD
+**Plans**: 1 plan in 1 wave
 
 Plans:
-- [ ] 13-01: TBD
+- [ ] 13-01-PLAN.md — Patterns tool with VictoriaLogs parity (Wave 1)
 
 #### Phase 14: UI and Helm Chart
 **Goal**: UI configuration form and Helm chart support for Kubernetes secret mounting
@@ -198,9 +198,9 @@ Phases execute in numeric order: 10 → 11 → 12 → 13 → 14
 | 10. Logz.io Client Foundation | v1.2 | 0/TBD | Not started | - |
 | 11. Secret File Management | v1.2 | 4/4 | Complete | 2026-01-22 |
 | 12. MCP Tools - Overview and Logs | v1.2 | 2/2 | Complete | 2026-01-22 |
-| 13. MCP Tools - Patterns | v1.2 | 0/TBD | Not started | - |
+| 13. MCP Tools - Patterns | v1.2 | 1 plan | Ready | - |
 | 14. UI and Helm Chart | v1.2 | 0/TBD | Not started | - |
 
 ---
 *Created: 2026-01-22*
-*Last updated: 2026-01-22 - Phase 12 planned*
+*Last updated: 2026-01-22 - Phase 13 planned*
