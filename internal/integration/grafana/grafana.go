@@ -156,6 +156,7 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 		g.syncer = NewDashboardSyncer(
 			g.client,
 			g.graphClient,
+			g.config,
 			time.Hour, // Sync interval
 			g.logger,
 		)

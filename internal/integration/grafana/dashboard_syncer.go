@@ -42,13 +42,14 @@ type DashboardSyncer struct {
 func NewDashboardSyncer(
 	grafanaClient GrafanaClientInterface,
 	graphClient graph.Client,
+	config *Config,
 	syncInterval time.Duration,
 	logger *logging.Logger,
 ) *DashboardSyncer {
 	return &DashboardSyncer{
 		grafanaClient:  grafanaClient,
 		graphClient:    graphClient,
-		graphBuilder:   NewGraphBuilder(graphClient, logger),
+		graphBuilder:   NewGraphBuilder(graphClient, config, logger),
 		logger:         logger,
 		syncInterval:   syncInterval,
 		stopped:        make(chan struct{}),
