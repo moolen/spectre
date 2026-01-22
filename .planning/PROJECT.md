@@ -2,13 +2,33 @@
 
 ## What This Is
 
-A Kubernetes observability platform with an MCP server for AI assistants. Provides timeline-based event exploration, graph-based reasoning (FalkorDB), and pluggable integrations (VictoriaLogs). AI assistants can explore logs progressively: overview → patterns → raw logs.
+A Kubernetes observability platform with an MCP server for AI assistants. Provides timeline-based event exploration, graph-based reasoning (FalkorDB), and pluggable integrations (VictoriaLogs, Logz.io, Grafana). AI assistants can explore logs progressively and use Grafana dashboards as structured operational knowledge for metrics reasoning.
 
 ## Core Value
 
-Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, and log exploration in one server.
+Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis in one server.
 
-## Current State (v1.2 Shipped)
+## Current Milestone: v1.3 Grafana Metrics Integration
+
+**Goal:** Use Grafana dashboards as structured operational knowledge so Spectre can detect high-level anomalies, progressively drill down, and reason about services, clusters, and metrics.
+
+**Target features:**
+- Grafana dashboard ingestion via API (both Cloud and self-hosted)
+- Full semantic graph storage in FalkorDB (dashboards→panels→queries→metrics→services)
+- Dashboard hierarchy (overview/drill-down/detail) via Grafana tags + config fallback
+- Best-effort PromQL parsing for metric names, labels, and variable classification
+- Service inference from metric labels (job, service, app)
+- Anomaly detection with 7-day historical baseline (queried on-demand via Grafana)
+- Three MCP tools: metrics_overview, metrics_aggregated, metrics_details
+- UI configuration form for Grafana connection (URL, API token, hierarchy mapping)
+
+**Core principles:**
+- Dashboards are intent, not truth — treat them as fuzzy signals
+- Progressive disclosure — overview → aggregated → details
+- Query via Grafana API — simpler auth, variable handling
+- No metric storage — query historical ranges on-demand
+
+## Previous State (v1.2 Shipped)
 
 **Shipped 2026-01-22:**
 - Logz.io as second log backend with 3 MCP tools (overview, logs, patterns)
@@ -76,16 +96,27 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 
 ### Active
 
-(No active requirements — ready for next milestone)
+- [ ] Grafana API client for dashboard ingestion (both Cloud and self-hosted)
+- [ ] FalkorDB graph schema for dashboards, panels, queries, metrics, services
+- [ ] Dashboard hierarchy support (overview/drill-down/detail levels)
+- [ ] PromQL parser for metric extraction (best-effort)
+- [ ] Variable classification (scoping vs entity vs detail)
+- [ ] Service inference from metric labels
+- [ ] Anomaly detection with 7-day historical baseline
+- [ ] MCP tool: metrics_overview (overview dashboards, ranked anomalies)
+- [ ] MCP tool: metrics_aggregated (service/cluster focus, correlations)
+- [ ] MCP tool: metrics_details (full dashboard, deep expansion)
+- [ ] UI form for Grafana configuration (URL, API token, hierarchy mapping)
 
 ### Out of Scope
 
-- Grafana Cloud integration — defer to later milestone
 - VictoriaMetrics (metrics) integration — defer to later milestone
-- Long-term pattern baseline tracking — keep simple, compare to previous time window only
+- Long-term pattern baseline tracking for logs — keep simple, compare to previous time window only
 - Authentication for VictoriaLogs — no auth needed (just base URL)
 - Mobile UI — web-first
 - Standalone MCP server command — consolidated architecture is the deployment model
+- Metric value storage — query Grafana on-demand instead of storing time-series locally
+- Direct Prometheus/Mimir queries — use Grafana API as proxy for simpler auth
 
 ## Context
 
@@ -113,6 +144,13 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 2. **Patterns** — log templates via Drain with novelty detection (compare to previous window)
 3. **Logs** — raw logs with limit enforcement (max 500)
 
+**Grafana integration architecture (v1.3 target):**
+- Dashboard ingestion: Grafana API → full JSON stored, structure extracted to graph
+- Graph schema: Dashboard→Panel→Query→Metric, Service inferred from labels
+- Query execution: Via Grafana /api/ds/query endpoint (not direct to Prometheus)
+- Variable handling: AI provides scoping variables (cluster, region) per MCP call
+- Anomaly detection: Compare current metrics to 7-day rolling average (time-of-day matched)
+
 ## Constraints
 
 - **Tech stack**: Go backend, TypeScript/React frontend — established patterns
@@ -122,6 +160,9 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - **Reusability**: Log processing package is integration-agnostic
 - **Logz.io rate limit**: 100 concurrent API requests per account
 - **Logz.io result limits**: 1,000 aggregated results, 10,000 non-aggregated results per query
+- **Grafana API token**: Requires Bearer token with dashboard read permissions
+- **PromQL parsing best-effort**: Complex expressions may not fully parse, extract what's possible
+- **Graph storage for structure only**: FalkorDB stores dashboard structure, not metric values
 
 ## Key Decisions
 
@@ -153,4 +194,4 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - GET /{name} endpoint available but unused by UI (uses list endpoint instead)
 
 ---
-*Last updated: 2026-01-22 after v1.2 milestone shipped*
+*Last updated: 2026-01-22 after v1.3 milestone started*
