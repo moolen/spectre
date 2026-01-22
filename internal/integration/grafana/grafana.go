@@ -275,6 +275,34 @@ func (g *GrafanaIntegration) getHealthStatus() integration.HealthStatus {
 	return g.healthStatus
 }
 
+// GetSyncStatus returns the current sync status if syncer is available
+func (g *GrafanaIntegration) GetSyncStatus() *integration.SyncStatus {
+	if g.syncer == nil {
+		return nil
+	}
+	return g.syncer.GetSyncStatus()
+}
+
+// TriggerSync triggers a manual dashboard sync
+func (g *GrafanaIntegration) TriggerSync(ctx context.Context) error {
+	if g.syncer == nil {
+		return fmt.Errorf("syncer not initialized")
+	}
+	return g.syncer.TriggerSync(ctx)
+}
+
+// Status returns the integration status including sync information
+func (g *GrafanaIntegration) Status() integration.IntegrationStatus {
+	status := integration.IntegrationStatus{
+		Name:       g.name,
+		Type:       "grafana",
+		Enabled:    true, // Runtime instances are always enabled
+		Health:     g.getHealthStatus().String(),
+		SyncStatus: g.GetSyncStatus(),
+	}
+	return status
+}
+
 // getCurrentNamespace reads the namespace from the ServiceAccount mount.
 // This file is automatically mounted by Kubernetes in all pods at a well-known path.
 func getCurrentNamespace() (string, error) {

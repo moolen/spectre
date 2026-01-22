@@ -87,15 +87,15 @@ func TestDashboardSyncerLifecycle(t *testing.T) {
 	}
 
 	// Verify initial sync completed
-	lastSync, count, lastErr := syncer.GetSyncStatus()
-	if lastSync.IsZero() {
+	syncStatus := syncer.GetSyncStatus()
+	if syncStatus.LastSyncTime == nil {
 		t.Error("Expected lastSyncTime to be set")
 	}
-	if lastErr != nil {
-		t.Errorf("Expected no error, got: %v", lastErr)
+	if syncStatus.LastError != "" {
+		t.Errorf("Expected no error, got: %v", syncStatus.LastError)
 	}
-	if count != 0 {
-		t.Errorf("Expected 0 dashboards, got %d", count)
+	if syncStatus.DashboardCount != 0 {
+		t.Errorf("Expected 0 dashboards, got %d", syncStatus.DashboardCount)
 	}
 
 	// Let syncer run for a bit

@@ -102,14 +102,14 @@ func TestSyncAll_NewDashboards(t *testing.T) {
 	}
 
 	// Verify sync status
-	lastSync, count, lastErr := syncer.GetSyncStatus()
-	if count != 2 {
-		t.Errorf("Expected 2 dashboards, got %d", count)
+	syncStatus := syncer.GetSyncStatus()
+	if syncStatus.DashboardCount != 2 {
+		t.Errorf("Expected 2 dashboards, got %d", syncStatus.DashboardCount)
 	}
-	if lastErr != nil {
-		t.Errorf("Expected no error, got: %v", lastErr)
+	if syncStatus.LastError != "" {
+		t.Errorf("Expected no error, got: %v", syncStatus.LastError)
 	}
-	if lastSync.IsZero() {
+	if syncStatus.LastSyncTime == nil {
 		t.Error("Expected lastSyncTime to be set")
 	}
 
@@ -223,11 +223,11 @@ func TestSyncAll_UnchangedDashboard(t *testing.T) {
 	// The test primarily validates that syncAll completes successfully
 	// when processing dashboards that may be unchanged. Detailed version
 	// comparison logic is exercised in the Updated/New dashboard tests.
-	lastSync, count, _ := syncer.GetSyncStatus()
-	if count != 1 {
-		t.Errorf("Expected 1 dashboard in sync status, got %d", count)
+	syncStatus := syncer.GetSyncStatus()
+	if syncStatus.DashboardCount != 1 {
+		t.Errorf("Expected 1 dashboard in sync status, got %d", syncStatus.DashboardCount)
 	}
-	if lastSync.IsZero() {
+	if syncStatus.LastSyncTime == nil {
 		t.Error("Expected lastSyncTime to be set")
 	}
 }
@@ -332,8 +332,8 @@ func TestDashboardSyncer_StartStop(t *testing.T) {
 	syncer.Stop()
 
 	// Verify sync status was updated
-	lastSync, _, _ := syncer.GetSyncStatus()
-	if lastSync.IsZero() {
+	syncStatus := syncer.GetSyncStatus()
+	if syncStatus.LastSyncTime == nil {
 		t.Error("Expected lastSyncTime to be set after initial sync")
 	}
 }

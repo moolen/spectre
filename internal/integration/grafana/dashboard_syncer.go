@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
 )
 
@@ -34,6 +35,7 @@ type DashboardSyncer struct {
 	lastSyncTime   time.Time
 	dashboardCount int
 	lastError      error
+	inProgress     bool
 }
 
 // NewDashboardSyncer creates a new dashboard syncer instance
@@ -92,10 +94,24 @@ func (ds *DashboardSyncer) Stop() {
 }
 
 // GetSyncStatus returns current sync status (thread-safe)
-func (ds *DashboardSyncer) GetSyncStatus() (lastSyncTime time.Time, dashboardCount int, lastError error) {
+func (ds *DashboardSyncer) GetSyncStatus() *integration.SyncStatus {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
-	return ds.lastSyncTime, ds.dashboardCount, ds.lastError
+
+	status := &integration.SyncStatus{
+		DashboardCount: ds.dashboardCount,
+		InProgress:     ds.inProgress,
+	}
+
+	if !ds.lastSyncTime.IsZero() {
+		status.LastSyncTime = &ds.lastSyncTime
+	}
+
+	if ds.lastError != nil {
+		status.LastError = ds.lastError.Error()
+	}
+
+	return status
 }
 
 // syncLoop runs periodic sync on ticker interval
@@ -127,6 +143,17 @@ func (ds *DashboardSyncer) syncLoop(ctx context.Context) {
 func (ds *DashboardSyncer) syncAll(ctx context.Context) error {
 	startTime := time.Now()
 	ds.logger.Info("Starting dashboard sync")
+
+	// Set inProgress flag
+	ds.mu.Lock()
+	ds.inProgress = true
+	ds.mu.Unlock()
+
+	defer func() {
+		ds.mu.Lock()
+		ds.inProgress = false
+		ds.mu.Unlock()
+	}()
 
 	// Get list of all dashboards
 	dashboards, err := ds.grafanaClient.ListDashboards(ctx)
@@ -332,6 +359,18 @@ func (ds *DashboardSyncer) parseDashboard(dashboardData map[string]interface{}, 
 	}
 
 	return &dashboard, nil
+}
+
+// TriggerSync triggers a manual sync, returning error if sync already in progress
+func (ds *DashboardSyncer) TriggerSync(ctx context.Context) error {
+	ds.mu.RLock()
+	if ds.inProgress {
+		ds.mu.RUnlock()
+		return fmt.Errorf("sync already in progress")
+	}
+	ds.mu.RUnlock()
+
+	return ds.syncAll(ctx)
 }
 
 // setLastError updates the last error (thread-safe)
