@@ -8,7 +8,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
 	"k8s.io/client-go/kubernetes"
@@ -30,6 +32,8 @@ type GrafanaIntegration struct {
 	config        *Config              // Full configuration (includes URL and SecretRef)
 	client        *GrafanaClient       // Grafana HTTP client
 	secretWatcher *SecretWatcher       // Optional: manages API token from Kubernetes Secret
+	syncer        *DashboardSyncer     // Dashboard sync orchestrator
+	graphClient   graph.Client         // Graph client for dashboard sync
 	logger        *logging.Logger
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -37,6 +41,13 @@ type GrafanaIntegration struct {
 	// Thread-safe health status
 	mu           sync.RWMutex
 	healthStatus integration.HealthStatus
+}
+
+// SetGraphClient sets the graph client for dashboard synchronization.
+// This must be called before Start() if dashboard sync is desired.
+// This is a transitional API - future phases may pass graphClient via factory.
+func (g *GrafanaIntegration) SetGraphClient(graphClient graph.Client) {
+	g.graphClient = graphClient
 }
 
 // NewGrafanaIntegration creates a new Grafana integration instance.
@@ -139,6 +150,23 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 		g.setHealthStatus(integration.Healthy)
 	}
 
+	// Start dashboard syncer if graph client is available
+	if g.graphClient != nil {
+		g.logger.Info("Starting dashboard syncer (sync interval: 1 hour)")
+		g.syncer = NewDashboardSyncer(
+			g.client,
+			g.graphClient,
+			time.Hour, // Sync interval
+			g.logger,
+		)
+		if err := g.syncer.Start(g.ctx); err != nil {
+			g.logger.Warn("Failed to start dashboard syncer: %v (continuing without sync)", err)
+			// Don't fail startup - syncer is optional enhancement
+		}
+	} else {
+		g.logger.Info("Graph client not available - dashboard sync disabled")
+	}
+
 	g.logger.Info("Grafana integration started successfully (health: %s)", g.getHealthStatus().String())
 	return nil
 }
@@ -152,6 +180,11 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 		g.cancel()
 	}
 
+	// Stop dashboard syncer if it exists
+	if g.syncer != nil {
+		g.syncer.Stop()
+	}
+
 	// Stop secret watcher if it exists
 	if g.secretWatcher != nil {
 		if err := g.secretWatcher.Stop(); err != nil {
@@ -162,6 +195,7 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	// Clear references
 	g.client = nil
 	g.secretWatcher = nil
+	g.syncer = nil
 
 	// Update health status
 	g.setHealthStatus(integration.Stopped)
