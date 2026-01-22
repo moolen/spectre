@@ -68,10 +68,12 @@ Plans:
   3. Graph contains Dashboard→Panel→Query→Metric relationships with CONTAINS/QUERIES/USES edges
   4. UI displays sync status and last sync time
   5. Parser handles Grafana variable syntax as passthrough (preserves $var, [[var]])
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 16-01: TBD
+- [ ] 16-01-PLAN.md — PromQL parser with AST extraction (metrics, labels, aggregations)
+- [ ] 16-02-PLAN.md — Dashboard syncer with incremental sync and graph builder
+- [ ] 16-03-PLAN.md — UI sync status display and manual sync trigger
 
 #### Phase 17: Semantic Layer - Service Inference & Dashboard Hierarchy
 **Goal**: Dashboards are classified by hierarchy level, services are inferred from metrics, and variables are classified by type.
@@ -128,7 +130,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 15. Foundation | 3/3 | ✓ Complete | 2026-01-22 |
-| 16. Ingestion Pipeline | 0/TBD | Ready to plan | - |
+| 16. Ingestion Pipeline | 0/3 | Ready to execute | - |
 | 17. Semantic Layer | 0/TBD | Not started | - |
 | 18. Query Execution & MCP Tools | 0/TBD | Not started | - |
 | 19. Anomaly Detection | 0/TBD | Not started | - |
