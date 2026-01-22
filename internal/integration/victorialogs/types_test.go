@@ -147,3 +147,154 @@ func TestDefaultTimeRange(t *testing.T) {
 	assert.WithinDuration(t, time.Now(), tr.End, 2*time.Second,
 		"End should be close to current time")
 }
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      Config
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "valid URL only",
+			config: Config{
+				URL: "http://victorialogs:9428",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid secret ref",
+			config: Config{
+				URL: "http://victorialogs:9428",
+				APITokenRef: &SecretRef{
+					SecretName: "my-secret",
+					Key:        "token",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing URL",
+			config: Config{
+				APITokenRef: &SecretRef{
+					SecretName: "my-secret",
+					Key:        "token",
+				},
+			},
+			wantErr:     true,
+			errContains: "url is required",
+		},
+		{
+			name: "missing secret key",
+			config: Config{
+				URL: "http://victorialogs:9428",
+				APITokenRef: &SecretRef{
+					SecretName: "my-secret",
+					Key:        "",
+				},
+			},
+			wantErr:     true,
+			errContains: "key is required",
+		},
+		{
+			name: "mutual exclusion - URL with @ and secret ref",
+			config: Config{
+				URL: "http://user:pass@victorialogs:9428",
+				APITokenRef: &SecretRef{
+					SecretName: "my-secret",
+					Key:        "token",
+				},
+			},
+			wantErr:     true,
+			errContains: "cannot specify both",
+		},
+		{
+			name: "empty secret name with non-empty key",
+			config: Config{
+				URL: "http://victorialogs:9428",
+				APITokenRef: &SecretRef{
+					SecretName: "",
+					Key:        "token",
+				},
+			},
+			wantErr: false, // Empty SecretName means not using secret ref
+		},
+		{
+			name: "nil APITokenRef",
+			config: Config{
+				URL:         "http://victorialogs:9428",
+				APITokenRef: nil,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+
+			if tt.wantErr {
+				require.Error(t, err, "expected error but got nil")
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains,
+						"error should contain %q, got: %v", tt.errContains, err)
+				}
+			} else {
+				assert.NoError(t, err, "unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestConfig_UsesSecretRef(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		want   bool
+	}{
+		{
+			name: "no APITokenRef",
+			config: Config{
+				URL: "http://victorialogs:9428",
+			},
+			want: false,
+		},
+		{
+			name: "nil APITokenRef",
+			config: Config{
+				URL:         "http://victorialogs:9428",
+				APITokenRef: nil,
+			},
+			want: false,
+		},
+		{
+			name: "empty SecretName",
+			config: Config{
+				URL: "http://victorialogs:9428",
+				APITokenRef: &SecretRef{
+					SecretName: "",
+					Key:        "token",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "valid secret ref",
+			config: Config{
+				URL: "http://victorialogs:9428",
+				APITokenRef: &SecretRef{
+					SecretName: "my-secret",
+					Key:        "token",
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.config.UsesSecretRef()
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
