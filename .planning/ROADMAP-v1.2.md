@@ -133,7 +133,7 @@ Plans:
 - [x] 11-03-PLAN.md — Integration wiring and client token auth (Wave 2)
 - [x] 11-04-PLAN.md — RBAC setup in Helm chart (Wave 1)
 
-#### Phase 12: MCP Tools - Overview and Logs
+#### ✅ Phase 12: MCP Tools - Overview and Logs
 **Goal**: MCP tools expose Logz.io data with progressive disclosure (overview → logs)
 **Depends on**: Phase 11
 **Requirements**: TOOL-01, TOOL-02, TOOL-04, TOOL-05
@@ -146,8 +146,8 @@ Plans:
 **Plans**: 2 plans in 2 waves
 
 Plans:
-- [ ] 12-01-PLAN.md — Logzio foundation (bootstrap, client, query builder) (Wave 1)
-- [ ] 12-02-PLAN.md — MCP tools (overview + logs with progressive disclosure) (Wave 2)
+- [x] 12-01-PLAN.md — Logzio foundation (bootstrap, client, query builder) (Wave 1)
+- [x] 12-02-PLAN.md — MCP tools (overview + logs with progressive disclosure) (Wave 2)
 
 #### Phase 13: MCP Tools - Patterns
 **Goal**: Pattern mining tool exposes log templates with novelty detection
@@ -197,7 +197,7 @@ Phases execute in numeric order: 10 → 11 → 12 → 13 → 14
 | 9. E2E Test Validation | v1.1 | 2/2 | Complete | 2026-01-21 |
 | 10. Logz.io Client Foundation | v1.2 | 0/TBD | Not started | - |
 | 11. Secret File Management | v1.2 | 4/4 | Complete | 2026-01-22 |
-| 12. MCP Tools - Overview and Logs | v1.2 | 0/2 | Ready to execute | - |
+| 12. MCP Tools - Overview and Logs | v1.2 | 2/2 | Complete | 2026-01-22 |
 | 13. MCP Tools - Patterns | v1.2 | 0/TBD | Not started | - |
 | 14. UI and Helm Chart | v1.2 | 0/TBD | Not started | - |
 
