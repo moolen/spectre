@@ -11,6 +11,7 @@ import (
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/config"
 	"github.com/moolen/spectre/internal/integration"
+	_ "github.com/moolen/spectre/internal/integration/grafana"
 	"github.com/moolen/spectre/internal/logging"
 )
 
@@ -384,6 +385,111 @@ func (h *IntegrationConfigHandler) HandleTest(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = api.WriteJSON(w, response)
+}
+
+// HandleStatusStream handles GET /api/config/integrations/stream - SSE endpoint for real-time status updates.
+func (h *IntegrationConfigHandler) HandleStatusStream(w http.ResponseWriter, r *http.Request) {
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Check if flusher is supported
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		h.logger.Error("SSE not supported: ResponseWriter doesn't implement Flusher")
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Debug("SSE client connected for integration status stream")
+
+	// Track last known status to only send changes
+	lastStatus := make(map[string]string)
+
+	// Poll interval
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// Send initial status immediately
+	h.sendStatusUpdate(w, flusher, lastStatus)
+
+	for {
+		select {
+		case <-r.Context().Done():
+			h.logger.Debug("SSE client disconnected")
+			return
+		case <-ticker.C:
+			h.sendStatusUpdate(w, flusher, lastStatus)
+		}
+	}
+}
+
+// sendStatusUpdate sends an SSE event if any integration status has changed.
+func (h *IntegrationConfigHandler) sendStatusUpdate(w http.ResponseWriter, flusher http.Flusher, lastStatus map[string]string) {
+	// Load current config
+	integrationsFile, err := config.LoadIntegrationsFile(h.configPath)
+	if err != nil {
+		h.logger.Error("SSE: Failed to load integrations config: %v", err)
+		return
+	}
+
+	registry := h.manager.GetRegistry()
+	hasChanges := false
+	responses := make([]IntegrationInstanceResponse, 0, len(integrationsFile.Instances))
+
+	// Check for removed integrations
+	currentNames := make(map[string]bool)
+	for _, instance := range integrationsFile.Instances {
+		currentNames[instance.Name] = true
+	}
+	for name := range lastStatus {
+		if !currentNames[name] {
+			delete(lastStatus, name)
+			hasChanges = true
+		}
+	}
+
+	for _, instance := range integrationsFile.Instances {
+		health := "not_started"
+
+		// Query runtime health if instance is registered
+		if runtimeInstance, ok := registry.Get(instance.Name); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			healthStatus := runtimeInstance.Health(ctx)
+			cancel()
+			health = healthStatus.String()
+		}
+
+		// Check if status changed
+		if lastHealth, exists := lastStatus[instance.Name]; !exists || lastHealth != health {
+			hasChanges = true
+			lastStatus[instance.Name] = health
+		}
+
+		responses = append(responses, IntegrationInstanceResponse{
+			Name:      instance.Name,
+			Type:      instance.Type,
+			Enabled:   instance.Enabled,
+			Config:    instance.Config,
+			Health:    health,
+			DateAdded: time.Now().Format(time.RFC3339),
+		})
+	}
+
+	// Only send if there are changes or this is the first send (lastStatus was empty)
+	if hasChanges || len(lastStatus) == 0 {
+		data, err := json.Marshal(responses)
+		if err != nil {
+			h.logger.Error("SSE: Failed to marshal status: %v", err)
+			return
+		}
+
+		// Write SSE event
+		fmt.Fprintf(w, "event: status\ndata: %s\n\n", data)
+		flusher.Flush()
+	}
 }
 
 // testConnection attempts to create and test an integration instance with panic recovery.
