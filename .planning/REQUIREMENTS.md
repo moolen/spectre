@@ -22,7 +22,7 @@ Requirements for Grafana metrics integration. Each maps to roadmap phases.
 - [x] **GRPH-02**: FalkorDB schema includes Panel nodes with query references
 - [x] **GRPH-03**: FalkorDB schema includes Query nodes with raw PromQL expressions
 - [x] **GRPH-04**: FalkorDB schema includes Metric nodes (metric name templates)
-- [ ] **GRPH-05**: FalkorDB schema includes Service nodes inferred from metric labels
+- [x] **GRPH-05**: FalkorDB schema includes Service nodes inferred from metric labels
 - [x] **GRPH-06**: Relationships: Dashboard CONTAINS Panel, Panel HAS Query, Query USES Metric, Metric TRACKS Service
 - [ ] **GRPH-07**: Graph indexes on Dashboard.uid, Metric.name, Service.name for efficient queries
 
@@ -37,23 +37,23 @@ Requirements for Grafana metrics integration. Each maps to roadmap phases.
 
 ### Service Inference
 
-- [ ] **SERV-01**: Service inference extracts from job, service, app labels in PromQL
-- [ ] **SERV-02**: Service inference extracts namespace and cluster for scoping
-- [ ] **SERV-03**: Service nodes link to Metric nodes via TRACKS relationship
-- [ ] **SERV-04**: Service inference uses whitelist approach (known-good labels only)
+- [x] **SERV-01**: Service inference extracts from job, service, app labels in PromQL
+- [x] **SERV-02**: Service inference extracts namespace and cluster for scoping
+- [x] **SERV-03**: Service nodes link to Metric nodes via TRACKS relationship
+- [x] **SERV-04**: Service inference uses whitelist approach (known-good labels only)
 
 ### Dashboard Hierarchy
 
-- [ ] **HIER-01**: Dashboards classified as overview, drill-down, or detail level
-- [ ] **HIER-02**: Hierarchy read from Grafana tags (spectre:overview, spectre:drilldown, spectre:detail)
-- [ ] **HIER-03**: Hierarchy fallback to config mapping when tags not present
-- [ ] **HIER-04**: Hierarchy level stored as Dashboard node property
+- [x] **HIER-01**: Dashboards classified as overview, drill-down, or detail level
+- [x] **HIER-02**: Hierarchy read from Grafana tags (spectre:overview, spectre:drilldown, spectre:detail)
+- [x] **HIER-03**: Hierarchy fallback to config mapping when tags not present
+- [x] **HIER-04**: Hierarchy level stored as Dashboard node property
 
 ### Variable Handling
 
-- [ ] **VARB-01**: Variables extracted from dashboard JSON template section
-- [ ] **VARB-02**: Variables classified as scoping (cluster, region), entity (service, namespace), or detail (pod, instance)
-- [ ] **VARB-03**: Variable classification stored in graph for smart defaults
+- [x] **VARB-01**: Variables extracted from dashboard JSON template section
+- [x] **VARB-02**: Variables classified as scoping (cluster, region), entity (service, namespace), or detail (pod, instance)
+- [x] **VARB-03**: Variable classification stored in graph for smart defaults
 - [ ] **VARB-04**: Single-value variable substitution supported for query execution
 - [ ] **VARB-05**: Variables passed to Grafana API via scopedVars (not interpolated locally)
 
@@ -90,7 +90,7 @@ Requirements for Grafana metrics integration. Each maps to roadmap phases.
 - [ ] **UICF-01**: Integration form includes Grafana URL field
 - [ ] **UICF-02**: Integration form includes API token field (SecretRef: name + key)
 - [ ] **UICF-03**: Integration form validates connection on save (health check)
-- [ ] **UICF-04**: Integration form includes hierarchy mapping configuration
+- [x] **UICF-04**: Integration form includes hierarchy mapping configuration
 - [x] **UICF-05**: UI displays sync status and last sync time
 
 ## v2 Requirements
@@ -144,7 +144,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GRPH-02 | Phase 16 | Complete |
 | GRPH-03 | Phase 16 | Complete |
 | GRPH-04 | Phase 16 | Complete |
-| GRPH-05 | Phase 17 | Pending |
+| GRPH-05 | Phase 17 | Complete |
 | GRPH-06 | Phase 16 | Complete |
 | GRPH-07 | Phase 15 | Complete |
 | PROM-01 | Phase 16 | Complete |
@@ -153,17 +153,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROM-04 | Phase 16 | Complete |
 | PROM-05 | Phase 16 | Complete |
 | PROM-06 | Phase 16 | Complete |
-| SERV-01 | Phase 17 | Pending |
-| SERV-02 | Phase 17 | Pending |
-| SERV-03 | Phase 17 | Pending |
-| SERV-04 | Phase 17 | Pending |
-| HIER-01 | Phase 17 | Pending |
-| HIER-02 | Phase 17 | Pending |
-| HIER-03 | Phase 17 | Pending |
-| HIER-04 | Phase 17 | Pending |
-| VARB-01 | Phase 17 | Pending |
-| VARB-02 | Phase 17 | Pending |
-| VARB-03 | Phase 17 | Pending |
+| SERV-01 | Phase 17 | Complete |
+| SERV-02 | Phase 17 | Complete |
+| SERV-03 | Phase 17 | Complete |
+| SERV-04 | Phase 17 | Complete |
+| HIER-01 | Phase 17 | Complete |
+| HIER-02 | Phase 17 | Complete |
+| HIER-03 | Phase 17 | Complete |
+| HIER-04 | Phase 17 | Complete |
+| VARB-01 | Phase 17 | Complete |
+| VARB-02 | Phase 17 | Complete |
+| VARB-03 | Phase 17 | Complete |
 | VARB-04 | Phase 18 | Pending |
 | VARB-05 | Phase 18 | Pending |
 | EXEC-01 | Phase 18 | Pending |
@@ -188,7 +188,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UICF-01 | Phase 15 | Complete |
 | UICF-02 | Phase 15 | Complete |
 | UICF-03 | Phase 15 | Complete |
-| UICF-04 | Phase 17 | Pending |
+| UICF-04 | Phase 17 | Complete |
 | UICF-05 | Phase 16 | Complete |
 
 **Coverage:**

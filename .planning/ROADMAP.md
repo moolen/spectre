@@ -76,7 +76,7 @@ Plans:
 - [x] 16-02-PLAN.md — Dashboard syncer with incremental sync and graph builder
 - [x] 16-03-PLAN.md — UI sync status display and manual sync trigger
 
-#### Phase 17: Semantic Layer - Service Inference & Dashboard Hierarchy
+#### ✅ Phase 17: Semantic Layer - Service Inference & Dashboard Hierarchy
 **Goal**: Dashboards are classified by hierarchy level, services are inferred from metrics, and variables are classified by type.
 **Depends on**: Phase 16
 **Requirements**: GRPH-05, SERV-01, SERV-02, SERV-03, SERV-04, HIER-01, HIER-02, HIER-03, HIER-04, VARB-01, VARB-02, VARB-03, UICF-04
@@ -86,12 +86,14 @@ Plans:
   3. Dashboards are classified as overview, drill-down, or detail based on tags
   4. Variables are classified as scoping (cluster/region), entity (service/namespace), or detail (pod/instance)
   5. UI allows configuration of hierarchy mapping fallback (when tags not present)
-**Plans**: 3 plans
+**Plans**: 4 plans
+**Completed**: 2026-01-23
 
 Plans:
-- [ ] 17-01-PLAN.md — Service inference from labels and variable classification
-- [ ] 17-02-PLAN.md — Dashboard hierarchy classification with tag-first logic
-- [ ] 17-03-PLAN.md — UI hierarchy mapping configuration
+- [x] 17-01-PLAN.md — Service inference from PromQL label selectors
+- [x] 17-02-PLAN.md — Variable classification (scoping/entity/detail)
+- [x] 17-03-PLAN.md — Dashboard hierarchy classification with tag-first logic
+- [x] 17-04-PLAN.md — UI hierarchy mapping configuration
 
 #### Phase 18: Query Execution & MCP Tools Foundation
 **Goal**: AI can execute Grafana queries and discover dashboards through three MCP tools.
@@ -134,7 +136,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 |-------|----------------|--------|-----------|
 | 15. Foundation | 3/3 | ✓ Complete | 2026-01-22 |
 | 16. Ingestion Pipeline | 3/3 | ✓ Complete | 2026-01-22 |
-| 17. Semantic Layer | 0/3 | Not started | - |
+| 17. Semantic Layer | 4/4 | ✓ Complete | 2026-01-23 |
 | 18. Query Execution & MCP Tools | 0/TBD | Not started | - |
 | 19. Anomaly Detection | 0/TBD | Not started | - |
 
