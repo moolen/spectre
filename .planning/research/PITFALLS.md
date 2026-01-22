@@ -1,754 +1,588 @@
-# Pitfalls Research: Logz.io Integration + Secret Management
+# Domain Pitfalls: Grafana Metrics Integration
 
-**Domain:** Logz.io integration for Kubernetes observability with API token secret management
+**Domain:** Grafana API integration, PromQL parsing, graph schema for observability, anomaly detection, progressive disclosure
 **Researched:** 2026-01-22
-**Confidence:** MEDIUM (WebSearch verified with official docs, existing VictoriaLogs patterns examined)
-
-## Executive Summary
-
-Adding Logz.io integration and secret management introduces complexity across multiple dimensions: Elasticsearch DSL query limitations, multi-region configuration, rate limiting, scroll API lifecycle, fsnotify edge cases, and Kubernetes secret refresh mechanics. Critical pitfalls cluster around three areas:
-
-1. **Elasticsearch DSL query constraints** - Leading wildcards disabled, analyzed field limitations, scroll API expiration
-2. **Secret rotation mechanics** - Kubernetes subPath breaks hot-reload, fsnotify misses atomic writes, race conditions during rotation
-3. **Multi-region correctness** - Hard-coded endpoints, region-specific rate limits, credential scope confusion
-
-Many of these are subtle correctness issues that manifest in production under load, not during development. This research identifies early warning signs and prevention strategies for each.
-
----
+**Confidence:** MEDIUM (WebSearch verified with official Grafana docs, PromQL GitHub issues, research papers)
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites, data loss, or security incidents.
-
-### Pitfall 1: Kubernetes Secret subPath Breaks Hot-Reload
-
-**What goes wrong:**
-When secrets are mounted with `subPath`, Kubernetes updates the volume symlink but NOT the actual file bind-mounted into the container. Your fsnotify watcher detects no changes, application never reloads credentials, and you get authentication failures after secret rotation.
-
-**Why it happens:**
-Kubernetes atomic writer uses symlinks for volume updates. With `subPath`, the symlink update happens at the mount point, not at the file level. The existing VictoriaLogs fsnotify watcher (`.planning/research/integration_watcher.go`) watches the file directly, which becomes stale with `subPath` mounts.
-
-**Consequences:**
-- Secret rotation causes downtime (authentication fails)
-- Monitoring alerts fire during rotation windows
-- Manual pod restarts required to pick up new secrets
-- Violates zero-downtime rotation requirement
-
-**Prevention:**
-1. **DO NOT use `subPath` for secret mounts** - Mount entire secret volume, reference by path
-2. Document in deployment YAML with explicit comment warning against subPath
-3. Add integration test that verifies hot-reload with volume mount (not subPath)
-4. Consider Secrets Store CSI Driver with Reloader for external vaults
-
-**Detection:**
-- Warning sign: fsnotify events stop after first secret rotation
-- Warning sign: Pod logs show "authentication failed" after secret update
-- Test: Update secret, watch for fsnotify event within 60s (kubelet sync period)
-
-**References:**
-- [Kubernetes Secrets and Pod Restarts](https://blog.ascendingdc.com/kubernetes-secrets-and-pod-restarts)
-- [Known Limitations - Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations)
-- [K8s Deployment Automatic Rollout Restart](https://igboie.medium.com/k8s-deployment-automatic-rollout-restart-when-referenced-secrets-and-configmaps-are-updated-0c74c85c1b4a)
-
-**Which phase:**
-Phase 2 (Logz.io API Client) - Must establish secret loading pattern before MCP tools implementation
+Mistakes that cause rewrites or major issues.
 
 ---
 
-### Pitfall 2: Atomic Editor Saves Cause fsnotify Watch Loss
+### Pitfall 1: Grafana API Version Breaking Changes
 
-**What goes wrong:**
-Text editors (vim, VSCode, kubectl) use atomic writes: write temp file → rename to target. fsnotify watches the inode, which changes on rename. Watch is automatically removed, fsnotify stops receiving events, and config changes are silently ignored.
+**What goes wrong:** Dashboard JSON schema changes between major Grafana versions break parsing logic. The dashboard schema changed significantly in v11 (URL structure for repeated panels) and v12 (new schema format).
 
-**Why it happens:**
-The existing `integration_watcher.go` handles this with Remove/Rename event re-watching (lines 140-148), BUT there's a 50ms sleep gap where the file might be written and you miss the event. Kubernetes Secret volume updates are atomic writes. VSCode triggers 5 events per save, creating race conditions in the debounce logic.
+**Why it happens:** Grafana's HTTP API follows alpha/beta/GA stability levels. Alpha APIs can have breaking changes without notice. GA APIs are stable but dashboard schema evolves independently.
 
 **Consequences:**
-- Secret rotation silently fails (no reload triggered)
-- Integration continues using expired credentials until health check fails
-- Gap between rotation and detection creates security window
-- Difficult to debug (no error, just missing events)
+- Dashboard ingestion fails silently when new schema fields appear
+- Panel parsing breaks when `gridPos` structure changes
+- Variable interpolation fails when template syntax evolves
+- Repeated panel URLs (`&viewPanel=panel-5` → `&viewPanel=panel-3-clone1`) become invalid across versions
 
 **Prevention:**
-1. **Verify existing re-watch logic handles Kubernetes volume updates** - Test with actual Secret mount
-2. **Increase re-watch delay from 50ms to 200ms** for Kubernetes atomic writes (slower than editor saves)
-3. **Watch parent directory, not file** - Recommended by fsnotify docs (avoids inode change problem)
-4. **Add file existence check after re-watch** - Verify file exists before continuing
-5. **Log all watch removals and re-additions** - Make missing events visible
+1. **Store raw dashboard JSON** — Always persist complete JSON before parsing. When parsing fails, fall back to raw storage and log for investigation.
+2. **Version detection** — Check `schemaVersion` field (integer in dashboard JSON) and handle known versions explicitly.
+3. **Defensive parsing** — Use optional field extraction. If `gridPos` is missing, infer from panel order. If `targets` array is empty, log warning but continue.
+4. **Schema evolution tests** — Test against Grafana v9, v10, v11, v12 dashboard exports. Create fixture files for each.
 
 **Detection:**
-- Warning sign: Watcher logs show Remove/Rename events but no subsequent reload
-- Warning sign: Time gap between secret update and reload > 500ms
-- Test: Simulate atomic write (write temp → rename), verify fsnotify event within 200ms
+- Dashboard ingestion succeeds but panels array is empty
+- Queries array exists but metric extraction returns zero results
+- `schemaVersion` in logs is higher than tested versions
+
+**Affected phases:** Phase 1 (Grafana client), Phase 2 (graph schema), Phase 6 (MCP tools)
 
 **References:**
-- [fsnotify Issue #372: Robustly watching a single file](https://github.com/fsnotify/fsnotify/issues/372)
-- [Building a cross-platform File Watcher in Go](https://dev.to/asoseil/building-a-cross-platform-file-watcher-in-go-what-i-learned-from-scratch-1dbj)
-
-**Which phase:**
-Phase 2 (Logz.io API Client) - Critical for secret hot-reload, blocks production deployment
+- [Grafana v11 Breaking Changes](https://grafana.com/docs/grafana/latest/breaking-changes/breaking-changes-v11-0/)
+- [Dashboard JSON Schema](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/view-dashboard-json-model/)
+- [Schema V2 Resource](https://grafana.com/docs/grafana/latest/as-code/observability-as-code/schema-v2/)
 
 ---
 
-### Pitfall 3: Leading Wildcard Queries Disabled by Logz.io
+### Pitfall 2: Service Account Token Scope Confusion
 
-**What goes wrong:**
-Logz.io API enforces `allow_leading_wildcard: false` on query_string queries. User tries query like `*-service` to find all services, gets error. This is NOT documented clearly in their API docs, only buried in their UI help.
+**What goes wrong:** Service account tokens created in Grafana Cloud have different permissions than self-hosted Grafana. Tokens work for dashboard reads but fail for Admin/User API endpoints. Authentication method (Basic auth vs Bearer) varies between Cloud and self-hosted.
 
-**Why it happens:**
-Leading wildcards require scanning every term in the index (extremely expensive). Logz.io disables this for performance/cost reasons. Standard Elasticsearch clients default to allowing it, creating mismatch with Logz.io API expectations.
+**Why it happens:** Service accounts are limited to an organization and organization role. They cannot be granted Grafana server administrator permissions. Admin HTTP API and User HTTP API require Basic authentication with server admin role.
 
 **Consequences:**
-- MCP tool queries fail with cryptic errors
-- Users familiar with Elasticsearch expect this to work
-- Workarounds (use filters, analyzed fields) are non-obvious
-- Degrades user experience of AI assistant tools
+- Token works in development (self-hosted with admin user) but fails in production (Cloud with service account)
+- User attempts to list all dashboards via Admin API but gets 403 Forbidden
+- Dashboard export works but version history API fails (requires `dashboards:write` since Grafana v11)
 
 **Prevention:**
-1. **Document leading wildcard limitation prominently** in MCP tool descriptions
-2. **Validate queries before sending to API** - Reject leading wildcards with helpful error
-3. **Suggest alternatives in error message** - "Use field filters instead of leading wildcards"
-4. **Pre-query field mapping check** - Identify analyzed fields that support tokenized search
-5. **Add query builder helper** that constructs valid Logz.io queries
+1. **Separate auth paths** — Detect Grafana Cloud vs self-hosted via base URL pattern (`grafana.com` vs custom domain). Use Bearer token for Cloud, optionally support Basic auth for self-hosted.
+2. **Minimal permissions** — Document required scopes: `dashboards:read` for ingestion. Do NOT require Admin API access.
+3. **Graceful degradation** — If dashboard versions API fails (403), fall back to current version only. Log warning about missing permissions.
+4. **Clear error messages** — Map 403 responses to actionable errors: "Service account needs 'dashboards:read' scope" vs "This endpoint requires server admin permissions (not available for service accounts)".
 
 **Detection:**
-- Warning sign: API returns 400 errors on wildcard queries
-- Test: Attempt query with leading wildcard, verify helpful error message
+- 403 Forbidden responses on API calls that worked in testing
+- Error message contains "service account" or "organization role"
+- Admin/User API endpoints fail while Dashboard API succeeds
+
+**Affected phases:** Phase 1 (Grafana client), Phase 8 (UI configuration)
 
 **References:**
-- [Logz.io Wildcard Searches](https://docs.logz.io/kibana/wildcards/)
-- [Logz.io Search Logs API](https://api-docs.logz.io/docs/logz/search/)
-- [Elasticsearch Query DSL Guide](https://logz.io/blog/elasticsearch-queries/)
-
-**Which phase:**
-Phase 3 (MCP Tool Implementation) - Query validation layer before API client calls
+- [Grafana API Authentication](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/authentication/)
+- [User HTTP API Limitations](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/user/)
+- [Dashboard Versions API Issue #100970](https://github.com/grafana/grafana/issues/100970)
 
 ---
 
-### Pitfall 4: Scroll API Context Expiration After 20 Minutes
+### Pitfall 3: PromQL Parser Handwritten Complexity
 
-**What goes wrong:**
-Logz.io scroll API contexts expire after 20 minutes. If MCP tool takes >20min to process results (e.g., pattern mining large dataset), scroll_id becomes invalid. Subsequent scroll requests fail with "expired scroll ID" error, and you lose your pagination state.
+**What goes wrong:** PromQL has no formal grammar definition. The official parser is a handwritten recursive-descent parser with "hidden features and edge cases that nobody is aware of." Building a custom parser leads to incompatibilities with valid PromQL.
 
-**Why it happens:**
-Scroll contexts hold cluster resources (search state, results cache). 20-minute timeout is aggressive compared to Elasticsearch default (1 minute, but adjustable). The project context mentions this limit but doesn't explain implications for long-running operations.
+**Why it happens:** PromQL evolved organically. The Prometheus team acknowledges that "none of the active members has a deep understanding of the parser code." Third-party parsers (Go, C#, Python) handle different edge cases differently.
 
 **Consequences:**
-- Pattern mining tool fails mid-operation on large namespaces
-- Partial results without clear indication of incompleteness
-- User retries query, hits rate limit, degrades service
-- Cannot paginate through large result sets (>10,000 logs)
+- Valid PromQL from Grafana dashboard fails to parse: `rate(http_requests_total[5m])` works but `rate(http_requests_total{job=~"$job"}[5m])` breaks on variable interpolation
+- Binary expression constraints are inconsistent: "comparisons between scalars must use BOOL modifier" but not enforced everywhere
+- Nested function calls parse incorrectly: `histogram_quantile(0.95, sum(rate(...)) by (le))` loses grouping context
 
 **Prevention:**
-1. **Use scroll API only for result sets needing >1,000 logs** (Logz.io aggregation limit)
-2. **Set aggressive internal timeout (15 min)** - Leave 5min buffer before API expiration
-3. **Implement checkpoint/resume** - Save last processed position, allow restart
-4. **Consider Point-in-Time API** if Logz.io supports it (newer alternative to scroll)
-5. **Stream results to caller incrementally** - Don't buffer entire dataset in memory
-6. **Clear scroll context after use** - Free resources promptly
+1. **Best-effort parsing** — Accept PROJECT.md constraint: "Complex expressions may not fully parse, extract what's possible." Do NOT attempt 100% PromQL compatibility.
+2. **Use official parser** — Import `github.com/prometheus/prometheus/promql/parser` for Go. Do NOT write custom parser.
+3. **Variable interpolation passthrough** — Detect Grafana variables (`$var`, `[[var]]`) and preserve as-is. Do NOT attempt to resolve during parsing.
+4. **Metric name extraction only** — Focus on extracting metric names, label matchers (simple equality only), and aggregation functions. Skip complex binary expressions.
+5. **Test with real dashboards** — Parse actual Grafana dashboard queries (from fixtures), not synthetic examples.
 
 **Detection:**
-- Warning sign: Long-running queries (>10min) fail with scroll errors
-- Warning sign: Memory usage grows unbounded during pattern mining
-- Test: Query with scroll, sleep 21 minutes, attempt next page (expect error handling)
+- Parser returns error on query that works in Grafana
+- Metric names extracted are empty when query clearly contains `rate(metric_name...)`
+- Label filters are lost: `{job="api"}` becomes just the metric name
+
+**Affected phases:** Phase 3 (PromQL parsing), Phase 4 (metric extraction)
 
 **References:**
-- [Elasticsearch Scroll API](https://www.elastic.co/guide/en/elasticsearch/reference/current/scroll-api.html)
-- [Elasticsearch Error: Cannot retrieve scroll context](https://pulse.support/kb/elasticsearch-cannot-retrieve-scroll-context-expired-scroll-id)
-- [Elasticsearch Pagination by Scroll API](https://medium.com/eatclub-tech/elasticsearch-pagination-by-scroll-api-68d36b8f4972)
-
-**Which phase:**
-Phase 3 (MCP Tool Implementation) - Affects patterns tool querying large datasets
+- [Prometheus Issue #6256: Replacing the PromQL Parser](https://github.com/prometheus/prometheus/issues/6256)
+- [PromQL Parser Source](https://github.com/prometheus/prometheus/blob/main/promql/parser/parse.go)
+- [VictoriaMetrics: PromQL Edge Cases](https://victoriametrics.com/blog/prometheus-monitoring-function-operator-modifier/)
 
 ---
 
-### Pitfall 5: Hard-Coded API Region Endpoint
+### Pitfall 4: Graph Schema Cardinality Explosion
 
-**What goes wrong:**
-Logz.io uses different API endpoints per region (us-east-1, eu-central-1, ap-southeast-2, etc.). If you hard-code the endpoint URL in config or default to US region, users in other regions get authentication failures or routing errors.
+**What goes wrong:** Creating a node for every metric time series (e.g., `http_requests_total{job="api", status="200"}`) explodes graph size. 10K metrics × 100 label combinations = 1M nodes. FalkorDB traversals become slow.
 
-**Why it happens:**
-Multi-region architecture is common in observability SaaS, but not obvious to new integrators. The project context mentions "multi-region: different API endpoints" but doesn't specify how to determine correct endpoint. Users expect a single API domain.
+**Why it happens:** Observability data has high cardinality. A single Prometheus instance can have millions of unique time series. Treating each series as a graph node ignores that time-series databases are purpose-built for this scale.
 
 **Consequences:**
-- Authentication fails for non-US users (wrong region, token not valid)
-- Higher latency for users far from hard-coded region
-- Data sovereignty violations (EU data routed through US)
-- Support burden ("integration doesn't work for me")
+- Graph ingestion takes minutes instead of seconds
+- Cypher queries timeout when traversing metric relationships
+- Memory usage grows unbounded (1M nodes × avg 500 bytes = 500MB just for metric nodes)
+- Dashboard hierarchy traversal (Overview→Detail) is slower than querying Grafana directly
 
 **Prevention:**
-1. **Require region as explicit config parameter** - No defaults, force user to specify
-2. **Validate region against known list** - Reject invalid regions early with helpful message
-3. **Construct endpoint URL from region** - `https://api-{region}.logz.io` pattern
-4. **Document region discovery process** - Link to Logz.io docs showing how to find your region
-5. **Add region to MCP tool descriptions** - Make it visible which instance serves which region
+1. **Schema hierarchy** — Store structure, not data:
+   - **Dashboard** node (dozens): `{uid, title, tags, level: overview|aggregated|detail}`
+   - **Panel** node (hundreds): `{id, title, type, gridPos}`
+   - **Query** node (hundreds): `{refId, expr: raw PromQL, datasource}`
+   - **Metric template** node (thousands): `{name: "http_requests_total", labels: ["job", "status"]}` — no label values
+   - **Service** node (dozens): `{name: inferred from job/service label}`
+
+2. **Do NOT create nodes for:**
+   - Individual time series (e.g., `http_requests_total{job="api"}`)
+   - Metric values or timestamps
+   - Label value combinations
+
+3. **Relationships:**
+   - `(Dashboard)-[:CONTAINS]->(Panel)`
+   - `(Panel)-[:QUERIES]->(Query)`
+   - `(Query)-[:MEASURES]->(MetricTemplate)`
+   - `(MetricTemplate)-[:BELONGS_TO]->(Service)` — inferred from labels
+
+4. **Service inference** — Extract `job`, `service`, or `app` label from PromQL. Create single Service node per unique value.
+
+5. **Metric values in Grafana** — Query actual time-series data via Grafana API on-demand. Graph only stores "what exists" not "what the values are."
 
 **Detection:**
-- Warning sign: Authentication works in staging but fails in production (different regions)
-- Warning sign: High latency in API calls (cross-region routing)
-- Test: Configure integration for each known region, verify correct endpoint construction
+- Graph ingestion for 10 dashboards takes >30 seconds
+- Node count exceeds 100K after ingesting <100 dashboards
+- Memory usage grows proportional to number of unique label combinations
+
+**Affected phases:** Phase 2 (graph schema design), Phase 5 (service inference)
 
 **References:**
-- [Azure APIM Multi-Region Concepts](https://github.com/MicrosoftDocs/azure-docs/blob/main/includes/api-management-multi-region-concepts.md)
-- [Multi-Region API Gateway Deployment Guide](https://www.eyer.ai/blog/multi-region-api-gateway-deployment-guide/)
-
-**Which phase:**
-Phase 1 (Planning & Research) - Architecture decision before implementation starts
+- [FalkorDB Design](https://docs.falkordb.com/design/)
+- [Time Series Database Fundamentals](https://www.tigergraph.com/blog/time-series-database-fundamentals-in-modern-analytics/)
+- [Graph Database Schema Best Practices](https://www.falkordb.com/blog/how-to-build-a-knowledge-graph/)
 
 ---
 
-### Pitfall 6: Secret Value Logging During Debug
+### Pitfall 5: Anomaly Detection Baseline Drift
 
-**What goes wrong:**
-During development/debugging, developers add log statements that inadvertently log secret values (API tokens, connection strings with passwords). These end up in pod logs, aggregated into VictoriaLogs/Logz.io, and become searchable by anyone with log access.
+**What goes wrong:** Anomaly detection compares current metrics to 7-day average but doesn't account for seasonality (weekday vs weekend) or concept drift (deployment changes baseline). Results in false positives ("CPU is high!" but it's Monday morning) or false negatives (gradual memory leak is "normal").
 
-**Why it happens:**
-Secrets are just strings, no type-level protection. Generic error messages include full context ("failed to connect with token=abc123..."). Structured logging makes it easy to log entire config objects. Existing VictoriaLogs integration has generic logging, no secret scrubbing.
+**Why it happens:** Time-series data has multiple seasonal patterns (hourly, daily, weekly). Simple rolling average doesn't distinguish "10am on Monday" from "2am on Sunday." Systems change over time (new features, scaling events) so old baselines become invalid.
 
 **Consequences:**
-- Credential leakage to logs (security incident)
-- Compliance violation (secrets in plaintext in log storage)
-- Difficult to detect/remediate (secrets may be in historical logs)
-- Incident response requires log deletion (may violate retention policies)
+- High false positive rate: 40% of anomalies are "it's just peak hours"
+- Users ignore alerts (alert fatigue)
+- Gradual degradation goes undetected: 2% daily memory leak over 7 days looks "normal"
+- Seasonal patterns (Black Friday, end-of-quarter) trigger false alarms
 
 **Prevention:**
-1. **Mark secret fields with struct tags** - `json:"-" yaml:"api_token"` prevents marshaling
-2. **Implement String() method for config** - Return redacted version for logging
-3. **Log config validation only** - Log "token present: yes" not token value
-4. **Add linter rule** - Detect `log.*config` patterns in code review
-5. **Sanitize error messages** - Wrap API errors, strip credentials from strings
-6. **Log audit** - Search existing logs for exposed tokens before production
+1. **Time-of-day matching** — Compare current value to same time-of-day in previous 7 days:
+   - Current: Monday 10:15am
+   - Baseline: Average of [last Monday 10:15am, 2 Mondays ago 10:15am, ...]
+   - Use 1-hour window around target time to handle small time shifts
+
+2. **Minimum deviation threshold** — Only flag as anomaly if:
+   - Absolute deviation: `|current - baseline| > threshold` (e.g., 1000 requests/sec)
+   - AND relative deviation: `|(current - baseline) / baseline| > percentage` (e.g., 50%)
+   - This prevents "CPU is 0.1% higher!" false positives
+
+3. **Baseline staleness detection** — If baseline data is >14 days old or has gaps, warn "insufficient data for anomaly detection" instead of showing false confidence.
+
+4. **Trend analysis (future enhancement)** — Detect monotonic increase/decrease over 7 days using linear regression. If slope is significant, flag "trending up" instead of "anomaly."
+
+5. **Manual thresholds** — Allow users to set expected ranges per metric in dashboard tags (e.g., `threshold:cpu_90%`). Use as override for ML-based detection.
+
+6. **STL decomposition (advanced)** — For high-confidence metrics, use Seasonal-Trend decomposition (Loess) to separate trend, seasonality, and residuals. Detect anomalies in residuals only.
 
 **Detection:**
-- Warning sign: Log entries contain "token=" or "api_key=" followed by values
-- Test: Grep application logs for known test secret values
-- Test: Log config object, verify secrets are redacted
+- Anomaly alerts correlate with known patterns (time of day, day of week)
+- False positive rate >20% when validating against known incidents
+- Users report "anomaly detection is always wrong"
+
+**Affected phases:** Phase 7 (anomaly detection), Phase 6 (MCP tools show anomaly scores)
 
 **References:**
-- [Kubernetes Secrets Management Best Practices](https://www.cncf.io/blog/2023/09/28/kubernetes-security-best-practices-for-kubernetes-secrets-management/)
-- [Kubernetes Secrets: Best Practices](https://blog.gitguardian.com/how-to-handle-secrets-in-kubernetes/)
-
-**Which phase:**
-Phase 2 (Logz.io API Client) - Establish logging patterns before building MCP tools
+- [Dealing with Trends and Seasonality](https://www.oreilly.com/library/view/anomaly-detection-for/9781492042341/ch04.html)
+- [OpenSearch: Reducing False Positives](https://opensearch.org/blog/reducing-false-positives-through-algorithmic-improvements/)
+- [Anomaly Detection: How to Tell Good from Bad](https://towardsdatascience.com/anomaly-detection-how-to-tell-good-performance-from-bad-b57116d71a10/)
+- [Time Series Anomaly Detection Seasonality](https://milvus.io/ai-quick-reference/how-does-anomaly-detection-handle-seasonal-patterns)
 
 ---
 
 ## Moderate Pitfalls
 
-Mistakes that cause delays, technical debt, or intermittent issues.
-
-### Pitfall 7: Rate Limit Handling Without Exponential Backoff
-
-**What goes wrong:**
-Logz.io enforces 100 concurrent requests per account. Without exponential backoff, multiple MCP tools hitting rate limit will retry immediately, amplifying the problem. Fixed-delay retries create thundering herd when rate limit resets.
-
-**Why it happens:**
-Rate limiting is account-wide, not per-instance. Multiple users running Claude Code simultaneously share the same rate limit. Naive retry logic uses fixed delays or immediate retries. HTTP 429 responses don't include Retry-After header (not documented).
-
-**Consequences:**
-- Request storms during rate limit periods
-- Degraded service for all users sharing account
-- MCP tools time out waiting for responses
-- Support tickets for "integration randomly fails"
-
-**Prevention:**
-1. **Implement exponential backoff with jitter** - Start at 1s, double each retry, max 32s
-2. **Track rate limit globally per instance** - Share state across tool invocations
-3. **Fail fast after 3 retries** - Return clear error to user, don't hang
-4. **Add rate limit metrics** - Expose `logzio_rate_limit_hits_total` counter
-5. **Document concurrent request limit** in integration configuration
-6. **Consider request queuing** - Serialize requests to stay under limit
-
-**Detection:**
-- Warning sign: Bursts of 429 errors in logs
-- Warning sign: Request latency spikes during high usage
-- Test: Send 101 concurrent requests, verify graceful handling
-
-**References:**
-- [Logz.io Metrics Throttling](https://docs.logz.io/docs/user-guide/infrastructure-monitoring/metric-throttling/)
-- [API Rate Limiting Strategies](https://nhonvo.github.io/posts/2025-09-07-api-rate-limiting-and-throttling-strategies/)
-- [Exponential Backoff Strategy](https://substack.thewebscraping.club/p/rate-limit-scraping-exponential-backoff)
-
-**Which phase:**
-Phase 2 (Logz.io API Client) - HTTP client configuration with retry middleware
+Mistakes that cause delays or technical debt.
 
 ---
 
-### Pitfall 8: Result Limit Confusion (1,000 vs 10,000)
+### Pitfall 6: Grafana Variable Interpolation Edge Cases
 
-**What goes wrong:**
-Logz.io has TWO result limits: 1,000 for aggregated results, 10,000 for non-aggregated. MCP tool tries to fetch 5,000 log messages (non-aggregated), expects it to work based on 10,000 limit, but uses aggregation query by accident and gets 1,000-row limit error.
+**What goes wrong:** Grafana template variables have multiple syntaxes (`$var` vs `[[var]]`) and formatting options (`${var:csv}`, `${var:regex}`). Multi-value variables interpolate differently per data source (Prometheus uses regex, InfluxDB uses OR clauses). Custom "All" values (`*` vs concatenated values) break when used incorrectly.
 
-**Why it happens:**
-The distinction between aggregated vs non-aggregated is subtle. Aggregation happens implicitly when grouping by fields. Project context mentions both limits but doesn't explain which queries use which. Easy to hit wrong limit during development.
+**Why it happens:** Variable interpolation happens at Grafana query time, not dashboard storage time. Different data sources have different query languages, so Grafana transforms variables differently. The `[[var]]` syntax is deprecated but still appears in old dashboards.
 
 **Consequences:**
-- Pattern mining tool silently truncates results at 1,000 (uses aggregation)
-- Raw logs tool works fine (non-aggregated, 10,000 limit)
-- Inconsistent behavior across MCP tools confuses users
-- Testing with small datasets misses the problem
+- Query stored as `{job=~"$job"}` but when executed with multi-select, becomes `{job=~"(api|web)"` (correct) or `{job=~"api,web"}` (broken regex)
+- Custom "All" value of `.*` works for Prometheus but breaks for exact-match databases
+- Variable extraction from PromQL during parsing returns `$job` instead of actual values, breaking service inference
 
 **Prevention:**
-1. **Document which MCP tools hit which limit** in tool descriptions
-2. **Validate limit parameter against query type** - Reject invalid combinations early
-3. **Warn user when approaching limit** - "Returning 1,000 of 50,000 matching logs"
-4. **Use scroll API for large result sets** - Avoid hitting limits entirely
-5. **Test with large datasets** - Ensure limits are enforced correctly
+1. **Store variables separately** — Extract dashboard `templating.list` into separate Variable nodes in graph: `{name: "job", type: "query", multi: true, includeAll: true}`
+2. **Do NOT interpolate during ingestion** — Keep queries as-is with `$var` placeholders. Grafana API handles interpolation during query execution.
+3. **Pass variables to Grafana API** — When querying metrics, include `scopedVars` in `/api/ds/query` request body with AI-provided values.
+4. **Document variable types** — In graph schema, classify variables:
+   - **Scoping** (namespace, cluster, region): AI provides per MCP call
+   - **Entity** (pod, service): Used for drill-down
+   - **Detail** (time range, aggregation): Controls visualization
+
+5. **Test multi-value variables** — Create fixture dashboard with `job` variable set to multi-select. Verify query execution returns results for all selected values.
 
 **Detection:**
-- Warning sign: Tool returns exactly 1,000 or 10,000 results (suspicious)
-- Test: Query returning >1,000 aggregated results, verify error handling
+- Queries return zero results when variable is multi-select
+- Service inference extracts `$job` as literal string instead of recognizing as variable
+- Regex errors in Prometheus logs: "invalid regexp: api,web"
+
+**Affected phases:** Phase 3 (PromQL parsing), Phase 4 (variable classification), Phase 6 (MCP query execution)
 
 **References:**
-- Project context: "Result limits: 1,000 aggregated, 10,000 non-aggregated"
-- [Elasticsearch Query DSL Guide](https://logz.io/blog/elasticsearch-queries/)
-
-**Which phase:**
-Phase 3 (MCP Tool Implementation) - Query construction and result handling
+- [Prometheus Template Variables](https://grafana.com/docs/grafana/latest/datasources/prometheus/template-variables/)
+- [Variable Syntax](https://grafana.com/docs/grafana/latest/visualizations/dashboards/variables/variable-syntax/)
+- [GitHub Issue #93776: Variable Formatter](https://github.com/grafana/grafana/issues/93776)
 
 ---
 
-### Pitfall 9: Analyzed Field Sorting/Aggregation Failure
+### Pitfall 7: Rate Limiting and Pagination Gaps
 
-**What goes wrong:**
-Elasticsearch analyzed fields (like `message`) are tokenized for full-text search. You cannot sort or aggregate on them. MCP tool tries `"sort": [{"message": "asc"}]` and gets cryptic error about "fielddata disabled on text fields."
+**What goes wrong:** Grafana Cloud API has rate limits (600 requests/hour for access policies). Large organizations with hundreds of dashboards hit limits during initial ingestion. Grafana API lacks pagination for dashboard list endpoints (default max 5000 data sources, no explicit dashboard limit documented).
 
-**Why it happens:**
-Field mapping determines whether field is analyzed (full-text) or keyword (exact match). Logz.io auto-maps many fields, but behavior may differ from self-hosted Elasticsearch. Sorting/aggregation requires keyword fields. Error messages are Elasticsearch internals, not user-friendly.
+**Why it happens:** Grafana API evolved for interactive use (humans clicking UI) not bulk automation. Rate limits prevent API abuse but block legitimate batch operations like "ingest all dashboards."
 
 **Consequences:**
-- MCP tools fail with confusing errors
-- Query construction logic becomes brittle (needs field mapping knowledge)
-- Different behavior between environments (mapping differences)
+- Initial ingestion of 200 dashboards × 5 panels × 3 queries = 3000 API calls, hits rate limit
+- Dashboard list returns first 5000 results, silently truncates rest
+- Concurrent dashboard ingestion from multiple Spectre instances triggers rate limit
 
 **Prevention:**
-1. **Fetch field mappings during integration Start()** - Cache them
-2. **Validate sort/aggregation fields against mappings** - Only allow keyword fields
-3. **Provide user-friendly error** - "Cannot sort on 'message' (text field). Use 'message.keyword' instead."
-4. **Document common field suffixes** - `.keyword` for exact match, base field for search
-5. **Add field mapping explorer tool** - Let users discover available fields
+1. **Batch dashboard fetching** — Use `/api/search` endpoint with `type=dash-db` to list all dashboards, then fetch each full dashboard via `/api/dashboards/uid/:uid`. Do NOT fetch via `/api/dashboards/db/:slug` (deprecated).
+2. **Rate limit backoff** — Detect 429 Too Many Requests response. Implement exponential backoff: wait 60s, then 120s, then 240s. Log "rate limited, retrying..." to UI.
+3. **Incremental ingestion** — On first run, ingest dashboards tagged `overview` only (typically <20). Full ingestion happens in background with rate limiting.
+4. **Cache dashboard JSON** — After initial fetch, only re-fetch if dashboard `version` changed (check via lightweight `/api/search` which includes version field).
+5. **Pagination detection** — Check if dashboard list length equals suspected page size (e.g., 1000, 5000). Log warning "possible truncation, verify all dashboards ingested."
 
 **Detection:**
-- Warning sign: Queries fail with "fielddata" or "aggregation not supported" errors
-- Test: Attempt sort on known text field, verify helpful error message
+- 429 response codes in logs
+- Dashboard count in Spectre doesn't match Grafana UI count
+- Ingestion stops midway with "rate limit exceeded" error
+
+**Affected phases:** Phase 1 (Grafana client), Phase 2 (dashboard ingestion)
 
 **References:**
-- [Elasticsearch Query DSL Guide](https://logz.io/blog/elasticsearch-queries/)
-- [Understanding Common Elasticsearch Query Errors](https://moldstud.com/articles/p-understanding-common-causes-of-elasticsearch-query-errors-and-how-to-effectively-resolve-them)
-
-**Which phase:**
-Phase 3 (MCP Tool Implementation) - Query builder needs field mapping awareness
+- [Grafana Cloud API Rate Limiting](https://drdroid.io/stack-diagnosis/grafana-grafana-api-rate-limiting)
+- [Data Source HTTP API Pagination](https://grafana.com/docs/grafana/latest/developers/http_api/data_source/)
+- [Infinity Datasource Pagination Limits](https://github.com/grafana/grafana-infinity-datasource/discussions/601)
 
 ---
 
-### Pitfall 10: fsnotify File Descriptor Exhaustion on macOS
+### Pitfall 8: Panel gridPos Negative Gravity
 
-**What goes wrong:**
-On macOS, fsnotify uses kqueue, which requires one file descriptor per watched file. If you watch many integration config files (or watch a directory with many files), you hit the OS limit (default 256) and get "too many open files" error.
+**What goes wrong:** Dashboard panel layout uses `gridPos` with coordinates `{x, y, w, h}` where the grid has "negative gravity" — panels automatically move upward to fill gaps. When programmatically modifying layouts or calculating panel importance, Y-coordinate alone doesn't indicate visual hierarchy.
 
-**Why it happens:**
-macOS kqueue is more resource-intensive than Linux inotify. The existing integration watcher watches a single file, but if deployment pattern involves watching multiple config files (one per integration instance), the problem scales. This is a platform-specific behavior.
+**Why it happens:** Grafana UI auto-arranges panels to eliminate whitespace. When a panel is deleted, panels below move up. The stored `gridPos.y` reflects final position after gravity, not intended hierarchy.
 
 **Consequences:**
-- Watcher fails to start on macOS (development machines)
-- Error is cryptic ("too many open files" doesn't mention fsnotify)
-- Works fine on Linux (CI/production), fails on developer laptops
-- Blocks local testing of multi-instance scenarios
+- Importance ranking "first panel is overview" breaks when top panel is full-width (y=0) but second panel also has y=0 (placed to the right, not below)
+- Panel reconstruction from graph fails to maintain visual layout
+- Drill-down relationships inferred from position are incorrect: "panel at y=5 drills into panel at y=10" but they're actually side-by-side
 
 **Prevention:**
-1. **Watch parent directory, not individual files** - Single file descriptor for entire directory
-2. **Filter events by filename** - Ignore irrelevant files in directory
-3. **Document macOS ulimit requirement** - `ulimit -n 4096` in setup docs
-4. **Add startup check** - Verify file descriptor limit is sufficient
-5. **Log clear error** - "fsnotify failed: increase file descriptor limit (ulimit -n 4096)"
+1. **Sort by y then x** — When ranking panels by importance: sort by `gridPos.y` ascending, then `gridPos.x` ascending. This gives reading order (left-to-right, top-to-bottom).
+2. **Use panel type as signal** — "Row" panels (type: "row") group related panels. Panel immediately after a row is child of that row.
+3. **Rely on dashboard tags** — Use Grafana tags or dashboard JSON `tags` field for explicit hierarchy (`overview`, `detail`), not inferred from layout.
+4. **Store original gridPos** — When saving to graph, preserve exact `gridPos` for reconstruction. Do NOT recalculate positions.
 
 **Detection:**
-- Warning sign: "too many open files" error during watcher startup
-- Warning sign: Watcher works on Linux CI, fails on macOS laptops
-- Test: Create 300 watched files, verify watcher starts successfully (or errors helpfully)
+- Panel importance ranking shows "graph" panel before "singlestat" panel when visual hierarchy is opposite
+- Dashboard reconstruction places panels in wrong positions
+- Drill-down links go to unrelated panels
+
+**Affected phases:** Phase 2 (graph schema), Phase 5 (dashboard hierarchy inference)
 
 **References:**
-- [fsnotify GitHub README](https://github.com/fsnotify/fsnotify)
-- [Building a cross-platform File Watcher in Go](https://dev.to/asoseil/building-a-cross-platform-file-watcher-in-go-what-i-learned-from-scratch-1dbj)
-
-**Which phase:**
-Phase 2 (Logz.io API Client) - File watching infrastructure setup
+- [Dashboard JSON Model](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/view-dashboard-json-model/)
+- [Dashboard JSON Structure](https://yasoobhaider.medium.com/using-grafana-json-model-howto-509aca3cf9a9)
 
 ---
 
-### Pitfall 11: Dual-Phase Secret Rotation Not Implemented
+### Pitfall 9: PromQL Label Cardinality Mistakes
 
-**What goes wrong:**
-Old secret is invalidated immediately when new secret is generated. During rotation, there's a window where application has old secret cached but it's already invalid. Requests fail with 401 errors until hot-reload completes.
+**What goes wrong:** Developers add high-cardinality labels to metrics (`user_id`, `request_id`, `trace_id`) causing millions of time series. Queries like `rate(http_requests{trace_id=~".*"}[5m])` timeout or OOM. Service inference from labels fails when label values are unbounded.
 
-**Why it happens:**
-Simple rotation (generate new → invalidate old) assumes instant propagation. File-based hot-reload takes time (fsnotify event → reload → HTTP client update). Kubernetes kubelet syncs volumes every 60s by default. Secret provider may not support overlapping active versions.
+**Why it happens:** Prometheus best practices warn against high cardinality but Grafana dashboards may query external systems (Thanos, Mimir) with poor label hygiene. Every unique label combination creates a new time series in memory.
 
 **Consequences:**
-- Downtime during secret rotation (seconds to minutes)
-- 401 errors visible to users during rotation window
-- Rotation becomes risky, teams avoid doing it regularly
-- Security posture degrades (stale secrets stay active)
+- Queries timeout after 30 seconds
+- Prometheus memory usage spikes to 10GB+ for simple `rate()` query
+- Service inference extracts 100K "services" from `trace_id` label instead of 10 services from `job` label
+- Grafana API returns partial results or errors
 
 **Prevention:**
-1. **Use dual-phase rotation** - Generate new, wait for propagation, invalidate old
-2. **Support multiple active tokens** - Application accepts both old and new during transition
-3. **Implement grace period** - Keep old secret valid for 5 minutes after new one deployed
-4. **Monitor rotation health** - Alert if 401 errors spike during rotation
-5. **Document rotation procedure** - Step-by-step with verification checkpoints
-6. **Test rotation in staging** - Verify zero-downtime before production
+1. **Label validation during ingestion** — When parsing PromQL, extract label matchers. If label name matches high-cardinality patterns (`*_id`, `trace_*`, `span_*`, `uuid`, `session`), log warning: "High-cardinality label detected in dashboard '{dashboard}', panel '{panel}'"
+2. **Service inference whitelist** — Only infer services from known-good labels: `job`, `service`, `app`, `application`, `namespace`, `cluster`. Ignore all other labels.
+3. **Query timeout enforcement** — Set Grafana query timeout to 30s (via `/api/ds/query` request). If query times out, show "query too slow" instead of crashing.
+4. **Pre-aggregation hints** — Detect queries missing aggregation: `http_requests_total` without `sum()` or `rate()`. Log warning "query may return too many series."
 
 **Detection:**
-- Warning sign: 401 errors during known rotation windows
-- Test: Rotate secret while load testing, verify no 401s
+- Grafana queries return 429 "too many series" errors
+- Service node count in graph is >1000 (should be <100 for typical setup)
+- Query execution logs show "timeout" or "OOM"
+
+**Affected phases:** Phase 3 (PromQL parsing), Phase 5 (service inference), Phase 7 (anomaly detection queries)
 
 **References:**
-- [Zero Downtime Secrets Rotation: 10-Step Guide](https://www.doppler.com/blog/10-step-secrets-rotation-guide)
-- [AWS: Rotate database credentials without restarting containers](https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/rotate-database-credentials-without-restarting-containers.html)
-- [Secrets rotation strategies for long-lived services](https://technori.com/news/secrets-rotation-long-lived-services/)
+- [3 Common Mistakes with PromQL](https://home.robusta.dev/blog/3-common-mistakes-with-promql-and-kubernetes-metrics)
+- [PromQL Best Practices](https://last9.io/blog/promql-cheat-sheet/)
 
-**Which phase:**
-Phase 2 (Logz.io API Client) - Client initialization and credential refresh logic
+---
+
+### Pitfall 10: Progressive Disclosure State Leakage
+
+**What goes wrong:** Progressive disclosure (overview → aggregated → details) requires maintaining context across MCP tool calls. If state is stored server-side (e.g., "user selected cluster X in overview, now calling aggregated"), concurrent AI sessions interfere. If state is AI-managed, AI forgets context and calls details tool without scoping variables.
+
+**Why it happens:** Spectre follows stateless MCP architecture (per PROJECT.md: "AI passes filters per call, no server-side session state"). But progressive disclosure implies stateful flow: overview picks service → aggregated shows correlations → details expands dashboard.
+
+**Consequences:**
+- AI calls `metrics_aggregated` without cluster/namespace, returns aggregated results across ALL clusters (too broad, slow)
+- Concurrent Claude sessions: User A selects "prod" cluster, User B selects "staging", both get same results (state collision)
+- AI forgets to pass scoping variables from overview to details: "show me details for service X" but doesn't include `cluster=prod` from previous call
+
+**Prevention:**
+1. **Stateless MCP tools** — Already implemented. Each tool call is independent, all filters passed as parameters.
+2. **AI context management** — Document in MCP tool descriptions: "To drill down, copy scoping variables (cluster, namespace, service) from overview response and pass to aggregated/details calls."
+3. **Require scoping variables** — Make `cluster` or `namespace` a required parameter for `metrics_aggregated` and `metrics_details` tools. Return error if missing.
+4. **Prompt engineering** — MCP tool response includes reminder: "To see details for service 'api', call metrics_details with cluster='prod', namespace='default', service='api'."
+5. **Test multi-turn conversations** — E2E test: AI calls overview → picks service → calls aggregated with correct scoping → calls details. Verify no state leakage.
+
+**Detection:**
+- AI calls `metrics_details` without scoping, returns "too many results" or timeout
+- Multiple AI sessions report unexpected results (sign of shared state)
+- Logs show tool calls with missing required parameters
+
+**Affected phases:** Phase 6 (MCP tool design), Phase 8 (UI integration)
+
+**References:**
+- [Progressive Disclosure NN/G](https://www.nngroup.com/articles/progressive-disclosure/)
+- [Progressive Disclosure Pitfalls](https://userpilot.com/blog/progressive-disclosure-examples/)
+- [B2B SaaS UX 2026](https://www.onething.design/post/b2b-saas-ux-design)
 
 ---
 
 ## Minor Pitfalls
 
-Mistakes that cause inconvenience but are easily fixable.
-
-### Pitfall 12: Time Range Default Confusion (Seconds vs Milliseconds)
-
-**What goes wrong:**
-Logz.io API accepts Unix timestamps in milliseconds. Developer defaults to Go's `time.Now().Unix()` (seconds), queries return no results. Error is silent (valid query, just wrong time range).
-
-**Why it happens:**
-Go standard library uses seconds for Unix timestamps. JavaScript uses milliseconds. Elasticsearch can accept both but prefers milliseconds. Easy to forget conversion. Project context doesn't specify which format to use.
-
-**Consequences:**
-- MCP tools return empty results for valid queries
-- Confusing user experience ("I know there are logs in that timeframe")
-- Hard to debug (no error, just wrong results)
-
-**Prevention:**
-1. **Use milliseconds consistently** - Convert at input boundary
-2. **Add unit tests** - Verify timestamp format in queries
-3. **Validate time ranges** - Reject timestamps in the future or too far past
-4. **Log effective time range** - "Querying logs from 2024-01-20T10:00:00Z to 2024-01-20T11:00:00Z"
-5. **Accept both formats, normalize internally** - Check magnitude, convert if needed
-
-**Detection:**
-- Warning sign: Queries return 0 results when logs exist
-- Test: Query with known log entry timestamp, verify it's found
-
-**References:**
-- [Logz.io Search API](https://api-docs.logz.io/docs/logz/search/)
-
-**Which phase:**
-Phase 3 (MCP Tool Implementation) - Time range parameter handling
+Mistakes that cause annoyance but are fixable.
 
 ---
 
-### Pitfall 13: Integration Name Used Directly in Tool Names
+### Pitfall 11: Dashboard JSON Comment and Whitespace Loss
 
-**What goes wrong:**
-If integration name contains spaces or special characters (e.g., "Logz.io Production"), tool name becomes `logzio_Logz.io Production_overview` (invalid MCP tool name). Registration fails.
+**What goes wrong:** Dashboard JSON may include comments (via `__comment` fields) or custom formatting (indentation, field ordering). When parsing dashboard → storing in graph → reconstructing JSON, comments and formatting are lost.
 
-**Why it happens:**
-The existing VictoriaLogs integration uses name directly in tool name construction: `fmt.Sprintf("victorialogs_%s_overview", v.name)`. Assumes name is kebab-case or snake_case. No validation of integration name format.
+**Why it happens:** JSON parsers discard comments and reformat. Grafana dashboard export uses custom field ordering (e.g., `id` before `title`) but Go `json.Marshal` uses alphabetical order.
 
 **Consequences:**
-- Tool registration fails silently or with cryptic error
-- Integration starts but MCP tools don't work
-- Hard to debug (error is far from name definition)
+- Users export dashboard from Spectre, lose original comments and formatting
+- Git diffs show entire file changed even when only one panel modified (due to field reordering)
+- Minor annoyance, not functionality break
 
 **Prevention:**
-1. **Sanitize name for tool construction** - Replace spaces with underscores, lowercase
-2. **Validate name at config load** - Reject names with special characters
-3. **Document name format requirement** - "Name must be lowercase alphanumeric with hyphens"
-4. **Add test case** - Verify tool registration with various name formats
-5. **Log generated tool names** - Make it visible what names were registered
+1. **Store raw JSON** — Always preserve original dashboard JSON in graph or database. When exporting, return raw JSON instead of reconstructed.
+2. **Do NOT reconstruct JSON** — Parsing is for graph population only, not for round-trip export.
+3. **Document limitation** — If export is needed, add note: "Exported dashboards may have different formatting than original."
 
 **Detection:**
-- Warning sign: Integration starts but `mcp tools list` doesn't show expected tools
-- Test: Configure integration with name containing spaces, verify error or sanitization
+- User reports "exported dashboard lost my comments"
+- Git diff shows reformatted JSON
+
+**Affected phases:** Phase 2 (dashboard storage)
 
 **References:**
-- Existing code: `/home/moritz/dev/spectre-via-ssh/internal/integration/victorialogs/victorialogs.go` line 163
-
-**Which phase:**
-Phase 3 (MCP Tool Implementation) - Tool registration logic
+- [PromQL Parser C# Limitations](https://github.com/djluck/PromQL.Parser)
 
 ---
 
-### Pitfall 14: Debounce Too Short for Kubernetes Secret Updates
+### Pitfall 12: Histogram Quantile Misuse
 
-**What goes wrong:**
-Integration watcher uses 500ms debounce (existing code line 59). Kubernetes Secret volume updates trigger multiple events (Remove → Create → Write) within 1 second as kubelet syncs. Reload triggers multiple times, causing unnecessary restarts.
+**What goes wrong:** Developers use `histogram_quantile()` on already-aggregated data or forget `le` label, producing nonsensical results. Example: `histogram_quantile(0.95, rate(http_duration_bucket[5m]))` without `sum() by (le)`.
 
-**Why it happens:**
-Kubelet sync isn't atomic from fsnotify's perspective. Atomic writer updates symlink, then rewrites target file. 500ms debounce is tuned for editor saves (many fast events), not Kubernetes volume updates (slower but still multiple events).
+**Why it happens:** Histogram metrics require specific aggregation patterns. Prometheus histograms use `_bucket` suffix with `le` (less than or equal) labels. Incorrect aggregation loses bucket boundaries.
 
 **Consequences:**
-- Secret reload triggers 2-3 times for single update
-- Unnecessary churn in HTTP client reconnection
-- Metrics show inflated reload counts
-- Log noise
+- 95th percentile shows 0.0 or NaN
+- Anomaly detection on latency percentiles fails
 
 **Prevention:**
-1. **Increase debounce to 2 seconds** for Kubernetes environments
-2. **Make debounce configurable** - Different values for dev (editor) vs prod (K8s)
-3. **Add reload deduplication** - Track content hash, skip if unchanged
-4. **Log debounce behavior** - "Received 3 events, coalesced into 1 reload"
-5. **Test with real Kubernetes Secret updates** - Not just local file edits
+1. **Template detection** — When parsing PromQL, detect `histogram_quantile()`. Verify it wraps `sum(...) by (le)` or `rate(...[...]) by (le)`. Log warning if missing.
+2. **Documentation** — When displaying histogram metrics in MCP tools, show note: "Percentile calculated from histogram buckets."
 
 **Detection:**
-- Warning sign: Multiple reload log entries within seconds
-- Test: Update secret once, verify exactly one reload (after debounce period)
+- PromQL contains `histogram_quantile` without `by (le)`
+- Query returns NaN or 0 for percentile metrics
+
+**Affected phases:** Phase 3 (PromQL parsing validation)
 
 **References:**
-- Existing code: `/home/moritz/dev/spectre-via-ssh/internal/config/integration_watcher.go` line 59
-- [fsnotify Issue #372](https://github.com/fsnotify/fsnotify/issues/372)
-
-**Which phase:**
-Phase 2 (Logz.io API Client) - Watcher configuration tuning
+- [PromQL Tutorial: Histograms](https://coralogix.com/blog/promql-tutorial-5-tricks-to-become-a-prometheus-god/)
+- [PromQL Cheat Sheet](https://promlabs.com/promql-cheat-sheet/)
 
 ---
 
-### Pitfall 15: No Index Specification (Defaults May Surprise)
+### Pitfall 13: Absent Metric False Positives
 
-**What goes wrong:**
-Logz.io search API documentation says "two consecutive indexes only (today + yesterday default)." If user expects to query logs from 3 days ago, they get empty results. API silently ignores logs outside the default index range.
+**What goes wrong:** Anomaly detection flags "metric missing" when metric is legitimately zero (e.g., `error_count=0` during healthy period). Using `absent()` function detects truly missing metrics but doesn't distinguish from zero values.
 
-**Why it happens:**
-Elasticsearch uses date-based index rotation. Logz.io default is recent 2 days for performance. Querying older logs requires explicit index specification. This is mentioned in project context but not enforced in API client.
+**Why it happens:** Prometheus doesn't store zero-value counters. If `http_errors_total` has no errors, the metric doesn't exist in TSDB. `absent(metric)` returns 1 (true) both when metric never existed and when it's currently zero.
 
 **Consequences:**
-- Historical log queries return incomplete results
-- Users don't understand why old logs aren't visible
-- Workaround (specify indexes) is not discoverable
+- Alert fatigue: "error_count missing!" every time there are no errors
+- Cannot distinguish "scrape failed" from "no errors"
 
 **Prevention:**
-1. **Validate time range against index coverage** - Warn if querying >2 days
-2. **Auto-calculate index names from time range** - `logzio-YYYY-MM-DD` pattern
-3. **Document index limitation prominently** - In MCP tool descriptions
-4. **Add index parameter to MCP tools** - Advanced users can override
-5. **Log effective index range** - "Querying indexes: logzio-2024-01-20, logzio-2024-01-21"
+1. **Check scrape status first** — Query `up{job="..."}` metric. If 0, scrape failed. If 1 but metric missing, it's legitimately zero.
+2. **Use `or vector(0)`** — PromQL pattern: `metric_name or vector(0)` returns 0 when metric absent.
+3. **Baseline staleness** — Only flag missing if metric existed in previous 7 days. New services won't trigger false alerts.
 
 **Detection:**
-- Warning sign: Historical queries (>2 days ago) return 0 results
-- Test: Query with 3-day-old timestamp, verify warning or index specification
+- Anomaly alerts during healthy periods: "error rate missing"
+- `absent()` queries return 1 constantly
+
+**Affected phases:** Phase 7 (anomaly detection)
 
 **References:**
-- Project context: "Two consecutive indexes only (today + yesterday default)"
-- [Logz.io Search API](https://api-docs.logz.io/docs/logz/search/)
-
-**Which phase:**
-Phase 3 (MCP Tool Implementation) - Query construction with index awareness
-
----
-
-## Secret Management Pitfalls
-
-Security-specific issues to avoid.
-
-### Pitfall 16: Secret Leakage in Error Messages
-
-**What goes wrong:**
-HTTP client error includes full request details: `GET https://api.logz.io/logs?X-API-TOKEN=abc123...`. Error is logged, bubbles up to MCP tool response, ends up in Claude Code conversation history.
-
-**Why it happens:**
-Standard HTTP libraries include full request in errors for debugging. Headers contain credentials. Error wrapping preserves original error. No sanitization layer between HTTP client and caller.
-
-**Consequences:**
-- API token visible in application logs
-- Token visible in MCP tool error responses
-- Token may be transmitted to Anthropic via Claude Code (conversation history)
-- Credential rotation required if leak detected
-
-**Prevention:**
-1. **Implement HTTP client error wrapper** - Strip `X-API-TOKEN` header from errors
-2. **Redact credentials in request logs** - `X-API-TOKEN: [REDACTED]`
-3. **Never log full HTTP requests** - Log method + path only, not headers
-4. **Sanitize errors before MCP response** - Generic "authentication failed" message
-5. **Add security test** - Simulate auth failure, verify token not in error
-
-**Detection:**
-- Warning sign: Grep logs for "X-API-TOKEN" finds matches
-- Test: Trigger auth error, verify token not in error message
-
-**References:**
-- [Kubernetes Secrets Management Best Practices](https://www.cncf.io/blog/2023/09/28/kubernetes-security-best-practices-for-kubernetes-secrets-management/)
-
-**Which phase:**
-Phase 2 (Logz.io API Client) - HTTP client error handling
-
----
-
-### Pitfall 17: Base64 Encoding Is Not Encryption
-
-**What goes wrong:**
-Kubernetes Secrets are base64-encoded, not encrypted. Developer assumes this provides security, stores API token in Secret without enabling encryption-at-rest in etcd. Anyone with etcd access can decode secrets.
-
-**Why it happens:**
-Base64 looks like encryption (random characters). Kubernetes documentation mentions "Secrets" which implies security. Encryption-at-rest is not enabled by default. This is a Kubernetes platform issue, but affects integration security.
-
-**Consequences:**
-- Secrets vulnerable to etcd compromise
-- Compliance violations (secrets stored in plaintext)
-- Cluster-wide security issue (affects all secrets)
-
-**Prevention:**
-1. **Document encryption-at-rest requirement** - In deployment docs
-2. **Recommend External Secrets Operator** - Fetch from Vault/AWS Secrets Manager
-3. **Verify encryption during setup** - Check etcd encryption config
-4. **Use least-privilege RBAC** - Limit who can read Secrets
-5. **Consider sealed secrets** - Encrypt before committing to Git
-
-**Detection:**
-- Check: `kubectl describe secret` shows base64 data (not encrypted)
-- Check: etcd encryption provider config exists
-- Audit: Review who has `get secrets` RBAC permission
-
-**References:**
-- [Kubernetes Secrets Good Practices](https://kubernetes.io/docs/concepts/security/secrets-good-practices/)
-- [Kubernetes Secrets Management Limitations](https://www.groundcover.com/blog/kubernetes-secret-management)
-
-**Which phase:**
-Phase 1 (Planning & Research) - Security architecture decision, documented before implementation
-
----
-
-### Pitfall 18: Secret Rotation Without Monitoring
-
-**What goes wrong:**
-Secret is rotated (new token deployed), but no monitoring verifies that rotation succeeded. Old token expired, new token has typo, all API calls fail silently until next health check (could be minutes).
-
-**Why it happens:**
-Rotation is treated as deployment task, not operational concern. No metrics track rotation events. Health checks run infrequently (default 30s-60s). Gap between rotation and detection creates downtime.
-
-**Consequences:**
-- Undetected authentication failures during rotation
-- Users experience intermittent errors
-- Difficult to correlate errors with rotation events
-
-**Prevention:**
-1. **Add rotation event metric** - `logzio_secret_reload_total{status="success|failure"}`
-2. **Trigger health check immediately after reload** - Don't wait for next periodic check
-3. **Alert on reload failures** - Prometheus alert: `rate(logzio_secret_reload_total{status="failure"}) > 0`
-4. **Log before/after token prefix** - "Reloaded token: old=abc123..., new=def456..." (first 6 chars only)
-5. **Test connection after reload** - Verify new credentials work before considering reload successful
-
-**Detection:**
-- Warning sign: No metrics for secret reload events
-- Test: Rotate to invalid token, verify immediate health check failure
-
-**References:**
-- [Zero Downtime Secrets Rotation](https://www.doppler.com/blog/10-step-secrets-rotation-guide)
-
-**Which phase:**
-Phase 2 (Logz.io API Client) - Metrics and health check integration
+- [PromQL Tricks: Absent](https://last9.io/blog/promql-tricks-you-should-know/)
 
 ---
 
 ## Phase-Specific Warnings
 
-Recommendations for which phases need deeper investigation or risk mitigation.
-
-| Phase | Likely Pitfall | Mitigation Strategy |
-|-------|---------------|---------------------|
-| **Phase 1: Planning** | Multi-region config complexity | Research region discovery, document region parameter requirement explicitly |
-| **Phase 2: API Client** | Kubernetes Secret subPath + fsnotify atomic writes | Prototype secret hot-reload early, test with real K8s Secret volume (not local file) |
-| **Phase 2: API Client** | Secret leakage in logs | Implement sanitization/redaction before any MCP tool integration |
-| **Phase 2: API Client** | Rate limiting without backoff | Add retry middleware to HTTP client with exponential backoff + jitter |
-| **Phase 3: MCP Tools** | Leading wildcard queries fail | Add query validator that rejects leading wildcards with helpful error |
-| **Phase 3: MCP Tools** | Scroll API expiration on large datasets | Set 15min timeout for pattern mining, implement checkpoint/resume |
-| **Phase 3: MCP Tools** | Result limit confusion (1K vs 10K) | Document which tools use aggregation, validate limits against query type |
-| **Phase 4: Testing** | Integration tests miss K8s-specific issues | Add E2E test with real Kubernetes Secret mount (not mocked file) |
-| **Phase 4: Testing** | Rate limit testing requires shared state | Mock rate limiter in tests, verify backoff behavior without hitting real API |
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| **Phase 1: Grafana Client** | Service account token vs Basic auth confusion | Detect Cloud vs self-hosted via URL pattern. Use Bearer token for Cloud. Document required scopes. |
+| **Phase 2: Graph Schema** | Cardinality explosion from storing time-series nodes | Store structure only: Dashboard→Panel→Query→MetricTemplate. NO nodes for label values or metric data. |
+| **Phase 3: PromQL Parsing** | Handwritten parser incompatibilities | Use official `prometheus/promql/parser` package. Best-effort extraction. Preserve variables as-is. |
+| **Phase 4: Variable Classification** | Multi-value variable interpolation breaks | Store variables separately. Do NOT interpolate during ingestion. Pass to Grafana API during query. |
+| **Phase 5: Service Inference** | High-cardinality labels (trace_id) become "services" | Whitelist: only infer from `job`, `service`, `app`, `namespace`, `cluster` labels. |
+| **Phase 6: MCP Tools** | Progressive disclosure state leakage | Stateless tools. Require scoping variables. AI manages context. Test multi-turn conversations. |
+| **Phase 7: Anomaly Detection** | Seasonality false positives | Time-of-day matching. Minimum deviation thresholds. Trend detection. Manual overrides. |
+| **Phase 8: UI Configuration** | Rate limit exhaustion during initial ingestion | Incremental ingestion. Backoff on 429. Cache dashboards. Background sync. |
 
 ---
 
-## Open Questions for Further Research
+## Integration with Existing Spectre Patterns
 
-1. **Does Logz.io API return Retry-After header on 429 responses?** - Not documented, need to test
-2. **What's the exact index naming pattern?** - `logzio-YYYY-MM-DD` is assumed, need to verify
-3. **Can we use Point-in-Time API instead of scroll?** - Newer Elasticsearch feature, may not be available
-4. **Does Logz.io support multiple active API tokens?** - Critical for dual-phase rotation
-5. **What's the actual kubelet Secret sync period?** - Default is 60s, but can be configured
-6. **How to discover user's Logz.io region programmatically?** - May need to parse account details
+### Patterns to Apply from v1.2 (Logz.io) and v1.1
+
+**Secret management (v1.2):**
+- SecretWatcher with SharedInformerFactory for Kubernetes-native hot-reload
+- Grafana API token can use same pattern: store in Secret, reference via `SecretRef{Name, Key}`
+- **Apply to:** Phase 1 (Grafana client auth)
+
+**Hot-reload with fsnotify (v1.1):**
+- IntegrationWatcher with debouncing (500ms) prevents reload storms
+- Invalid configs logged but don't crash watcher
+- **Apply to:** Phase 8 (Grafana config updates trigger re-ingestion)
+
+**Best-effort parsing (VictoriaLogs):**
+- LogsQL query builder gracefully handles missing fields
+- Falls back to defaults when validation fails
+- **Apply to:** Phase 3 (PromQL parsing — not all expressions need to parse perfectly)
+
+**Progressive disclosure (v1.2):**
+- overview → patterns → logs model already implemented for VictoriaLogs and Logz.io
+- Stateless MCP tools with AI-managed context
+- **Apply to:** Phase 6 (metrics_overview → metrics_aggregated → metrics_details)
+
+**Graph storage (v1):**
+- FalkorDB already stores Kubernetes resource relationships
+- Node-edge model for hierarchical data
+- **Apply to:** Phase 2 (Dashboard→Panel→Query→Metric graph schema)
+
+### New Patterns for Grafana Integration
+
+**Time-of-day baseline matching:**
+- New requirement for anomaly detection
+- VictoriaLogs pattern comparison is simpler (previous window only)
+- **Implement in:** Phase 7 with time bucketing logic
+
+**Variable classification:**
+- Distinguish scoping (cluster, namespace) from entity (pod, service) from detail (time range)
+- New concept not needed for log integrations
+- **Implement in:** Phase 4 as metadata on Variable nodes
+
+**Service inference from labels:**
+- Graph schema needs Service nodes inferred from PromQL labels
+- Kubernetes resources have explicit Service objects, metrics do not
+- **Implement in:** Phase 5 with label whitelist
 
 ---
 
-## Confidence Assessment
+## Verification Checklist
 
-| Area | Confidence | Source | Notes |
-|------|-----------|--------|-------|
-| **Elasticsearch DSL limitations** | HIGH | Official Logz.io docs, Elasticsearch reference | Leading wildcard restriction confirmed in docs |
-| **Kubernetes Secret mechanics** | HIGH | Kubernetes docs, community blog posts | subPath limitation well-documented |
-| **fsnotify edge cases** | HIGH | fsnotify GitHub issues, community experiences | Atomic write problem is known issue #372 |
-| **Scroll API behavior** | MEDIUM | Elasticsearch docs, Stack Overflow | 20min timeout from project context, not directly verified |
-| **Rate limiting details** | LOW | Logz.io docs (metrics only, not logs API) | 100 concurrent requests from project context, needs verification |
-| **Multi-region configuration** | MEDIUM | Generic multi-region patterns, not Logz.io-specific | Need to verify exact endpoint format |
-| **Secret rotation patterns** | HIGH | Multiple authoritative sources (AWS, HashiCorp, Doppler) | Dual-phase rotation well-established pattern |
-| **Result limits** | MEDIUM | Project context states 1K/10K | Need to verify if aggregation detection is automatic |
+Before proceeding to roadmap creation:
 
----
-
-## Summary: Top 5 Pitfalls to Address First
-
-1. **Kubernetes Secret subPath breaks hot-reload** - Critical for production deployments, affects security posture
-2. **fsnotify atomic write edge cases** - Silent failures hard to debug, blocks reliable secret rotation
-3. **Leading wildcard queries disabled** - User-facing errors, degrades MCP tool experience
-4. **Secret value leakage in logs/errors** - Security incident risk, compliance violation
-5. **Multi-region endpoint hard-coding** - Breaks integration for non-US users, support burden
-
-These five pitfalls represent the highest risk and should be addressed in Phase 2 (API Client) before implementing MCP tools in Phase 3.
+- [ ] Grafana client handles both Cloud (Bearer token) and self-hosted (Basic auth optional)
+- [ ] Graph schema stores structure (Dashboard/Panel/Query/Metric) not time-series data
+- [ ] PromQL parsing uses official `prometheus/promql/parser` package
+- [ ] Variable interpolation preserved, passed to Grafana API during query execution
+- [ ] Service inference only from whitelisted labels (job, service, app, namespace, cluster)
+- [ ] Anomaly detection uses time-of-day baseline matching with minimum thresholds
+- [ ] MCP tools are stateless, require scoping variables, AI manages context
+- [ ] Rate limiting handled with backoff, incremental ingestion, caching
+- [ ] Dashboard JSON stored raw for version compatibility
+- [ ] E2E tests include multi-value variables, histogram metrics, high-cardinality label detection
 
 ---
 
 ## Sources
 
-**Logz.io-Specific:**
-- [Logz.io Wildcard Searches](https://docs.logz.io/kibana/wildcards/)
-- [Logz.io Search Logs API](https://api-docs.logz.io/docs/logz/search/)
-- [Elasticsearch Query DSL Guide by Logz.io](https://logz.io/blog/elasticsearch-queries/)
-- [Logz.io Metrics Throttling](https://docs.logz.io/docs/user-guide/infrastructure-monitoring/metric-throttling/)
+**Grafana API & Authentication:**
+- [Grafana API Authentication Methods](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/authentication/)
+- [User HTTP API Limitations](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/user/)
+- [Breaking Changes in Grafana v11](https://grafana.com/docs/grafana/latest/breaking-changes/breaking-changes-v11-0/)
+- [Dashboard Versions API Issue #100970](https://github.com/grafana/grafana/issues/100970)
+- [Grafana API Rate Limiting](https://drdroid.io/stack-diagnosis/grafana-grafana-api-rate-limiting)
+- [Azure Managed Grafana Limitations](https://learn.microsoft.com/en-us/azure/managed-grafana/known-limitations)
 
-**Elasticsearch DSL:**
-- [Elasticsearch Query DSL](https://www.elastic.co/docs/explore-analyze/query-filter/languages/querydsl)
-- [Query string query Reference](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html)
-- [Understanding Elasticsearch Query Errors](https://moldstud.com/articles/p-understanding-common-causes-of-elasticsearch-query-errors-and-how-to-effectively-resolve-them)
-- [Elasticsearch Scroll API](https://www.elastic.co/guide/en/elasticsearch/reference/current/scroll-api.html)
-- [Elasticsearch Error: Expired Scroll ID](https://pulse.support/kb/elasticsearch-cannot-retrieve-scroll-context-expired-scroll-id)
+**Dashboard JSON Schema:**
+- [Dashboard JSON Model](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/view-dashboard-json-model/)
+- [Dashboard JSON Schema V2](https://grafana.com/docs/grafana/latest/as-code/observability-as-code/schema-v2/)
+- [Using Grafana JSON Model](https://yasoobhaider.medium.com/using-grafana-json-model-howto-509aca3cf9a9)
+- [Dashboard Spec GitHub](https://github.com/grafana/dashboard-spec)
 
-**Kubernetes Secrets:**
-- [Kubernetes Secrets Good Practices](https://kubernetes.io/docs/concepts/security/secrets-good-practices/)
-- [Secrets Management in Kubernetes Best Practices](https://dev.to/rubixkube/secrets-management-in-kubernetes-best-practices-for-security-1df0)
-- [Kubernetes Secret Management Limitations](https://www.groundcover.com/blog/kubernetes-secret-management)
-- [Kubernetes Secrets: Best Practices (GitGuardian)](https://blog.gitguardian.com/how-to-handle-secrets-in-kubernetes/)
-- [Kubernetes CNCF: Secrets Management Best Practices](https://www.cncf.io/blog/2023/09/28/kubernetes-security-best-practices-for-kubernetes-secrets-management/)
-- [Kubernetes Secrets and Pod Restarts](https://blog.ascendingdc.com/kubernetes-secrets-and-pod-restarts)
-- [K8s Deployment Automatic Rollout Restart](https://igboie.medium.com/k8s-deployment-automatic-rollout-restart-when-referenced-secrets-and-configmaps-are-updated-0c74c85c1b4a)
-- [Secrets Store CSI Driver Known Limitations](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations)
+**PromQL Parsing:**
+- [Prometheus Issue #6256: Parser Replacement](https://github.com/prometheus/prometheus/issues/6256)
+- [PromQL Parser Source Code](https://github.com/prometheus/prometheus/blob/main/promql/parser/parse.go)
+- [VictoriaMetrics: PromQL Functions and Edge Cases](https://victoriametrics.com/blog/prometheus-monitoring-function-operator-modifier/)
+- [3 Common PromQL Mistakes](https://home.robusta.dev/blog/3-common-mistakes-with-promql-and-kubernetes-metrics)
+- [PromQL Cheat Sheet](https://promlabs.com/promql-cheat-sheet/)
+- [21 PromQL Tricks](https://last9.io/blog/promql-tricks-you-should-know/)
 
-**Secret Rotation:**
-- [Zero Downtime Secrets Rotation: 10-Step Guide (Doppler)](https://www.doppler.com/blog/10-step-secrets-rotation-guide)
-- [AWS: Rotate database credentials without restarting containers](https://docs.aws.amazon.com/prescriptive-guidance/latest/patterns/rotate-database-credentials-without-restarting-containers.html)
-- [Secrets rotation strategies for long-lived services](https://technori.com/news/secrets-rotation-long-lived-services/)
-- [Orchestrating Automated Secret Rotation](https://medium.com/@eren.c.uysal/orchestrating-automated-secret-rotation-for-custom-applications-67d0869d6c5f)
-- [HashiCorp: Automated secrets rotation](https://developer.hashicorp.com/hcp/docs/vault-secrets/auto-rotation)
+**Grafana Variables:**
+- [Prometheus Template Variables](https://grafana.com/docs/grafana/latest/datasources/prometheus/template-variables/)
+- [Variable Syntax](https://grafana.com/docs/grafana/latest/visualizations/dashboards/variables/variable-syntax/)
+- [Variable Formatter Issue #93776](https://github.com/grafana/grafana/issues/93776)
 
-**fsnotify:**
-- [fsnotify Issue #372: Robustly watching a single file](https://github.com/fsnotify/fsnotify/issues/372)
-- [fsnotify GitHub Repository](https://github.com/fsnotify/fsnotify)
-- [Building a cross-platform File Watcher in Go](https://dev.to/asoseil/building-a-cross-platform-file-watcher-in-go-what-i-learned-from-scratch-1dbj)
+**Graph Database Schema:**
+- [FalkorDB Design](https://docs.falkordb.com/design/)
+- [How to Build a Knowledge Graph](https://www.falkordb.com/blog/how-to-build-a-knowledge-graph/)
+- [Graph Database Guide for AI](https://www.falkordb.com/blog/graph-database-guide/)
+- [Time Series Database Fundamentals](https://www.tigergraph.com/blog/time-series-database-fundamentals-in-modern-analytics/)
+- [Schema Design for Time Series](https://cloud.google.com/bigtable/docs/schema-design-time-series)
 
-**Rate Limiting:**
-- [API Rate Limiting and Throttling Strategies](https://nhonvo.github.io/posts/2025-09-07-api-rate-limiting-and-throttling-strategies/)
-- [Exponential Backoff Strategy](https://substack.thewebscraping.club/p/rate-limit-scraping-exponential-backoff)
-- [API Rate Limits Best Practices 2025](https://orq.ai/blog/api-rate-limit)
+**Anomaly Detection:**
+- [Dealing with Trends and Seasonality](https://www.oreilly.com/library/view/anomaly-detection-for/9781492042341/ch04.html)
+- [OpenSearch: Reducing False Positives](https://opensearch.org/blog/reducing-false-positives-through-algorithmic-improvements/)
+- [Anomaly Detection: Good vs Bad Performance](https://towardsdatascience.com/anomaly-detection-how-to-tell-good-performance-from-bad-b57116d71a10/)
+- [Handling Seasonal Patterns](https://milvus.io/ai-quick-reference/how-does-anomaly-detection-handle-seasonal-patterns)
+- [Time Series Anomaly Detection in Python](https://www.turing.com/kb/time-series-anomaly-detection-in-python)
+- [Digital Twin Anomaly Detection Under Drift](https://www.sciencedirect.com/science/article/abs/pii/S0957417425036784)
 
-**Multi-Region:**
-- [Azure APIM Multi-Region Concepts](https://github.com/MicrosoftDocs/azure-docs/blob/main/includes/api-management-multi-region-concepts.md)
-- [Multi-Region API Gateway Deployment Guide](https://www.eyer.ai/blog/multi-region-api-gateway-deployment-guide/)
-- [Google Cloud: Multi-region deployments for API Gateway](https://cloud.google.com/api-gateway/docs/multi-region-deployment)
+**Progressive Disclosure:**
+- [Progressive Disclosure (NN/G)](https://www.nngroup.com/articles/progressive-disclosure/)
+- [Progressive Disclosure Examples](https://userpilot.com/blog/progressive-disclosure-examples/)
+- [B2B SaaS UX Design 2026](https://www.onething.design/post/b2b-saas-ux-design)
+- [Progressive Disclosure in UX](https://blog.logrocket.com/ux-design/progressive-disclosure-ux-types-use-cases/)
+
+**Observability Trends:**
+- [2026 Observability Trends from Grafana Labs](https://grafana.com/blog/2026-observability-trends-predictions-from-grafana-labs-unified-intelligent-and-open/)
+- [What is Observability in 2026](https://clickhouse.com/resources/engineering/what-is-observability)
+- [Observability Predictions for 2026](https://middleware.io/blog/observability-predictions/)

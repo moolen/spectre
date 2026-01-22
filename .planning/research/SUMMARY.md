@@ -1,307 +1,344 @@
 # Project Research Summary
 
-**Project:** Spectre MCP Plugin System with VictoriaLogs Integration
-**Domain:** MCP server extensibility with observability integrations
-**Researched:** 2026-01-20
+**Project:** Spectre v1.3 Grafana Metrics Integration
+**Domain:** AI-assisted metrics observability through Grafana dashboards
+**Researched:** 2026-01-22
 **Confidence:** HIGH
 
 ## Executive Summary
 
-This project extends the existing Spectre MCP server with a plugin architecture that enables dynamic tool registration for observability integrations. The primary use case is VictoriaLogs integration with intelligent log exploration using template mining and progressive disclosure UX patterns.
+The v1.3 Grafana Metrics Integration extends Spectre's progressive disclosure pattern from logs to metrics. Research recommends using custom HTTP client for Grafana API (official clients are immature), Prometheus official PromQL parser for metric extraction, existing FalkorDB patterns for graph storage, and custom statistical baseline for anomaly detection. This approach prioritizes production-ready libraries, avoids dependency bloat, and aligns with Spectre's existing architecture (FalkorDB integration, plugin system, MCP tools).
 
-Expert systems build extensible observability platforms using compile-time plugin registration (not runtime .so loading) with RPC-based process isolation. The recommended approach uses HashiCorp go-plugin for plugin lifecycle, Koanf for hot-reload configuration management, and Drain algorithm for log template mining. Critical architecture decisions include: interface-based plugin registry (avoiding Go stdlib plugin versioning hell), pipeline stages with bounded channels for backpressure, and atomic pointer swap for race-free config reloads.
+The key architectural insight is to parse PromQL at ingestion time (not query time) to build a semantic graph of Dashboard→Panel→Query→Metric→Service relationships. This enables intelligent queries like "show me all dashboards tracking pod memory" without re-parsing queries. The progressive disclosure model (overview→aggregated→details) mirrors the proven log exploration pattern and provides AI-driven anomaly detection with severity ranking as a competitive differentiator.
 
-The primary risk is template mining instability with variable-starting logs, which causes template explosion and degrades accuracy from 90% to under 70%. Mitigation requires pre-tokenization with masking, periodic template rebalancing, and monitoring template growth metrics. Secondary risks include config hot-reload race conditions (prevented via atomic.Value) and progressive disclosure state loss (prevented via URL-based state). All critical risks have proven mitigation strategies from production deployments.
+Critical risks include Grafana API version breaking changes (mitigated by storing raw dashboard JSON and defensive parsing), service account token scope confusion (mitigated by separate auth paths for Cloud vs self-hosted), and graph schema cardinality explosion (mitigated by storing structure only, not time-series data). The recommended approach avoids handwritten PromQL parsing (use official library), prevents variable interpolation edge cases (store separately, pass to API), and handles baseline drift with time-of-day matching for seasonality.
 
 ## Key Findings
 
 ### Recommended Stack
 
-Research identified battle-tested technologies for plugin systems and log processing, avoiding common pitfalls like Go stdlib plugin versioning constraints and Viper's case-sensitivity bugs.
+The technology stack prioritizes production-ready libraries with active maintenance, compatibility with Go 1.24+, and alignment with Spectre's existing patterns. No external services are required beyond Grafana API access and the already-deployed FalkorDB instance.
 
 **Core technologies:**
-- **HashiCorp go-plugin v1.7.0**: RPC-based plugin architecture — avoids stdlib plugin versioning hell, provides process isolation, production-proven in Terraform/Vault/Nomad
-- **Koanf v2.3.0**: Hot-reload configuration management — modular design, built-in file watching, fixes Viper's case-insensitivity and bloat issues
-- **LoggingDrain (Drain algorithm)**: Log template mining — O(log n) matching, handles high-volume streams, sub-microsecond performance
-- **net/http (stdlib)**: VictoriaLogs client — sufficient for simple HTTP API, no custom client needed
-- **Existing stack reuse**: mark3labs/mcp-go for MCP server, connectrpc for REST API, gopkg.in/yaml.v3 for config
+- **Custom HTTP client (net/http)**: Grafana API access — official Go clients are deprecated or immature; custom client provides production control and matches existing integration patterns (VictoriaLogs, Logz.io)
+- **prometheus/promql/parser**: PromQL parsing — official Prometheus library, production-proven, 556+ dependents; avoids handwritten parser complexity
+- **FalkorDB (existing v2.0.2)**: Graph storage — already integrated; reuse existing patterns for Dashboard→Panel→Query→Metric relationships
+- **Custom statistical baseline (stdlib math)**: Anomaly detection — z-score with time-of-day matching; simple, effective, no dependencies; defers ML complexity to future versions
+- **SecretWatcher (existing pattern)**: Token management — Kubernetes-native hot-reload for Grafana API tokens; proven pattern from VictoriaLogs/Logz.io
 
-**Stack confidence:** HIGH overall. Only MEDIUM component is LoggingDrain library (small community), but Drain algorithm itself is HIGH confidence (proven in academic research and IBM production systems). Mitigation: algorithm is simple enough to re-implement in 200-300 LOC if library proves buggy.
+**New dependencies needed:**
+```bash
+go get github.com/prometheus/prometheus/promql/parser@latest
+```
+
+All other components use stdlib (net/http, encoding/json, math, time) or existing dependencies.
 
 ### Expected Features
 
-Research revealed MCP ecosystem favors minimalist tool design (10-20 tools maximum) due to context window constraints, directly influencing how plugins expose functionality and how log exploration should be surfaced.
+Research divides features into four categories: table stakes (users expect this), differentiators (competitive advantage), anti-features (explicitly avoid), and phase-specific (builds on foundation).
 
 **Must have (table stakes):**
-- Plugin discovery and lifecycle (load/unload with error isolation)
-- Semantic versioning with compatibility checking
-- Full-text log search with time range and field-based filtering
-- Basic aggregation (count by time window, group by field, top-N queries)
-- Progressive disclosure navigation (overview → aggregated → detail, max 3 levels)
-- Clear MCP tool descriptions with JSON Schema inputs
-- Breadcrumb navigation with state preservation
+- Dashboard execution via API (fetch, parse, execute queries with time ranges)
+- Basic variable support (single-value, simple substitution)
+- RED method metrics (rate, errors, duration for request-driven services)
+- USE method metrics (utilization, saturation, errors for resources)
 
 **Should have (competitive differentiators):**
-- Automatic log template mining (extract patterns without manual config)
-- Category-based tool loading (load tool groups on demand, not all upfront)
-- High-cardinality field search (fast search on trace_id despite millions of unique values)
-- Smart defaults with SLO-first views
-- MCP Resources for context (expose docs/schemas as resources, not tools)
+- AI-driven anomaly detection with severity ranking (statistical baseline, z-score, correlation)
+- Intelligent variable scoping (classify as scope/entity/detail, auto-set defaults per tool level)
+- Cross-signal correlation (metrics↔logs linking via shared namespace/time)
+- Progressive disclosure pattern (overview→aggregated→details mirrors log exploration)
 
 **Defer (v2+):**
-- Novelty detection (time window comparison of patterns — requires baseline period)
-- Anomaly scoring (rank logs by unusualness — complex ML implementation)
-- Plugin marketplace/registry (centralized discovery — unnecessary for MVP)
-- Hot reload without restart (advanced, can iterate to this)
-- Network-based plugin discovery (adds deployment complexity without clear demand)
+- Advanced variable support (multi-value with pipe syntax, chained variables 3+ levels deep, query variables)
+- Sophisticated anomaly detection (ML models, LSTM, adaptive baselines, root cause analysis)
+- Trace linking (requires OpenTelemetry adoption)
+- Dashboard management (create/edit/provision dashboards)
+
+**Anti-features (explicitly avoid):**
+- Dashboard UI replication (return structured data, not rendered visualizations)
+- Custom dashboard creation via API (read-only access, users manage dashboards in Grafana)
+- User-specific dashboard management (stateless MCP architecture, no per-user state)
+- Full variable dependency resolution (support 2-3 levels, warn on deeper chaining)
 
 ### Architecture Approach
 
-The architecture uses interface-based plugin registration (compile-time, not runtime .so loading) with a pipeline processing pattern for log ingestion. Plugins implement a standard interface and register themselves in a compile-time registry. Log processing follows a staged pipeline with bounded channels for backpressure: ingestion → normalization → template mining → structuring → batching → VictoriaLogs storage.
+The Grafana integration follows Spectre's existing plugin architecture, extending it with six new components: dashboard sync, PromQL parser, graph storage schema, query executor, anomaly detector, and MCP tools. The design prioritizes incremental sync (only changed dashboards), structured graph queries (semantic relationships), and integration with existing infrastructure (FalkorDB, MCP server, plugin system).
 
 **Major components:**
-1. **Plugin Manager** (`internal/mcp/plugins/`) — maintains registry of plugins, reads config to enable/disable, handles lifecycle (init/reload/shutdown), registers tools with MCP server
-2. **VictoriaLogs Plugin** (`internal/mcp/plugins/victorialogs/`) — implements Plugin interface, manages log processing pipeline, exposes MCP tools for querying, handles template persistence
-3. **Log Processing Pipeline** (`pipeline/`) — chain of stages with buffered channels: normalize → mine → structure → batch → write; backpressure via bounded channels with drop-oldest policy
-4. **Template Miner** (`miner/`) — Drain algorithm implementation, builds prefix tree by token count and first token, similarity scoring for matches, WAL persistence with snapshots
-5. **Configuration Hot-Reload** (`internal/config/watcher.go`) — fsnotify-based file watching, debouncing, SIGHUP signal handling, atomic pointer swap for race-free updates
-6. **VictoriaLogs Client** (`client/`) — HTTP wrapper for /insert/jsonline endpoint, NDJSON serialization, retry with backoff, circuit breaker
+1. **GrafanaClient**: HTTP API wrapper for Grafana — handles authentication (Bearer token for Cloud, optional Basic auth for self-hosted), dashboard retrieval, query execution via `/api/ds/query`, rate limiting with exponential backoff
+2. **DashboardSyncer**: Ingestion pipeline — incremental sync based on dashboard version, concurrent fetching with worker pool, change detection, batch graph writes in transactions
+3. **PromQLParser**: Semantic extraction — uses Prometheus official parser to extract metric names, label selectors, aggregations, functions; stores results in graph for semantic queries
+4. **GraphSchema**: Semantic relationships — Dashboard→Panel→Query→Metric→Service edges with CONTAINS, QUERIES, TRACKS relationships; stores structure only (no time-series data, no label values)
+5. **QueryService**: Query execution — executes PromQL via Grafana API, formats results for MCP tools, performs graph queries for dashboard discovery ("show dashboards tracking this pod")
+6. **AnomalyService**: Statistical detection — computes baselines (7-day history with time-of-day matching), calculates z-scores, classifies severity (info/warning/critical), caches baselines in graph (1-hour TTL)
 
-**Key patterns to follow:**
-- Interface-based plugin registration (not runtime .so loading)
-- Pipeline stages with bounded channels (prevents memory exhaustion)
-- Drain-inspired template mining (O(log n) matching vs O(n) regex list)
-- Atomic pointer swap for config reload (prevents torn reads)
-- Template cache with WAL persistence (fast reads, durability across restarts)
+**Data flow:**
+- Ingestion: Poll Grafana API → parse dashboards → extract PromQL → build graph (Dashboard→Panel→Query→Metric→Service)
+- Query: MCP tool → QueryService → Grafana API → format time series
+- Anomaly: MCP tool → AnomalyService → compute baseline (cached) → query current → compare → rank by severity
+
+**Graph schema strategy:**
+Store structure (what exists), not data (metric values). Avoid cardinality explosion by creating nodes for Dashboard (dozens), Panel (hundreds), Query (hundreds), Metric template (thousands), Service (dozens) — NOT for individual time series (millions). Query actual metric values on-demand via Grafana API.
 
 ### Critical Pitfalls
 
-Research identified five critical pitfalls that cause rewrites or major production issues, plus several moderate pitfalls that cause delays.
+Research identified 13 pitfalls ranging from critical (rewrites) to minor (annoyance). Top 5 require explicit mitigation in roadmap phases.
 
-1. **Go Stdlib Plugin Versioning Hell** — Using stdlib `plugin` package creates brittle deployment where plugins crash with version mismatches. All plugins and host must be built with exact same Go toolchain, dependency versions, GOPATH, and build flags. Prevention: Use HashiCorp go-plugin (RPC-based, process isolation, production-proven).
+1. **Grafana API version breaking changes** — Dashboard JSON schema evolves between major versions (v11 URL changes, v12 schema format). Prevention: Store raw dashboard JSON before parsing, version detection via `schemaVersion` field, defensive parsing with optional fields, test against multiple Grafana versions (v9-v12 fixtures).
 
-2. **Template Mining Instability with Variable-Starting Logs** — Drain fails when log messages start with variables instead of constants (e.g., "cupsd shutdown succeeded" vs "irqbalance shutdown succeeded" create separate templates instead of one). Causes template explosion, accuracy drops from 90% to <70%. Prevention: Pre-tokenize with masking (replace known variable patterns before feeding to Drain), use Drain3 with built-in masking, monitor template growth metrics.
+2. **Service account token scope confusion** — Cloud vs self-hosted have different auth methods (Bearer vs Basic) and permission scopes (service accounts lack Admin API access). Prevention: Detect Cloud via URL pattern, separate auth paths, minimal permissions (`dashboards:read` only), graceful degradation if optional APIs fail, clear error messages mapping 403 to actionable guidance.
 
-3. **Race Conditions in Config Hot-Reload** — Using sync.RWMutex with in-place field updates creates torn reads where goroutines see partial config state (old URL with new API key). Prevention: Use atomic.Value pointer swap pattern — validate entire config, then single atomic swap (readers see old OR new, never partial).
+3. **PromQL parser handwritten complexity** — PromQL has no formal grammar, official parser is handwritten with edge cases. Prevention: Use official `prometheus/promql/parser` library (do NOT write custom parser), best-effort extraction (complex expressions may not fully parse), variable interpolation passthrough (preserve `$var`, `[[var]]` as-is), focus on metric name extraction only.
 
-4. **Template Drift Without Rebalancing** — Log formats evolve over time (syntactic drift), causing accuracy degradation and template explosion after 30-60 days. Prevention: Use Drain3 HELP implementation with iterative rebalancing, implement template TTL (expire templates not seen in 30d), monitor templates-per-1000-logs ratio.
+4. **Graph schema cardinality explosion** — Creating nodes for every time series (metric × labels) explodes to millions of nodes. Prevention: Store structure only (Dashboard→Panel→Query→Metric template), do NOT create nodes for label values or time-series data, query actual metric values on-demand via Grafana API, limit to dozens of Dashboards/Services, hundreds of Panels/Queries, thousands of Metric templates.
 
-5. **UI State Loss During Progressive Disclosure** — Component-local state resets on navigation, browser back button doesn't restore context. Prevention: Encode state in URL query params from day 1 (hard to retrofit), use React Router with location.state, implement breadcrumb navigation with clickable links.
+5. **Anomaly detection baseline drift** — Simple rolling average ignores seasonality (weekday vs weekend) and concept drift (deployments change baseline). Prevention: Time-of-day matching (compare Monday 10am to previous Mondays at 10am), minimum deviation thresholds (absolute + relative), baseline staleness detection (warn if >14 days old), trend analysis for gradual degradation.
 
-**Moderate pitfalls:**
-- MCP protocol version mismatch without graceful degradation (support multiple protocol versions)
-- Cross-client template inconsistency (canonical storage in MCP server, deterministic IDs)
-- VictoriaLogs live tailing without rate limiting (minimum 1s refresh, warn at >1K logs/sec)
-- No config validation before hot-reload (validate and health-check before swap)
+**Additional key pitfalls:**
+- **Variable interpolation edge cases**: Multi-value variables use different formats per data source (`{job=~"(api|web)"}` for Prometheus). Store variables separately, do NOT interpolate during ingestion, pass to Grafana API during query.
+- **Rate limiting**: Grafana Cloud has 600 requests/hour limit. Implement exponential backoff on 429, incremental ingestion (overview dashboards first), cache dashboard JSON, background sync.
+- **Progressive disclosure state leakage**: Stateless MCP tools prevent concurrent session interference. Require scoping variables (cluster, namespace), AI manages context across calls, document drill-down pattern in tool descriptions.
 
 ## Implications for Roadmap
 
-Based on research, suggested phase structure follows dependency order identified in architecture patterns: plugin foundation must exist before integrations, log processing depends on VictoriaLogs client, template mining can be iterative, UI comes last.
+Based on research, v1.3 should follow a 5-phase structure that builds incrementally from foundation (HTTP client, graph schema) through ingestion (PromQL parsing, dashboard sync) to value delivery (MCP tools, anomaly detection). Each phase addresses specific features from FEATURES.md and mitigates pitfalls from PITFALLS.md.
 
-### Phase 1: Plugin Infrastructure Foundation
-**Rationale:** Plugin architecture is the foundation for all integrations. Must be correct from day 1 because changing plugin system later (e.g., stdlib plugin to go-plugin) forces complete rewrite.
-
-**Delivers:**
-- Plugin interface definition and registry
-- Config loader extension for integrations.yaml
-- Atomic config hot-reload with fsnotify
-- Existing Kubernetes tools migrated to plugin pattern
-
-**Addresses (from FEATURES.md):**
-- Plugin discovery and lifecycle (table stakes)
-- Semantic versioning with compatibility checking (table stakes)
-- Config hot-reload (competitive differentiator)
-
-**Avoids (from PITFALLS.md):**
-- CRITICAL-1: Uses HashiCorp go-plugin, not stdlib plugin
-- CRITICAL-3: Implements atomic pointer swap for config reload from start
-
-**Stack elements:** Koanf v2.3.0 + providers, fsnotify (transitive), HashiCorp go-plugin v1.7.0
-
-**Research flags:** Standard patterns, skip additional research. Well-documented in go-plugin and Koanf documentation.
-
-### Phase 2: VictoriaLogs Client & Basic Pipeline
-**Rationale:** Establish reliable external integration before adding complexity of template mining. Validates that log pipeline architecture works with real VictoriaLogs instance.
+### Phase 1: Foundation — Grafana API Client & Graph Schema
+**Rationale:** Establish HTTP client and graph structure before ingestion logic. Grafana client handles auth complexity (Cloud vs self-hosted). Graph schema design prevents cardinality explosion (store structure, not data).
 
 **Delivers:**
-- HTTP client for /insert/jsonline endpoint
-- Pipeline stages (normalize, batch, write)
-- Kubernetes event ingestion
-- Basic VictoriaLogs plugin registration
-- Backpressure with bounded channels
+- GrafanaClient with authentication (Bearer token for Cloud, SecretWatcher integration)
+- Graph schema nodes (Dashboard, Panel, Query, Metric, Service) with indexes
+- Health checks and connectivity validation
+- Integration lifecycle (Start/Stop/Health) and factory registration
 
-**Addresses (from FEATURES.md):**
-- Log ingestion and storage (prerequisite for query tools)
-- Backpressure handling (reliability)
+**Addresses features:**
+- Table stakes: Dashboard execution API access, basic connectivity
+- Foundation for all other features
 
-**Avoids (from PITFALLS.md):**
-- MODERATE-4: Implements rate limiting for potential live tail
-- MINOR-4: Uses correct VictoriaLogs time filter patterns
+**Avoids pitfalls:**
+- Pitfall 2 (token scope): Separate auth paths for Cloud vs self-hosted, minimal permissions
+- Pitfall 4 (cardinality): Graph schema stores structure only, no time-series nodes
+- Pitfall 7 (rate limiting): HTTP client with rate limiter, exponential backoff
 
-**Stack elements:** net/http (stdlib), existing Kubernetes event stream
+**Confidence:** HIGH — HTTP client patterns proven in VictoriaLogs/Logz.io, graph schema extends existing FalkorDB patterns.
 
-**Research flags:** Standard patterns, skip additional research. VictoriaLogs API is well-documented.
+---
 
-### Phase 3: Log Template Mining
-**Rationale:** Template mining is complex and can be iterated on. Start with basic Drain implementation, validate with production log samples, iterate on masking and rebalancing based on real data.
-
-**Delivers:**
-- Drain algorithm implementation for template extraction
-- Template cache with in-memory storage
-- Template persistence (WAL + snapshots)
-- Integration with log pipeline
-- Template metadata in VictoriaLogs logs
-
-**Addresses (from FEATURES.md):**
-- Automatic template mining (competitive differentiator)
-- Pattern detection without manual config
-
-**Avoids (from PITFALLS.md):**
-- CRITICAL-2: Pre-tokenization with masking for variable-starting logs
-- CRITICAL-4: Periodic rebalancing mechanism (use Drain3 HELP if available, or implement TTL)
-- MINOR-3: Order normalization rules correctly (IPv6 before UUID)
-
-**Stack elements:** LoggingDrain library (or custom implementation)
-
-**Research flags:** NEEDS DEEPER RESEARCH during phase planning. Drain algorithm parameters (similarity threshold, tree depth, max clusters) need tuning based on actual log patterns. Recommend `/gsd:research-phase` to:
-- Sample production logs from target namespaces
-- Validate template count is reasonable (<1000 for typical app)
-- Tune similarity threshold (0.3-0.6 range)
-- Test masking patterns with edge cases
-
-### Phase 4: MCP Query Tools
-**Rationale:** Query tools depend on both VictoriaLogs client (Phase 2) and template mining (Phase 3). This phase exposes functionality to AI assistants via MCP.
+### Phase 2: Ingestion Pipeline — Dashboard Sync & PromQL Parsing
+**Rationale:** Build ingestion before MCP tools. PromQL parsing enables semantic graph queries ("show dashboards tracking this metric"). Incremental sync handles large Grafana instances (100+ dashboards).
 
 **Delivers:**
-- `query_logs` tool with LogsQL integration
-- `analyze_log_patterns` tool using template data
-- VictoriaLogs plugin full registration
-- Tool descriptions and JSON schemas
-- MCP Resources for VictoriaLogs schema docs
+- DashboardSyncer with incremental sync (version-based change detection)
+- PromQLParser using official Prometheus library (metric extraction)
+- Dashboard→Panel→Query→Metric graph population
+- Concurrent fetching (worker pool), batch graph writes (transactions)
 
-**Addresses (from FEATURES.md):**
-- Full-text search with time range filtering (table stakes)
-- Field-based filtering, aggregation (table stakes)
-- High-cardinality field search (differentiator)
-- MCP Resources for context (differentiator)
+**Addresses features:**
+- Table stakes: Dashboard parsing, panel/query extraction
+- Foundation for anomaly detection (need metrics in graph)
 
-**Avoids (from PITFALLS.md):**
-- MODERATE-1: Multi-version MCP protocol support
-- Tool count minimization (10-20 tools, per MCP best practices)
+**Avoids pitfalls:**
+- Pitfall 1 (API breaking changes): Store raw dashboard JSON, defensive parsing, version detection
+- Pitfall 3 (PromQL parser): Use official library, best-effort extraction, variable passthrough
+- Pitfall 6 (variable edge cases): Store variables separately, do NOT interpolate during ingestion
+- Pitfall 7 (rate limiting): Incremental sync, concurrent fetching with QPS limit
 
-**Stack elements:** Existing mark3labs/mcp-go, VictoriaLogs client from Phase 2, templates from Phase 3
+**Uses stack:**
+- `prometheus/promql/parser` (new dependency)
+- FalkorDB batch writes via existing graph.Client
 
-**Research flags:** Standard MCP patterns, skip additional research. Mark3labs/mcp-go provides clear tool registration API.
+**Confidence:** HIGH — Incremental sync is standard pattern, PromQL parser is production-proven official library.
 
-### Phase 5: Progressive Disclosure UI
-**Rationale:** UI comes last because it depends on query tools (Phase 4) and benefits from real template data. Can iterate on UX based on actual usage patterns.
+---
 
-**Delivers:**
-- Three-level drill-down (global → aggregated → detail)
-- URL-based state management
-- Breadcrumb navigation
-- Collapsible sections for details
-- Smart defaults (SLO-first view)
-
-**Addresses (from FEATURES.md):**
-- Progressive disclosure navigation (table stakes)
-- State preservation (table stakes)
-- Smart defaults with SLO-first views (differentiator)
-
-**Avoids (from PITFALLS.md):**
-- CRITICAL-5: URL-based state from day 1 (hard to retrofit)
-- MINOR-2: Limit to 3 levels maximum (global → aggregated → detail)
-- MODERATE-5: Preserve context during drill-down
-
-**Stack elements:** Existing React frontend, React Router
-
-**Research flags:** Standard React patterns, skip additional research. Established SPA state management patterns.
-
-### Phase 6: Template Consistency & Monitoring (Optional)
-**Rationale:** Cross-client consistency and drift monitoring are operational excellence features. Can defer if MVP targets single client or if template drift isn't observed in practice.
+### Phase 3: Service Inference & Dashboard Hierarchy
+**Rationale:** Build semantic relationships (Metric→Service, Dashboard hierarchy) before MCP tools. Service inference enables "show metrics for this service" queries. Dashboard hierarchy (overview/aggregated/detail tags) structures progressive disclosure.
 
 **Delivers:**
-- Canonical template storage in MCP server
-- Deterministic template IDs (hash-based)
-- Template drift detection metrics
-- Template growth monitoring
-- Health check endpoints
+- Service inference from PromQL labels (job, service, app, namespace, cluster)
+- Metric→Service linking with confidence scores (TRACKS edges)
+- Dashboard hierarchy classification (via tags: overview, aggregated, detail)
+- Variable classification (scope/entity/detail) for smart defaults
 
-**Addresses (from FEATURES.md):**
-- Cross-client consistency (nice-to-have)
-- Template drift detection (operational excellence)
+**Addresses features:**
+- Differentiator: Intelligent variable scoping (auto-classify variables)
+- Foundation for progressive disclosure (need hierarchy)
 
-**Avoids (from PITFALLS.md):**
-- MODERATE-2: Ensures same template IDs across clients
-- Template growth monitoring (early warning for drift)
+**Avoids pitfalls:**
+- Pitfall 5 (baseline drift): Service nodes enable per-service baselines (future)
+- Pitfall 9 (label cardinality): Whitelist labels for service inference (job, service, app, namespace, cluster only)
+- Pitfall 8 (gridPos): Use dashboard tags for hierarchy, not panel position
 
-**Research flags:** Standard patterns, skip additional research.
+**Confidence:** MEDIUM-HIGH — Heuristic-based classification (80% accuracy expected), configurable via manual tags.
+
+---
+
+### Phase 4: Query Execution & MCP Tools Foundation
+**Rationale:** Deliver basic MCP tools before anomaly detection. Enables AI to query metrics and discover dashboards. Tests end-to-end flow (client → parser → graph → tools).
+
+**Delivers:**
+- GrafanaQueryService (execute PromQL via Grafana API, format results)
+- MCP tools: `grafana_{name}_dashboards` (list/search with filters)
+- MCP tool: `grafana_{name}_query` (execute PromQL, return time series)
+- MCP tool: `grafana_{name}_metrics_for_resource` (reverse lookup: resource → dashboards)
+
+**Addresses features:**
+- Table stakes: Dashboard execution, query execution with time ranges
+- Progressive disclosure structure: Three tools (dashboards, query, metrics-for-resource)
+
+**Avoids pitfalls:**
+- Pitfall 10 (state leakage): Stateless MCP tools, require scoping variables, AI manages context
+- Pitfall 6 (variable interpolation): Pass variables to Grafana API via `scopedVars`, not interpolated locally
+
+**Uses stack:**
+- GrafanaClient (query execution)
+- FalkorDB (semantic queries for dashboard discovery)
+
+**Confidence:** HIGH — MCP tool pattern proven in VictoriaLogs/Logz.io, stateless architecture established.
+
+---
+
+### Phase 5: Anomaly Detection & Progressive Disclosure
+**Rationale:** Deliver competitive differentiator (anomaly detection) after foundation is stable. Progressive disclosure tools (overview/aggregated/details) complete the value proposition.
+
+**Delivers:**
+- GrafanaAnomalyService (baseline computation with time-of-day matching, z-score comparison)
+- Baseline caching in graph (MetricBaseline nodes, 1-hour TTL)
+- MCP tool: `grafana_{name}_detect_anomalies` (rank by severity)
+- Progressive disclosure defaults per tool level (interval, limit)
+
+**Addresses features:**
+- Differentiator: AI-driven anomaly detection with severity ranking
+- Differentiator: Progressive disclosure pattern (overview→aggregated→details)
+- Differentiator: Cross-signal correlation (metrics + logs via shared namespace/time)
+
+**Avoids pitfalls:**
+- Pitfall 5 (baseline drift): Time-of-day matching, minimum thresholds, staleness detection
+- Pitfall 13 (absent metrics): Check scrape status first (`up` metric), use `or vector(0)` pattern
+- Pitfall 12 (histogram quantile): Validate `histogram_quantile()` wraps `sum() by (le)`
+
+**Uses stack:**
+- GrafanaQueryService (historical queries for baseline)
+- stdlib math (mean, stddev, percentile calculations)
+- FalkorDB (cache baselines)
+
+**Confidence:** MEDIUM-HIGH — Statistical methods well-established, severity ranking heuristic needs tuning with real data.
+
+---
 
 ### Phase Ordering Rationale
 
-- **Sequential dependency chain:** Plugin infrastructure (1) → VictoriaLogs client (2) → Template mining (3) → Query tools (4) → UI (5)
-- **Risk-first approach:** Critical decisions (plugin system choice, config reload pattern) in Phase 1 where changes are cheapest
-- **Iterative complexity:** Start simple (basic pipeline in Phase 2), add complexity (template mining in Phase 3), iterate on UX (Phase 5)
-- **Validation points:** Each phase delivers independently testable functionality (Phase 2 validates VictoriaLogs integration before adding template mining complexity)
-- **Pitfall avoidance:** Phase 1 prevents CRITICAL-1 (plugin system) and CRITICAL-3 (config reload), Phase 3 prevents CRITICAL-2 and CRITICAL-4 (template mining), Phase 5 prevents CRITICAL-5 (UI state)
+**Why this order:**
+1. **Foundation first (Phase 1-2)**: HTTP client and graph schema are prerequisites for all other features. PromQL parsing enables semantic queries.
+2. **Semantic layer (Phase 3)**: Service inference and hierarchy classification add intelligence to the graph before building tools on top.
+3. **Basic tools (Phase 4)**: Deliver value early (query metrics, discover dashboards) before advanced features. Tests end-to-end flow.
+4. **Differentiators last (Phase 5)**: Anomaly detection and progressive disclosure require stable foundation. These are competitive advantages, not MVP blockers.
+
+**Why this grouping:**
+- **Phase 1**: Auth complexity is separate concern from ingestion (different failure modes)
+- **Phase 2**: Dashboard sync and PromQL parsing are tightly coupled (sync needs parser)
+- **Phase 3**: Service inference depends on PromQL parsing (needs label extraction)
+- **Phase 4**: MCP tools depend on query service (needs execution layer)
+- **Phase 5**: Anomaly detection depends on query service (needs historical data)
+
+**How this avoids pitfalls:**
+- Early defensive parsing (Phase 2) catches API breaking changes before they block later phases
+- Incremental sync (Phase 2) prevents rate limit exhaustion during initial ingestion
+- Stateless tools (Phase 4) prevent progressive disclosure state leakage
+- Time-of-day matching (Phase 5) mitigates baseline drift before anomaly detection ships
 
 ### Research Flags
 
-Phases likely needing deeper research during planning:
-- **Phase 3 (Template Mining):** Complex algorithm with production-sensitive tuning. Needs `/gsd:research-phase` to sample real logs, validate template count, tune parameters (similarity threshold, tree depth, masking patterns). Research questions: What's the typical template count for our log patterns? What similarity threshold prevents explosion? Which fields need masking?
+**Phases likely needing deeper research during planning:**
+- **Phase 3**: Service inference heuristics need validation with real-world dashboard corpus. Question: What % of dashboards use standard labels (job, service, app) vs custom labels? May need fallback discovery method (folder-based hierarchy) if tag adoption is low.
+- **Phase 5**: Anomaly detection thresholds (z-score cutoffs, severity classification weights) are heuristic-based. Will need A/B testing with real metrics data to tune false positive rates.
 
-Phases with standard patterns (skip research-phase):
-- **Phase 1 (Plugin Infrastructure):** Well-documented in go-plugin and Koanf documentation, established patterns
-- **Phase 2 (VictoriaLogs Client):** VictoriaLogs HTTP API is well-documented, standard Go HTTP client patterns
-- **Phase 4 (MCP Query Tools):** Mark3labs/mcp-go provides clear API, existing MCP tools in codebase as reference
-- **Phase 5 (Progressive Disclosure UI):** Standard React/SPA patterns, URL state management well-established
+**Phases with standard patterns (skip research-phase):**
+- **Phase 1**: HTTP client follows VictoriaLogs/Logz.io pattern exactly. SecretWatcher is copy-paste.
+- **Phase 2**: PromQL parser is well-documented official library. Incremental sync is standard pattern.
+- **Phase 4**: MCP tool pattern proven in VictoriaLogs/Logz.io. Stateless architecture established.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | HashiCorp go-plugin (4+ years production), Koanf (stable v2), VictoriaLogs (official docs). Only MEDIUM: LoggingDrain library (small community, but algorithm is proven). |
-| Features | HIGH | MCP patterns from 2026 best practices, progressive disclosure from UX research, log exploration features from VictoriaLogs docs and competitor analysis. MEDIUM: VictoriaLogs-specific query capabilities (not all features detailed in web search). |
-| Architecture | HIGH | Existing codebase analysis provides foundation, external patterns verified with production examples (pipeline stages, Drain algorithm, atomic swap pattern). Interface-based plugin registry is idiomatic Go. |
-| Pitfalls | MEDIUM-HIGH | Critical pitfalls verified with official sources (Go issue tracker for stdlib plugin, academic papers for Drain limitations, Go docs for atomic operations). MEDIUM: Progressive disclosure pitfalls (UX research from web only). |
+| Stack | HIGH | Official Prometheus parser is production-proven (556+ dependents). FalkorDB already integrated. Custom HTTP client follows proven pattern. Only new dependency is PromQL parser. |
+| Features | MEDIUM-HIGH | Table stakes verified with official Grafana docs. Differentiators (anomaly detection, progressive disclosure) based on industry best practices (RED/USE metrics, statistical baselines). MVP scope validated against competitive tools (Netdata, AWS Lookout). |
+| Architecture | HIGH | Graph schema extends existing FalkorDB patterns (ResourceIdentity, ChangeEvent). MCP tool pattern proven in VictoriaLogs/Logz.io. Service layer follows existing TimelineService/GraphService design. Integration lifecycle matches plugin system. |
+| Pitfalls | MEDIUM-HIGH | Critical pitfalls verified with official Grafana docs (API breaking changes, auth scope) and Prometheus GitHub issues (parser complexity). Anomaly detection seasonality is well-researched (O'Reilly book, research papers). Variable interpolation edge cases documented in Grafana issues. Some pitfalls (baseline tuning, variable chaining depth) need validation with real dashboards. |
 
 **Overall confidence:** HIGH
 
-Research covers all critical decisions with high-confidence sources. The one MEDIUM component (LoggingDrain library) has clear mitigation (re-implement algorithm if needed). Recommended phase order follows verified dependency patterns.
+The recommended stack is production-ready with minimal new dependencies. The architecture aligns perfectly with Spectre's existing patterns (FalkorDB, MCP tools, plugin system). The main uncertainties are heuristic-based (service inference, anomaly thresholds) which are tunable parameters, not architectural risks.
 
 ### Gaps to Address
 
-**LoggingDrain library maturity (MEDIUM confidence):** Small community (16 stars), recent but limited production reports. Mitigation: Phase 3 should include spike to validate library works as expected. If bugs found, Drain algorithm is simple enough to implement in-house (200-300 LOC for core logic per research).
+**Validation needed during implementation:**
+- **Variable chaining depth**: Research suggests 90% of dashboards use 0-3 levels of variable chaining, but this needs validation with real-world dashboard corpus (Grafana community library sample). If >10% use deeper chaining, Phase 2 may need scope expansion.
+- **Dashboard tagging adoption**: Research shows tags are standard Grafana feature, but need to verify users already tag dashboards or if this is new practice. If low adoption, Phase 3 needs fallback discovery method (folder-based hierarchy).
+- **Anomaly detection false positive rate**: Statistical methods (z-score, IQR) are well-established but thresholds (2.5 sigma vs 3.0 sigma) need tuning with production data. Plan for A/B testing in Phase 5.
 
-**VictoriaLogs query syntax details (MEDIUM confidence):** Web search provided high-level capabilities, but full LogsQL syntax not exhaustively documented in search results. Mitigation: Consult VictoriaLogs API documentation directly during Phase 4 implementation. No blocking risk — basic query patterns are well-documented.
+**How to handle during planning:**
+- Phase 2 planning: Include fixture dashboards with multi-value variables (2-3 levels deep) to validate parsing. Log warning if deeper chaining detected.
+- Phase 3 planning: Document manual tagging workflow in UI. Design fallback: if no tags, classify by folder name patterns (overview, service, detail).
+- Phase 5 planning: Make sensitivity thresholds configurable. Include "tune anomaly detection" task for post-MVP based on false positive feedback.
 
-**Template mining parameter tuning (production-dependent):** Optimal values for similarity threshold, tree depth, and max clusters depend on actual log patterns in target environment. Mitigation: Phase 3 planning should include `/gsd:research-phase` to sample production logs and validate parameters. Research identified ranges (similarity 0.3-0.6, depth 4-6) but exact values need empirical testing.
-
-**Cross-client template consistency requirements (unclear):** Research identified the risk, but MVP scope doesn't clarify if multiple clients will access templates simultaneously. Mitigation: Phase 6 is marked optional, can prioritize based on actual multi-client usage patterns observed in Phases 4-5.
+**Known limitations (document, do NOT block):**
+- Multi-value variables deferred to post-MVP (can work around by AI providing single value)
+- Query variables (dynamic) deferred to post-MVP (AI provides static values)
+- Trace linking deferred (requires OpenTelemetry adoption, metrics+logs already valuable)
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- [HashiCorp go-plugin v1.7.0 on Go Packages](https://pkg.go.dev/github.com/hashicorp/go-plugin) — plugin architecture
-- [Koanf v2.3.0 GitHub releases](https://github.com/knadh/koanf/releases) — config management
-- [VictoriaLogs Official Documentation](https://docs.victoriametrics.com/victorialogs/) — log storage and querying
-- [Drain3 algorithm](https://github.com/logpai/Drain3) — template mining
-- [Go issue tracker (#27751, #31354)](https://github.com/golang/go/issues) — stdlib plugin limitations
-- [MCP Protocol Specification](https://modelcontextprotocol.io/specification/) — MCP patterns
-- [Semantic Versioning 2.0.0](https://semver.org/) — versioning
-- [Nielsen Norman Group - Progressive Disclosure](https://www.nngroup.com/articles/progressive-disclosure/) — UX patterns
+
+**Grafana Official Documentation:**
+- [Dashboard HTTP API](https://grafana.com/docs/grafana/latest/developers/http_api/dashboard/) — API endpoints, authentication, dashboard JSON structure
+- [Data Source HTTP API](https://grafana.com/docs/grafana/latest/developers/http_api/data_source/) — Query execution, `/api/ds/query` format
+- [Grafana Authentication](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/authentication/) — Service accounts, Bearer tokens, permissions
+- [Variables Documentation](https://grafana.com/docs/grafana/latest/visualizations/dashboards/variables/) — Template syntax, multi-value, chained variables
+- [Dashboard Best Practices](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/best-practices/) — Tags, organization, hierarchy
+
+**Prometheus Official Documentation:**
+- [PromQL Parser pkg.go.dev](https://pkg.go.dev/github.com/prometheus/prometheus/promql/parser) — API reference, AST structure
+- [Prometheus Parser Source](https://github.com/prometheus/prometheus/blob/main/promql/parser/ast.go) — VectorSelector, AggregateExpr, Call structures
+
+**FalkorDB Official Documentation:**
+- [FalkorDB Design](https://docs.falkordb.com/design/) — Architecture, GraphBLAS backend, string interning
+- [Cypher Support](https://docs.falkordb.com/cypher/cypher-support.html) — Supported Cypher syntax, indexes, transactions
 
 ### Secondary (MEDIUM confidence)
-- [Klavis - MCP Design Patterns](https://www.klavis.ai/blog/less-is-more-mcp-design-patterns-for-ai-agents) — tool count guidance
-- [LoggingDrain GitHub](https://github.com/PalanQu/LoggingDrain) — Go implementation
-- [Viper vs Koanf comparison](https://itnext.io/golang-configuration-management-library-viper-vs-koanf-eea60a652a22) — config library trade-offs
-- [Investigating and Improving Log Parsing in Practice](https://yanmeng.github.io/papers/FSE221.pdf) — template mining pitfalls
-- [Adaptive Log Anomaly Detection through Drift](https://openreview.net/pdf?id=6QXrawkcrX) — template drift research
-- [React State Management 2025](https://www.developerway.com/posts/react-state-management-2025) — SPA state patterns
 
-### Tertiary (LOW confidence)
-- Various blog posts and Medium articles — supporting evidence for best practices, cross-validated with official sources
+**Industry Best Practices:**
+- [RED Method Monitoring](https://last9.io/blog/monitoring-with-red-method/) — Rate, errors, duration (table stakes for microservices)
+- [Four Golden Signals](https://www.sysdig.com/blog/golden-signals-kubernetes) — USE method for resources
+- [Getting Started with Grafana API](https://last9.io/blog/getting-started-with-the-grafana-api/) — Practical examples, authentication patterns
+
+**Anomaly Detection Research:**
+- [Netdata Anomaly Detection](https://learn.netdata.cloud/docs/netdata-ai/anomaly-detection) — Real-world implementation, severity ranking
+- [AWS Lookout for Metrics](https://aws.amazon.com/lookout-for-metrics/) — Commercial product approach, baseline strategies
+- [Time Series Anomaly Detection – ACM SIGMOD](https://wp.sigmod.org/?p=3739) — Statistical methods vs ML
+
+**Progressive Disclosure UX:**
+- [Progressive Disclosure (NN/G)](https://www.nngroup.com/articles/progressive-disclosure/) — UX patterns, drill-down hierarchy
+- [Three Pillars of Observability](https://www.ibm.com/think/insights/observability-pillars) — Metrics, logs, traces correlation
+
+### Tertiary (LOW-MEDIUM confidence)
+
+**Grafana API Workarounds:**
+- [Medium: Reverse Engineering Grafana API](https://medium.com/@mattam808/reverse-engineering-the-grafana-api-to-get-the-data-from-a-dashboard-48c2a399f797) — `/api/ds/query` undocumented structure
+- [Grafana Community: Query /api/ds/query](https://community.grafana.com/t/query-data-from-grafanas-api-api-ds-query/143474) — Response format verification
+
+**PromQL Edge Cases:**
+- [Prometheus Issue #6256](https://github.com/prometheus/prometheus/issues/6256) — Parser complexity discussion, lack of formal grammar
+- [VictoriaMetrics MetricsQL](https://github.com/VictoriaMetrics/metricsql) — Alternative parser, PromQL compatibility notes
+
+**Emerging Patterns (2026 Trends):**
+- [2026 Observability Trends](https://grafana.com/blog/2026-observability-trends-predictions-from-grafana-labs-unified-intelligent-and-open/) — Unified observability, AI integration
+- [10 Observability Tools for 2026](https://platformengineering.org/blog/10-observability-tools-platform-engineers-should-evaluate-in-2026) — Industry direction
 
 ---
-*Research completed: 2026-01-20*
+*Research completed: 2026-01-22*
 *Ready for roadmap: yes*
