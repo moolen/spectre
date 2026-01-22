@@ -13,6 +13,9 @@ const (
 	NodeTypeChangeEvent      NodeType = "ChangeEvent"
 	NodeTypeK8sEvent         NodeType = "K8sEvent"
 	NodeTypeDashboard        NodeType = "Dashboard"
+	NodeTypePanel            NodeType = "Panel"
+	NodeTypeQuery            NodeType = "Query"
+	NodeTypeMetric           NodeType = "Metric"
 )
 
 // EdgeType represents the type of graph edge
@@ -35,6 +38,11 @@ const (
 	EdgeTypeReferencesSpec  EdgeType = "REFERENCES_SPEC"  // Explicit spec references
 	EdgeTypeManages         EdgeType = "MANAGES"          // Lifecycle management (inferred)
 	EdgeTypeCreatesObserved EdgeType = "CREATES_OBSERVED" // Observed creation correlation
+
+	// Dashboard relationship types
+	EdgeTypeContains EdgeType = "CONTAINS" // Dashboard -> Panel
+	EdgeTypeHas      EdgeType = "HAS"      // Panel -> Query
+	EdgeTypeUses     EdgeType = "USES"     // Query -> Metric
 )
 
 // ResourceIdentity represents a persistent Kubernetes resource node
@@ -88,6 +96,34 @@ type DashboardNode struct {
 	URL       string   `json:"url"`       // Dashboard URL
 	FirstSeen int64    `json:"firstSeen"` // Unix nano timestamp when first seen
 	LastSeen  int64    `json:"lastSeen"`  // Unix nano timestamp when last seen
+}
+
+// PanelNode represents a Grafana Panel node in the graph
+type PanelNode struct {
+	ID           string `json:"id"`           // Unique: dashboardUID + panelID
+	DashboardUID string `json:"dashboardUID"` // Parent dashboard
+	Title        string `json:"title"`        // Panel title
+	Type         string `json:"type"`         // Panel type (graph, table, etc.)
+	GridPosX     int    `json:"gridPosX"`     // Layout position X
+	GridPosY     int    `json:"gridPosY"`     // Layout position Y
+}
+
+// QueryNode represents a PromQL query node in the graph
+type QueryNode struct {
+	ID             string            `json:"id"`             // Unique: dashboardUID + panelID + refID
+	RefID          string            `json:"refId"`          // Query reference (A, B, C, etc.)
+	RawPromQL      string            `json:"rawPromQL"`      // Original PromQL
+	DatasourceUID  string            `json:"datasourceUID"`  // Datasource UID
+	Aggregations   []string          `json:"aggregations"`   // Extracted functions
+	LabelSelectors map[string]string `json:"labelSelectors"` // Extracted matchers
+	HasVariables   bool              `json:"hasVariables"`   // Contains Grafana variables
+}
+
+// MetricNode represents a Prometheus metric node in the graph
+type MetricNode struct {
+	Name      string `json:"name"`      // Metric name (e.g., http_requests_total)
+	FirstSeen int64  `json:"firstSeen"` // Unix nano timestamp
+	LastSeen  int64  `json:"lastSeen"`  // Unix nano timestamp
 }
 
 // OwnsEdge represents ownership relationship properties
