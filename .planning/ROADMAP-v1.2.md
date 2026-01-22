@@ -8,7 +8,7 @@
 
 ## Overview
 
-v1.2 adds Logz.io as a second log integration with production-grade secret management infrastructure. The journey: build HTTP client with multi-region support → implement file-based secret hot-reload → expose MCP tools for overview/logs → add pattern mining → finalize Helm chart and documentation for Kubernetes deployment.
+v1.2 adds Logz.io as a second log integration with production-grade secret management infrastructure. The journey: build HTTP client with multi-region support → implement Kubernetes-native secret hot-reload → expose MCP tools for overview/logs → add pattern mining → finalize Helm chart and documentation for Kubernetes deployment.
 
 ## Phases
 
@@ -97,7 +97,7 @@ Plans:
 
 ### 🚧 v1.2 Logz.io Integration + Secret Management (In Progress)
 
-**Milestone Goal:** Add Logz.io as second log backend with file-based secret hot-reload and multi-region API support.
+**Milestone Goal:** Add Logz.io as second log backend with Kubernetes-native secret hot-reload and multi-region API support.
 
 #### Phase 10: Logz.io Client Foundation
 **Goal**: HTTP client connects to Logz.io Search API with multi-region support and bearer token authentication
@@ -116,20 +116,22 @@ Plans:
 - [ ] 10-02: TBD
 
 #### Phase 11: Secret File Management
-**Goal**: File-based secret storage with hot-reload for zero-downtime credential rotation
+**Goal**: Kubernetes-native secret fetching with hot-reload for zero-downtime credential rotation
 **Depends on**: Phase 10
 **Requirements**: SECR-01, SECR-02, SECR-03, SECR-04, SECR-05
 **Success Criteria** (what must be TRUE):
-  1. Integration reads API token from file at startup (Kubernetes Secret volume mount pattern)
-  2. fsnotify detects Kubernetes Secret rotation within 2 seconds without pod restart
+  1. Integration reads API token from Kubernetes Secret at startup (fetches via API, not file mount)
+  2. Watch API detects Secret rotation within 2 seconds without pod restart
   3. Token updates are thread-safe - concurrent queries continue with old token until update completes
   4. API token values never appear in logs, error messages, or HTTP debug output
-  5. Watch re-establishes after atomic write events (Kubernetes symlink rotation pattern)
-**Plans**: TBD
+  5. Watch re-establishes automatically after disconnection (Kubernetes informer pattern)
+**Plans**: 4 plans in 3 waves
 
 Plans:
-- [ ] 11-01: TBD
-- [ ] 11-02: TBD
+- [ ] 11-01-PLAN.md — SecretWatcher with SharedInformerFactory (Wave 1)
+- [ ] 11-02-PLAN.md — Config types with SecretRef field (Wave 1)
+- [ ] 11-03-PLAN.md — Integration wiring and client token auth (Wave 2)
+- [ ] 11-04-PLAN.md — RBAC setup in Helm chart (Wave 3)
 
 #### Phase 12: MCP Tools - Overview and Logs
 **Goal**: MCP tools expose Logz.io data with progressive disclosure (overview → logs)
@@ -194,11 +196,11 @@ Phases execute in numeric order: 10 → 11 → 12 → 13 → 14
 | 8. Helm Chart Update | v1.1 | 1/1 | Complete | 2026-01-21 |
 | 9. E2E Test Validation | v1.1 | 2/2 | Complete | 2026-01-21 |
 | 10. Logz.io Client Foundation | v1.2 | 0/TBD | Not started | - |
-| 11. Secret File Management | v1.2 | 0/TBD | Not started | - |
+| 11. Secret File Management | v1.2 | 0/4 | Not started | - |
 | 12. MCP Tools - Overview and Logs | v1.2 | 0/TBD | Not started | - |
 | 13. MCP Tools - Patterns | v1.2 | 0/TBD | Not started | - |
 | 14. UI and Helm Chart | v1.2 | 0/TBD | Not started | - |
 
 ---
 *Created: 2026-01-22*
-*Last updated: 2026-01-22 - v1.2 roadmap initialized*
+*Last updated: 2026-01-22 - Phase 11 planned*
