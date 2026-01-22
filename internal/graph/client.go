@@ -485,6 +485,8 @@ func (c *falkorClient) InitializeSchema(ctx context.Context) error {
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.timestamp)",
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.status)",
 		"CREATE INDEX FOR (n:K8sEvent) ON (n.timestamp)",
+		// Dashboard indexes
+		"CREATE INDEX FOR (n:Dashboard) ON (n.uid)",
 	}
 
 	for _, indexQuery := range indexes {

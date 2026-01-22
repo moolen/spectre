@@ -705,6 +705,50 @@ func CreateMountsEdgeQuery(podUID, pvcUID string, props MountsEdge) GraphQuery {
 	}
 }
 
+// UpsertDashboardNode creates a query to insert or update a Dashboard node
+// Uses MERGE to provide idempotency based on uid
+func UpsertDashboardNode(dashboard DashboardNode) GraphQuery {
+	// Serialize tags to JSON for storage
+	tagsJSON := "[]"
+	if dashboard.Tags != nil && len(dashboard.Tags) > 0 {
+		tagsBytes, _ := json.Marshal(dashboard.Tags)
+		tagsJSON = string(tagsBytes)
+	}
+
+	query := `
+		MERGE (d:Dashboard {uid: $uid})
+		ON CREATE SET
+			d.title = $title,
+			d.version = $version,
+			d.tags = $tags,
+			d.folder = $folder,
+			d.url = $url,
+			d.firstSeen = $firstSeen,
+			d.lastSeen = $lastSeen
+		ON MATCH SET
+			d.title = $title,
+			d.version = $version,
+			d.tags = $tags,
+			d.folder = $folder,
+			d.url = $url,
+			d.lastSeen = $lastSeen
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"uid":       dashboard.UID,
+			"title":     dashboard.Title,
+			"version":   dashboard.Version,
+			"tags":      tagsJSON,
+			"folder":    dashboard.Folder,
+			"url":       dashboard.URL,
+			"firstSeen": dashboard.FirstSeen,
+			"lastSeen":  dashboard.LastSeen,
+		},
+	}
+}
+
 // FindManagedResourcesQuery finds all resources managed by a CR
 func FindManagedResourcesQuery(crUID string, minConfidence float64) GraphQuery {
 	return GraphQuery{

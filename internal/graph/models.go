@@ -12,6 +12,7 @@ const (
 	NodeTypeResourceIdentity NodeType = "ResourceIdentity"
 	NodeTypeChangeEvent      NodeType = "ChangeEvent"
 	NodeTypeK8sEvent         NodeType = "K8sEvent"
+	NodeTypeDashboard        NodeType = "Dashboard"
 )
 
 // EdgeType represents the type of graph edge
@@ -75,6 +76,18 @@ type K8sEvent struct {
 	Type      string `json:"type"`      // Warning, Normal, Error
 	Count     int    `json:"count"`     // event count (if repeated)
 	Source    string `json:"source"`    // component that generated event
+}
+
+// DashboardNode represents a Grafana Dashboard node in the graph
+type DashboardNode struct {
+	UID       string   `json:"uid"`       // Dashboard UID (primary key)
+	Title     string   `json:"title"`     // Dashboard title
+	Version   int      `json:"version"`   // Dashboard version number
+	Tags      []string `json:"tags"`      // Dashboard tags
+	Folder    string   `json:"folder"`    // Folder path
+	URL       string   `json:"url"`       // Dashboard URL
+	FirstSeen int64    `json:"firstSeen"` // Unix nano timestamp when first seen
+	LastSeen  int64    `json:"lastSeen"`  // Unix nano timestamp when last seen
 }
 
 // OwnsEdge represents ownership relationship properties
