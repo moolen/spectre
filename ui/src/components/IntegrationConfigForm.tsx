@@ -73,6 +73,13 @@ export function IntegrationConfigForm({
     });
   };
 
+  const handleGrafanaUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange({
+      ...config,
+      config: { ...config.config, url: e.target.value },
+    });
+  };
+
   return (
     <div>
       {/* Name Field */}
@@ -170,6 +177,7 @@ export function IntegrationConfigForm({
         >
           <option value="victorialogs">VictoriaLogs</option>
           <option value="logzio">Logz.io</option>
+          <option value="grafana">Grafana</option>
         </select>
       </div>
 
@@ -390,6 +398,176 @@ export function IntegrationConfigForm({
               </label>
               <input
                 id="integration-secret-key"
+                type="text"
+                value={config.config.apiTokenRef?.key || ''}
+                onChange={handleSecretKeyChange}
+                placeholder="api-token"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border-soft)',
+                  backgroundColor: 'var(--color-surface-elevated)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '14px',
+                  outline: 'none',
+                  transition: 'border-color 0.15s',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = '#3b82f6';
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--color-border-soft)';
+                }}
+              />
+              <p
+                style={{
+                  marginTop: '6px',
+                  fontSize: '12px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                Key within the Secret containing the API token
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Grafana Configuration */}
+      {config.type === 'grafana' && (
+        <>
+          {/* Grafana URL Field */}
+          <div style={{ marginBottom: '20px' }}>
+            <label
+              htmlFor="integration-grafana-url"
+              style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: 'var(--color-text-primary)',
+                marginBottom: '8px',
+              }}
+            >
+              Grafana URL
+            </label>
+            <input
+              id="integration-grafana-url"
+              type="text"
+              value={config.config.url || ''}
+              onChange={handleGrafanaUrlChange}
+              placeholder="https://myorg.grafana.net or https://grafana.internal:3000"
+              style={{
+                width: '100%',
+                padding: '12px',
+                borderRadius: '8px',
+                border: '1px solid var(--color-border-soft)',
+                backgroundColor: 'var(--color-surface-elevated)',
+                color: 'var(--color-text-primary)',
+                fontSize: '14px',
+                outline: 'none',
+                transition: 'border-color 0.15s',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = '#3b82f6';
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = 'var(--color-border-soft)';
+              }}
+            />
+            <p
+              style={{
+                marginTop: '6px',
+                fontSize: '12px',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              Full base URL (Cloud or self-hosted)
+            </p>
+          </div>
+
+          {/* Authentication Section (SecretRef) */}
+          <div style={{
+            marginBottom: '20px',
+            padding: '16px',
+            borderRadius: '8px',
+            border: '1px solid var(--color-border-soft)',
+            backgroundColor: 'var(--color-surface-muted)',
+          }}>
+            <h4 style={{
+              margin: '0 0 16px 0',
+              fontSize: '14px',
+              fontWeight: 600,
+              color: 'var(--color-text-primary)',
+            }}>
+              Authentication
+            </h4>
+
+            {/* Secret Name */}
+            <div style={{ marginBottom: '12px' }}>
+              <label
+                htmlFor="integration-grafana-secret-name"
+                style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'var(--color-text-primary)',
+                  marginBottom: '8px',
+                }}
+              >
+                Secret Name
+              </label>
+              <input
+                id="integration-grafana-secret-name"
+                type="text"
+                value={config.config.apiTokenRef?.secretName || ''}
+                onChange={handleSecretNameChange}
+                placeholder="grafana-token"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border-soft)',
+                  backgroundColor: 'var(--color-surface-elevated)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '14px',
+                  outline: 'none',
+                  transition: 'border-color 0.15s',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = '#3b82f6';
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--color-border-soft)';
+                }}
+              />
+              <p
+                style={{
+                  marginTop: '6px',
+                  fontSize: '12px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                Name of Kubernetes Secret in Spectre's namespace
+              </p>
+            </div>
+
+            {/* Secret Key */}
+            <div>
+              <label
+                htmlFor="integration-grafana-secret-key"
+                style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'var(--color-text-primary)',
+                  marginBottom: '8px',
+                }}
+              >
+                Key
+              </label>
+              <input
+                id="integration-grafana-secret-key"
                 type="text"
                 value={config.config.apiTokenRef?.key || ''}
                 onChange={handleSecretKeyChange}
