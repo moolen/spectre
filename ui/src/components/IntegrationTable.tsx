@@ -1,4 +1,12 @@
 import React from 'react';
+import { formatDistanceToNow } from 'date-fns';
+
+interface SyncStatus {
+  lastSyncTime?: string;
+  dashboardCount: number;
+  lastError?: string;
+  inProgress: boolean;
+}
 
 interface Integration {
   name: string;
@@ -7,11 +15,14 @@ interface Integration {
   enabled: boolean;
   health?: 'healthy' | 'degraded' | 'stopped' | 'not_started';
   dateAdded?: string;
+  syncStatus?: SyncStatus;
 }
 
 interface IntegrationTableProps {
   integrations: Integration[];
   onEdit: (integration: Integration) => void;
+  onSync?: (name: string) => void;
+  syncingIntegrations?: Set<string>;
 }
 
 const getStatusColor = (health?: string): string => {
@@ -53,7 +64,7 @@ const formatDate = (dateString?: string): string => {
   }
 };
 
-export function IntegrationTable({ integrations, onEdit }: IntegrationTableProps) {
+export function IntegrationTable({ integrations, onEdit, onSync, syncingIntegrations }: IntegrationTableProps) {
   if (integrations.length === 0) {
     return null;
   }
@@ -139,6 +150,32 @@ export function IntegrationTable({ integrations, onEdit }: IntegrationTableProps
               }}
             >
               Status
+            </th>
+            <th
+              style={{
+                padding: '12px 16px',
+                textAlign: 'left',
+                fontSize: '12px',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              Sync Status
+            </th>
+            <th
+              style={{
+                padding: '12px 16px',
+                textAlign: 'left',
+                fontSize: '12px',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              Actions
             </th>
           </tr>
         </thead>
@@ -233,10 +270,92 @@ export function IntegrationTable({ integrations, onEdit }: IntegrationTableProps
                   </span>
                 </div>
               </td>
+              <td
+                style={{
+                  padding: '16px',
+                  fontSize: '14px',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {integration.syncStatus ? (
+                  <div style={{ fontSize: '13px' }}>
+                    {integration.syncStatus.lastSyncTime ? (
+                      <>
+                        <div style={{ color: 'var(--color-text-primary)' }}>
+                          {formatDistanceToNow(new Date(integration.syncStatus.lastSyncTime))} ago
+                        </div>
+                        <div style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>
+                          {integration.syncStatus.dashboardCount} dashboards
+                        </div>
+                        {integration.syncStatus.lastError && (
+                          <div style={{ color: '#ef4444', fontSize: '11px', marginTop: '4px' }}>
+                            {integration.syncStatus.lastError}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <span style={{ color: 'var(--color-text-muted)' }}>Never synced</span>
+                    )}
+                  </div>
+                ) : (
+                  <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                )}
+              </td>
+              <td
+                style={{
+                  padding: '16px',
+                  fontSize: '14px',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {integration.type === 'grafana' && onSync && (
+                  <button
+                    onClick={() => onSync(integration.name)}
+                    disabled={syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '13px',
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? 'not-allowed' : 'pointer',
+                      opacity: syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? 0.5 : 1,
+                      transition: 'all 0.15s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!syncingIntegrations?.has(integration.name) && !integration.syncStatus?.inProgress) {
+                        e.currentTarget.style.backgroundColor = '#2563eb';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#3b82f6';
+                    }}
+                  >
+                    {syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? (
+                      <>
+                        <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>
+                        Syncing...
+                      </>
+                    ) : (
+                      'Sync Now'
+                    )}
+                  </button>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

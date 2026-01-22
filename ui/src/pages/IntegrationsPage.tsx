@@ -1,18 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { IntegrationModal } from '../components/IntegrationModal';
 import { IntegrationTable } from '../components/IntegrationTable';
+import { IntegrationStatus } from '../types';
 
 /**
- * Integration configuration from API
+ * Integration configuration from API (alias for IntegrationStatus)
  */
-interface IntegrationConfig {
-  name: string;
-  type: string;
-  enabled: boolean;
-  config: Record<string, any>;
-  health?: 'healthy' | 'degraded' | 'stopped' | 'not_started';
-  dateAdded?: string;
-}
+type IntegrationConfig = IntegrationStatus;
 
 /**
  * Mock integration for empty state
@@ -141,10 +135,36 @@ export default function IntegrationsPage() {
   const [selectedIntegration, setSelectedIntegration] = useState<IntegrationConfig | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncingIntegrations, setSyncingIntegrations] = useState<Set<string>>(new Set());
 
   // Fetch integrations on mount
   useEffect(() => {
     loadIntegrations();
+  }, []);
+
+  // Subscribe to SSE for real-time status updates
+  useEffect(() => {
+    const eventSource = new EventSource('/api/config/integrations/stream');
+
+    eventSource.addEventListener('status', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setIntegrations(data || []);
+        // Clear any previous error when we receive updates
+        setError(null);
+      } catch (err) {
+        console.error('Failed to parse SSE data:', err);
+      }
+    });
+
+    eventSource.onerror = (err) => {
+      console.error('SSE connection error:', err);
+      // Don't set error state - the connection will auto-reconnect
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, []);
 
   const loadIntegrations = async () => {
@@ -220,6 +240,41 @@ export default function IntegrationsPage() {
     setIsModalOpen(true);
   };
 
+  const syncIntegration = async (name: string) => {
+    setSyncingIntegrations(prev => new Set(prev).add(name));
+
+    try {
+      const response = await fetch(`/api/config/integrations/${name}/sync`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          console.error('Sync already in progress');
+          alert('Sync already in progress');
+        } else {
+          const errorText = await response.text();
+          console.error('Sync failed:', errorText);
+          alert(`Sync failed: ${errorText}`);
+        }
+        return;
+      }
+
+      // Refresh integrations list to show updated status
+      await loadIntegrations();
+      console.log('Dashboard sync completed');
+    } catch (error) {
+      console.error('Error syncing dashboards:', error);
+      alert(`Error syncing dashboards: ${error}`);
+    } finally {
+      setSyncingIntegrations(prev => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto bg-[var(--color-app-bg)]">
       <div className="max-w-6xl mx-auto p-8">
@@ -270,7 +325,12 @@ export default function IntegrationsPage() {
           <>
             {integrations.length > 0 ? (
               // Table view for existing integrations
-              <IntegrationTable integrations={integrations} onEdit={handleEdit} />
+              <IntegrationTable
+                integrations={integrations}
+                onEdit={handleEdit}
+                onSync={syncIntegration}
+                syncingIntegrations={syncingIntegrations}
+              />
             ) : (
               // Empty state with tiles
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

@@ -59,3 +59,20 @@ export interface TimeRange {
   start: Date;
   end: Date;
 }
+
+export interface SyncStatus {
+  lastSyncTime?: string;      // ISO timestamp
+  dashboardCount: number;
+  lastError?: string;
+  inProgress: boolean;
+}
+
+export interface IntegrationStatus {
+  name: string;
+  type: string;
+  enabled: boolean;
+  config: Record<string, any>;
+  health: 'healthy' | 'degraded' | 'stopped' | 'not_started';
+  dateAdded?: string;
+  syncStatus?: SyncStatus;
+}
