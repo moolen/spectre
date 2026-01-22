@@ -13,6 +13,7 @@ import (
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/integration/victorialogs"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/logprocessing"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -34,6 +35,7 @@ type LogzioIntegration struct {
 	logger        *logging.Logger
 	registry      integration.ToolRegistry            // MCP tool registry for dynamic tool registration
 	secretWatcher *victorialogs.SecretWatcher         // Optional: manages API token from Kubernetes Secret
+	templateStore *logprocessing.TemplateStore        // Template store for pattern mining
 }
 
 // NewLogzioIntegration creates a new Logz.io integration instance.
@@ -130,6 +132,10 @@ func (l *LogzioIntegration) Start(ctx context.Context) error {
 	// Create Logz.io client wrapper
 	l.client = NewClient(l.config.GetBaseURL(), httpClient, l.secretWatcher, l.logger)
 
+	// Initialize template store for pattern mining
+	l.templateStore = logprocessing.NewTemplateStore(logprocessing.DefaultDrainConfig())
+	l.logger.Info("Template store initialized for pattern mining")
+
 	l.logger.Info("Logz.io integration started successfully")
 	return nil
 }
@@ -187,6 +193,10 @@ func (l *LogzioIntegration) RegisterTools(registry integration.ToolRegistry) err
 	// Instantiate tools
 	overviewTool := &OverviewTool{ctx: toolCtx}
 	logsTool := &LogsTool{ctx: toolCtx}
+	patternsTool := &PatternsTool{
+		ctx:           toolCtx,
+		templateStore: l.templateStore,
+	}
 
 	// Register overview tool
 	overviewName := fmt.Sprintf("logzio_%s_overview", l.name)
@@ -257,7 +267,43 @@ func (l *LogzioIntegration) RegisterTools(registry integration.ToolRegistry) err
 	}
 	l.logger.Info("Registered tool: %s", logsName)
 
-	l.logger.Info("Successfully registered 2 MCP tools for Logz.io integration: %s", l.name)
+	// Register patterns tool
+	patternsName := fmt.Sprintf("logzio_%s_patterns", l.name)
+	patternsDesc := fmt.Sprintf("Get aggregated log patterns with novelty detection for Logz.io %s. Returns log templates with occurrence counts. Use after overview to understand error patterns.", l.name)
+	patternsSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Kubernetes namespace to query (required)",
+			},
+			"severity": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional: filter by severity level (error, warn). Only logs matching the severity pattern will be processed.",
+				"enum":        []string{"error", "warn"},
+			},
+			"start_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "Start timestamp (Unix seconds or milliseconds). Default: 1 hour ago",
+			},
+			"end_time": map[string]interface{}{
+				"type":        "integer",
+				"description": "End timestamp (Unix seconds or milliseconds). Default: now",
+			},
+			"limit": map[string]interface{}{
+				"type":        "integer",
+				"description": "Max templates to return (default 50)",
+			},
+		},
+		"required": []string{"namespace"},
+	}
+
+	if err := registry.RegisterTool(patternsName, patternsDesc, patternsTool.Execute, patternsSchema); err != nil {
+		return fmt.Errorf("failed to register patterns tool: %w", err)
+	}
+	l.logger.Info("Registered tool: %s", patternsName)
+
+	l.logger.Info("Successfully registered 3 MCP tools for Logz.io integration: %s", l.name)
 	return nil
 }
 
