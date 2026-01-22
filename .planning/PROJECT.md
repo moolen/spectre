@@ -8,15 +8,16 @@ A Kubernetes observability platform with an MCP server for AI assistants. Provid
 
 Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, and log exploration in one server.
 
-## Current Milestone: v1.2 Logz.io Integration + Secret Management
+## Current State (v1.2 Shipped)
 
-**Goal:** Add Logz.io as a second log integration with secret management infrastructure for authenticated APIs.
+**Shipped 2026-01-22:**
+- Logz.io as second log backend with 3 MCP tools (overview, logs, patterns)
+- SecretWatcher with SharedInformerFactory for Kubernetes-native secret hot-reload
+- Multi-region API support (US, EU, UK, AU, CA) with X-API-TOKEN authentication
+- UI configuration form with region selector and SecretRef fields
+- Helm chart documentation for Secret mounting with rotation workflow
 
-**Target features:**
-- Logz.io integration with same progressive disclosure tools (overview, patterns, logs)
-- Secret management via Kubernetes Secrets mounted as files
-- Multi-region support for Logz.io API endpoints (US, EU, UK, AU, CA)
-- UI updates for Logz.io configuration with region selector and secret path
+**Cumulative stats:** 14 phases, 39 plans, 73 requirements, ~125k LOC (Go + TypeScript)
 
 ## Previous State (v1.1 Shipped)
 
@@ -66,15 +67,16 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - ✓ Remove MCP sidecar from Helm chart deployment — v1.1
 - ✓ Integration manager works with consolidated server — v1.1
 - ✓ E2E tests updated for single-server architecture — v1.1
+- ✓ Logz.io integration with Elasticsearch DSL query client — v1.2
+- ✓ Secret management infrastructure (Kubernetes-native SecretWatcher) — v1.2
+- ✓ Logz.io progressive disclosure tools (overview, patterns, logs) — v1.2
+- ✓ Multi-region API endpoint support (US, EU, UK, AU, CA) — v1.2
+- ✓ UI for Logz.io configuration (region selector, SecretRef fields) — v1.2
+- ✓ Helm chart updates for secret mounting (extraVolumes example) — v1.2
 
 ### Active
 
-- [ ] Logz.io integration with Elasticsearch DSL query client
-- [ ] Secret management infrastructure (file-based K8s secrets)
-- [ ] Logz.io progressive disclosure tools (overview, patterns, logs)
-- [ ] Multi-region API endpoint support
-- [ ] UI for Logz.io configuration (region selector, API token path)
-- [ ] Helm chart updates for secret mounting
+(No active requirements — ready for next milestone)
 
 ### Out of Scope
 
@@ -139,6 +141,11 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 | Service layer shared by REST and MCP (v1.1) | Eliminates code duplication, single source of truth for business logic | ✓ Good |
 | Delete HTTP client entirely (v1.1) | Service-only architecture is cleaner, HTTP self-calls were wasteful | ✓ Good |
 | StreamableHTTP stateless mode (v1.1) | Compatibility with MCP clients that don't manage sessions | ✓ Good |
+| SharedInformerFactory for secrets (v1.2) | Kubernetes best practice, auto-reconnection, namespace-scoped | ✓ Good |
+| X-API-TOKEN header for Logz.io (v1.2) | Per Logz.io API spec, not Bearer token | ✓ Good |
+| VictoriaLogs parity for Logz.io tools (v1.2) | Consistent AI experience across backends | ✓ Good |
+| Region selector (not freeform URL) (v1.2) | Prevents misconfiguration, maps to regional endpoints | ✓ Good |
+| SecretRef split (Name + Key) (v1.2) | Clearer UX than single reference string | ✓ Good |
 
 ## Tech Debt
 
@@ -146,4 +153,4 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - GET /{name} endpoint available but unused by UI (uses list endpoint instead)
 
 ---
-*Last updated: 2026-01-22 after starting v1.2 milestone*
+*Last updated: 2026-01-22 after v1.2 milestone shipped*

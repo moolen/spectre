@@ -1,5 +1,33 @@
 # Project Milestones: Spectre MCP Plugin System
 
+## v1.2 Logz.io Integration + Secret Management (Shipped: 2026-01-22)
+
+**Delivered:** Logz.io as second log backend with Kubernetes-native secret management—SecretWatcher with hot-reload, 3 MCP tools (overview, logs, patterns), UI configuration form, and Helm chart documentation for production deployment.
+
+**Phases completed:** 11-14 (8 plans total)
+
+**Key accomplishments:**
+
+- SecretWatcher with SharedInformerFactory for zero-downtime credential rotation (< 2s detection)
+- Thread-safe token access with sync.RWMutex and graceful degradation when secrets missing
+- Logz.io HTTP client with X-API-TOKEN authentication and 5-region support (US, EU, UK, AU, CA)
+- Three MCP tools with VictoriaLogs parity: overview (parallel aggregations), logs (100 limit), patterns (novelty detection)
+- UI form with region selector and SecretRef fields (Secret Name, Key) in Authentication section
+- Helm chart values.yaml with copy-paste Secret mounting example and 4-step rotation workflow
+
+**Stats:**
+
+- ~104k Go LOC, ~21k TypeScript LOC (cumulative)
+- 4 phases, 8 plans, 21 requirements
+- Same-day execution (all 4 phases completed 2026-01-22)
+- Critical fix: Logzio factory import added during milestone audit
+
+**Git range:** Phase 11 → Phase 14
+
+**What's next:** Additional integrations (Grafana Cloud, Datadog) or advanced features (multi-account support, pattern alerting)
+
+---
+
 ## v1.1 Server Consolidation (Shipped: 2026-01-21)
 
 **Delivered:** Single-port deployment with in-process MCP execution—REST API, UI, and MCP all served on port 8080, eliminating MCP sidecar and HTTP overhead via shared service layer.
