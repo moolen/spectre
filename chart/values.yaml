@@ -156,6 +156,24 @@ metadataCache:
   # Higher values reduce database load but may show stale data
   refreshSeconds: 30
 
+# Integration configuration persistence
+# Stores integration configuration at /var/lib/spectre/config/integrations.yaml
+integrations:
+  # Enable integration manager (MCP tools for VictoriaLogs, etc.)
+  enabled: true
+  # Path to the integrations configuration file (inside the container)
+  configPath: /var/lib/spectre/config/integrations.yaml
+  # Persistent storage for integration configuration
+  persistence:
+    enabled: true
+    size: 100Mi
+    mountPath: /var/lib/spectre
+    # storageClassName: ""  # Use default storage class if not specified
+    accessModes:
+      - ReadWriteOnce
+    annotations: {}
+    selector: {}
+
 # Persistent storage configuration (deprecated - storage package removed)
 persistence:
   enabled: false
@@ -297,6 +315,13 @@ serviceAccount:
   name: ""  # Will use "spectre" if not specified
   annotations: {}
   automountServiceAccountToken: true
+
+# RBAC configuration
+rbac:
+  # Secret access for integration credential management
+  # Enable when integrations use Kubernetes Secrets for API tokens
+  secretAccess:
+    enabled: true  # Default to enabled for v1.2+ (Logz.io integration)
 
 extraArgs: []
 
