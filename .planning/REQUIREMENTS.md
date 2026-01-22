@@ -12,28 +12,28 @@ Requirements for Grafana metrics integration. Each maps to roadmap phases.
 - [ ] **FOUN-01**: Grafana API client supports both Cloud and self-hosted authentication
 - [ ] **FOUN-02**: Client can list all dashboards via Grafana search API
 - [ ] **FOUN-03**: Client can retrieve full dashboard JSON by UID
-- [ ] **FOUN-04**: Incremental sync detects changed dashboards via version field
+- [x] **FOUN-04**: Incremental sync detects changed dashboards via version field
 - [ ] **FOUN-05**: Client integrates with SecretWatcher for API token hot-reload
 - [ ] **FOUN-06**: Integration follows factory registry pattern (compile-time registration)
 
 ### Graph Schema
 
 - [ ] **GRPH-01**: FalkorDB schema includes Dashboard nodes with metadata (uid, title, tags, folder)
-- [ ] **GRPH-02**: FalkorDB schema includes Panel nodes with query references
-- [ ] **GRPH-03**: FalkorDB schema includes Query nodes with raw PromQL expressions
-- [ ] **GRPH-04**: FalkorDB schema includes Metric nodes (metric name templates)
+- [x] **GRPH-02**: FalkorDB schema includes Panel nodes with query references
+- [x] **GRPH-03**: FalkorDB schema includes Query nodes with raw PromQL expressions
+- [x] **GRPH-04**: FalkorDB schema includes Metric nodes (metric name templates)
 - [ ] **GRPH-05**: FalkorDB schema includes Service nodes inferred from metric labels
-- [ ] **GRPH-06**: Relationships: Dashboard CONTAINS Panel, Panel HAS Query, Query USES Metric, Metric TRACKS Service
+- [x] **GRPH-06**: Relationships: Dashboard CONTAINS Panel, Panel HAS Query, Query USES Metric, Metric TRACKS Service
 - [ ] **GRPH-07**: Graph indexes on Dashboard.uid, Metric.name, Service.name for efficient queries
 
 ### PromQL Parsing
 
-- [ ] **PROM-01**: PromQL parser uses official Prometheus library (prometheus/promql/parser)
-- [ ] **PROM-02**: Parser extracts metric names from VectorSelector nodes
-- [ ] **PROM-03**: Parser extracts label selectors (key-value matchers)
-- [ ] **PROM-04**: Parser extracts aggregation functions (sum, avg, rate, etc.)
-- [ ] **PROM-05**: Parser handles variable syntax ($var, ${var}, [[var]]) as passthrough
-- [ ] **PROM-06**: Parser uses best-effort extraction (complex expressions may partially parse)
+- [x] **PROM-01**: PromQL parser uses official Prometheus library (prometheus/promql/parser)
+- [x] **PROM-02**: Parser extracts metric names from VectorSelector nodes
+- [x] **PROM-03**: Parser extracts label selectors (key-value matchers)
+- [x] **PROM-04**: Parser extracts aggregation functions (sum, avg, rate, etc.)
+- [x] **PROM-05**: Parser handles variable syntax ($var, ${var}, [[var]]) as passthrough
+- [x] **PROM-06**: Parser uses best-effort extraction (complex expressions may partially parse)
 
 ### Service Inference
 
@@ -91,7 +91,7 @@ Requirements for Grafana metrics integration. Each maps to roadmap phases.
 - [ ] **UICF-02**: Integration form includes API token field (SecretRef: name + key)
 - [ ] **UICF-03**: Integration form validates connection on save (health check)
 - [ ] **UICF-04**: Integration form includes hierarchy mapping configuration
-- [ ] **UICF-05**: UI displays sync status and last sync time
+- [x] **UICF-05**: UI displays sync status and last sync time
 
 ## v2 Requirements
 
@@ -137,22 +137,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FOUN-01 | Phase 15 | Complete |
 | FOUN-02 | Phase 15 | Complete |
 | FOUN-03 | Phase 15 | Complete |
-| FOUN-04 | Phase 16 | Pending |
+| FOUN-04 | Phase 16 | Complete |
 | FOUN-05 | Phase 15 | Complete |
 | FOUN-06 | Phase 15 | Complete |
 | GRPH-01 | Phase 15 | Complete |
-| GRPH-02 | Phase 16 | Pending |
-| GRPH-03 | Phase 16 | Pending |
-| GRPH-04 | Phase 16 | Pending |
+| GRPH-02 | Phase 16 | Complete |
+| GRPH-03 | Phase 16 | Complete |
+| GRPH-04 | Phase 16 | Complete |
 | GRPH-05 | Phase 17 | Pending |
-| GRPH-06 | Phase 16 | Pending |
+| GRPH-06 | Phase 16 | Complete |
 | GRPH-07 | Phase 15 | Complete |
-| PROM-01 | Phase 16 | Pending |
-| PROM-02 | Phase 16 | Pending |
-| PROM-03 | Phase 16 | Pending |
-| PROM-04 | Phase 16 | Pending |
-| PROM-05 | Phase 16 | Pending |
-| PROM-06 | Phase 16 | Pending |
+| PROM-01 | Phase 16 | Complete |
+| PROM-02 | Phase 16 | Complete |
+| PROM-03 | Phase 16 | Complete |
+| PROM-04 | Phase 16 | Complete |
+| PROM-05 | Phase 16 | Complete |
+| PROM-06 | Phase 16 | Complete |
 | SERV-01 | Phase 17 | Pending |
 | SERV-02 | Phase 17 | Pending |
 | SERV-03 | Phase 17 | Pending |
@@ -189,7 +189,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UICF-02 | Phase 15 | Complete |
 | UICF-03 | Phase 15 | Complete |
 | UICF-04 | Phase 17 | Pending |
-| UICF-05 | Phase 16 | Pending |
+| UICF-05 | Phase 16 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 51 total

@@ -58,22 +58,23 @@ Plans:
 - [x] 15-02-PLAN.md — FalkorDB Dashboard node schema with named graph support
 - [x] 15-03-PLAN.md — UI configuration form and test connection handler
 
-#### Phase 16: Ingestion Pipeline - Dashboard Sync & PromQL Parsing
+#### ✅ Phase 16: Ingestion Pipeline - Dashboard Sync & PromQL Parsing
 **Goal**: Dashboards are ingested incrementally with full semantic structure extracted to graph.
 **Depends on**: Phase 15
 **Requirements**: FOUN-04, GRPH-02, GRPH-03, GRPH-04, GRPH-06, PROM-01, PROM-02, PROM-03, PROM-04, PROM-05, PROM-06, UICF-05
 **Success Criteria** (what must be TRUE):
   1. DashboardSyncer detects changed dashboards via version field (incremental sync)
   2. PromQL parser extracts metric names, label selectors, and aggregation functions
-  3. Graph contains Dashboard→Panel→Query→Metric relationships with CONTAINS/QUERIES/USES edges
+  3. Graph contains Dashboard→Panel→Query→Metric relationships with CONTAINS/HAS/USES edges
   4. UI displays sync status and last sync time
   5. Parser handles Grafana variable syntax as passthrough (preserves $var, [[var]])
 **Plans**: 3 plans
+**Completed**: 2026-01-22
 
 Plans:
-- [ ] 16-01-PLAN.md — PromQL parser with AST extraction (metrics, labels, aggregations)
-- [ ] 16-02-PLAN.md — Dashboard syncer with incremental sync and graph builder
-- [ ] 16-03-PLAN.md — UI sync status display and manual sync trigger
+- [x] 16-01-PLAN.md — PromQL parser with AST extraction (metrics, labels, aggregations)
+- [x] 16-02-PLAN.md — Dashboard syncer with incremental sync and graph builder
+- [x] 16-03-PLAN.md — UI sync status display and manual sync trigger
 
 #### Phase 17: Semantic Layer - Service Inference & Dashboard Hierarchy
 **Goal**: Dashboards are classified by hierarchy level, services are inferred from metrics, and variables are classified by type.
@@ -130,7 +131,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 15. Foundation | 3/3 | ✓ Complete | 2026-01-22 |
-| 16. Ingestion Pipeline | 0/3 | Ready to execute | - |
+| 16. Ingestion Pipeline | 3/3 | ✓ Complete | 2026-01-22 |
 | 17. Semantic Layer | 0/TBD | Not started | - |
 | 18. Query Execution & MCP Tools | 0/TBD | Not started | - |
 | 19. Anomaly Detection | 0/TBD | Not started | - |
