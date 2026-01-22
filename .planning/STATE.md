@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 12 of 14 (MCP Tools - Overview and Logs)
-Plan: Ready to plan
-Status: Ready to plan Phase 12
-Last activity: 2026-01-22 — Phase 11 complete
+Plan: 1 of 3 complete
+Status: In progress - Plan 12-01 complete
+Last activity: 2026-01-22 — Completed 12-01-PLAN.md
 
-Progress: [████████████░░] 71% (10 of 14 phases complete)
+Progress: [████████████░░] 73% (10.33 of 14 phases complete)
 
 ## Milestone History
 
@@ -42,44 +42,58 @@ None
 - DateAdded field not persisted in integration config (from v1)
 - GET /{name} endpoint unused by UI (from v1)
 
-## Phase 11 Deliverables (Available for Phase 12)
+## Phase 12 Plan 01 Deliverables (Available for Plan 02)
 
-- **SecretWatcher**: `internal/integration/victorialogs/secret_watcher.go`
-  - NewSecretWatcher(client, namespace, secretName, key) creates watcher
-  - GetToken() returns current token (thread-safe)
-  - IsHealthy() returns true when token available
-  - Start()/Stop() for lifecycle management
+- **Logzio Integration**: `internal/integration/logzio/logzio.go`
+  - Factory registered as "logzio" type
+  - NewLogzioIntegration with config validation
+  - Start/Stop lifecycle with SecretWatcher management
+  - Health check with SecretWatcher validation
 
-- **Config Types**: `internal/integration/victorialogs/types.go`
-  - SecretRef{SecretName, Key} for referencing Kubernetes secrets
-  - Config{URL, APITokenRef} with mutual exclusivity validation
-  - UsesSecretRef() helper method
+- **Elasticsearch DSL Builder**: `internal/integration/logzio/query.go`
+  - BuildLogsQuery with bool queries and .keyword suffixes
+  - BuildAggregationQuery with terms aggregation (size 1000)
+  - ValidateQueryParams rejecting leading wildcards
 
-- **Helm RBAC**: `chart/templates/role.yaml`, `chart/templates/rolebinding.yaml`
-  - Namespace-scoped Role with get/watch/list on secrets
-  - Conditional via rbac.secretAccess.enabled (default true)
+- **HTTP Client**: `internal/integration/logzio/client.go`
+  - QueryLogs with X-API-TOKEN authentication
+  - QueryAggregation with terms aggregation parsing
+  - Regional endpoint support (5 regions)
+
+- **Severity Patterns**: `internal/integration/logzio/severity.go`
+  - GetErrorPattern() and GetWarningPattern() copied from VictoriaLogs
+  - Proven across 1000s of logs
+
+## Decisions Accumulated
+
+| Phase   | Decision | Impact |
+|---------|----------|--------|
+| 12-01   | Reused victorialogs.SecretWatcher for token management | No code duplication, proven reliability |
+| 12-01   | X-API-TOKEN header instead of Authorization: Bearer | Logz.io API requirement |
+| 12-01   | .keyword suffix on exact-match fields | Elasticsearch requirement for exact matching |
+| 12-01   | ValidateQueryParams validates internal severity patterns | Protects overview tool from leading wildcard perf issues |
 
 ## Next Steps
 
-1. `/gsd:plan-phase 12` — Plan MCP Tools Overview and Logs phase
+1. `/gsd:execute-phase 12 --plan 02` — Implement MCP tools (overview and logs)
 
 ## Cumulative Stats
 
 - Milestones: 2 shipped (v1, v1.1), 1 in progress (v1.2)
 - Total phases: 14 planned (10 complete, 4 pending)
-- Total plans: 35 complete (31 from v1/v1.1, 4 from v1.2 Phase 11)
+- Total plans: 36 complete (31 from v1/v1.1, 4 from Phase 11, 1 from Phase 12)
 - Total requirements: 73 (52 complete, 21 pending)
-- Total LOC: ~122k (Go + TypeScript)
+- Total LOC: ~123k (Go + TypeScript)
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 11
-**Context preserved:** Phase 11 complete, Phase 12 ready to plan
+**Last command:** /gsd:execute-phase 12 --plan 01
+**Context preserved:** Plan 12-01 complete, Logzio integration bootstrap done
 
 **On next session:**
-- Phase 11 complete: SecretWatcher, Config types, Helm RBAC all delivered
-- Phase 12 ready for planning
-- Start with `/gsd:discuss-phase 12` or `/gsd:plan-phase 12`
+- Plan 12-01 complete: Logzio integration, Elasticsearch DSL builder, X-API-TOKEN client ready
+- Plan 12-02 ready: Implement MCP tools (overview and logs)
+- Start with `/gsd:execute-phase 12 --plan 02`
 
 ---
-*Last updated: 2026-01-22 — Phase 11 complete*
+*Last updated: 2026-01-22 — Plan 12-01 complete*
