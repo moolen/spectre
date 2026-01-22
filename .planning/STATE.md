@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 17 of 19 (v1.3 Grafana Metrics Integration)
-Plan: 1 of 3 (Service Inference)
-Status: In progress - 17-01 complete
-Last activity: 2026-01-23 — Completed 17-01-PLAN.md (Service node inference)
+Plan: 3 of 3 (Dashboard Hierarchy Classification)
+Status: In progress - 17-03 complete
+Last activity: 2026-01-23 — Completed 17-03-PLAN.md (Dashboard hierarchy classification)
 
-Progress: [█████░░░░░░░░░░░] 43% (2 of 5 phases complete, 1 of 3 plans in phase 17)
+Progress: [█████░░░░░░░░░░░] 45% (2 of 5 phases complete, 3 of 3 plans in phase 17)
 
 ## Performance Metrics
 
 **v1.3 Velocity:**
-- Total plans completed: 7
+- Total plans completed: 9
 - Average duration: 5 min
-- Total execution time: 0.6 hours
+- Total execution time: 0.75 hours
 
 **Previous Milestones:**
 - v1.2: 8 plans completed
@@ -29,7 +29,7 @@ Progress: [█████░░░░░░░░░░░] 43% (2 of 5 phases 
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 46 complete (v1.0-v1.3 phase 17 plan 1)
+- Total plans: 48 complete (v1.0-v1.3 phase 17)
 - Milestones shipped: 3
 
 ## Accumulated Context
@@ -69,6 +69,11 @@ From Phase 17:
 - Multiple service nodes when labels disagree instead of choosing one — 17-01
 - Unknown service with empty cluster/namespace when no labels present — 17-01
 - TRACKS edges from Metric to Service (not Query to Service) — 17-01
+- Per-tag HierarchyMap mapping (simplest, most flexible) - each tag maps to level, first match wins — 17-03
+- Support both spectre:* and hierarchy:* tag formats for flexibility — 17-03
+- Case-insensitive hierarchy tag matching for user convenience — 17-03
+- Tags always override config mapping when both present — 17-03
+- Default to "detail" level when no hierarchy signals present — 17-03
 
 ### Pending Todos
 
@@ -99,13 +104,13 @@ None yet.
 
 ## Session Continuity
 
-**Last session:** 2026-01-23T00:31:41Z
-**Stopped at:** Completed 17-01-PLAN.md (Service node inference)
+**Last session:** 2026-01-23T23:32:21Z
+**Stopped at:** Completed 17-03-PLAN.md (Dashboard hierarchy classification)
 **Resume file:** None
 
-**Context preserved:** Phase 17 Plan 01 complete - Service inference with label priority, cluster/namespace scoping, and TRACKS edges
+**Context preserved:** Phase 17 complete - Service inference, variable classification, and dashboard hierarchy classification implemented. All semantic layer features ready for MCP tools.
 
-**Next step:** Continue to 17-02 (Dashboard Hierarchy Classification) or 17-03 (Variable Classification)
+**Next step:** Phase 18 - MCP Tools implementation to expose semantic layer via MCP interface
 
 ---
-*Last updated: 2026-01-23 — Phase 17 Plan 01 complete*
+*Last updated: 2026-01-23 — Phase 17 Semantic Layer complete*
