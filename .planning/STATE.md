@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 17 of 19 (v1.3 Grafana Metrics Integration)
-Plan: 3 of 3 (Dashboard Hierarchy Classification)
-Status: In progress - 17-03 complete
-Last activity: 2026-01-23 — Completed 17-03-PLAN.md (Dashboard hierarchy classification)
+Plan: Complete - all 4 plans finished
+Status: Phase complete
+Last activity: 2026-01-22 — Completed 17-04-PLAN.md (UI hierarchy mapping configuration)
 
-Progress: [█████░░░░░░░░░░░] 45% (2 of 5 phases complete, 3 of 3 plans in phase 17)
+Progress: [██████░░░░░░░░░░] 50% (2.5 of 5 phases complete in v1.3)
 
 ## Performance Metrics
 
 **v1.3 Velocity:**
-- Total plans completed: 9
-- Average duration: 5 min
-- Total execution time: 0.75 hours
+- Total plans completed: 10
+- Average duration: 4 min
+- Total execution time: 0.76 hours
 
 **Previous Milestones:**
 - v1.2: 8 plans completed
@@ -29,7 +29,7 @@ Progress: [█████░░░░░░░░░░░] 45% (2 of 5 phases 
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 48 complete (v1.0-v1.3 phase 17)
+- Total plans: 49 complete (v1.0-v1.3 phase 17)
 - Milestones shipped: 3
 
 ## Accumulated Context
@@ -78,6 +78,9 @@ From Phase 17:
 - Case-insensitive hierarchy tag matching for user convenience — 17-03
 - Tags always override config mapping when both present — 17-03
 - Default to "detail" level when no hierarchy signals present — 17-03
+- Warning-only validation for hierarchy levels (allows save with invalid values) — 17-04
+- Empty string values allowed in hierarchy mappings (cleanup on backend) — 17-04
+- Inline IIFE pattern for validation warning rendering — 17-04
 
 ### Pending Todos
 
@@ -108,13 +111,13 @@ None yet.
 
 ## Session Continuity
 
-**Last session:** 2026-01-23T23:32:21Z
-**Stopped at:** Completed 17-03-PLAN.md (Dashboard hierarchy classification)
+**Last session:** 2026-01-22T23:36:59Z
+**Stopped at:** Completed 17-04-PLAN.md (UI hierarchy mapping configuration)
 **Resume file:** None
 
-**Context preserved:** Phase 17 complete - Service inference, variable classification, and dashboard hierarchy classification implemented. All semantic layer features ready for MCP tools.
+**Context preserved:** Phase 17 complete - Service inference, variable classification, dashboard hierarchy classification, and UI hierarchy mapping configuration all implemented. Semantic layer complete with both backend logic and UI configuration interface.
 
 **Next step:** Phase 18 - MCP Tools implementation to expose semantic layer via MCP interface
 
 ---
-*Last updated: 2026-01-23 — Phase 17 Semantic Layer complete*
+*Last updated: 2026-01-22 — Phase 17 Semantic Layer complete*
