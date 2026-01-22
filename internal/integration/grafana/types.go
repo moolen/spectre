@@ -22,6 +22,12 @@ type Config struct {
 
 	// APITokenRef references a Kubernetes Secret containing the API token
 	APITokenRef *SecretRef `json:"apiTokenRef,omitempty" yaml:"apiTokenRef,omitempty"`
+
+	// HierarchyMap maps Grafana tags to hierarchy levels (overview/drilldown/detail)
+	// Used as fallback when dashboard lacks explicit hierarchy tags (spectre:* or hierarchy:*)
+	// Example: {"prod": "overview", "staging": "drilldown"}
+	// Optional: if not specified, dashboards default to "detail" when no hierarchy tags found
+	HierarchyMap map[string]string `json:"hierarchyMap,omitempty" yaml:"hierarchyMap,omitempty"`
 }
 
 // Validate checks config for common errors
@@ -37,6 +43,20 @@ func (c *Config) Validate() error {
 	if c.APITokenRef != nil && c.APITokenRef.SecretName != "" {
 		if c.APITokenRef.Key == "" {
 			return fmt.Errorf("apiTokenRef.key is required when apiTokenRef is specified")
+		}
+	}
+
+	// Validate HierarchyMap if present
+	if len(c.HierarchyMap) > 0 {
+		validLevels := map[string]bool{
+			"overview":  true,
+			"drilldown": true,
+			"detail":    true,
+		}
+		for tag, level := range c.HierarchyMap {
+			if !validLevels[level] {
+				return fmt.Errorf("hierarchyMap contains invalid level %q for tag %q, must be overview/drilldown/detail", level, tag)
+			}
 		}
 	}
 
