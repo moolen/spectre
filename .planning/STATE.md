@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 12 of 14 (MCP Tools - Overview and Logs)
-Plan: 1 of 3 complete
-Status: In progress - Plan 12-01 complete
-Last activity: 2026-01-22 — Completed 12-01-PLAN.md
+Plan: 2 of 3 complete
+Status: In progress - Plan 12-02 complete
+Last activity: 2026-01-22 — Completed 12-02-PLAN.md
 
-Progress: [████████████░░] 73% (10.33 of 14 phases complete)
+Progress: [████████████░░] 74% (10.67 of 14 phases complete)
 
 ## Milestone History
 
@@ -42,11 +42,11 @@ None
 - DateAdded field not persisted in integration config (from v1)
 - GET /{name} endpoint unused by UI (from v1)
 
-## Phase 12 Plan 01 Deliverables (Available for Plan 02)
+## Phase 12 Deliverables (Available for Plan 03)
 
+### Plan 01: Logzio Integration Bootstrap
 - **Logzio Integration**: `internal/integration/logzio/logzio.go`
   - Factory registered as "logzio" type
-  - NewLogzioIntegration with config validation
   - Start/Stop lifecycle with SecretWatcher management
   - Health check with SecretWatcher validation
 
@@ -61,8 +61,25 @@ None
   - Regional endpoint support (5 regions)
 
 - **Severity Patterns**: `internal/integration/logzio/severity.go`
-  - GetErrorPattern() and GetWarningPattern() copied from VictoriaLogs
-  - Proven across 1000s of logs
+  - GetErrorPattern() and GetWarningPattern()
+
+### Plan 02: MCP Tools (Overview + Logs)
+- **Overview Tool**: `internal/integration/logzio/tools_overview.go`
+  - Parallel aggregations (3 goroutines: total, errors, warnings)
+  - NamespaceSeverity breakdown (Errors, Warnings, Other, Total)
+  - parseTimeRange helper (Unix seconds/milliseconds detection)
+  - Registered as logzio_{name}_overview
+
+- **Logs Tool**: `internal/integration/logzio/tools_logs.go`
+  - Namespace required, max 100 logs enforced
+  - Truncation detection via Limit+1 pattern
+  - Structured filters only (no regex exposure to users)
+  - Registered as logzio_{name}_logs
+
+- **Tool Registration**: `internal/integration/logzio/logzio.go`
+  - RegisterTools with 2 MCP tools
+  - Tool schemas with parameter descriptions
+  - ToolContext pattern for dependency injection
 
 ## Decisions Accumulated
 
@@ -72,28 +89,33 @@ None
 | 12-01   | X-API-TOKEN header instead of Authorization: Bearer | Logz.io API requirement |
 | 12-01   | .keyword suffix on exact-match fields | Elasticsearch requirement for exact matching |
 | 12-01   | ValidateQueryParams validates internal severity patterns | Protects overview tool from leading wildcard perf issues |
+| 12-02   | Logs tool max 100 entries (not 500 like VictoriaLogs) | More conservative limit per CONTEXT.md prevents AI context overflow |
+| 12-02   | ValidateQueryParams scope: internal patterns only | Logs tool only exposes structured filters, no user regex exposure |
+| 12-02   | Parallel aggregation queries (3 goroutines) | Reduces latency from ~16s to ~10s |
+| 12-02   | Logs tool schema: no regex parameter | Users can only use structured filters (namespace, pod, container, level) |
 
 ## Next Steps
 
-1. `/gsd:execute-phase 12 --plan 02` — Implement MCP tools (overview and logs)
+1. `/gsd:execute-phase 12 --plan 03` — Implement patterns tool (log template mining)
 
 ## Cumulative Stats
 
 - Milestones: 2 shipped (v1, v1.1), 1 in progress (v1.2)
 - Total phases: 14 planned (10 complete, 4 pending)
-- Total plans: 36 complete (31 from v1/v1.1, 4 from Phase 11, 1 from Phase 12)
+- Total plans: 37 complete (31 from v1/v1.1, 4 from Phase 11, 2 from Phase 12)
 - Total requirements: 73 (52 complete, 21 pending)
 - Total LOC: ~123k (Go + TypeScript)
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 12 --plan 01
-**Context preserved:** Plan 12-01 complete, Logzio integration bootstrap done
+**Last command:** /gsd:execute-phase 12 --plan 02
+**Context preserved:** Plan 12-02 complete, Logzio MCP tools (overview + logs) operational
 
 **On next session:**
-- Plan 12-01 complete: Logzio integration, Elasticsearch DSL builder, X-API-TOKEN client ready
-- Plan 12-02 ready: Implement MCP tools (overview and logs)
-- Start with `/gsd:execute-phase 12 --plan 02`
+- Plan 12-01 complete: Logzio integration, Elasticsearch DSL builder, X-API-TOKEN client
+- Plan 12-02 complete: Overview tool (parallel aggregations), Logs tool (100-log limit)
+- Plan 12-03 ready: Implement patterns tool (log template mining)
+- Start with `/gsd:execute-phase 12 --plan 03`
 
 ---
-*Last updated: 2026-01-22 — Plan 12-01 complete*
+*Last updated: 2026-01-22 — Plan 12-02 complete*
