@@ -50,10 +50,12 @@ See `.planning/milestones/v1.2-ROADMAP.md` for details.
   3. GrafanaClient can authenticate to both Cloud and self-hosted instances
   4. GrafanaClient can list all dashboards via search API
   5. FalkorDB schema includes Dashboard nodes with indexes on uid
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 15-01: TBD
+- [ ] 15-01-PLAN.md — Grafana API client backend with SecretWatcher integration
+- [ ] 15-02-PLAN.md — FalkorDB Dashboard node schema with named graph support
+- [ ] 15-03-PLAN.md — UI configuration form and test connection handler
 
 #### Phase 16: Ingestion Pipeline - Dashboard Sync & PromQL Parsing
 **Goal**: Dashboards are ingested incrementally with full semantic structure extracted to graph.
@@ -124,7 +126,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 15. Foundation | 0/TBD | Not started | - |
+| 15. Foundation | 0/3 | Ready to execute | - |
 | 16. Ingestion Pipeline | 0/TBD | Not started | - |
 | 17. Semantic Layer | 0/TBD | Not started | - |
 | 18. Query Execution & MCP Tools | 0/TBD | Not started | - |
