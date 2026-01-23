@@ -106,10 +106,12 @@ Plans:
   4. MCP tool `grafana_{name}_metrics_aggregated` focuses on specified service or cluster
   5. MCP tool `grafana_{name}_metrics_details` executes full dashboard with all panels
   6. All tools accept scoping variables (cluster, region) as parameters and pass to Grafana API
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 18-01: TBD
+- [ ] 18-01-PLAN.md — GrafanaQueryService with Grafana /api/ds/query integration
+- [ ] 18-02-PLAN.md — Three MCP tools (overview, aggregated, details)
+- [ ] 18-03-PLAN.md — Tool registration and end-to-end verification
 
 #### Phase 19: Anomaly Detection & Progressive Disclosure
 **Goal**: AI can detect anomalies vs 7-day baseline with severity ranking and progressively disclose from overview to details.
@@ -137,7 +139,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 | 15. Foundation | 3/3 | ✓ Complete | 2026-01-22 |
 | 16. Ingestion Pipeline | 3/3 | ✓ Complete | 2026-01-22 |
 | 17. Semantic Layer | 4/4 | ✓ Complete | 2026-01-23 |
-| 18. Query Execution & MCP Tools | 0/TBD | Not started | - |
+| 18. Query Execution & MCP Tools | 0/3 | Not started | - |
 | 19. Anomaly Detection | 0/TBD | Not started | - |
 
 ---
