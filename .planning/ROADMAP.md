@@ -172,10 +172,11 @@ Plans:
   3. Graph stores full state timeline with from_state, to_state, and timestamp
   4. Periodic sync updates both alert rules and current state
   5. Sync gracefully handles Grafana API unavailability (logs error, continues with stale data)
-**Plans**: 0 plans
+**Plans**: 2 plans
 
 Plans:
-- [ ] TBD (created by /gsd:plan-phase)
+- [ ] 21-01-PLAN.md — Alert state API client and graph storage with deduplication
+- [ ] 21-02-PLAN.md — AlertStateSyncer with periodic sync and lifecycle wiring
 
 #### Phase 22: Historical Analysis
 **Goal**: AI can identify flapping alerts and compare current alert behavior to 7-day baseline.
@@ -211,7 +212,7 @@ Plans:
 Plans:
 - [ ] TBD (created by /gsd:plan-phase)
 
-**Stats:** 4 phases, 2 plans (Phase 20 planned), 22 requirements
+**Stats:** 4 phases, 4 plans (Phase 20-21 planned), 22 requirements
 
 ## Progress
 
@@ -221,9 +222,9 @@ Plans:
 | v1.1 | 6-9 | 12 | 21 | ✅ Shipped 2026-01-21 |
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
-| v1.4 | 20-23 | 2 (in progress) | 22 | 🚧 In progress |
+| v1.4 | 20-23 | 4 (in progress) | 22 | 🚧 In progress |
 
-**Total:** 23 phases (20 complete), 58 plans (58 complete), 146 requirements (129 complete)
+**Total:** 23 phases (20 complete), 60 plans (58 complete), 146 requirements (129 complete)
 
 ---
 *v1.4 roadmap updated: 2026-01-23*
