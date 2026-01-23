@@ -5,7 +5,7 @@
 - ✅ **v1.0 MCP Plugin System + VictoriaLogs** - Phases 1-5 (shipped 2026-01-21)
 - ✅ **v1.1 Server Consolidation** - Phases 6-9 (shipped 2026-01-21)
 - ✅ **v1.2 Logz.io Integration + Secret Management** - Phases 10-14 (shipped 2026-01-22)
-- 🚧 **v1.3 Grafana Metrics Integration** - Phases 15-19 (in progress)
+- ✅ **v1.3 Grafana Metrics Integration** - Phases 15-19 (shipped 2026-01-23)
 
 ## Phases
 
@@ -36,7 +36,8 @@ See `.planning/milestones/v1.2-ROADMAP.md` for details.
 
 </details>
 
-### 🚧 v1.3 Grafana Metrics Integration (In Progress)
+<details>
+<summary>✅ v1.3 Grafana Metrics Integration (Phases 15-19) - SHIPPED 2026-01-23</summary>
 
 **Milestone Goal:** Use Grafana dashboards as structured operational knowledge so Spectre can detect high-level anomalies, progressively drill down, and reason about services, clusters, and metrics.
 
@@ -134,18 +135,22 @@ Plans:
 - [x] 19-03-PLAN.md — Anomaly service orchestration and Overview tool integration
 - [x] 19-04-PLAN.md — Integration wiring, tests, and verification
 
+**Stats:** 5 phases, 17 plans, 51 requirements
+
+</details>
+
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
+All milestones complete through v1.3.
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 15. Foundation | 3/3 | ✓ Complete | 2026-01-22 |
-| 16. Ingestion Pipeline | 3/3 | ✓ Complete | 2026-01-22 |
-| 17. Semantic Layer | 4/4 | ✓ Complete | 2026-01-23 |
-| 18. Query Execution & MCP Tools | 3/3 | ✓ Complete | 2026-01-23 |
-| 19. Anomaly Detection | 4/4 | ✓ Complete | 2026-01-23 |
+| Milestone | Phases | Plans | Requirements | Shipped |
+|-----------|--------|-------|--------------|---------|
+| v1.0 | 1-5 | 19 | 31 | 2026-01-21 |
+| v1.1 | 6-9 | 12 | 21 | 2026-01-21 |
+| v1.2 | 10-14 | 8 | 21 | 2026-01-22 |
+| v1.3 | 15-19 | 17 | 51 | 2026-01-23 |
+
+**Total:** 19 phases, 56 plans, 124 requirements
 
 ---
-*v1.3 roadmap created: 2026-01-22*
+*v1.3 roadmap created: 2026-01-22, shipped: 2026-01-23*

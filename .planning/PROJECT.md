@@ -8,25 +8,23 @@ A Kubernetes observability platform with an MCP server for AI assistants. Provid
 
 Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis in one server.
 
-## Current Milestone: v1.3 Grafana Metrics Integration
+## Current Status: Ready for Next Milestone
 
-**Goal:** Use Grafana dashboards as structured operational knowledge so Spectre can detect high-level anomalies, progressively drill down, and reason about services, clusters, and metrics.
+All planned milestones (v1.0-v1.3) have been shipped. The project is ready for its next milestone.
 
-**Target features:**
+## Previous State (v1.3 Shipped)
+
+**Shipped 2026-01-23:**
 - Grafana dashboard ingestion via API (both Cloud and self-hosted)
 - Full semantic graph storage in FalkorDB (dashboards→panels→queries→metrics→services)
 - Dashboard hierarchy (overview/drill-down/detail) via Grafana tags + config fallback
 - Best-effort PromQL parsing for metric names, labels, and variable classification
 - Service inference from metric labels (job, service, app)
-- Anomaly detection with 7-day historical baseline (queried on-demand via Grafana)
+- Anomaly detection with 7-day historical baseline (z-score based, time-of-day matched)
 - Three MCP tools: metrics_overview, metrics_aggregated, metrics_details
 - UI configuration form for Grafana connection (URL, API token, hierarchy mapping)
 
-**Core principles:**
-- Dashboards are intent, not truth — treat them as fuzzy signals
-- Progressive disclosure — overview → aggregated → details
-- Query via Grafana API — simpler auth, variable handling
-- No metric storage — query historical ranges on-demand
+**Cumulative stats:** 19 phases, 56 plans, 124 requirements, ~132k LOC (Go + TypeScript)
 
 ## Previous State (v1.2 Shipped)
 
@@ -94,19 +92,19 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - ✓ UI for Logz.io configuration (region selector, SecretRef fields) — v1.2
 - ✓ Helm chart updates for secret mounting (extraVolumes example) — v1.2
 
-### Active
+### v1.3 (Shipped)
 
-- [ ] Grafana API client for dashboard ingestion (both Cloud and self-hosted)
-- [ ] FalkorDB graph schema for dashboards, panels, queries, metrics, services
-- [ ] Dashboard hierarchy support (overview/drill-down/detail levels)
-- [ ] PromQL parser for metric extraction (best-effort)
-- [ ] Variable classification (scoping vs entity vs detail)
-- [ ] Service inference from metric labels
-- [ ] Anomaly detection with 7-day historical baseline
-- [ ] MCP tool: metrics_overview (overview dashboards, ranked anomalies)
-- [ ] MCP tool: metrics_aggregated (service/cluster focus, correlations)
-- [ ] MCP tool: metrics_details (full dashboard, deep expansion)
-- [ ] UI form for Grafana configuration (URL, API token, hierarchy mapping)
+- ✓ Grafana API client for dashboard ingestion (both Cloud and self-hosted)
+- ✓ FalkorDB graph schema for dashboards, panels, queries, metrics, services
+- ✓ Dashboard hierarchy support (overview/drill-down/detail levels)
+- ✓ PromQL parser for metric extraction (best-effort)
+- ✓ Variable classification (scoping vs entity vs detail)
+- ✓ Service inference from metric labels
+- ✓ Anomaly detection with 7-day historical baseline
+- ✓ MCP tool: metrics_overview (overview dashboards, ranked anomalies)
+- ✓ MCP tool: metrics_aggregated (service/cluster focus, correlations)
+- ✓ MCP tool: metrics_details (full dashboard, deep expansion)
+- ✓ UI form for Grafana configuration (URL, API token, hierarchy mapping)
 
 ### Out of Scope
 
@@ -187,6 +185,13 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 | VictoriaLogs parity for Logz.io tools (v1.2) | Consistent AI experience across backends | ✓ Good |
 | Region selector (not freeform URL) (v1.2) | Prevents misconfiguration, maps to regional endpoints | ✓ Good |
 | SecretRef split (Name + Key) (v1.2) | Clearer UX than single reference string | ✓ Good |
+| Query via Grafana API (v1.3) | Simpler auth, variable handling vs direct Prometheus | ✓ Good |
+| No metric storage (v1.3) | Query historical ranges on-demand via Grafana | ✓ Good |
+| Dashboards as fuzzy signals (v1.3) | AI treats structure as intent, not strict truth | ✓ Good |
+| Progressive disclosure for metrics (v1.3) | Overview → aggregated → details pattern | ✓ Good |
+| Z-score with time-of-day matching (v1.3) | Better anomaly detection vs simple rolling average | ✓ Good |
+| Error metrics use lower thresholds (v1.3) | Errors deserve attention at 2σ vs 3σ for normal | ✓ Good |
+| Baseline cache in graph with TTL (v1.3) | Performance optimization, 1-hour refresh | ✓ Good |
 
 ## Tech Debt
 
@@ -194,4 +199,4 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - GET /{name} endpoint available but unused by UI (uses list endpoint instead)
 
 ---
-*Last updated: 2026-01-22 after v1.3 milestone started*
+*Last updated: 2026-01-23 after v1.3 milestone shipped*
