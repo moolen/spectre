@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
@@ -31,6 +32,22 @@ type AlertQuery struct {
 	Model         json.RawMessage `json:"model"`         // Query model (contains PromQL)
 	DatasourceUID string          `json:"datasourceUID"` // Datasource UID
 	QueryType     string          `json:"queryType"`     // Query type (typically "prometheus")
+}
+
+// AlertState represents an alert rule with its current state and instances
+type AlertState struct {
+	UID       string          `json:"-"`      // Extracted from rule
+	Title     string          `json:"-"`      // Extracted from rule
+	State     string          `json:"state"`  // Alert rule evaluation state
+	Instances []AlertInstance `json:"alerts"` // Active alert instances
+}
+
+// AlertInstance represents a single alert instance (specific label combination)
+type AlertInstance struct {
+	Labels   map[string]string `json:"labels"`   // Alert instance labels
+	State    string            `json:"state"`    // firing, pending, normal
+	ActiveAt *time.Time        `json:"activeAt"` // When instance became active (nil if normal)
+	Value    string            `json:"value"`    // Current metric value
 }
 
 // GrafanaClient is an HTTP client wrapper for Grafana API.
@@ -274,6 +291,106 @@ func (c *GrafanaClient) GetAlertRule(ctx context.Context, uid string) (*AlertRul
 
 	c.logger.Debug("Retrieved alert rule %s from Grafana", uid)
 	return &alertRule, nil
+}
+
+// PrometheusRulesResponse represents the response from /api/prometheus/grafana/api/v1/rules
+type PrometheusRulesResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		Groups []PrometheusRuleGroup `json:"groups"`
+	} `json:"data"`
+}
+
+// PrometheusRuleGroup represents a rule group in Prometheus format
+type PrometheusRuleGroup struct {
+	Name  string             `json:"name"`
+	File  string             `json:"file"`
+	Rules []PrometheusRule   `json:"rules"`
+}
+
+// PrometheusRule represents a rule with its current state and instances
+type PrometheusRule struct {
+	Name   string            `json:"name"`   // Alert rule name
+	Query  string            `json:"query"`  // PromQL expression
+	Labels map[string]string `json:"labels"` // Rule labels
+	State  string            `json:"state"`  // Alert rule evaluation state
+	Alerts []AlertInstance   `json:"alerts"` // Active alert instances
+}
+
+// GetAlertStates retrieves current alert states from Grafana using Prometheus-compatible API.
+// Uses /api/prometheus/grafana/api/v1/rules endpoint which returns alert rules with instances.
+// Maps Grafana state values: "alerting" -> "firing", normalizes to lowercase.
+func (c *GrafanaClient) GetAlertStates(ctx context.Context) ([]AlertState, error) {
+	// Build request URL
+	reqURL := fmt.Sprintf("%s/api/prometheus/grafana/api/v1/rules", c.config.URL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create get alert states request: %w", err)
+	}
+
+	// Add Bearer token authentication if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	// Execute request
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute get alert states request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// CRITICAL: Always read response body to completion for connection reuse
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("Grafana get alert states failed: status=%d body=%s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("get alert states failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse JSON response
+	var result PrometheusRulesResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse alert states response: %w", err)
+	}
+
+	// Extract alert states from nested structure
+	var alertStates []AlertState
+	for _, group := range result.Data.Groups {
+		for _, rule := range group.Rules {
+			// Extract UID from labels (uid label injected by Grafana)
+			uid := rule.Labels["grafana_uid"]
+			if uid == "" {
+				// Skip rules without UID (not Grafana-managed alerts)
+				continue
+			}
+
+			// Normalize state: "alerting" -> "firing", lowercase
+			state := rule.State
+			if state == "alerting" {
+				state = "firing"
+			}
+			state = strings.ToLower(state)
+
+			alertStates = append(alertStates, AlertState{
+				UID:       uid,
+				Title:     rule.Name,
+				State:     state,
+				Instances: rule.Alerts,
+			})
+		}
+	}
+
+	c.logger.Debug("Retrieved %d alert states from Grafana", len(alertStates))
+	return alertStates, nil
 }
 
 // QueryRequest represents a request to Grafana's /api/ds/query endpoint
