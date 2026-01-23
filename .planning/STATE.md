@@ -10,18 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-23)
 ## Current Position
 
 Phase: 21 (Alert Sync Pipeline)
-Plan: 1 of 3 complete
-Status: In progress - Plan 21-01 complete
-Last activity: 2026-01-23 — Completed 21-01-PLAN.md
+Plan: 2 of 2 complete
+Status: Phase 21 complete - Ready for Phase 22
+Last activity: 2026-01-23 — Completed 21-02-PLAN.md
 
-Progress: [█████░>              ] 27% (1/3 phases started, 1/3 plans complete in Phase 21)
+Progress: [█████░>              ] 27% (Phase 21 complete: 2/2 plans)
 
 ## Performance Metrics
 
 **v1.4 Velocity (current):**
-- Plans completed: 3
+- Plans completed: 4
 - Phase 20 duration: ~10 min
 - Phase 21-01 duration: 4 min
+- Phase 21-02 duration: 8 min
 
 **v1.3 Velocity:**
 - Total plans completed: 17
@@ -34,7 +35,7 @@ Progress: [█████░>              ] 27% (1/3 phases started, 1/3 plans
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 59 complete (v1.0-v1.4 Phase 21-01)
+- Total plans: 60 complete (v1.0-v1.4 Phase 21-02)
 - Milestones shipped: 4 (v1.0, v1.1, v1.2, v1.3)
 
 ## Accumulated Context
@@ -113,6 +114,11 @@ From Phase 21:
 - Self-edge pattern for state transitions: (Alert)-[STATE_TRANSITION]->(Alert) — 21-01
 - Return "unknown" for missing state (not error) to handle first sync gracefully — 21-01
 - MERGE for Alert node in state sync to handle race with rule sync — 21-01
+- Periodic state sync with 5-minute interval (independent from 1-hour rule sync) — 21-02
+- State aggregation: worst-case across instances (firing > pending > normal) — 21-02
+- Per-alert last_synced_at timestamp for staleness tracking (not global) — 21-02
+- Partial failures OK: continue sync with other alerts on graph errors — 21-02
+- strings.Contains for query detection in mocks (more reliable than parameter matching) — 21-02
 
 ### Pending Todos
 
