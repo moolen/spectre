@@ -204,7 +204,7 @@ None yet.
 **Resume file:** None
 **Context preserved:** Phase 23-03 COMPLETE ✅ - Comprehensive integration tests (959 lines) validate all three alert MCP tools with mockAlertGraphClient providing realistic Alert nodes and STATE_TRANSITION edges. Progressive disclosure workflow verified end-to-end: overview → aggregated → details. Edge cases covered: nil analysis service, ErrInsufficientData, parameter validation. State timeline bucketization tested with 10-minute LOCF interpolation. v1.4 Grafana Alerts Integration COMPLETE.
 
-**Next step:** v1.4 shipped. Run `/gsd:audit-milestone` to verify requirements and cross-phase integration, or `/gsd:complete-milestone` to archive.
+**Next step:** v1.4 archived. Run `/gsd:new-milestone` to start next milestone, or `/gsd:progress` to check project status.
 
 ---
 *Last updated: 2026-01-23 — v1.4 milestone SHIPPED*
