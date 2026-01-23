@@ -18,6 +18,7 @@ const (
 	NodeTypeMetric           NodeType = "Metric"
 	NodeTypeService          NodeType = "Service"
 	NodeTypeVariable         NodeType = "Variable"
+	NodeTypeAlert            NodeType = "Alert"
 )
 
 // EdgeType represents the type of graph edge
@@ -47,6 +48,7 @@ const (
 	EdgeTypeUses        EdgeType = "USES"         // Query -> Metric
 	EdgeTypeTracks      EdgeType = "TRACKS"       // Metric -> Service
 	EdgeTypeHasVariable EdgeType = "HAS_VARIABLE" // Dashboard -> Variable
+	EdgeTypeMonitors    EdgeType = "MONITORS"     // Alert -> Metric/Service
 )
 
 // ResourceIdentity represents a persistent Kubernetes resource node
@@ -88,6 +90,19 @@ type K8sEvent struct {
 	Type      string `json:"type"`      // Warning, Normal, Error
 	Count     int    `json:"count"`     // event count (if repeated)
 	Source    string `json:"source"`    // component that generated event
+}
+
+// AlertNode represents a Grafana Alert Rule node in the graph
+type AlertNode struct {
+	UID         string            `json:"uid"`         // Alert rule UID (primary key)
+	Title       string            `json:"title"`       // Alert rule title
+	FolderTitle string            `json:"folderTitle"` // Folder containing the rule
+	RuleGroup   string            `json:"ruleGroup"`   // Alert rule group name
+	Condition   string            `json:"condition"`   // PromQL expression (stored for display, parsed separately)
+	Labels      map[string]string `json:"labels"`      // Alert labels
+	Annotations map[string]string `json:"annotations"` // Alert annotations including severity
+	Updated     string            `json:"updated"`     // ISO8601 timestamp for incremental sync
+	Integration string            `json:"integration"` // Integration name (e.g., "grafana_prod")
 }
 
 // DashboardNode represents a Grafana Dashboard node in the graph
