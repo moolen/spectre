@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-23)
 ## Current Position
 
 Phase: 20 of 4 (Alert API Client & Graph Schema)
-Plan: 1 of 4 in phase
+Plan: 2 of 4 in phase
 Status: In progress
-Last activity: 2026-01-23 — Completed 20-01-PLAN.md
+Last activity: 2026-01-23 — Completed 20-02-PLAN.md
 
-Progress: [█████>               ] 25% (1/4 plans)
+Progress: [██████████>          ] 50% (2/4 plans)
 
 ## Performance Metrics
 
@@ -93,6 +93,11 @@ From Phase 20:
 - Alert rule metadata stored in AlertNode (definition), state tracking deferred to Phase 21 — 20-01
 - AlertQuery.Model as json.RawMessage for flexible PromQL parsing — 20-01
 - Integration field in AlertNode for multi-Grafana support — 20-01
+- ISO8601 string comparison for timestamp-based incremental sync (no parse needed) — 20-02
+- Shared GraphBuilder instance between Dashboard and Alert syncers — 20-02
+- Integration name parameter in GraphBuilder constructor for consistent node tagging — 20-02
+- First PromQL expression stored as condition field for alert display — 20-02
+- Alert→Service relationships accessed transitively via Metrics (no direct edge) — 20-02
 
 ### Pending Todos
 
@@ -127,13 +132,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase (plan 20-01)
-**Last session:** 2026-01-23T08:44:49Z
-**Stopped at:** Completed 20-01-PLAN.md
+**Last command:** /gsd:execute-phase (plan 20-02)
+**Last session:** 2026-01-23T08:54:50Z
+**Stopped at:** Completed 20-02-PLAN.md
 **Resume file:** None
-**Context preserved:** Alert API foundation complete - graph schema and client methods ready for sync service
+**Context preserved:** Alert rule sync service complete - AlertSyncer ingests alert rules hourly with PromQL metric extraction and graph relationships
 
-**Next step:** Plan 20-02 (Alert Rules Sync Service)
+**Next step:** Plan 20-03 (Alert Query Tools)
 
 ---
-*Last updated: 2026-01-23 — Phase 20 Plan 01 complete*
+*Last updated: 2026-01-23 — Phase 20 Plan 02 complete*
