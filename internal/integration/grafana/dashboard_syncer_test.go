@@ -50,6 +50,10 @@ func (m *mockGrafanaClient) ListAlertRules(ctx context.Context) ([]AlertRule, er
 	return nil, nil
 }
 
+func (m *mockGrafanaClient) GetAlertStates(ctx context.Context) ([]AlertState, error) {
+	return nil, nil
+}
+
 // Helper to create dashboard data
 func createDashboardData(uid, title string, version int, panels []GrafanaPanel) map[string]interface{} {
 	dashboard := map[string]interface{}{

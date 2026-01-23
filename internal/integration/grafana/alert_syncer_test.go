@@ -30,6 +30,10 @@ func (m *mockGrafanaClientForAlerts) ListAlertRules(ctx context.Context) ([]Aler
 	return nil, nil
 }
 
+func (m *mockGrafanaClientForAlerts) GetAlertStates(ctx context.Context) ([]AlertState, error) {
+	return nil, nil
+}
+
 // mockGraphClientForAlerts implements graph.Client for testing
 type mockGraphClientForAlerts struct {
 	executeQueryFunc func(ctx context.Context, query graph.GraphQuery) (*graph.QueryResult, error)
