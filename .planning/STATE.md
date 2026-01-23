@@ -9,22 +9,23 @@ See: .planning/PROJECT.md (updated 2026-01-23)
 
 ## Current Position
 
-Phase: 22 (Historical Analysis) — COMPLETE
-Plan: 2/2 complete (22-02 DONE)
-Status: AlertAnalysisService complete with cache, categorization, and LOCF, ready for Phase 23 (MCP Tools)
-Last activity: 2026-01-23 — Completed 22-02-PLAN.md (AlertAnalysisService with multi-label categorization)
+Phase: 22 (Historical Analysis) — COMPLETE ✅
+Plan: 3/3 complete (22-03 DONE)
+Status: Phase 22 fully complete - AlertAnalysisService integrated into lifecycle, tested, ready for Phase 23 MCP tools
+Last activity: 2026-01-23 — Completed 22-03-PLAN.md (Integration lifecycle and end-to-end tests)
 
-Progress: [█████████████>       ] 68.75% (2.75/4 phases)
+Progress: [██████████████>      ] 75% (3/4 phases)
 
 ## Performance Metrics
 
 **v1.4 Velocity (current):**
-- Plans completed: 6
+- Plans completed: 7
 - Phase 20 duration: ~10 min
 - Phase 21-01 duration: 4 min
 - Phase 21-02 duration: 8 min
 - Phase 22-01 duration: 9 min
 - Phase 22-02 duration: 6 min
+- Phase 22-03 duration: 5 min (281s)
 
 **v1.3 Velocity:**
 - Total plans completed: 17
@@ -37,7 +38,7 @@ Progress: [█████████████>       ] 68.75% (2.75/4 phase
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 62 complete (v1.0-v1.4 Phase 22-02)
+- Total plans: 63 complete (v1.0-v1.4 Phase 22-03)
 - Milestones shipped: 4 (v1.0, v1.1, v1.2, v1.3)
 
 ## Accumulated Context
@@ -135,6 +136,9 @@ From Phase 22:
 - Chronic threshold: >80% firing over 7 days using LOCF — 22-02
 - Flapping overrides trend patterns (flappiness > 0.7) — 22-02
 - ErrInsufficientData with Available/Required fields for clear error messages — 22-02
+- AlertAnalysisService created in Start after graphClient (no Start/Stop methods) — 22-03
+- GetAnalysisService() getter returns nil when graph disabled (clear signal to MCP tools) — 22-03
+- Service shares graphClient with AlertSyncer and AlertStateSyncer (no separate client) — 22-03
 
 ### Pending Todos
 
@@ -169,13 +173,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** Execute plan 22-02
+**Last command:** Execute plan 22-03
 **Last session:** 2026-01-23
-**Stopped at:** Completed 22-02-PLAN.md (AlertAnalysisService)
+**Stopped at:** Completed 22-03-PLAN.md (Integration lifecycle and tests)
 **Resume file:** None
-**Context preserved:** Phase 22 (Historical Analysis) complete - AlertAnalysisService with 5-minute TTL cache, multi-label categorization (onset + pattern), LOCF interpolation for duration computation, transitions fetcher with graph queries, 29 unit tests (>85% coverage). Ready for Phase 23 MCP tool integration. Service integrates ComputeFlappinessScore, ComputeRollingBaseline, CompareToBaseline from Plan 22-01. Cache: hashicorp/golang-lru/v2/expirable, 1000 entries, 5-minute TTL.
+**Context preserved:** Phase 22 COMPLETE ✅ - AlertAnalysisService integrated into GrafanaIntegration lifecycle, accessible via GetAnalysisService(), 5 integration tests verify end-to-end functionality (full history, flapping, insufficient data, cache, lifecycle). Service created in Start after graphClient init, shares graph client with syncers, no Start/Stop methods (stateless). ~71% test coverage (core logic >85%). Ready for Phase 23 MCP tools.
 
-**Next step:** Execute Phase 23 plans to create MCP tools for alert analysis (list_alerts with filters, analyze_alert, get_flapping_alerts)
+**Next step:** Execute Phase 23 plans to create MCP tools for alert analysis (list_alerts with filters, analyze_alert, get_flapping_alerts). Service access pattern: `integration.GetAnalysisService()` returns nil if graph disabled.
 
 ---
-*Last updated: 2026-01-23 — Phase 22-02 complete (AlertAnalysisService with categorization)*
+*Last updated: 2026-01-23 — Phase 22-03 complete (Integration lifecycle wiring)*
