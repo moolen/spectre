@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-01-23)
 
 **Core value:** Enable AI assistants to understand what's happening in Kubernetes clusters through unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis.
-**Current focus:** v1.3 Milestone Shipped - Ready for Next Milestone
+**Current focus:** v1.4 Grafana Alerts Integration
 
 ## Current Position
 
-Phase: None active
-Plan: None active
-Status: v1.3 milestone shipped
-Last activity: 2026-01-23 — v1.3 Grafana Metrics Integration completed and archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-01-23 — Milestone v1.4 started
 
-Progress: Ready for next milestone planning
+Progress: Requirements definition in progress
 
 ## Performance Metrics
 
@@ -122,13 +122,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:complete-milestone v1.3
+**Last command:** /gsd:new-milestone
 **Last session:** 2026-01-23
-**Stopped at:** v1.3 milestone archived and shipped
+**Stopped at:** Defining v1.4 requirements
 **Resume file:** None
-**Context preserved:** v1.3 Grafana Metrics Integration shipped with 51 requirements, 5 phases, 17 plans
+**Context preserved:** v1.4 Grafana Alerts Integration — alert sync, graph linking, 3 MCP tools
 
-**Next step:** `/gsd:new-milestone` to start planning next milestone
+**Next step:** Complete requirements and roadmap creation
 
 ---
-*Last updated: 2026-01-23 — v1.3 Grafana Metrics Integration shipped*
+*Last updated: 2026-01-23 — v1.4 milestone started*

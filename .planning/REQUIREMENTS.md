@@ -1,119 +1,61 @@
-# Requirements: Spectre v1.3 Grafana Metrics Integration
+# Requirements: Spectre v1.4 Grafana Alerts Integration
 
-**Defined:** 2026-01-22
-**Core Value:** Use Grafana dashboards as structured operational knowledge so Spectre can detect high-level anomalies, progressively drill down, and reason about services, clusters, and metrics.
+**Defined:** 2026-01-23
+**Core Value:** Enable AI assistants to understand what's happening in Kubernetes clusters through unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis.
 
-## v1.3 Requirements
+## v1.4 Requirements
 
-Requirements for Grafana metrics integration. Each maps to roadmap phases.
+Requirements for Grafana alerts integration. Each maps to roadmap phases.
 
-### Foundation
+### Alert Sync
 
-- [x] **FOUN-01**: Grafana API client supports both Cloud and self-hosted authentication
-- [x] **FOUN-02**: Client can list all dashboards via Grafana search API
-- [x] **FOUN-03**: Client can retrieve full dashboard JSON by UID
-- [x] **FOUN-04**: Incremental sync detects changed dashboards via version field
-- [x] **FOUN-05**: Client integrates with SecretWatcher for API token hot-reload
-- [x] **FOUN-06**: Integration follows factory registry pattern (compile-time registration)
+- [ ] **ALRT-01**: Alert rules synced via Grafana Alerting API (incremental, version-based)
+- [ ] **ALRT-02**: Alert rule PromQL queries parsed to extract metrics (reuse existing parser)
+- [ ] **ALRT-03**: Alert state fetched (firing/pending/normal) with timestamps
+- [ ] **ALRT-04**: Alert state timeline stored in graph (state transitions over time)
+- [ ] **ALRT-05**: Periodic sync updates alert rules and current state
 
 ### Graph Schema
 
-- [x] **GRPH-01**: FalkorDB schema includes Dashboard nodes with metadata (uid, title, tags, folder)
-- [x] **GRPH-02**: FalkorDB schema includes Panel nodes with query references
-- [x] **GRPH-03**: FalkorDB schema includes Query nodes with raw PromQL expressions
-- [x] **GRPH-04**: FalkorDB schema includes Metric nodes (metric name templates)
-- [x] **GRPH-05**: FalkorDB schema includes Service nodes inferred from metric labels
-- [x] **GRPH-06**: Relationships: Dashboard CONTAINS Panel, Panel HAS Query, Query USES Metric, Metric TRACKS Service
-- [x] **GRPH-07**: Graph indexes on Dashboard.uid, Metric.name, Service.name for efficient queries
+- [ ] **GRPH-08**: Alert nodes in FalkorDB with metadata (name, severity, labels, state)
+- [ ] **GRPH-09**: Alert→Metric relationships via PromQL extraction (MONITORS edge)
+- [ ] **GRPH-10**: Alert→Service relationships via metric labels (transitive through Metric nodes)
+- [ ] **GRPH-11**: AlertStateChange nodes for state timeline (timestamp, from_state, to_state)
 
-### PromQL Parsing
+### Historical Analysis
 
-- [x] **PROM-01**: PromQL parser uses official Prometheus library (prometheus/promql/parser)
-- [x] **PROM-02**: Parser extracts metric names from VectorSelector nodes
-- [x] **PROM-03**: Parser extracts label selectors (key-value matchers)
-- [x] **PROM-04**: Parser extracts aggregation functions (sum, avg, rate, etc.)
-- [x] **PROM-05**: Parser handles variable syntax ($var, ${var}, [[var]]) as passthrough
-- [x] **PROM-06**: Parser uses best-effort extraction (complex expressions may partially parse)
-
-### Service Inference
-
-- [x] **SERV-01**: Service inference extracts from job, service, app labels in PromQL
-- [x] **SERV-02**: Service inference extracts namespace and cluster for scoping
-- [x] **SERV-03**: Service nodes link to Metric nodes via TRACKS relationship
-- [x] **SERV-04**: Service inference uses whitelist approach (known-good labels only)
-
-### Dashboard Hierarchy
-
-- [x] **HIER-01**: Dashboards classified as overview, drill-down, or detail level
-- [x] **HIER-02**: Hierarchy read from Grafana tags (spectre:overview, spectre:drilldown, spectre:detail)
-- [x] **HIER-03**: Hierarchy fallback to config mapping when tags not present
-- [x] **HIER-04**: Hierarchy level stored as Dashboard node property
-
-### Variable Handling
-
-- [x] **VARB-01**: Variables extracted from dashboard JSON template section
-- [x] **VARB-02**: Variables classified as scoping (cluster, region), entity (service, namespace), or detail (pod, instance)
-- [x] **VARB-03**: Variable classification stored in graph for smart defaults
-- [x] **VARB-04**: Single-value variable substitution supported for query execution
-- [x] **VARB-05**: Variables passed to Grafana API via scopedVars (not interpolated locally)
-
-### Query Execution
-
-- [x] **EXEC-01**: Queries executed via Grafana /api/ds/query endpoint
-- [x] **EXEC-02**: Query service handles time range parameters (from, to, interval)
-- [x] **EXEC-03**: Query service formats Prometheus time series response for MCP tools
-- [x] **EXEC-04**: Query service supports scoping variable substitution (AI provides values)
+- [ ] **HIST-01**: 7-day baseline for alert state patterns (time-of-day matching)
+- [ ] **HIST-02**: Flappiness detection (frequent state transitions within window)
+- [ ] **HIST-03**: Trend analysis (alert started firing recently vs always firing)
+- [ ] **HIST-04**: State comparison with historical baseline (normal vs abnormal alert behavior)
 
 ### MCP Tools
 
-- [x] **TOOL-01**: `grafana_{name}_metrics_overview` executes overview dashboards only
-- [x] **TOOL-02**: `grafana_{name}_metrics_overview` detects anomalies vs 7-day baseline
-- [x] **TOOL-03**: `grafana_{name}_metrics_overview` returns ranked anomalies with severity
-- [x] **TOOL-04**: `grafana_{name}_metrics_aggregated` focuses on specified service or cluster
-- [x] **TOOL-05**: `grafana_{name}_metrics_aggregated` executes related dashboards for correlation
-- [x] **TOOL-06**: `grafana_{name}_metrics_details` executes full dashboard with all panels
-- [x] **TOOL-07**: `grafana_{name}_metrics_details` supports deep variable expansion
-- [x] **TOOL-08**: All tools accept scoping variables (cluster, region) as parameters
-- [x] **TOOL-09**: All tools are stateless (AI manages context across calls)
-
-### Anomaly Detection
-
-- [x] **ANOM-01**: Baseline computed from 7-day historical data
-- [x] **ANOM-02**: Baseline uses time-of-day matching (compare Monday 10am to previous Mondays 10am)
-- [x] **ANOM-03**: Anomaly detection uses z-score comparison against baseline
-- [x] **ANOM-04**: Anomalies classified by severity (info, warning, critical)
-- [x] **ANOM-05**: Baseline cached in graph with TTL (1-hour refresh)
-- [x] **ANOM-06**: Anomaly detection handles missing metrics gracefully (check scrape status)
-
-### UI Configuration
-
-- [x] **UICF-01**: Integration form includes Grafana URL field
-- [x] **UICF-02**: Integration form includes API token field (SecretRef: name + key)
-- [x] **UICF-03**: Integration form validates connection on save (health check)
-- [x] **UICF-04**: Integration form includes hierarchy mapping configuration
-- [x] **UICF-05**: UI displays sync status and last sync time
+- [ ] **TOOL-10**: `grafana_{name}_alerts_overview` — counts by severity/cluster/service/namespace
+- [ ] **TOOL-11**: `grafana_{name}_alerts_overview` — accepts optional filters (severity, cluster, service, namespace)
+- [ ] **TOOL-12**: `grafana_{name}_alerts_overview` — includes flappiness indicator per group
+- [ ] **TOOL-13**: `grafana_{name}_alerts_aggregated` — specific alerts with 1h state progression
+- [ ] **TOOL-14**: `grafana_{name}_alerts_aggregated` — accepts lookback duration parameter
+- [ ] **TOOL-15**: `grafana_{name}_alerts_aggregated` — state change summary (started firing, was firing, flapping)
+- [ ] **TOOL-16**: `grafana_{name}_alerts_details` — full state timeline graph data
+- [ ] **TOOL-17**: `grafana_{name}_alerts_details` — includes alert rule definition and labels
+- [ ] **TOOL-18**: All alert tools are stateless (AI manages context)
 
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
 
-### Advanced Variables
+### Advanced Alert Features
 
-- **VARB-V2-01**: Multi-value variable support with pipe syntax
-- **VARB-V2-02**: Chained variables (3+ levels deep)
-- **VARB-V2-03**: Query variables (dynamic options from data source)
-
-### Advanced Anomaly Detection
-
-- **ANOM-V2-01**: ML-based anomaly detection (LSTM, adaptive baselines)
-- **ANOM-V2-02**: Root cause analysis across correlated metrics
-- **ANOM-V2-03**: Anomaly pattern learning (reduce false positives over time)
+- **ALRT-V2-01**: Alert silencing/muting support
+- **ALRT-V2-02**: Alert annotation ingestion
+- **ALRT-V2-03**: Notification channel integration
 
 ### Cross-Signal Correlation
 
-- **CORR-V2-01**: Trace linking with OpenTelemetry integration
-- **CORR-V2-02**: Automatic correlation of metrics with log patterns
-- **CORR-V2-03**: Event correlation (K8s events + metric spikes)
+- **CORR-V2-01**: Alert↔Log correlation (time-based linking)
+- **CORR-V2-02**: Alert↔Metric anomaly correlation
+- **CORR-V2-03**: Root cause suggestion based on correlated signals
 
 ## Out of Scope
 
@@ -121,12 +63,10 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| Dashboard UI replication | Return structured data, not rendered visualizations |
-| Dashboard creation/editing | Read-only access, users manage dashboards in Grafana |
-| Direct Prometheus queries | Use Grafana API as proxy for simpler auth |
-| Metric value storage | Query on-demand, avoid time-series DB complexity |
-| Per-user dashboard state | Stateless MCP architecture, no session state |
-| Alert rule sync | Different API, defer to future milestone |
+| Alert rule creation/editing | Read-only access, users manage alerts in Grafana |
+| Alert acknowledgment | Would require write access and state management |
+| Notification routing | Grafana handles notification channels |
+| Alert dashboard rendering | Return structured data, not visualizations |
 
 ## Traceability
 
@@ -134,68 +74,34 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FOUN-01 | Phase 15 | Complete |
-| FOUN-02 | Phase 15 | Complete |
-| FOUN-03 | Phase 15 | Complete |
-| FOUN-04 | Phase 16 | Complete |
-| FOUN-05 | Phase 15 | Complete |
-| FOUN-06 | Phase 15 | Complete |
-| GRPH-01 | Phase 15 | Complete |
-| GRPH-02 | Phase 16 | Complete |
-| GRPH-03 | Phase 16 | Complete |
-| GRPH-04 | Phase 16 | Complete |
-| GRPH-05 | Phase 17 | Complete |
-| GRPH-06 | Phase 16 | Complete |
-| GRPH-07 | Phase 15 | Complete |
-| PROM-01 | Phase 16 | Complete |
-| PROM-02 | Phase 16 | Complete |
-| PROM-03 | Phase 16 | Complete |
-| PROM-04 | Phase 16 | Complete |
-| PROM-05 | Phase 16 | Complete |
-| PROM-06 | Phase 16 | Complete |
-| SERV-01 | Phase 17 | Complete |
-| SERV-02 | Phase 17 | Complete |
-| SERV-03 | Phase 17 | Complete |
-| SERV-04 | Phase 17 | Complete |
-| HIER-01 | Phase 17 | Complete |
-| HIER-02 | Phase 17 | Complete |
-| HIER-03 | Phase 17 | Complete |
-| HIER-04 | Phase 17 | Complete |
-| VARB-01 | Phase 17 | Complete |
-| VARB-02 | Phase 17 | Complete |
-| VARB-03 | Phase 17 | Complete |
-| VARB-04 | Phase 18 | Complete |
-| VARB-05 | Phase 18 | Complete |
-| EXEC-01 | Phase 18 | Complete |
-| EXEC-02 | Phase 18 | Complete |
-| EXEC-03 | Phase 18 | Complete |
-| EXEC-04 | Phase 18 | Complete |
-| TOOL-01 | Phase 18 | Complete |
-| TOOL-02 | Phase 19 | Complete |
-| TOOL-03 | Phase 19 | Complete |
-| TOOL-04 | Phase 18 | Complete |
-| TOOL-05 | Phase 18 | Complete |
-| TOOL-06 | Phase 18 | Complete |
-| TOOL-07 | Phase 18 | Complete |
-| TOOL-08 | Phase 18 | Complete |
-| TOOL-09 | Phase 18 | Complete |
-| ANOM-01 | Phase 19 | Complete |
-| ANOM-02 | Phase 19 | Complete |
-| ANOM-03 | Phase 19 | Complete |
-| ANOM-04 | Phase 19 | Complete |
-| ANOM-05 | Phase 19 | Complete |
-| ANOM-06 | Phase 19 | Complete |
-| UICF-01 | Phase 15 | Complete |
-| UICF-02 | Phase 15 | Complete |
-| UICF-03 | Phase 15 | Complete |
-| UICF-04 | Phase 17 | Complete |
-| UICF-05 | Phase 16 | Complete |
+| ALRT-01 | TBD | Pending |
+| ALRT-02 | TBD | Pending |
+| ALRT-03 | TBD | Pending |
+| ALRT-04 | TBD | Pending |
+| ALRT-05 | TBD | Pending |
+| GRPH-08 | TBD | Pending |
+| GRPH-09 | TBD | Pending |
+| GRPH-10 | TBD | Pending |
+| GRPH-11 | TBD | Pending |
+| HIST-01 | TBD | Pending |
+| HIST-02 | TBD | Pending |
+| HIST-03 | TBD | Pending |
+| HIST-04 | TBD | Pending |
+| TOOL-10 | TBD | Pending |
+| TOOL-11 | TBD | Pending |
+| TOOL-12 | TBD | Pending |
+| TOOL-13 | TBD | Pending |
+| TOOL-14 | TBD | Pending |
+| TOOL-15 | TBD | Pending |
+| TOOL-16 | TBD | Pending |
+| TOOL-17 | TBD | Pending |
+| TOOL-18 | TBD | Pending |
 
 **Coverage:**
-- v1.3 requirements: 51 total
-- Mapped to phases: 51
-- Unmapped: 0 ✓
+- v1.4 requirements: 22 total
+- Mapped to phases: 0
+- Unmapped: 22 (pending roadmap creation)
 
 ---
-*Requirements defined: 2026-01-22*
-*Last updated: 2026-01-23 — v1.3 milestone complete, all 51 requirements satisfied*
+*Requirements defined: 2026-01-23*
+*Last updated: 2026-01-23 after initial definition*

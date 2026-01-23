@@ -8,9 +8,23 @@ A Kubernetes observability platform with an MCP server for AI assistants. Provid
 
 Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis in one server.
 
-## Current Status: Ready for Next Milestone
+## Current Milestone: v1.4 Grafana Alerts Integration
 
-All planned milestones (v1.0-v1.3) have been shipped. The project is ready for its next milestone.
+**Goal:** Extend Grafana integration with alert rule ingestion, graph linking, and three progressive disclosure MCP tools for incident response.
+
+**Target features:**
+- Alert rule sync via Grafana Alerting API (incremental, version-based)
+- Graph schema: Alert nodes linked to existing Metrics/Services/Dashboards via PromQL
+- 7-day baseline for flappiness detection and historical comparison
+- Alert state timeline storage (firing/pending/normal transitions)
+- `grafana_{name}_alerts_overview` — firing/pending counts by severity/cluster/service/namespace
+- `grafana_{name}_alerts_aggregated` — specific alerts with 1h state progression analysis
+- `grafana_{name}_alerts_details` — full state timeline graph data for debugging
+
+**Core principles:**
+- Progressive disclosure pattern (consistent with logs and metrics)
+- Link alerts to existing graph via metric extraction from alert PromQL queries
+- Operational focus — flappiness, state changes, trending alerts for incident response
 
 ## Previous State (v1.3 Shipped)
 
@@ -106,6 +120,16 @@ All planned milestones (v1.0-v1.3) have been shipped. The project is ready for i
 - ✓ MCP tool: metrics_details (full dashboard, deep expansion)
 - ✓ UI form for Grafana configuration (URL, API token, hierarchy mapping)
 
+### Active (v1.4)
+
+- [ ] Alert rule sync via Grafana Alerting API (incremental, version-based)
+- [ ] Alert nodes in FalkorDB linked to existing Metrics/Services/Dashboards
+- [ ] Alert state timeline storage (firing/pending/normal transitions)
+- [ ] 7-day baseline for flappiness detection and historical comparison
+- [ ] MCP tool: alerts_overview (firing/pending counts by severity/cluster/service)
+- [ ] MCP tool: alerts_aggregated (specific alerts with 1h state progression)
+- [ ] MCP tool: alerts_details (full state timeline graph data)
+
 ### Out of Scope
 
 - VictoriaMetrics (metrics) integration — defer to later milestone
@@ -199,4 +223,4 @@ All planned milestones (v1.0-v1.3) have been shipped. The project is ready for i
 - GET /{name} endpoint available but unused by UI (uses list endpoint instead)
 
 ---
-*Last updated: 2026-01-23 after v1.3 milestone shipped*
+*Last updated: 2026-01-23 after v1.4 milestone started*
