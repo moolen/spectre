@@ -11,18 +11,22 @@ import (
 
 // OverviewTool provides high-level metrics overview from overview-level dashboards.
 // Executes only the first 5 panels per dashboard for a quick summary.
+// Detects anomalies by comparing current metrics to 7-day baseline with severity ranking.
 type OverviewTool struct {
-	queryService *GrafanaQueryService
-	graphClient  graph.Client
-	logger       *logging.Logger
+	queryService   *GrafanaQueryService
+	anomalyService *AnomalyService
+	graphClient    graph.Client
+	logger         *logging.Logger
 }
 
 // NewOverviewTool creates a new overview tool.
-func NewOverviewTool(qs *GrafanaQueryService, gc graph.Client, logger *logging.Logger) *OverviewTool {
+// anomalyService may be nil for backward compatibility (tool still works without anomaly detection).
+func NewOverviewTool(qs *GrafanaQueryService, as *AnomalyService, gc graph.Client, logger *logging.Logger) *OverviewTool {
 	return &OverviewTool{
-		queryService: qs,
-		graphClient:  gc,
-		logger:       logger,
+		queryService:   qs,
+		anomalyService: as,
+		graphClient:    gc,
+		logger:         logger,
 	}
 }
 
@@ -34,10 +38,19 @@ type OverviewParams struct {
 	Region  string `json:"region"`  // Required: region name for scoping
 }
 
-// OverviewResponse contains the results from overview dashboards.
+// OverviewResponse contains the results from overview dashboards with optional anomaly detection.
 type OverviewResponse struct {
-	Dashboards []DashboardQueryResult `json:"dashboards"`
+	Dashboards []DashboardQueryResult `json:"dashboards,omitempty"`
 	TimeRange  string                 `json:"time_range"`
+	Anomalies  []MetricAnomaly        `json:"anomalies,omitempty"`
+	Summary    *AnomalySummary        `json:"summary,omitempty"`
+}
+
+// AnomalySummary provides summary statistics for anomaly detection.
+type AnomalySummary struct {
+	MetricsChecked  int `json:"metrics_checked"`
+	AnomaliesFound  int `json:"anomalies_found"`
+	MetricsSkipped  int `json:"metrics_skipped"`
 }
 
 // Execute runs the overview tool.
@@ -94,10 +107,38 @@ func (t *OverviewTool) Execute(ctx context.Context, args []byte) (interface{}, e
 		results = append(results, *result)
 	}
 
-	return &OverviewResponse{
+	// Initialize response with dashboard results
+	response := &OverviewResponse{
 		Dashboards: results,
 		TimeRange:  timeRange.FormatDisplay(),
-	}, nil
+	}
+
+	// Run anomaly detection if service is available
+	if t.anomalyService != nil && len(dashboards) > 0 {
+		// Run anomaly detection on first dashboard (typically the primary overview dashboard)
+		anomalyResult, err := t.anomalyService.DetectAnomalies(
+			ctx, dashboards[0].UID, timeRange, scopedVars,
+		)
+		if err != nil {
+			// Graceful degradation - log warning but continue with non-anomaly response
+			t.logger.Warn("Anomaly detection failed: %v", err)
+		} else {
+			// Format anomalies with minimal context
+			response.Anomalies = formatAnomaliesMinimal(anomalyResult.Anomalies)
+			response.Summary = &AnomalySummary{
+				MetricsChecked: anomalyResult.MetricsChecked,
+				AnomaliesFound: len(anomalyResult.Anomalies),
+				MetricsSkipped: anomalyResult.SkipCount,
+			}
+
+			// When anomalies are detected, omit dashboard results for minimal context
+			if len(response.Anomalies) > 0 {
+				response.Dashboards = nil
+			}
+		}
+	}
+
+	return response, nil
 }
 
 // dashboardInfo holds minimal dashboard information.
@@ -151,4 +192,23 @@ func (t *OverviewTool) findDashboardsByHierarchy(ctx context.Context, level stri
 	}
 
 	return dashboards, nil
+}
+
+// formatAnomaliesMinimal formats anomalies with minimal context (no timestamp, no panel info)
+// Returns only: metric name, current value, baseline, z-score, severity
+func formatAnomaliesMinimal(anomalies []MetricAnomaly) []MetricAnomaly {
+	// MetricAnomaly already has the minimal fields we need
+	// Just strip the timestamp field by creating new slice
+	minimal := make([]MetricAnomaly, len(anomalies))
+	for i, a := range anomalies {
+		minimal[i] = MetricAnomaly{
+			MetricName: a.MetricName,
+			Value:      a.Value,
+			Baseline:   a.Baseline,
+			ZScore:     a.ZScore,
+			Severity:   a.Severity,
+			// Timestamp intentionally omitted for minimal context
+		}
+	}
+	return minimal
 }

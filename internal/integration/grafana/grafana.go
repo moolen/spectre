@@ -28,16 +28,17 @@ func init() {
 
 // GrafanaIntegration implements the Integration interface for Grafana.
 type GrafanaIntegration struct {
-	name          string
-	config        *Config              // Full configuration (includes URL and SecretRef)
-	client        *GrafanaClient       // Grafana HTTP client
-	secretWatcher *SecretWatcher       // Optional: manages API token from Kubernetes Secret
-	syncer        *DashboardSyncer     // Dashboard sync orchestrator
-	graphClient   graph.Client         // Graph client for dashboard sync
-	queryService  *GrafanaQueryService // Query service for MCP tools
-	logger        *logging.Logger
-	ctx           context.Context
-	cancel        context.CancelFunc
+	name           string
+	config         *Config              // Full configuration (includes URL and SecretRef)
+	client         *GrafanaClient       // Grafana HTTP client
+	secretWatcher  *SecretWatcher       // Optional: manages API token from Kubernetes Secret
+	syncer         *DashboardSyncer     // Dashboard sync orchestrator
+	graphClient    graph.Client         // Graph client for dashboard sync
+	queryService   *GrafanaQueryService // Query service for MCP tools
+	anomalyService *AnomalyService      // Anomaly detection service for MCP tools
+	logger         *logging.Logger
+	ctx            context.Context
+	cancel         context.CancelFunc
 
 	// Thread-safe health status
 	mu           sync.RWMutex
@@ -169,6 +170,12 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 		// Create query service for MCP tools (requires graph client)
 		g.queryService = NewGrafanaQueryService(g.client, g.graphClient, g.logger)
 		g.logger.Info("Query service created for MCP tools")
+
+		// Create anomaly detection service (requires query service and graph client)
+		detector := &StatisticalDetector{}
+		baselineCache := NewBaselineCache(g.graphClient, g.logger)
+		g.anomalyService = NewAnomalyService(g.queryService, detector, baselineCache, g.logger)
+		g.logger.Info("Anomaly detection service created for MCP tools")
 	} else {
 		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
 	}
@@ -246,7 +253,7 @@ func (g *GrafanaIntegration) RegisterTools(registry integration.ToolRegistry) er
 	}
 
 	// Register Overview tool: grafana_{name}_metrics_overview
-	overviewTool := NewOverviewTool(g.queryService, g.graphClient, g.logger)
+	overviewTool := NewOverviewTool(g.queryService, g.anomalyService, g.graphClient, g.logger)
 	overviewName := fmt.Sprintf("grafana_%s_metrics_overview", g.name)
 	overviewSchema := map[string]interface{}{
 		"type": "object",
