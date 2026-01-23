@@ -9,17 +9,17 @@ Requirements for Grafana alerts integration. Each maps to roadmap phases.
 
 ### Alert Sync
 
-- [ ] **ALRT-01**: Alert rules synced via Grafana Alerting API (incremental, version-based)
-- [ ] **ALRT-02**: Alert rule PromQL queries parsed to extract metrics (reuse existing parser)
+- [x] **ALRT-01**: Alert rules synced via Grafana Alerting API (incremental, version-based)
+- [x] **ALRT-02**: Alert rule PromQL queries parsed to extract metrics (reuse existing parser)
 - [ ] **ALRT-03**: Alert state fetched (firing/pending/normal) with timestamps
 - [ ] **ALRT-04**: Alert state timeline stored in graph (state transitions over time)
 - [ ] **ALRT-05**: Periodic sync updates alert rules and current state
 
 ### Graph Schema
 
-- [ ] **GRPH-08**: Alert nodes in FalkorDB with metadata (name, severity, labels, state)
-- [ ] **GRPH-09**: Alert→Metric relationships via PromQL extraction (MONITORS edge)
-- [ ] **GRPH-10**: Alert→Service relationships via metric labels (transitive through Metric nodes)
+- [x] **GRPH-08**: Alert nodes in FalkorDB with metadata (name, severity, labels, state)
+- [x] **GRPH-09**: Alert→Metric relationships via PromQL extraction (MONITORS edge)
+- [x] **GRPH-10**: Alert→Service relationships via metric labels (transitive through Metric nodes)
 - [ ] **GRPH-11**: AlertStateChange nodes for state timeline (timestamp, from_state, to_state)
 
 ### Historical Analysis
@@ -74,14 +74,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ALRT-01 | Phase 20 | Pending |
-| ALRT-02 | Phase 20 | Pending |
+| ALRT-01 | Phase 20 | Complete |
+| ALRT-02 | Phase 20 | Complete |
 | ALRT-03 | Phase 21 | Pending |
 | ALRT-04 | Phase 21 | Pending |
 | ALRT-05 | Phase 21 | Pending |
-| GRPH-08 | Phase 20 | Pending |
-| GRPH-09 | Phase 20 | Pending |
-| GRPH-10 | Phase 20 | Pending |
+| GRPH-08 | Phase 20 | Complete |
+| GRPH-09 | Phase 20 | Complete |
+| GRPH-10 | Phase 20 | Complete |
 | GRPH-11 | Phase 21 | Pending |
 | HIST-01 | Phase 22 | Pending |
 | HIST-02 | Phase 22 | Pending |

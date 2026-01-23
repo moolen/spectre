@@ -144,7 +144,7 @@ Plans:
 
 **Milestone Goal:** Extend Grafana integration with alert rule ingestion, graph linking, and progressive disclosure MCP tools for incident response.
 
-#### Phase 20: Alert API Client & Graph Schema
+#### ✅ Phase 20: Alert API Client & Graph Schema
 **Goal**: Alert rules are synced from Grafana and stored in FalkorDB with links to existing Metrics and Services.
 **Depends on**: Phase 19 (v1.3 complete)
 **Requirements**: ALRT-01, ALRT-02, GRPH-08, GRPH-09, GRPH-10
@@ -156,10 +156,11 @@ Plans:
   5. Graph contains Alert→Metric relationships (MONITORS edges)
   6. Graph contains Alert→Service relationships (transitive through Metric nodes)
 **Plans**: 2 plans
+**Completed**: 2026-01-23
 
 Plans:
-- [ ] 20-01-PLAN.md — Alert node schema and Grafana API client methods
-- [ ] 20-02-PLAN.md — AlertSyncer with incremental sync and graph relationships
+- [x] 20-01-PLAN.md — Alert node schema and Grafana API client methods
+- [x] 20-02-PLAN.md — AlertSyncer with incremental sync and graph relationships
 
 #### Phase 21: Alert Sync Pipeline
 **Goal**: Alert state is continuously tracked with full state transition timeline stored in graph.
@@ -222,7 +223,7 @@ Plans:
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
 | v1.4 | 20-23 | 2 (in progress) | 22 | 🚧 In progress |
 
-**Total:** 23 phases (19 complete), 58 plans (56 complete), 146 requirements (124 complete)
+**Total:** 23 phases (20 complete), 58 plans (58 complete), 146 requirements (129 complete)
 
 ---
 *v1.4 roadmap updated: 2026-01-23*
