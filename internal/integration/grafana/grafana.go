@@ -411,7 +411,37 @@ func (g *GrafanaIntegration) RegisterTools(registry integration.ToolRegistry) er
 	}
 	g.logger.Info("Registered tool: %s", detailsName)
 
-	g.logger.Info("Successfully registered 3 Grafana MCP tools")
+	// Register Alerts Overview tool: grafana_{name}_alerts_overview
+	alertsOverviewTool := NewAlertsOverviewTool(g.graphClient, g.name, g.analysisService, g.logger)
+	alertsOverviewName := fmt.Sprintf("grafana_%s_alerts_overview", g.name)
+	alertsOverviewSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"severity": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by severity level (optional: critical, warning, info)",
+			},
+			"cluster": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by cluster name (optional)",
+			},
+			"service": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by service name (optional)",
+			},
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by namespace (optional)",
+			},
+		},
+		"required": []string{},
+	}
+	if err := registry.RegisterTool(alertsOverviewName, "Get overview of firing and pending alerts grouped by severity. Returns alert counts, flapping indicators, and minimal context (name + firing duration) for triage. All filters are optional.", alertsOverviewTool.Execute, alertsOverviewSchema); err != nil {
+		return fmt.Errorf("failed to register alerts overview tool: %w", err)
+	}
+	g.logger.Info("Registered tool: %s", alertsOverviewName)
+
+	g.logger.Info("Successfully registered 4 Grafana MCP tools")
 	return nil
 }
 
