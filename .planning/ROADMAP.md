@@ -114,7 +114,7 @@ Plans:
 - [x] 18-02-PLAN.md — Three MCP tools (overview, aggregated, details)
 - [x] 18-03-PLAN.md — Tool registration and end-to-end verification
 
-#### Phase 19: Anomaly Detection & Progressive Disclosure
+#### ✅ Phase 19: Anomaly Detection & Progressive Disclosure
 **Goal**: AI can detect anomalies vs 7-day baseline with severity ranking and progressively disclose from overview to details.
 **Depends on**: Phase 18
 **Requirements**: TOOL-02, TOOL-03, ANOM-01, ANOM-02, ANOM-03, ANOM-04, ANOM-05, ANOM-06
@@ -126,12 +126,13 @@ Plans:
   5. Anomaly detection handles missing metrics gracefully (checks scrape status, uses fallback)
   6. Baselines are cached in graph with 1-hour TTL for performance
 **Plans**: 4 plans
+**Completed**: 2026-01-23
 
 Plans:
-- [ ] 19-01-PLAN.md — Statistical detector with z-score analysis (TDD)
-- [ ] 19-02-PLAN.md — Baseline cache with FalkorDB storage and TTL
-- [ ] 19-03-PLAN.md — Anomaly service orchestration and Overview tool integration
-- [ ] 19-04-PLAN.md — Integration wiring, tests, and verification
+- [x] 19-01-PLAN.md — Statistical detector with z-score analysis (TDD)
+- [x] 19-02-PLAN.md — Baseline cache with FalkorDB storage and TTL
+- [x] 19-03-PLAN.md — Anomaly service orchestration and Overview tool integration
+- [x] 19-04-PLAN.md — Integration wiring, tests, and verification
 
 ## Progress
 
@@ -144,7 +145,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 | 16. Ingestion Pipeline | 3/3 | ✓ Complete | 2026-01-22 |
 | 17. Semantic Layer | 4/4 | ✓ Complete | 2026-01-23 |
 | 18. Query Execution & MCP Tools | 3/3 | ✓ Complete | 2026-01-23 |
-| 19. Anomaly Detection | 0/4 | Not started | - |
+| 19. Anomaly Detection | 4/4 | ✓ Complete | 2026-01-23 |
 
 ---
 *v1.3 roadmap created: 2026-01-22*
