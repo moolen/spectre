@@ -31,15 +31,15 @@ Requirements for Grafana alerts integration. Each maps to roadmap phases.
 
 ### MCP Tools
 
-- [ ] **TOOL-10**: `grafana_{name}_alerts_overview` — counts by severity/cluster/service/namespace
-- [ ] **TOOL-11**: `grafana_{name}_alerts_overview` — accepts optional filters (severity, cluster, service, namespace)
-- [ ] **TOOL-12**: `grafana_{name}_alerts_overview` — includes flappiness indicator per group
-- [ ] **TOOL-13**: `grafana_{name}_alerts_aggregated` — specific alerts with 1h state progression
-- [ ] **TOOL-14**: `grafana_{name}_alerts_aggregated` — accepts lookback duration parameter
-- [ ] **TOOL-15**: `grafana_{name}_alerts_aggregated` — state change summary (started firing, was firing, flapping)
-- [ ] **TOOL-16**: `grafana_{name}_alerts_details` — full state timeline graph data
-- [ ] **TOOL-17**: `grafana_{name}_alerts_details` — includes alert rule definition and labels
-- [ ] **TOOL-18**: All alert tools are stateless (AI manages context)
+- [x] **TOOL-10**: `grafana_{name}_alerts_overview` — counts by severity/cluster/service/namespace
+- [x] **TOOL-11**: `grafana_{name}_alerts_overview` — accepts optional filters (severity, cluster, service, namespace)
+- [x] **TOOL-12**: `grafana_{name}_alerts_overview` — includes flappiness indicator per group
+- [x] **TOOL-13**: `grafana_{name}_alerts_aggregated` — specific alerts with 1h state progression
+- [x] **TOOL-14**: `grafana_{name}_alerts_aggregated` — accepts lookback duration parameter
+- [x] **TOOL-15**: `grafana_{name}_alerts_aggregated` — state change summary (started firing, was firing, flapping)
+- [x] **TOOL-16**: `grafana_{name}_alerts_details` — full state timeline graph data
+- [x] **TOOL-17**: `grafana_{name}_alerts_details` — includes alert rule definition and labels
+- [x] **TOOL-18**: All alert tools are stateless (AI manages context)
 
 ## v2 Requirements
 
@@ -87,15 +87,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HIST-02 | Phase 22 | Complete |
 | HIST-03 | Phase 22 | Complete |
 | HIST-04 | Phase 22 | Complete |
-| TOOL-10 | Phase 23 | Pending |
-| TOOL-11 | Phase 23 | Pending |
-| TOOL-12 | Phase 23 | Pending |
-| TOOL-13 | Phase 23 | Pending |
-| TOOL-14 | Phase 23 | Pending |
-| TOOL-15 | Phase 23 | Pending |
-| TOOL-16 | Phase 23 | Pending |
-| TOOL-17 | Phase 23 | Pending |
-| TOOL-18 | Phase 23 | Pending |
+| TOOL-10 | Phase 23 | Complete |
+| TOOL-11 | Phase 23 | Complete |
+| TOOL-12 | Phase 23 | Complete |
+| TOOL-13 | Phase 23 | Complete |
+| TOOL-14 | Phase 23 | Complete |
+| TOOL-15 | Phase 23 | Complete |
+| TOOL-16 | Phase 23 | Complete |
+| TOOL-17 | Phase 23 | Complete |
+| TOOL-18 | Phase 23 | Complete |
 
 **Coverage:**
 - v1.4 requirements: 22 total
@@ -110,4 +110,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-23*
-*Last updated: 2026-01-23 with phase mappings*
+*Last updated: 2026-01-23 — v1.4 milestone COMPLETE (22/22 requirements satisfied)*
