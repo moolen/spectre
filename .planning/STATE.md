@@ -10,17 +10,17 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 Phase: 19 of 19 (v1.3 Grafana Metrics Integration)
-Plan: 01 of 04 complete (Anomaly Detection & Progressive Disclosure)
-Status: In progress - Statistical detector complete
-Last activity: 2026-01-23 — Completed 19-01-PLAN.md (Statistical Detector)
+Plan: 02 of 04 complete (Anomaly Detection & Progressive Disclosure)
+Status: In progress - Baseline cache complete
+Last activity: 2026-01-23 — Completed 19-02-PLAN.md (Baseline Cache)
 
-Progress: [████████░░░░░░░░] 81% (4 of 5 phases complete in v1.3, 1 of 4 plans in phase 19)
+Progress: [████████░░░░░░░░] 82% (4 of 5 phases complete in v1.3, 2 of 4 plans in phase 19)
 
 ## Performance Metrics
 
 **v1.3 Velocity:**
-- Total plans completed: 14
-- Average duration: ~4 min
+- Total plans completed: 15
+- Average duration: ~3 min
 - Total execution time: ~1.2 hours
 
 **Previous Milestones:**
@@ -29,7 +29,7 @@ Progress: [████████░░░░░░░░] 81% (4 of 5 phases 
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 53 complete (v1.0-v1.3 phase 19 plan 1)
+- Total plans: 54 complete (v1.0-v1.3 phase 19 plan 2)
 - Milestones shipped: 3
 
 ## Accumulated Context
@@ -79,6 +79,8 @@ From Phase 19:
 - Error metrics use lower thresholds (2σ critical vs 3σ for normal metrics) — 19-01
 - Absolute z-score for bidirectional anomaly detection — 19-01
 - Pattern-based error metric detection (5xx, error, failed, failure) — 19-01
+- TTL implementation via expires_at Unix timestamp in graph (no application-side cleanup) — 19-02
+- Weekday/weekend separation for different baseline patterns — 19-02
 
 ### Pending Todos
 
@@ -109,13 +111,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan 19-01
-**Last session:** 2026-01-23T06:27:22Z
-**Stopped at:** Completed 19-01-PLAN.md (Statistical Detector)
+**Last command:** /gsd:execute-plan 19-02
+**Last session:** 2026-01-23T06:31:03Z
+**Stopped at:** Completed 19-02-PLAN.md (Baseline Cache)
 **Resume file:** None
-**Context preserved:** Phase 19 plan 1 complete - statistical detector with z-score anomaly detection
+**Context preserved:** Phase 19 plan 2 complete - graph-backed baseline cache with TTL
 
-**Next step:** `/gsd:execute-plan 19-02` to implement baseline computation
+**Next step:** `/gsd:execute-plan 19-03` to implement baseline computation
 
 ---
-*Last updated: 2026-01-23 — Phase 19 Plan 01 complete (Statistical Detector)*
+*Last updated: 2026-01-23 — Phase 19 Plan 02 complete (Baseline Cache)*
