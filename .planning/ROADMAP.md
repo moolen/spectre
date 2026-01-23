@@ -211,12 +211,14 @@ Plans:
   7. MCP tool `grafana_{name}_alerts_details` returns full state timeline graph data
   8. Details tool includes alert rule definition and labels
   9. All alert tools are stateless (AI manages context across calls)
-**Plans**: 0 plans
+**Plans**: 3 plans
 
 Plans:
-- [ ] TBD (created by /gsd:plan-phase)
+- [ ] 23-01-PLAN.md — Overview tool with filtering and flappiness counts
+- [ ] 23-02-PLAN.md — Aggregated and details tools with state timeline buckets
+- [ ] 23-03-PLAN.md — Integration tests and end-to-end verification
 
-**Stats:** 4 phases, 7 plans (Phase 20-22 complete, Phase 23 pending), 22 requirements
+**Stats:** 4 phases, 10 plans (7 complete, 3 planned), 22 requirements
 
 ## Progress
 
@@ -226,9 +228,9 @@ Plans:
 | v1.1 | 6-9 | 12 | 21 | ✅ Shipped 2026-01-21 |
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
-| v1.4 | 20-23 | 7 (in progress) | 22 | 🚧 In progress |
+| v1.4 | 20-23 | 10 (7 complete, 3 planned) | 22 | 🚧 In progress |
 
-**Total:** 23 phases (22 complete), 63 plans (63 complete), 146 requirements (137 complete)
+**Total:** 23 phases (22 complete), 66 plans (63 complete, 3 planned), 146 requirements (137 complete)
 
 ---
 *v1.4 roadmap updated: 2026-01-23*
