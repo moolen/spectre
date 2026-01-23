@@ -9,20 +9,21 @@ See: .planning/PROJECT.md (updated 2026-01-23)
 
 ## Current Position
 
-Phase: 21 (Alert Sync Pipeline) ✓ COMPLETE
-Plan: 2/2 complete
-Status: Phase 21 verified, ready for Phase 22
-Last activity: 2026-01-23 — Phase 21 executed and verified
+Phase: 22 (Historical Analysis) — IN PROGRESS
+Plan: 1/2 complete (22-01 DONE)
+Status: Statistical functions complete, ready for 22-02 (AlertAnalysisService)
+Last activity: 2026-01-23 — Completed 22-01-PLAN.md (flappiness and baseline computation)
 
-Progress: [██████████>          ] 50% (2/4 phases)
+Progress: [████████████>        ] 62.5% (2.5/4 phases)
 
 ## Performance Metrics
 
 **v1.4 Velocity (current):**
-- Plans completed: 4
+- Plans completed: 5
 - Phase 20 duration: ~10 min
 - Phase 21-01 duration: 4 min
 - Phase 21-02 duration: 8 min
+- Phase 22-01 duration: 9 min
 
 **v1.3 Velocity:**
 - Total plans completed: 17
@@ -35,7 +36,7 @@ Progress: [██████████>          ] 50% (2/4 phases)
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 60 complete (v1.0-v1.4 Phase 21-02)
+- Total plans: 61 complete (v1.0-v1.4 Phase 22-01)
 - Milestones shipped: 4 (v1.0, v1.1, v1.2, v1.3)
 
 ## Accumulated Context
@@ -120,6 +121,14 @@ From Phase 21:
 - Partial failures OK: continue sync with other alerts on graph errors — 21-02
 - strings.Contains for query detection in mocks (more reliable than parameter matching) — 21-02
 
+From Phase 22:
+- Exponential scaling for flappiness (1 - exp(-k*count)) instead of linear ratio — 22-01
+- Duration multipliers penalize short-lived states (1.3x) vs long-lived (0.8x) — 22-01
+- LOCF daily buckets with state carryover for multi-day baseline variance — 22-01
+- 24h minimum data requirement for statistically meaningful baselines — 22-01
+- Transitions at period boundaries are inclusive (careful timestamp logic) — 22-01
+- Sample variance (N-1) via gonum.org/v1/gonum/stat.StdDev for unbiased estimator — 22-01
+
 ### Pending Todos
 
 None yet.
@@ -153,13 +162,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 21
+**Last command:** Execute plan 22-01
 **Last session:** 2026-01-23
-**Stopped at:** Phase 21 complete and verified
+**Stopped at:** Completed 22-01-PLAN.md (statistical functions)
 **Resume file:** None
-**Context preserved:** Alert state sync pipeline complete - GetAlertStates API, state transition edges with TTL, AlertStateSyncer with 5-min interval, deduplication, staleness tracking
+**Context preserved:** Statistical analysis functions complete - ComputeFlappinessScore with exponential scaling and duration multipliers, ComputeRollingBaseline with LOCF and daily bucketing, CompareToBaseline for deviation analysis. TDD cycle: 3 commits (RED/GREEN/REFACTOR), 22 tests, >90% coverage, gonum.org/v1/gonum/stat integrated.
 
-**Next step:** `/gsd:plan-phase 22` to create plans for Historical Analysis (flappiness, trend analysis, baseline comparison)
+**Next step:** Execute plan 22-02 to build AlertAnalysisService integrating these statistical functions for alert categorization
 
 ---
-*Last updated: 2026-01-23 — Phase 21 complete and verified*
+*Last updated: 2026-01-23 — Phase 22-01 complete (statistical functions)*
