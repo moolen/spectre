@@ -16,6 +16,7 @@ import (
 type GrafanaClientInterface interface {
 	ListDashboards(ctx context.Context) ([]DashboardMeta, error)
 	GetDashboard(ctx context.Context, uid string) (map[string]interface{}, error)
+	ListAlertRules(ctx context.Context) ([]AlertRule, error)
 }
 
 // DashboardSyncer orchestrates incremental dashboard synchronization
@@ -43,13 +44,14 @@ func NewDashboardSyncer(
 	grafanaClient GrafanaClientInterface,
 	graphClient graph.Client,
 	config *Config,
+	integrationName string,
 	syncInterval time.Duration,
 	logger *logging.Logger,
 ) *DashboardSyncer {
 	return &DashboardSyncer{
 		grafanaClient:  grafanaClient,
 		graphClient:    graphClient,
-		graphBuilder:   NewGraphBuilder(graphClient, config, logger),
+		graphBuilder:   NewGraphBuilder(graphClient, config, integrationName, logger),
 		logger:         logger,
 		syncInterval:   syncInterval,
 		stopped:        make(chan struct{}),
