@@ -441,7 +441,75 @@ func (g *GrafanaIntegration) RegisterTools(registry integration.ToolRegistry) er
 	}
 	g.logger.Info("Registered tool: %s", alertsOverviewName)
 
-	g.logger.Info("Successfully registered 4 Grafana MCP tools")
+	// Register Alerts Aggregated tool: grafana_{name}_alerts_aggregated
+	alertsAggregatedTool := NewAlertsAggregatedTool(g.graphClient, g.name, g.analysisService, g.logger)
+	alertsAggregatedName := fmt.Sprintf("grafana_%s_alerts_aggregated", g.name)
+	alertsAggregatedSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"lookback": map[string]interface{}{
+				"type":        "string",
+				"description": "Lookback duration (default: 1h, examples: 30m, 2h, 24h)",
+			},
+			"severity": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by severity level (optional: critical, warning, info)",
+			},
+			"cluster": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by cluster name (optional)",
+			},
+			"service": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by service name (optional)",
+			},
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by namespace (optional)",
+			},
+		},
+		"required": []string{},
+	}
+	if err := registry.RegisterTool(alertsAggregatedName, "Get specific alerts with compact state timeline ([F F N N] format) and analysis categories. Shows 1h state progression in 10-minute buckets using LOCF interpolation. Use after identifying issues in overview to investigate specific alerts without loading full history.", alertsAggregatedTool.Execute, alertsAggregatedSchema); err != nil {
+		return fmt.Errorf("failed to register alerts aggregated tool: %w", err)
+	}
+	g.logger.Info("Registered tool: %s", alertsAggregatedName)
+
+	// Register Alerts Details tool: grafana_{name}_alerts_details
+	alertsDetailsTool := NewAlertsDetailsTool(g.graphClient, g.name, g.analysisService, g.logger)
+	alertsDetailsName := fmt.Sprintf("grafana_%s_alerts_details", g.name)
+	alertsDetailsSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"alert_uid": map[string]interface{}{
+				"type":        "string",
+				"description": "Specific alert UID to fetch (optional, provide UID or filters)",
+			},
+			"severity": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by severity level (optional: critical, warning, info)",
+			},
+			"cluster": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by cluster name (optional)",
+			},
+			"service": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by service name (optional)",
+			},
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Filter by namespace (optional)",
+			},
+		},
+		"required": []string{},
+	}
+	if err := registry.RegisterTool(alertsDetailsName, "Get full state timeline (7 days) with timestamps, alert rule definition, and complete metadata (labels, annotations). Use for deep debugging of specific issues after narrowing scope with aggregated tool. WARNING: can produce large responses for multiple alerts.", alertsDetailsTool.Execute, alertsDetailsSchema); err != nil {
+		return fmt.Errorf("failed to register alerts details tool: %w", err)
+	}
+	g.logger.Info("Registered tool: %s", alertsDetailsName)
+
+	g.logger.Info("Successfully registered 6 Grafana MCP tools")
 	return nil
 }
 
