@@ -9,23 +9,25 @@ See: .planning/PROJECT.md (updated 2026-01-23)
 
 ## Current Position
 
-Phase: 22 (Historical Analysis) — COMPLETE ✅
-Plan: 3/3 complete (22-03 DONE)
-Status: Phase 22 fully complete - AlertAnalysisService integrated into lifecycle, tested, ready for Phase 23 MCP tools
-Last activity: 2026-01-23 — Completed 22-03-PLAN.md (Integration lifecycle and end-to-end tests)
+Phase: 23 (MCP Tools) — IN PROGRESS 🔄
+Plan: 2/3 complete (23-02 DONE)
+Status: Phase 23 plan 2 complete - AlertsAggregatedTool with compact state timelines [F F N N], AlertsDetailsTool with full 7-day history
+Last activity: 2026-01-23 — Completed 23-02-PLAN.md (Alert tools with state timelines)
 
-Progress: [██████████████>      ] 75% (3/4 phases)
+Progress: [████████████████>    ] 84% (9/10 plans in v1.4)
 
 ## Performance Metrics
 
 **v1.4 Velocity (current):**
-- Plans completed: 7
+- Plans completed: 9
 - Phase 20 duration: ~10 min
 - Phase 21-01 duration: 4 min
 - Phase 21-02 duration: 8 min
 - Phase 22-01 duration: 9 min
 - Phase 22-02 duration: 6 min
 - Phase 22-03 duration: 5 min (281s)
+- Phase 23-01 duration: 2 min
+- Phase 23-02 duration: 3 min
 
 **v1.3 Velocity:**
 - Total plans completed: 17
@@ -38,7 +40,7 @@ Progress: [██████████████>      ] 75% (3/4 phases)
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 63 complete (v1.0-v1.4 Phase 22-03)
+- Total plans: 65 complete (v1.0-v1.4 Phase 23-02)
 - Milestones shipped: 4 (v1.0, v1.1, v1.2, v1.3)
 
 ## Accumulated Context
@@ -139,6 +141,21 @@ From Phase 22:
 - AlertAnalysisService created in Start after graphClient (no Start/Stop methods) — 22-03
 - GetAnalysisService() getter returns nil when graph disabled (clear signal to MCP tools) — 22-03
 - Service shares graphClient with AlertSyncer and AlertStateSyncer (no separate client) — 22-03
+
+From Phase 23:
+- All MCP tool filter parameters optional (empty required array) for maximum flexibility — 23-01
+- Flappiness threshold 0.7 used consistently across all alert tools — 23-01
+- Handle nil AlertAnalysisService gracefully (graph disabled scenario) — 23-01
+- ErrInsufficientData checked with errors.As (new alerts lack 24h history) — 23-01
+- Severity case normalization via strings.ToLower for robust matching — 23-01
+- Minimal AlertSummary response (name + firing_duration) to minimize MCP tokens — 23-01
+- Group alerts by severity in response for efficient AI triage — 23-01
+- 10-minute buckets for compact state timelines (6 buckets per hour) — 23-02
+- Left-to-right timeline ordering (oldest→newest) for natural reading — 23-02
+- Category display format: "CHRONIC + flapping" combines onset and pattern — 23-02
+- LOCF interpolation for state timeline bucketization — 23-02
+- Details tool warns when >5 alerts (large response protection) — 23-02
+- Graceful degradation: "new (insufficient history)" for missing analysis — 23-02
 
 ### Pending Todos
 
