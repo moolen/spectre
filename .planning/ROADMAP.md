@@ -162,7 +162,7 @@ Plans:
 - [x] 20-01-PLAN.md — Alert node schema and Grafana API client methods
 - [x] 20-02-PLAN.md — AlertSyncer with incremental sync and graph relationships
 
-#### Phase 21: Alert Sync Pipeline
+#### ✅ Phase 21: Alert Sync Pipeline
 **Goal**: Alert state is continuously tracked with full state transition timeline stored in graph.
 **Depends on**: Phase 20
 **Requirements**: ALRT-03, ALRT-04, ALRT-05, GRPH-11
@@ -173,10 +173,11 @@ Plans:
   4. Periodic sync updates both alert rules and current state
   5. Sync gracefully handles Grafana API unavailability (logs error, continues with stale data)
 **Plans**: 2 plans
+**Completed**: 2026-01-23
 
 Plans:
-- [ ] 21-01-PLAN.md — Alert state API client and graph storage with deduplication
-- [ ] 21-02-PLAN.md — AlertStateSyncer with periodic sync and lifecycle wiring
+- [x] 21-01-PLAN.md — Alert state API client and graph storage with deduplication
+- [x] 21-02-PLAN.md — AlertStateSyncer with periodic sync and lifecycle wiring
 
 #### Phase 22: Historical Analysis
 **Goal**: AI can identify flapping alerts and compare current alert behavior to 7-day baseline.
@@ -212,7 +213,7 @@ Plans:
 Plans:
 - [ ] TBD (created by /gsd:plan-phase)
 
-**Stats:** 4 phases, 4 plans (Phase 20-21 planned), 22 requirements
+**Stats:** 4 phases, 4 plans (Phase 20-21 complete), 22 requirements
 
 ## Progress
 
@@ -224,7 +225,7 @@ Plans:
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
 | v1.4 | 20-23 | 4 (in progress) | 22 | 🚧 In progress |
 
-**Total:** 23 phases (20 complete), 60 plans (58 complete), 146 requirements (129 complete)
+**Total:** 23 phases (21 complete), 60 plans (60 complete), 146 requirements (133 complete)
 
 ---
 *v1.4 roadmap updated: 2026-01-23*
