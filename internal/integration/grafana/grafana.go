@@ -33,12 +33,13 @@ type GrafanaIntegration struct {
 	client         *GrafanaClient       // Grafana HTTP client
 	secretWatcher  *SecretWatcher       // Optional: manages API token from Kubernetes Secret
 	syncer         *DashboardSyncer     // Dashboard sync orchestrator
-	alertSyncer    *AlertSyncer         // Alert sync orchestrator
-	stateSyncer    *AlertStateSyncer    // Alert state sync orchestrator
-	graphClient    graph.Client         // Graph client for dashboard sync
-	queryService   *GrafanaQueryService // Query service for MCP tools
-	anomalyService *AnomalyService      // Anomaly detection service for MCP tools
-	logger         *logging.Logger
+	alertSyncer     *AlertSyncer           // Alert sync orchestrator
+	stateSyncer     *AlertStateSyncer      // Alert state sync orchestrator
+	analysisService *AlertAnalysisService  // Alert analysis service for historical analysis
+	graphClient     graph.Client           // Graph client for dashboard sync
+	queryService    *GrafanaQueryService   // Query service for MCP tools
+	anomalyService  *AnomalyService        // Anomaly detection service for MCP tools
+	logger          *logging.Logger
 	ctx            context.Context
 	cancel         context.CancelFunc
 
@@ -208,6 +209,14 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 		baselineCache := NewBaselineCache(g.graphClient, g.logger)
 		g.anomalyService = NewAnomalyService(g.queryService, detector, baselineCache, g.logger)
 		g.logger.Info("Anomaly detection service created for MCP tools")
+
+		// Create alert analysis service (shares graph client)
+		g.analysisService = NewAlertAnalysisService(
+			g.graphClient,
+			g.name,
+			g.logger,
+		)
+		g.logger.Info("Alert analysis service created for integration %s", g.name)
 	} else {
 		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
 	}
@@ -229,6 +238,12 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	if g.stateSyncer != nil {
 		g.logger.Info("Stopping alert state syncer for integration %s", g.name)
 		g.stateSyncer.Stop()
+	}
+
+	// Clear alert analysis service (no Stop method needed - stateless)
+	if g.analysisService != nil {
+		g.logger.Info("Clearing alert analysis service for integration %s", g.name)
+		g.analysisService = nil
 	}
 
 	// Stop alert syncer if it exists
@@ -462,6 +477,12 @@ func (g *GrafanaIntegration) Status() integration.IntegrationStatus {
 		SyncStatus: g.GetSyncStatus(),
 	}
 	return status
+}
+
+// GetAnalysisService returns the alert analysis service for this integration
+// Returns nil if service not initialized (graph disabled or startup failed)
+func (g *GrafanaIntegration) GetAnalysisService() *AlertAnalysisService {
+	return g.analysisService
 }
 
 // getCurrentNamespace reads the namespace from the ServiceAccount mount.
