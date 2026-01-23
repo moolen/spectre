@@ -95,7 +95,7 @@ Plans:
 - [x] 17-03-PLAN.md — Dashboard hierarchy classification with tag-first logic
 - [x] 17-04-PLAN.md — UI hierarchy mapping configuration
 
-#### Phase 18: Query Execution & MCP Tools Foundation
+#### ✅ Phase 18: Query Execution & MCP Tools Foundation
 **Goal**: AI can execute Grafana queries and discover dashboards through three MCP tools.
 **Depends on**: Phase 17
 **Requirements**: VARB-04, VARB-05, EXEC-01, EXEC-02, EXEC-03, EXEC-04, TOOL-01, TOOL-04, TOOL-05, TOOL-06, TOOL-07, TOOL-08, TOOL-09
@@ -107,11 +107,12 @@ Plans:
   5. MCP tool `grafana_{name}_metrics_details` executes full dashboard with all panels
   6. All tools accept scoping variables (cluster, region) as parameters and pass to Grafana API
 **Plans**: 3 plans
+**Completed**: 2026-01-23
 
 Plans:
-- [ ] 18-01-PLAN.md — GrafanaQueryService with Grafana /api/ds/query integration
-- [ ] 18-02-PLAN.md — Three MCP tools (overview, aggregated, details)
-- [ ] 18-03-PLAN.md — Tool registration and end-to-end verification
+- [x] 18-01-PLAN.md — GrafanaQueryService with Grafana /api/ds/query integration
+- [x] 18-02-PLAN.md — Three MCP tools (overview, aggregated, details)
+- [x] 18-03-PLAN.md — Tool registration and end-to-end verification
 
 #### Phase 19: Anomaly Detection & Progressive Disclosure
 **Goal**: AI can detect anomalies vs 7-day baseline with severity ranking and progressively disclose from overview to details.
@@ -139,7 +140,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 | 15. Foundation | 3/3 | ✓ Complete | 2026-01-22 |
 | 16. Ingestion Pipeline | 3/3 | ✓ Complete | 2026-01-22 |
 | 17. Semantic Layer | 4/4 | ✓ Complete | 2026-01-23 |
-| 18. Query Execution & MCP Tools | 0/3 | Not started | - |
+| 18. Query Execution & MCP Tools | 3/3 | ✓ Complete | 2026-01-23 |
 | 19. Anomaly Detection | 0/TBD | Not started | - |
 
 ---
