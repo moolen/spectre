@@ -121,7 +121,7 @@ func ComputeRollingBaseline(transitions []StateTransition, lookbackDays int, cur
 
 	// Calculate average distribution
 	var totalNormal, totalPending, totalFiring float64
-	var firingPercentages []float64
+	firingPercentages := make([]float64, 0, len(dailyDistributions))
 
 	for _, dist := range dailyDistributions {
 		totalNormal += dist.PercentNormal
