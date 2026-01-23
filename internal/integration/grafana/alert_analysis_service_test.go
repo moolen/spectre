@@ -338,7 +338,7 @@ func TestComputeCurrentDistribution(t *testing.T) {
 		{FromState: "firing", ToState: "normal", Timestamp: now.Add(-30 * time.Minute)},
 	}
 
-	dist := computeCurrentDistribution([]StateTransition{}, transitions, now, 1*time.Hour)
+	dist := computeCurrentDistribution(transitions, now, 1*time.Hour)
 
 	// 30 minutes firing, 30 minutes normal
 	assert.InDelta(t, 0.5, dist.PercentFiring, 0.01)

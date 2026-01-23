@@ -2,6 +2,7 @@ package grafana
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -127,7 +128,8 @@ func (s *AlertAnalysisService) AnalyzeAlert(ctx context.Context, alertUID string
 	baseline, stdDev, err := ComputeRollingBaseline(transitions, 7, endTime)
 	if err != nil {
 		// Handle insufficient data error gracefully
-		if _, ok := err.(*InsufficientDataError); ok {
+		var insufficientErr *InsufficientDataError
+		if errors.As(err, &insufficientErr) {
 			return nil, ErrInsufficientData{
 				Available: dataAvailable,
 				Required:  24 * time.Hour,
@@ -137,8 +139,7 @@ func (s *AlertAnalysisService) AnalyzeAlert(ctx context.Context, alertUID string
 	}
 
 	// Compute current state distribution (last 1 hour)
-	recentTransitions := filterTransitions(transitions, endTime.Add(-1*time.Hour), endTime)
-	currentDist := computeCurrentDistribution(recentTransitions, transitions, endTime, 1*time.Hour)
+	currentDist := computeCurrentDistribution(transitions, endTime, 1*time.Hour)
 
 	// Compare to baseline
 	deviationScore := CompareToBaseline(currentDist, baseline, stdDev)
@@ -178,7 +179,7 @@ func filterTransitions(transitions []StateTransition, startTime, endTime time.Ti
 
 // computeCurrentDistribution computes state distribution for recent window
 // using LOCF to handle gaps in data
-func computeCurrentDistribution(recentTransitions []StateTransition, allTransitions []StateTransition, currentTime time.Time, windowSize time.Duration) StateDistribution {
+func computeCurrentDistribution(allTransitions []StateTransition, currentTime time.Time, windowSize time.Duration) StateDistribution {
 	windowStart := currentTime.Add(-windowSize)
 
 	// Use computeStateDurations which already implements LOCF
