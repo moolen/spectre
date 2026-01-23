@@ -33,6 +33,7 @@ type GrafanaIntegration struct {
 	client         *GrafanaClient       // Grafana HTTP client
 	secretWatcher  *SecretWatcher       // Optional: manages API token from Kubernetes Secret
 	syncer         *DashboardSyncer     // Dashboard sync orchestrator
+	alertSyncer    *AlertSyncer         // Alert sync orchestrator
 	graphClient    graph.Client         // Graph client for dashboard sync
 	queryService   *GrafanaQueryService // Query service for MCP tools
 	anomalyService *AnomalyService      // Anomaly detection service for MCP tools
@@ -159,11 +160,27 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			g.client,
 			g.graphClient,
 			g.config,
+			g.name, // Integration name
 			time.Hour, // Sync interval
 			g.logger,
 		)
 		if err := g.syncer.Start(g.ctx); err != nil {
 			g.logger.Warn("Failed to start dashboard syncer: %v (continuing without sync)", err)
+			// Don't fail startup - syncer is optional enhancement
+		}
+
+		// Start alert syncer
+		g.logger.Info("Starting alert syncer (sync interval: 1 hour)")
+		graphBuilder := NewGraphBuilder(g.graphClient, g.config, g.name, g.logger)
+		g.alertSyncer = NewAlertSyncer(
+			g.client,
+			g.graphClient,
+			graphBuilder,
+			g.name, // Integration name
+			g.logger,
+		)
+		if err := g.alertSyncer.Start(g.ctx); err != nil {
+			g.logger.Warn("Failed to start alert syncer: %v (continuing without sync)", err)
 			// Don't fail startup - syncer is optional enhancement
 		}
 
@@ -193,6 +210,12 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 		g.cancel()
 	}
 
+	// Stop alert syncer if it exists
+	if g.alertSyncer != nil {
+		g.logger.Info("Stopping alert syncer for integration %s", g.name)
+		g.alertSyncer.Stop()
+	}
+
 	// Stop dashboard syncer if it exists
 	if g.syncer != nil {
 		g.syncer.Stop()
@@ -209,6 +232,7 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.client = nil
 	g.secretWatcher = nil
 	g.syncer = nil
+	g.alertSyncer = nil
 	g.queryService = nil
 
 	// Update health status
