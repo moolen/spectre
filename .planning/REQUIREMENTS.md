@@ -9,22 +9,22 @@ Requirements for Grafana metrics integration. Each maps to roadmap phases.
 
 ### Foundation
 
-- [ ] **FOUN-01**: Grafana API client supports both Cloud and self-hosted authentication
-- [ ] **FOUN-02**: Client can list all dashboards via Grafana search API
-- [ ] **FOUN-03**: Client can retrieve full dashboard JSON by UID
+- [x] **FOUN-01**: Grafana API client supports both Cloud and self-hosted authentication
+- [x] **FOUN-02**: Client can list all dashboards via Grafana search API
+- [x] **FOUN-03**: Client can retrieve full dashboard JSON by UID
 - [x] **FOUN-04**: Incremental sync detects changed dashboards via version field
-- [ ] **FOUN-05**: Client integrates with SecretWatcher for API token hot-reload
-- [ ] **FOUN-06**: Integration follows factory registry pattern (compile-time registration)
+- [x] **FOUN-05**: Client integrates with SecretWatcher for API token hot-reload
+- [x] **FOUN-06**: Integration follows factory registry pattern (compile-time registration)
 
 ### Graph Schema
 
-- [ ] **GRPH-01**: FalkorDB schema includes Dashboard nodes with metadata (uid, title, tags, folder)
+- [x] **GRPH-01**: FalkorDB schema includes Dashboard nodes with metadata (uid, title, tags, folder)
 - [x] **GRPH-02**: FalkorDB schema includes Panel nodes with query references
 - [x] **GRPH-03**: FalkorDB schema includes Query nodes with raw PromQL expressions
 - [x] **GRPH-04**: FalkorDB schema includes Metric nodes (metric name templates)
 - [x] **GRPH-05**: FalkorDB schema includes Service nodes inferred from metric labels
 - [x] **GRPH-06**: Relationships: Dashboard CONTAINS Panel, Panel HAS Query, Query USES Metric, Metric TRACKS Service
-- [ ] **GRPH-07**: Graph indexes on Dashboard.uid, Metric.name, Service.name for efficient queries
+- [x] **GRPH-07**: Graph indexes on Dashboard.uid, Metric.name, Service.name for efficient queries
 
 ### PromQL Parsing
 
@@ -54,42 +54,42 @@ Requirements for Grafana metrics integration. Each maps to roadmap phases.
 - [x] **VARB-01**: Variables extracted from dashboard JSON template section
 - [x] **VARB-02**: Variables classified as scoping (cluster, region), entity (service, namespace), or detail (pod, instance)
 - [x] **VARB-03**: Variable classification stored in graph for smart defaults
-- [ ] **VARB-04**: Single-value variable substitution supported for query execution
-- [ ] **VARB-05**: Variables passed to Grafana API via scopedVars (not interpolated locally)
+- [x] **VARB-04**: Single-value variable substitution supported for query execution
+- [x] **VARB-05**: Variables passed to Grafana API via scopedVars (not interpolated locally)
 
 ### Query Execution
 
-- [ ] **EXEC-01**: Queries executed via Grafana /api/ds/query endpoint
-- [ ] **EXEC-02**: Query service handles time range parameters (from, to, interval)
-- [ ] **EXEC-03**: Query service formats Prometheus time series response for MCP tools
-- [ ] **EXEC-04**: Query service supports scoping variable substitution (AI provides values)
+- [x] **EXEC-01**: Queries executed via Grafana /api/ds/query endpoint
+- [x] **EXEC-02**: Query service handles time range parameters (from, to, interval)
+- [x] **EXEC-03**: Query service formats Prometheus time series response for MCP tools
+- [x] **EXEC-04**: Query service supports scoping variable substitution (AI provides values)
 
 ### MCP Tools
 
-- [ ] **TOOL-01**: `grafana_{name}_metrics_overview` executes overview dashboards only
-- [ ] **TOOL-02**: `grafana_{name}_metrics_overview` detects anomalies vs 7-day baseline
-- [ ] **TOOL-03**: `grafana_{name}_metrics_overview` returns ranked anomalies with severity
-- [ ] **TOOL-04**: `grafana_{name}_metrics_aggregated` focuses on specified service or cluster
-- [ ] **TOOL-05**: `grafana_{name}_metrics_aggregated` executes related dashboards for correlation
-- [ ] **TOOL-06**: `grafana_{name}_metrics_details` executes full dashboard with all panels
-- [ ] **TOOL-07**: `grafana_{name}_metrics_details` supports deep variable expansion
-- [ ] **TOOL-08**: All tools accept scoping variables (cluster, region) as parameters
-- [ ] **TOOL-09**: All tools are stateless (AI manages context across calls)
+- [x] **TOOL-01**: `grafana_{name}_metrics_overview` executes overview dashboards only
+- [x] **TOOL-02**: `grafana_{name}_metrics_overview` detects anomalies vs 7-day baseline
+- [x] **TOOL-03**: `grafana_{name}_metrics_overview` returns ranked anomalies with severity
+- [x] **TOOL-04**: `grafana_{name}_metrics_aggregated` focuses on specified service or cluster
+- [x] **TOOL-05**: `grafana_{name}_metrics_aggregated` executes related dashboards for correlation
+- [x] **TOOL-06**: `grafana_{name}_metrics_details` executes full dashboard with all panels
+- [x] **TOOL-07**: `grafana_{name}_metrics_details` supports deep variable expansion
+- [x] **TOOL-08**: All tools accept scoping variables (cluster, region) as parameters
+- [x] **TOOL-09**: All tools are stateless (AI manages context across calls)
 
 ### Anomaly Detection
 
-- [ ] **ANOM-01**: Baseline computed from 7-day historical data
-- [ ] **ANOM-02**: Baseline uses time-of-day matching (compare Monday 10am to previous Mondays 10am)
-- [ ] **ANOM-03**: Anomaly detection uses z-score comparison against baseline
-- [ ] **ANOM-04**: Anomalies classified by severity (info, warning, critical)
-- [ ] **ANOM-05**: Baseline cached in graph with TTL (1-hour refresh)
-- [ ] **ANOM-06**: Anomaly detection handles missing metrics gracefully (check scrape status)
+- [x] **ANOM-01**: Baseline computed from 7-day historical data
+- [x] **ANOM-02**: Baseline uses time-of-day matching (compare Monday 10am to previous Mondays 10am)
+- [x] **ANOM-03**: Anomaly detection uses z-score comparison against baseline
+- [x] **ANOM-04**: Anomalies classified by severity (info, warning, critical)
+- [x] **ANOM-05**: Baseline cached in graph with TTL (1-hour refresh)
+- [x] **ANOM-06**: Anomaly detection handles missing metrics gracefully (check scrape status)
 
 ### UI Configuration
 
-- [ ] **UICF-01**: Integration form includes Grafana URL field
-- [ ] **UICF-02**: Integration form includes API token field (SecretRef: name + key)
-- [ ] **UICF-03**: Integration form validates connection on save (health check)
+- [x] **UICF-01**: Integration form includes Grafana URL field
+- [x] **UICF-02**: Integration form includes API token field (SecretRef: name + key)
+- [x] **UICF-03**: Integration form validates connection on save (health check)
 - [x] **UICF-04**: Integration form includes hierarchy mapping configuration
 - [x] **UICF-05**: UI displays sync status and last sync time
 
@@ -164,27 +164,27 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VARB-01 | Phase 17 | Complete |
 | VARB-02 | Phase 17 | Complete |
 | VARB-03 | Phase 17 | Complete |
-| VARB-04 | Phase 18 | Pending |
-| VARB-05 | Phase 18 | Pending |
-| EXEC-01 | Phase 18 | Pending |
-| EXEC-02 | Phase 18 | Pending |
-| EXEC-03 | Phase 18 | Pending |
-| EXEC-04 | Phase 18 | Pending |
-| TOOL-01 | Phase 18 | Pending |
-| TOOL-02 | Phase 19 | Pending |
-| TOOL-03 | Phase 19 | Pending |
-| TOOL-04 | Phase 18 | Pending |
-| TOOL-05 | Phase 18 | Pending |
-| TOOL-06 | Phase 18 | Pending |
-| TOOL-07 | Phase 18 | Pending |
-| TOOL-08 | Phase 18 | Pending |
-| TOOL-09 | Phase 18 | Pending |
-| ANOM-01 | Phase 19 | Pending |
-| ANOM-02 | Phase 19 | Pending |
-| ANOM-03 | Phase 19 | Pending |
-| ANOM-04 | Phase 19 | Pending |
-| ANOM-05 | Phase 19 | Pending |
-| ANOM-06 | Phase 19 | Pending |
+| VARB-04 | Phase 18 | Complete |
+| VARB-05 | Phase 18 | Complete |
+| EXEC-01 | Phase 18 | Complete |
+| EXEC-02 | Phase 18 | Complete |
+| EXEC-03 | Phase 18 | Complete |
+| EXEC-04 | Phase 18 | Complete |
+| TOOL-01 | Phase 18 | Complete |
+| TOOL-02 | Phase 19 | Complete |
+| TOOL-03 | Phase 19 | Complete |
+| TOOL-04 | Phase 18 | Complete |
+| TOOL-05 | Phase 18 | Complete |
+| TOOL-06 | Phase 18 | Complete |
+| TOOL-07 | Phase 18 | Complete |
+| TOOL-08 | Phase 18 | Complete |
+| TOOL-09 | Phase 18 | Complete |
+| ANOM-01 | Phase 19 | Complete |
+| ANOM-02 | Phase 19 | Complete |
+| ANOM-03 | Phase 19 | Complete |
+| ANOM-04 | Phase 19 | Complete |
+| ANOM-05 | Phase 19 | Complete |
+| ANOM-06 | Phase 19 | Complete |
 | UICF-01 | Phase 15 | Complete |
 | UICF-02 | Phase 15 | Complete |
 | UICF-03 | Phase 15 | Complete |
@@ -198,4 +198,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-22*
-*Last updated: 2026-01-22 after v1.3 roadmap creation*
+*Last updated: 2026-01-23 — v1.3 milestone complete, all 51 requirements satisfied*
