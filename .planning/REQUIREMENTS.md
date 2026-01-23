@@ -74,34 +74,40 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ALRT-01 | TBD | Pending |
-| ALRT-02 | TBD | Pending |
-| ALRT-03 | TBD | Pending |
-| ALRT-04 | TBD | Pending |
-| ALRT-05 | TBD | Pending |
-| GRPH-08 | TBD | Pending |
-| GRPH-09 | TBD | Pending |
-| GRPH-10 | TBD | Pending |
-| GRPH-11 | TBD | Pending |
-| HIST-01 | TBD | Pending |
-| HIST-02 | TBD | Pending |
-| HIST-03 | TBD | Pending |
-| HIST-04 | TBD | Pending |
-| TOOL-10 | TBD | Pending |
-| TOOL-11 | TBD | Pending |
-| TOOL-12 | TBD | Pending |
-| TOOL-13 | TBD | Pending |
-| TOOL-14 | TBD | Pending |
-| TOOL-15 | TBD | Pending |
-| TOOL-16 | TBD | Pending |
-| TOOL-17 | TBD | Pending |
-| TOOL-18 | TBD | Pending |
+| ALRT-01 | Phase 20 | Pending |
+| ALRT-02 | Phase 20 | Pending |
+| ALRT-03 | Phase 21 | Pending |
+| ALRT-04 | Phase 21 | Pending |
+| ALRT-05 | Phase 21 | Pending |
+| GRPH-08 | Phase 20 | Pending |
+| GRPH-09 | Phase 20 | Pending |
+| GRPH-10 | Phase 20 | Pending |
+| GRPH-11 | Phase 21 | Pending |
+| HIST-01 | Phase 22 | Pending |
+| HIST-02 | Phase 22 | Pending |
+| HIST-03 | Phase 22 | Pending |
+| HIST-04 | Phase 22 | Pending |
+| TOOL-10 | Phase 23 | Pending |
+| TOOL-11 | Phase 23 | Pending |
+| TOOL-12 | Phase 23 | Pending |
+| TOOL-13 | Phase 23 | Pending |
+| TOOL-14 | Phase 23 | Pending |
+| TOOL-15 | Phase 23 | Pending |
+| TOOL-16 | Phase 23 | Pending |
+| TOOL-17 | Phase 23 | Pending |
+| TOOL-18 | Phase 23 | Pending |
 
 **Coverage:**
 - v1.4 requirements: 22 total
-- Mapped to phases: 0
-- Unmapped: 22 (pending roadmap creation)
+- Mapped to phases: 22 (100%)
+- Unmapped: 0
+
+**Phase Distribution:**
+- Phase 20: 5 requirements (Alert API Client & Graph Schema)
+- Phase 21: 4 requirements (Alert Sync Pipeline)
+- Phase 22: 4 requirements (Historical Analysis)
+- Phase 23: 9 requirements (MCP Tools)
 
 ---
 *Requirements defined: 2026-01-23*
-*Last updated: 2026-01-23 after initial definition*
+*Last updated: 2026-01-23 with phase mappings*

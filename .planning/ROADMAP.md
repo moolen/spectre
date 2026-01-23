@@ -6,6 +6,7 @@
 - ✅ **v1.1 Server Consolidation** - Phases 6-9 (shipped 2026-01-21)
 - ✅ **v1.2 Logz.io Integration + Secret Management** - Phases 10-14 (shipped 2026-01-22)
 - ✅ **v1.3 Grafana Metrics Integration** - Phases 15-19 (shipped 2026-01-23)
+- 🚧 **v1.4 Grafana Alerts Integration** - Phases 20-23 (in progress)
 
 ## Phases
 
@@ -139,18 +140,72 @@ Plans:
 
 </details>
 
+### 🚧 v1.4 Grafana Alerts Integration (Phases 20-23) - IN PROGRESS
+
+**Milestone Goal:** Extend Grafana integration with alert rule ingestion, graph linking, and progressive disclosure MCP tools for incident response.
+
+#### Phase 20: Alert API Client & Graph Schema
+**Goal**: Alert rules are synced from Grafana and stored in FalkorDB with links to existing Metrics and Services.
+**Depends on**: Phase 19 (v1.3 complete)
+**Requirements**: ALRT-01, ALRT-02, GRPH-08, GRPH-09, GRPH-10
+**Success Criteria** (what must be TRUE):
+  1. GrafanaClient can fetch alert rules via Grafana Alerting API
+  2. Alert rules are synced incrementally based on version field (like dashboards)
+  3. Alert nodes exist in FalkorDB with metadata (name, severity, labels, current state)
+  4. PromQL parser extracts metrics from alert rule queries (reuses existing parser)
+  5. Graph contains Alert→Metric relationships (MONITORS edges)
+  6. Graph contains Alert→Service relationships (transitive through Metric nodes)
+
+#### Phase 21: Alert Sync Pipeline
+**Goal**: Alert state is continuously tracked with full state transition timeline stored in graph.
+**Depends on**: Phase 20
+**Requirements**: ALRT-03, ALRT-04, ALRT-05, GRPH-11
+**Success Criteria** (what must be TRUE):
+  1. AlertSyncer fetches current alert state (firing/pending/normal) with timestamps
+  2. AlertStateChange nodes are created for every state transition
+  3. Graph stores full state timeline with from_state, to_state, and timestamp
+  4. Periodic sync updates both alert rules and current state
+  5. Sync gracefully handles Grafana API unavailability (logs error, continues with stale data)
+
+#### Phase 22: Historical Analysis
+**Goal**: AI can identify flapping alerts and compare current alert behavior to 7-day baseline.
+**Depends on**: Phase 21
+**Requirements**: HIST-01, HIST-02, HIST-03, HIST-04
+**Success Criteria** (what must be TRUE):
+  1. AlertAnalysisService computes 7-day baseline for alert state patterns (time-of-day matching)
+  2. Flappiness detection identifies alerts with frequent state transitions within time window
+  3. Trend analysis distinguishes recently-started alerts from always-firing alerts
+  4. Historical comparison determines if current alert behavior is normal vs abnormal
+  5. Analysis handles missing historical data gracefully (marks as unknown vs error)
+
+#### Phase 23: MCP Tools
+**Goal**: AI can discover firing alerts, analyze state progression, and drill into full timeline through three progressive disclosure tools.
+**Depends on**: Phase 22
+**Requirements**: TOOL-10, TOOL-11, TOOL-12, TOOL-13, TOOL-14, TOOL-15, TOOL-16, TOOL-17, TOOL-18
+**Success Criteria** (what must be TRUE):
+  1. MCP tool `grafana_{name}_alerts_overview` returns firing/pending counts by severity/cluster/service/namespace
+  2. Overview tool accepts optional filters (severity, cluster, service, namespace)
+  3. Overview tool includes flappiness indicator for each alert group
+  4. MCP tool `grafana_{name}_alerts_aggregated` shows specific alerts with 1h state progression
+  5. Aggregated tool accepts lookback duration parameter
+  6. Aggregated tool provides state change summary (started firing, was firing, flapping)
+  7. MCP tool `grafana_{name}_alerts_details` returns full state timeline graph data
+  8. Details tool includes alert rule definition and labels
+  9. All alert tools are stateless (AI manages context across calls)
+
+**Stats:** 4 phases, TBD plans, 22 requirements
+
 ## Progress
 
-All milestones complete through v1.3.
+| Milestone | Phases | Plans | Requirements | Status |
+|-----------|--------|-------|--------------|--------|
+| v1.0 | 1-5 | 19 | 31 | ✅ Shipped 2026-01-21 |
+| v1.1 | 6-9 | 12 | 21 | ✅ Shipped 2026-01-21 |
+| v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
+| v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
+| v1.4 | 20-23 | TBD | 22 | 🚧 In progress |
 
-| Milestone | Phases | Plans | Requirements | Shipped |
-|-----------|--------|-------|--------------|---------|
-| v1.0 | 1-5 | 19 | 31 | 2026-01-21 |
-| v1.1 | 6-9 | 12 | 21 | 2026-01-21 |
-| v1.2 | 10-14 | 8 | 21 | 2026-01-22 |
-| v1.3 | 15-19 | 17 | 51 | 2026-01-23 |
-
-**Total:** 19 phases, 56 plans, 124 requirements
+**Total:** 23 phases (19 complete), 56 plans, 146 requirements (124 complete)
 
 ---
-*v1.3 roadmap created: 2026-01-22, shipped: 2026-01-23*
+*v1.4 roadmap created: 2026-01-23*
