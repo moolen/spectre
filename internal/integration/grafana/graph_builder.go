@@ -743,3 +743,96 @@ func (gb *GraphBuilder) createAlertMetricEdge(alertUID, metricName string, now i
 
 	return nil
 }
+
+// CreateStateTransitionEdge stores an alert state transition with TTL.
+// Creates self-edge (Alert)-[STATE_TRANSITION]->(Alert) with properties:
+// - from_state, to_state, timestamp, expires_at (7-day TTL)
+// Uses MERGE to ensure Alert node exists (handles race with rule sync).
+func (gb *GraphBuilder) CreateStateTransitionEdge(
+	ctx context.Context,
+	alertUID string,
+	fromState string,
+	toState string,
+	timestamp time.Time,
+) error {
+	// Calculate TTL: 7 days from timestamp
+	expiresAt := timestamp.Add(7 * 24 * time.Hour)
+
+	// Create self-edge with transition properties
+	// Use MERGE for Alert node to handle race with rule sync
+	query := `
+		MERGE (a:Alert {uid: $uid, integration: $integration})
+		CREATE (a)-[t:STATE_TRANSITION]->(a)
+		SET t.from_state = $from_state,
+		    t.to_state = $to_state,
+		    t.timestamp = $timestamp,
+		    t.expires_at = $expires_at
+	`
+
+	_, err := gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"uid":         alertUID,
+			"integration": gb.integrationName,
+			"from_state":  fromState,
+			"to_state":    toState,
+			"timestamp":   timestamp.Format(time.RFC3339),
+			"expires_at":  expiresAt.Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create state transition edge: %w", err)
+	}
+
+	gb.logger.Debug("Alert %s: %s -> %s", alertUID, fromState, toState)
+	return nil
+}
+
+// getLastKnownState retrieves the most recent state for an alert.
+// Returns: state string, error
+// Returns ("unknown", nil) if no previous state exists (not an error).
+// Filters expired edges using WHERE clause for TTL enforcement.
+func (gb *GraphBuilder) getLastKnownState(
+	ctx context.Context,
+	alertUID string,
+) (string, error) {
+	now := time.Now()
+
+	// Query most recent non-expired state transition
+	query := `
+		MATCH (a:Alert {uid: $uid, integration: $integration})-[t:STATE_TRANSITION]->(a)
+		WHERE t.expires_at > $now
+		RETURN t.to_state
+		ORDER BY t.timestamp DESC
+		LIMIT 1
+	`
+
+	result, err := gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"uid":         alertUID,
+			"integration": gb.integrationName,
+			"now":         now.Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to query last state: %w", err)
+	}
+
+	// No previous state found - return "unknown" (not an error)
+	if len(result.Rows) == 0 {
+		return "unknown", nil
+	}
+
+	// Extract state from first row
+	if len(result.Rows[0]) == 0 {
+		return "unknown", nil
+	}
+
+	state, ok := result.Rows[0][0].(string)
+	if !ok {
+		return "", fmt.Errorf("invalid state type: %T", result.Rows[0][0])
+	}
+
+	return state, nil
+}
