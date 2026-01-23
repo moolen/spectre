@@ -155,6 +155,11 @@ Plans:
   4. PromQL parser extracts metrics from alert rule queries (reuses existing parser)
   5. Graph contains Alert→Metric relationships (MONITORS edges)
   6. Graph contains Alert→Service relationships (transitive through Metric nodes)
+**Plans**: 2 plans
+
+Plans:
+- [ ] 20-01-PLAN.md — Alert node schema and Grafana API client methods
+- [ ] 20-02-PLAN.md — AlertSyncer with incremental sync and graph relationships
 
 #### Phase 21: Alert Sync Pipeline
 **Goal**: Alert state is continuously tracked with full state transition timeline stored in graph.
@@ -193,7 +198,7 @@ Plans:
   8. Details tool includes alert rule definition and labels
   9. All alert tools are stateless (AI manages context across calls)
 
-**Stats:** 4 phases, TBD plans, 22 requirements
+**Stats:** 4 phases, 2+ plans (Phase 20 planned), 22 requirements
 
 ## Progress
 
@@ -203,9 +208,9 @@ Plans:
 | v1.1 | 6-9 | 12 | 21 | ✅ Shipped 2026-01-21 |
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
-| v1.4 | 20-23 | TBD | 22 | 🚧 In progress |
+| v1.4 | 20-23 | 2+ (in progress) | 22 | 🚧 In progress |
 
-**Total:** 23 phases (19 complete), 56 plans, 146 requirements (124 complete)
+**Total:** 23 phases (19 complete), 58+ plans (56 complete), 146 requirements (124 complete)
 
 ---
-*v1.4 roadmap created: 2026-01-23*
+*v1.4 roadmap updated: 2026-01-23*
