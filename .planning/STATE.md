@@ -9,18 +9,19 @@ See: .planning/PROJECT.md (updated 2026-01-23)
 
 ## Current Position
 
-Phase: 20 (Alert API Client & Graph Schema) ✓ COMPLETE
-Plan: 2/2 complete
-Status: Phase 20 verified, ready for Phase 21
-Last activity: 2026-01-23 — Phase 20 executed and verified
+Phase: 21 (Alert Sync Pipeline)
+Plan: 1 of 3 complete
+Status: In progress - Plan 21-01 complete
+Last activity: 2026-01-23 — Completed 21-01-PLAN.md
 
-Progress: [█████>               ] 25% (1/4 phases)
+Progress: [█████░>              ] 27% (1/3 phases started, 1/3 plans complete in Phase 21)
 
 ## Performance Metrics
 
 **v1.4 Velocity (current):**
-- Plans completed: 2
+- Plans completed: 3
 - Phase 20 duration: ~10 min
+- Phase 21-01 duration: 4 min
 
 **v1.3 Velocity:**
 - Total plans completed: 17
@@ -33,7 +34,7 @@ Progress: [█████>               ] 25% (1/4 phases)
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 58 complete (v1.0-v1.4 Phase 20)
+- Total plans: 59 complete (v1.0-v1.4 Phase 21-01)
 - Milestones shipped: 4 (v1.0, v1.1, v1.2, v1.3)
 
 ## Accumulated Context
@@ -103,6 +104,16 @@ From Phase 20:
 - First PromQL expression stored as condition field for alert display — 20-02
 - Alert→Service relationships accessed transitively via Metrics (no direct edge) — 20-02
 
+From Phase 21:
+- Prometheus-compatible /api/prometheus/grafana/api/v1/rules endpoint for alert states — 21-01
+- 7-day TTL via expires_at RFC3339 timestamp with WHERE filtering (no cleanup job) — 21-01
+- State deduplication via getLastKnownState comparison before edge creation — 21-01
+- Map "alerting" to "firing" state, normalize to lowercase — 21-01
+- Extract UID from grafana_uid label in Prometheus response — 21-01
+- Self-edge pattern for state transitions: (Alert)-[STATE_TRANSITION]->(Alert) — 21-01
+- Return "unknown" for missing state (not error) to handle first sync gracefully — 21-01
+- MERGE for Alert node in state sync to handle race with rule sync — 21-01
+
 ### Pending Todos
 
 None yet.
@@ -136,13 +147,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 20
+**Last command:** /gsd:execute-plan 21-01
 **Last session:** 2026-01-23
-**Stopped at:** Phase 20 complete and verified
+**Stopped at:** Completed 21-01-PLAN.md (Alert State API & Graph Foundation)
 **Resume file:** None
-**Context preserved:** Alert API foundation complete - graph schema, client methods, AlertSyncer with incremental sync
+**Context preserved:** Alert state tracking foundation in place - GetAlertStates API method, CreateStateTransitionEdge with TTL, getLastKnownState for deduplication
 
-**Next step:** `/gsd:plan-phase 21` to create execution plans for Alert Sync Pipeline (state tracking)
+**Next step:** Execute remaining Phase 21 plans (21-02: Alert State Syncer, 21-03: Alert State MCP Tools)
 
 ---
-*Last updated: 2026-01-23 — Phase 20 complete and verified*
+*Last updated: 2026-01-23 — Completed plan 21-01*
