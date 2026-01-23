@@ -9,21 +9,22 @@ See: .planning/PROJECT.md (updated 2026-01-23)
 
 ## Current Position
 
-Phase: 22 (Historical Analysis) — IN PROGRESS
-Plan: 1/2 complete (22-01 DONE)
-Status: Statistical functions complete, ready for 22-02 (AlertAnalysisService)
-Last activity: 2026-01-23 — Completed 22-01-PLAN.md (flappiness and baseline computation)
+Phase: 22 (Historical Analysis) — COMPLETE
+Plan: 2/2 complete (22-02 DONE)
+Status: AlertAnalysisService complete with cache, categorization, and LOCF, ready for Phase 23 (MCP Tools)
+Last activity: 2026-01-23 — Completed 22-02-PLAN.md (AlertAnalysisService with multi-label categorization)
 
-Progress: [████████████>        ] 62.5% (2.5/4 phases)
+Progress: [█████████████>       ] 68.75% (2.75/4 phases)
 
 ## Performance Metrics
 
 **v1.4 Velocity (current):**
-- Plans completed: 5
+- Plans completed: 6
 - Phase 20 duration: ~10 min
 - Phase 21-01 duration: 4 min
 - Phase 21-02 duration: 8 min
 - Phase 22-01 duration: 9 min
+- Phase 22-02 duration: 6 min
 
 **v1.3 Velocity:**
 - Total plans completed: 17
@@ -36,7 +37,7 @@ Progress: [████████████>        ] 62.5% (2.5/4 phases)
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 61 complete (v1.0-v1.4 Phase 22-01)
+- Total plans: 62 complete (v1.0-v1.4 Phase 22-02)
 - Milestones shipped: 4 (v1.0, v1.1, v1.2, v1.3)
 
 ## Accumulated Context
@@ -128,6 +129,12 @@ From Phase 22:
 - 24h minimum data requirement for statistically meaningful baselines — 22-01
 - Transitions at period boundaries are inclusive (careful timestamp logic) — 22-01
 - Sample variance (N-1) via gonum.org/v1/gonum/stat.StdDev for unbiased estimator — 22-01
+- 5-minute cache TTL with 1000-entry LRU for analysis results — 22-02
+- Multi-label categorization: independent onset and pattern categories — 22-02
+- LOCF interpolation for state duration computation fills gaps realistically — 22-02
+- Chronic threshold: >80% firing over 7 days using LOCF — 22-02
+- Flapping overrides trend patterns (flappiness > 0.7) — 22-02
+- ErrInsufficientData with Available/Required fields for clear error messages — 22-02
 
 ### Pending Todos
 
@@ -162,13 +169,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** Execute plan 22-01
+**Last command:** Execute plan 22-02
 **Last session:** 2026-01-23
-**Stopped at:** Completed 22-01-PLAN.md (statistical functions)
+**Stopped at:** Completed 22-02-PLAN.md (AlertAnalysisService)
 **Resume file:** None
-**Context preserved:** Statistical analysis functions complete - ComputeFlappinessScore with exponential scaling and duration multipliers, ComputeRollingBaseline with LOCF and daily bucketing, CompareToBaseline for deviation analysis. TDD cycle: 3 commits (RED/GREEN/REFACTOR), 22 tests, >90% coverage, gonum.org/v1/gonum/stat integrated.
+**Context preserved:** Phase 22 (Historical Analysis) complete - AlertAnalysisService with 5-minute TTL cache, multi-label categorization (onset + pattern), LOCF interpolation for duration computation, transitions fetcher with graph queries, 29 unit tests (>85% coverage). Ready for Phase 23 MCP tool integration. Service integrates ComputeFlappinessScore, ComputeRollingBaseline, CompareToBaseline from Plan 22-01. Cache: hashicorp/golang-lru/v2/expirable, 1000 entries, 5-minute TTL.
 
-**Next step:** Execute plan 22-02 to build AlertAnalysisService integrating these statistical functions for alert categorization
+**Next step:** Execute Phase 23 plans to create MCP tools for alert analysis (list_alerts with filters, analyze_alert, get_flapping_alerts)
 
 ---
-*Last updated: 2026-01-23 — Phase 22-01 complete (statistical functions)*
+*Last updated: 2026-01-23 — Phase 22-02 complete (AlertAnalysisService with categorization)*
