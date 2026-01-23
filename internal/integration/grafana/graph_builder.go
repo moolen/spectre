@@ -54,10 +54,11 @@ type PromQLParserInterface interface {
 
 // GraphBuilder creates graph nodes and edges from Grafana dashboard structure
 type GraphBuilder struct {
-	graphClient graph.Client
-	parser      PromQLParserInterface
-	config      *Config
-	logger      *logging.Logger
+	graphClient     graph.Client
+	parser          PromQLParserInterface
+	config          *Config
+	integrationName string
+	logger          *logging.Logger
 }
 
 // ServiceInference represents an inferred service from label selectors
@@ -69,12 +70,13 @@ type ServiceInference struct {
 }
 
 // NewGraphBuilder creates a new GraphBuilder instance
-func NewGraphBuilder(graphClient graph.Client, config *Config, logger *logging.Logger) *GraphBuilder {
+func NewGraphBuilder(graphClient graph.Client, config *Config, integrationName string, logger *logging.Logger) *GraphBuilder {
 	return &GraphBuilder{
-		graphClient: graphClient,
-		parser:      &defaultPromQLParser{},
-		config:      config,
-		logger:      logger,
+		graphClient:     graphClient,
+		parser:          &defaultPromQLParser{},
+		config:          config,
+		integrationName: integrationName,
+		logger:          logger,
 	}
 }
 
@@ -580,5 +582,164 @@ func (gb *GraphBuilder) DeletePanelsForDashboard(ctx context.Context, dashboardU
 
 	gb.logger.Debug("Deleted %d panels and %d queries for dashboard %s",
 		result.Stats.NodesDeleted, result.Stats.RelationshipsDeleted, dashboardUID)
+	return nil
+}
+
+// BuildAlertGraph creates or updates an Alert node and its metric relationships
+func (gb *GraphBuilder) BuildAlertGraph(alertRule AlertRule) error {
+	now := time.Now().UnixNano()
+
+	gb.logger.Debug("Creating/updating Alert node: %s", alertRule.UID)
+
+	// Extract first PromQL expression for condition display
+	var firstCondition string
+	for _, query := range alertRule.Data {
+		if query.QueryType == "prometheus" && len(query.Model) > 0 {
+			// Parse Model JSON to extract expr field
+			var modelData map[string]interface{}
+			if err := json.Unmarshal(query.Model, &modelData); err == nil {
+				if expr, ok := modelData["expr"].(string); ok && expr != "" {
+					firstCondition = expr
+					break
+				}
+			}
+		}
+	}
+
+	// Marshal labels and annotations to JSON
+	labelsJSON, err := json.Marshal(alertRule.Labels)
+	if err != nil {
+		gb.logger.Warn("Failed to marshal alert labels: %v", err)
+		labelsJSON = []byte("{}")
+	}
+
+	annotationsJSON, err := json.Marshal(alertRule.Annotations)
+	if err != nil {
+		gb.logger.Warn("Failed to marshal alert annotations: %v", err)
+		annotationsJSON = []byte("{}")
+	}
+
+	// 1. Create/update Alert node with MERGE
+	alertQuery := `
+		MERGE (a:Alert {uid: $uid, integration: $integration})
+		ON CREATE SET
+			a.title = $title,
+			a.folderTitle = $folderTitle,
+			a.ruleGroup = $ruleGroup,
+			a.condition = $condition,
+			a.labels = $labels,
+			a.annotations = $annotations,
+			a.updated = $updated,
+			a.firstSeen = $now,
+			a.lastSeen = $now
+		ON MATCH SET
+			a.title = $title,
+			a.folderTitle = $folderTitle,
+			a.ruleGroup = $ruleGroup,
+			a.condition = $condition,
+			a.labels = $labels,
+			a.annotations = $annotations,
+			a.updated = $updated,
+			a.lastSeen = $now
+	`
+
+	_, err = gb.graphClient.ExecuteQuery(context.Background(), graph.GraphQuery{
+		Query: alertQuery,
+		Parameters: map[string]interface{}{
+			"uid":         alertRule.UID,
+			"integration": gb.integrationName,
+			"title":       alertRule.Title,
+			"folderTitle": alertRule.FolderUID,
+			"ruleGroup":   alertRule.RuleGroup,
+			"condition":   firstCondition,
+			"labels":      string(labelsJSON),
+			"annotations": string(annotationsJSON),
+			"updated":     alertRule.Updated.Format(time.RFC3339),
+			"now":         now,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create alert node: %w", err)
+	}
+
+	// 2. Extract PromQL expressions and parse for metrics
+	for _, query := range alertRule.Data {
+		// Only process Prometheus queries
+		if query.QueryType != "prometheus" {
+			continue
+		}
+
+		// Parse Model JSON to extract expr field
+		var modelData map[string]interface{}
+		if err := json.Unmarshal(query.Model, &modelData); err != nil {
+			gb.logger.Warn("Failed to parse alert query model for alert %s, query %s: %v (skipping query)",
+				alertRule.UID, query.RefID, err)
+			continue
+		}
+
+		expr, ok := modelData["expr"].(string)
+		if !ok || expr == "" {
+			gb.logger.Debug("No expr field in alert query model for alert %s, query %s (skipping)",
+				alertRule.UID, query.RefID)
+			continue
+		}
+
+		// Parse PromQL expression
+		extraction, err := gb.parser.Parse(expr)
+		if err != nil {
+			// Log error but continue with other queries (graceful degradation)
+			gb.logger.Warn("Failed to parse PromQL for alert %s, query %s: %v (skipping query)",
+				alertRule.UID, query.RefID, err)
+			continue
+		}
+
+		// Skip if query has variables (metric names may be templated)
+		if extraction.HasVariables {
+			gb.logger.Debug("Alert query %s has variables, skipping metric extraction", query.RefID)
+			continue
+		}
+
+		// 3. Create Metric nodes and MONITORS edges
+		for _, metricName := range extraction.MetricNames {
+			if err := gb.createAlertMetricEdge(alertRule.UID, metricName, now); err != nil {
+				// Log error but continue with other metrics (graceful degradation)
+				gb.logger.Warn("Failed to create MONITORS edge for alert %s, metric %s: %v",
+					alertRule.UID, metricName, err)
+				continue
+			}
+		}
+	}
+
+	gb.logger.Debug("Successfully created alert graph for %s", alertRule.UID)
+	return nil
+}
+
+// createAlertMetricEdge creates a Metric node and MONITORS edge from Alert to Metric
+func (gb *GraphBuilder) createAlertMetricEdge(alertUID, metricName string, now int64) error {
+	// Use MERGE for both Metric node and MONITORS edge
+	query := `
+		MATCH (a:Alert {uid: $alertUID, integration: $integration})
+		MERGE (m:Metric {name: $metricName})
+		ON CREATE SET
+			m.firstSeen = $now,
+			m.lastSeen = $now
+		ON MATCH SET
+			m.lastSeen = $now
+		MERGE (a)-[:MONITORS]->(m)
+	`
+
+	_, err := gb.graphClient.ExecuteQuery(context.Background(), graph.GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"alertUID":    alertUID,
+			"integration": gb.integrationName,
+			"metricName":  metricName,
+			"now":         now,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create metric node and MONITORS edge: %w", err)
+	}
+
 	return nil
 }

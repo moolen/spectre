@@ -100,7 +100,7 @@ func (m *mockPromQLParser) Parse(queryStr string) (*QueryExtraction, error) {
 func TestCreateDashboardGraph_SimplePanel(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	dashboard := &GrafanaDashboard{
 		UID:     "test-dashboard",
@@ -176,7 +176,7 @@ func TestCreateDashboardGraph_SimplePanel(t *testing.T) {
 func TestCreateDashboardGraph_MultipleQueries(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	dashboard := &GrafanaDashboard{
 		UID:     "multi-query-dashboard",
@@ -231,7 +231,7 @@ func TestCreateDashboardGraph_MultipleQueries(t *testing.T) {
 func TestCreateDashboardGraph_VariableInMetric(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	// Replace parser with mock that returns HasVariables=true
 	mockParser := newMockPromQLParser()
@@ -296,7 +296,7 @@ func TestCreateDashboardGraph_VariableInMetric(t *testing.T) {
 func TestDeletePanelsForDashboard(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	// Set up mock result for delete operation
 	mockClient.results[""] = &graph.QueryResult{
@@ -331,7 +331,7 @@ func TestDeletePanelsForDashboard(t *testing.T) {
 func TestGraphBuilder_GracefulDegradation(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	// Replace parser with one that returns errors for specific queries
 	mockParser := newMockPromQLParser()
@@ -385,7 +385,7 @@ func TestGraphBuilder_GracefulDegradation(t *testing.T) {
 func TestGraphBuilder_JSONSerialization(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	dashboard := &GrafanaDashboard{
 		UID:     "json-dashboard",
@@ -741,7 +741,7 @@ func TestInferServiceFromLabels_Scoping(t *testing.T) {
 func TestCreateServiceNodes(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	ctx := context.Background()
 	queryID := "test-dashboard-1-A"
@@ -805,7 +805,7 @@ func TestCreateServiceNodes(t *testing.T) {
 func TestClassifyHierarchy_ExplicitTags(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	tests := []struct {
 		name     string
@@ -866,7 +866,7 @@ func TestClassifyHierarchy_FallbackMapping(t *testing.T) {
 			"dev":     "detail",
 		},
 	}
-	builder := NewGraphBuilder(mockClient, config, logger)
+	builder := NewGraphBuilder(mockClient, config, "test-integration", logger)
 
 	tests := []struct {
 		name     string
@@ -915,7 +915,7 @@ func TestClassifyHierarchy_TagsOverrideMapping(t *testing.T) {
 			"prod": "overview",
 		},
 	}
-	builder := NewGraphBuilder(mockClient, config, logger)
+	builder := NewGraphBuilder(mockClient, config, "test-integration", logger)
 
 	// Explicit hierarchy tag should win over mapping
 	tags := []string{"prod", "spectre:detail"}
@@ -929,7 +929,7 @@ func TestClassifyHierarchy_TagsOverrideMapping(t *testing.T) {
 func TestClassifyHierarchy_DefaultToDetail(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	tests := []struct {
 		name string
@@ -958,7 +958,7 @@ func TestClassifyHierarchy_DefaultToDetail(t *testing.T) {
 func TestCreateDashboardGraph_WithServiceInference(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	// Replace parser with mock that returns label selectors
 	mockParser := newMockPromQLParser()
@@ -1127,7 +1127,7 @@ func TestClassifyVariable_Unknown(t *testing.T) {
 func TestCreateDashboardGraph_WithVariables(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	dashboard := &GrafanaDashboard{
 		UID:     "variable-dashboard",
@@ -1205,7 +1205,7 @@ func TestCreateDashboardGraph_WithVariables(t *testing.T) {
 func TestCreateDashboardGraph_MalformedVariable(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	dashboard := &GrafanaDashboard{
 		UID:     "malformed-var-dashboard",
@@ -1253,7 +1253,7 @@ func TestCreateDashboardGraph_MalformedVariable(t *testing.T) {
 func TestCreateDashboardGraph_VariableHAS_VARIABLEEdge(t *testing.T) {
 	mockClient := newMockGraphClient()
 	logger := logging.GetLogger("test")
-	builder := NewGraphBuilder(mockClient, nil, logger)
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
 
 	dashboard := &GrafanaDashboard{
 		UID:     "edge-dashboard",
