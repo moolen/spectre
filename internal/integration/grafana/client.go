@@ -13,6 +13,26 @@ import (
 	"github.com/moolen/spectre/internal/logging"
 )
 
+// AlertRule represents a Grafana alert rule from the Alerting Provisioning API
+type AlertRule struct {
+	UID         string            `json:"uid"`         // Alert rule UID
+	Title       string            `json:"title"`       // Alert rule title
+	FolderUID   string            `json:"folderUID"`   // Folder UID
+	RuleGroup   string            `json:"ruleGroup"`   // Rule group name
+	Data        []AlertQuery      `json:"data"`        // Alert queries (PromQL expressions)
+	Labels      map[string]string `json:"labels"`      // Alert labels
+	Annotations map[string]string `json:"annotations"` // Annotations including severity
+	Updated     time.Time         `json:"updated"`     // Last update timestamp
+}
+
+// AlertQuery represents a query within an alert rule
+type AlertQuery struct {
+	RefID         string          `json:"refId"`         // Query reference ID
+	Model         json.RawMessage `json:"model"`         // Query model (contains PromQL)
+	DatasourceUID string          `json:"datasourceUID"` // Datasource UID
+	QueryType     string          `json:"queryType"`     // Query type (typically "prometheus")
+}
+
 // GrafanaClient is an HTTP client wrapper for Grafana API.
 // It supports listing dashboards and retrieving dashboard JSON with Bearer token authentication.
 type GrafanaClient struct {
@@ -158,6 +178,102 @@ func (c *GrafanaClient) GetDashboard(ctx context.Context, uid string) (map[strin
 
 	c.logger.Debug("Retrieved dashboard %s from Grafana", uid)
 	return dashboard, nil
+}
+
+// ListAlertRules retrieves all alert rules from Grafana Alerting Provisioning API.
+// Uses /api/v1/provisioning/alert-rules endpoint.
+func (c *GrafanaClient) ListAlertRules(ctx context.Context) ([]AlertRule, error) {
+	// Build request URL
+	reqURL := fmt.Sprintf("%s/api/v1/provisioning/alert-rules", c.config.URL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create list alert rules request: %w", err)
+	}
+
+	// Add Bearer token authentication if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	// Execute request
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute list alert rules request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// CRITICAL: Always read response body to completion for connection reuse
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("Grafana list alert rules failed: status=%d body=%s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("list alert rules failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse JSON response
+	var alertRules []AlertRule
+	if err := json.Unmarshal(body, &alertRules); err != nil {
+		return nil, fmt.Errorf("parse alert rules response: %w", err)
+	}
+
+	c.logger.Debug("Listed %d alert rules from Grafana", len(alertRules))
+	return alertRules, nil
+}
+
+// GetAlertRule retrieves a single alert rule by UID from Grafana Alerting Provisioning API.
+// Uses /api/v1/provisioning/alert-rules/{uid} endpoint.
+func (c *GrafanaClient) GetAlertRule(ctx context.Context, uid string) (*AlertRule, error) {
+	// Build request URL
+	reqURL := fmt.Sprintf("%s/api/v1/provisioning/alert-rules/%s", c.config.URL, uid)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create get alert rule request: %w", err)
+	}
+
+	// Add Bearer token authentication if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	// Execute request
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute get alert rule request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// CRITICAL: Always read response body to completion for connection reuse
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("Grafana get alert rule failed: status=%d body=%s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("get alert rule failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse JSON response
+	var alertRule AlertRule
+	if err := json.Unmarshal(body, &alertRule); err != nil {
+		return nil, fmt.Errorf("parse alert rule response: %w", err)
+	}
+
+	c.logger.Debug("Retrieved alert rule %s from Grafana", uid)
+	return &alertRule, nil
 }
 
 // QueryRequest represents a request to Grafana's /api/ds/query endpoint
