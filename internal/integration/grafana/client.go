@@ -1,6 +1,7 @@
 package grafana
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -157,6 +158,151 @@ func (c *GrafanaClient) GetDashboard(ctx context.Context, uid string) (map[strin
 
 	c.logger.Debug("Retrieved dashboard %s from Grafana", uid)
 	return dashboard, nil
+}
+
+// QueryRequest represents a request to Grafana's /api/ds/query endpoint
+type QueryRequest struct {
+	Queries []Query `json:"queries"`
+	From    string  `json:"from"` // epoch milliseconds as string
+	To      string  `json:"to"`   // epoch milliseconds as string
+}
+
+// Query represents a single query within a QueryRequest
+type Query struct {
+	RefID         string              `json:"refId"`
+	Datasource    QueryDatasource     `json:"datasource"`
+	Expr          string              `json:"expr"`
+	Format        string              `json:"format"`        // "time_series"
+	MaxDataPoints int                 `json:"maxDataPoints"` // 100
+	IntervalMs    int                 `json:"intervalMs"`    // 1000
+	ScopedVars    map[string]ScopedVar `json:"scopedVars,omitempty"`
+}
+
+// QueryDatasource identifies a datasource in a query
+type QueryDatasource struct {
+	UID string `json:"uid"`
+}
+
+// ScopedVar represents a scoped variable for Grafana variable substitution
+type ScopedVar struct {
+	Text  string `json:"text"`
+	Value string `json:"value"`
+}
+
+// QueryResponse represents the response from Grafana's /api/ds/query endpoint
+type QueryResponse struct {
+	Results map[string]QueryResult `json:"results"`
+}
+
+// QueryResult represents a single result in the query response
+type QueryResult struct {
+	Frames []DataFrame `json:"frames"`
+	Error  string      `json:"error,omitempty"`
+}
+
+// DataFrame represents a Grafana data frame
+type DataFrame struct {
+	Schema DataFrameSchema `json:"schema"`
+	Data   DataFrameData   `json:"data"`
+}
+
+// DataFrameSchema contains metadata about a data frame
+type DataFrameSchema struct {
+	Name   string              `json:"name,omitempty"`
+	Fields []DataFrameField    `json:"fields"`
+}
+
+// DataFrameField represents a field in a data frame schema
+type DataFrameField struct {
+	Name   string            `json:"name"`
+	Type   string            `json:"type"`
+	Labels map[string]string `json:"labels,omitempty"`
+	Config *FieldConfig      `json:"config,omitempty"`
+}
+
+// FieldConfig contains field configuration like unit
+type FieldConfig struct {
+	Unit string `json:"unit,omitempty"`
+}
+
+// DataFrameData contains the actual data values
+type DataFrameData struct {
+	Values [][]interface{} `json:"values"` // First array is timestamps, second is values
+}
+
+// QueryDataSource executes a PromQL query via Grafana's /api/ds/query endpoint.
+// datasourceUID: the UID of the datasource to query
+// expr: the PromQL expression to execute
+// from, to: time range as epoch milliseconds (as strings)
+// scopedVars: variables for server-side substitution (e.g., cluster, region)
+func (c *GrafanaClient) QueryDataSource(ctx context.Context, datasourceUID string, expr string, from string, to string, scopedVars map[string]ScopedVar) (*QueryResponse, error) {
+	// Build query request
+	reqBody := QueryRequest{
+		Queries: []Query{
+			{
+				RefID:         "A",
+				Datasource:    QueryDatasource{UID: datasourceUID},
+				Expr:          expr,
+				Format:        "time_series",
+				MaxDataPoints: 100,
+				IntervalMs:    1000,
+				ScopedVars:    scopedVars,
+			},
+		},
+		From: from,
+		To:   to,
+	}
+
+	// Marshal request body
+	reqJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal query request: %w", err)
+	}
+
+	// Build HTTP request
+	reqURL := fmt.Sprintf("%s/api/ds/query", c.config.URL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(reqJSON))
+	if err != nil {
+		return nil, fmt.Errorf("create query request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Add Bearer token authentication if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	// Execute request
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute query request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// CRITICAL: Always read response body to completion for connection reuse
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("Grafana query failed: status=%d body=%s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("query failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse JSON response
+	var result QueryResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse query response: %w", err)
+	}
+
+	c.logger.Debug("Executed query against datasource %s", datasourceUID)
+	return &result, nil
 }
 
 // ListDatasources retrieves all datasources from Grafana.
