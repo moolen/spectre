@@ -171,6 +171,10 @@ Plans:
   3. Graph stores full state timeline with from_state, to_state, and timestamp
   4. Periodic sync updates both alert rules and current state
   5. Sync gracefully handles Grafana API unavailability (logs error, continues with stale data)
+**Plans**: 0 plans
+
+Plans:
+- [ ] TBD (created by /gsd:plan-phase)
 
 #### Phase 22: Historical Analysis
 **Goal**: AI can identify flapping alerts and compare current alert behavior to 7-day baseline.
@@ -182,6 +186,10 @@ Plans:
   3. Trend analysis distinguishes recently-started alerts from always-firing alerts
   4. Historical comparison determines if current alert behavior is normal vs abnormal
   5. Analysis handles missing historical data gracefully (marks as unknown vs error)
+**Plans**: 0 plans
+
+Plans:
+- [ ] TBD (created by /gsd:plan-phase)
 
 #### Phase 23: MCP Tools
 **Goal**: AI can discover firing alerts, analyze state progression, and drill into full timeline through three progressive disclosure tools.
@@ -197,8 +205,12 @@ Plans:
   7. MCP tool `grafana_{name}_alerts_details` returns full state timeline graph data
   8. Details tool includes alert rule definition and labels
   9. All alert tools are stateless (AI manages context across calls)
+**Plans**: 0 plans
 
-**Stats:** 4 phases, 2+ plans (Phase 20 planned), 22 requirements
+Plans:
+- [ ] TBD (created by /gsd:plan-phase)
+
+**Stats:** 4 phases, 2 plans (Phase 20 planned), 22 requirements
 
 ## Progress
 
@@ -208,9 +220,9 @@ Plans:
 | v1.1 | 6-9 | 12 | 21 | ✅ Shipped 2026-01-21 |
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
-| v1.4 | 20-23 | 2+ (in progress) | 22 | 🚧 In progress |
+| v1.4 | 20-23 | 2 (in progress) | 22 | 🚧 In progress |
 
-**Total:** 23 phases (19 complete), 58+ plans (56 complete), 146 requirements (124 complete)
+**Total:** 23 phases (19 complete), 58 plans (56 complete), 146 requirements (124 complete)
 
 ---
 *v1.4 roadmap updated: 2026-01-23*
