@@ -179,7 +179,7 @@ Plans:
 - [x] 21-01-PLAN.md — Alert state API client and graph storage with deduplication
 - [x] 21-02-PLAN.md — AlertStateSyncer with periodic sync and lifecycle wiring
 
-#### Phase 22: Historical Analysis
+#### ✅ Phase 22: Historical Analysis
 **Goal**: AI can identify flapping alerts and compare current alert behavior to 7-day baseline.
 **Depends on**: Phase 21
 **Requirements**: HIST-01, HIST-02, HIST-03, HIST-04
@@ -190,11 +190,12 @@ Plans:
   4. Historical comparison determines if current alert behavior is normal vs abnormal
   5. Analysis handles missing historical data gracefully (marks as unknown vs error)
 **Plans**: 3 plans
+**Completed**: 2026-01-23
 
 Plans:
-- [ ] 22-01-PLAN.md — Statistical analysis foundation with TDD (flappiness, baseline)
-- [ ] 22-02-PLAN.md — AlertAnalysisService with categorization and cache
-- [ ] 22-03-PLAN.md — Integration lifecycle wiring and end-to-end tests
+- [x] 22-01-PLAN.md — Statistical analysis foundation with TDD (flappiness, baseline)
+- [x] 22-02-PLAN.md — AlertAnalysisService with categorization and cache
+- [x] 22-03-PLAN.md — Integration lifecycle wiring and end-to-end tests
 
 #### Phase 23: MCP Tools
 **Goal**: AI can discover firing alerts, analyze state progression, and drill into full timeline through three progressive disclosure tools.
@@ -215,7 +216,7 @@ Plans:
 Plans:
 - [ ] TBD (created by /gsd:plan-phase)
 
-**Stats:** 4 phases, 7 plans (Phase 20-21 complete, Phase 22 planned), 22 requirements
+**Stats:** 4 phases, 7 plans (Phase 20-22 complete, Phase 23 pending), 22 requirements
 
 ## Progress
 
@@ -227,7 +228,7 @@ Plans:
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
 | v1.4 | 20-23 | 7 (in progress) | 22 | 🚧 In progress |
 
-**Total:** 23 phases (21 complete), 63 plans (60 complete, 3 planned), 146 requirements (133 complete)
+**Total:** 23 phases (22 complete), 63 plans (63 complete), 146 requirements (137 complete)
 
 ---
 *v1.4 roadmap updated: 2026-01-23*

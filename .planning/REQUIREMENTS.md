@@ -24,10 +24,10 @@ Requirements for Grafana alerts integration. Each maps to roadmap phases.
 
 ### Historical Analysis
 
-- [ ] **HIST-01**: 7-day baseline for alert state patterns (time-of-day matching)
-- [ ] **HIST-02**: Flappiness detection (frequent state transitions within window)
-- [ ] **HIST-03**: Trend analysis (alert started firing recently vs always firing)
-- [ ] **HIST-04**: State comparison with historical baseline (normal vs abnormal alert behavior)
+- [x] **HIST-01**: 7-day baseline for alert state patterns (time-of-day matching)
+- [x] **HIST-02**: Flappiness detection (frequent state transitions within window)
+- [x] **HIST-03**: Trend analysis (alert started firing recently vs always firing)
+- [x] **HIST-04**: State comparison with historical baseline (normal vs abnormal alert behavior)
 
 ### MCP Tools
 
@@ -83,10 +83,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GRPH-09 | Phase 20 | Complete |
 | GRPH-10 | Phase 20 | Complete |
 | GRPH-11 | Phase 21 | Complete |
-| HIST-01 | Phase 22 | Pending |
-| HIST-02 | Phase 22 | Pending |
-| HIST-03 | Phase 22 | Pending |
-| HIST-04 | Phase 22 | Pending |
+| HIST-01 | Phase 22 | Complete |
+| HIST-02 | Phase 22 | Complete |
+| HIST-03 | Phase 22 | Complete |
+| HIST-04 | Phase 22 | Complete |
 | TOOL-10 | Phase 23 | Pending |
 | TOOL-11 | Phase 23 | Pending |
 | TOOL-12 | Phase 23 | Pending |
