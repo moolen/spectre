@@ -34,6 +34,7 @@ type GrafanaIntegration struct {
 	secretWatcher *SecretWatcher       // Optional: manages API token from Kubernetes Secret
 	syncer        *DashboardSyncer     // Dashboard sync orchestrator
 	graphClient   graph.Client         // Graph client for dashboard sync
+	queryService  *GrafanaQueryService // Query service for MCP tools
 	logger        *logging.Logger
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -164,8 +165,12 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			g.logger.Warn("Failed to start dashboard syncer: %v (continuing without sync)", err)
 			// Don't fail startup - syncer is optional enhancement
 		}
+
+		// Create query service for MCP tools (requires graph client)
+		g.queryService = NewGrafanaQueryService(g.client, g.graphClient, g.logger)
+		g.logger.Info("Query service created for MCP tools")
 	} else {
-		g.logger.Info("Graph client not available - dashboard sync disabled")
+		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
 	}
 
 	g.logger.Info("Grafana integration started successfully (health: %s)", g.getHealthStatus().String())
@@ -197,6 +202,7 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.client = nil
 	g.secretWatcher = nil
 	g.syncer = nil
+	g.queryService = nil
 
 	// Update health status
 	g.setHealthStatus(integration.Stopped)
@@ -230,13 +236,114 @@ func (g *GrafanaIntegration) Health(ctx context.Context) integration.HealthStatu
 }
 
 // RegisterTools registers MCP tools with the server for this integration instance.
-// Placeholder - tools will be registered in Phase 18.
 func (g *GrafanaIntegration) RegisterTools(registry integration.ToolRegistry) error {
-	g.logger.Info("Grafana MCP tools registration placeholder (tools will be added in Phase 18)")
-	// Phase 18 will implement:
-	// - grafana_{name}_metrics_overview
-	// - grafana_{name}_dashboard_list
-	// - grafana_{name}_panel_query
+	g.logger.Info("Registering Grafana MCP tools for instance: %s", g.name)
+
+	// Check if query service is initialized (requires graph client)
+	if g.queryService == nil {
+		g.logger.Warn("Query service not initialized, skipping tool registration")
+		return nil
+	}
+
+	// Register Overview tool: grafana_{name}_metrics_overview
+	overviewTool := NewOverviewTool(g.queryService, g.graphClient, g.logger)
+	overviewName := fmt.Sprintf("grafana_%s_metrics_overview", g.name)
+	overviewSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"from": map[string]interface{}{
+				"type":        "string",
+				"description": "Start time (ISO8601: 2026-01-23T10:00:00Z)",
+			},
+			"to": map[string]interface{}{
+				"type":        "string",
+				"description": "End time (ISO8601: 2026-01-23T11:00:00Z)",
+			},
+			"cluster": map[string]interface{}{
+				"type":        "string",
+				"description": "Cluster name (required for scoping)",
+			},
+			"region": map[string]interface{}{
+				"type":        "string",
+				"description": "Region name (required for scoping)",
+			},
+		},
+		"required": []string{"from", "to", "cluster", "region"},
+	}
+	if err := registry.RegisterTool(overviewName, "Get overview of key metrics from overview-level dashboards (first 5 panels per dashboard). Use this for high-level anomaly detection across all services.", overviewTool.Execute, overviewSchema); err != nil {
+		return fmt.Errorf("failed to register overview tool: %w", err)
+	}
+	g.logger.Info("Registered tool: %s", overviewName)
+
+	// Register Aggregated tool: grafana_{name}_metrics_aggregated
+	aggregatedTool := NewAggregatedTool(g.queryService, g.graphClient, g.logger)
+	aggregatedName := fmt.Sprintf("grafana_%s_metrics_aggregated", g.name)
+	aggregatedSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"from": map[string]interface{}{
+				"type":        "string",
+				"description": "Start time (ISO8601: 2026-01-23T10:00:00Z)",
+			},
+			"to": map[string]interface{}{
+				"type":        "string",
+				"description": "End time (ISO8601: 2026-01-23T11:00:00Z)",
+			},
+			"cluster": map[string]interface{}{
+				"type":        "string",
+				"description": "Cluster name (required for scoping)",
+			},
+			"region": map[string]interface{}{
+				"type":        "string",
+				"description": "Region name (required for scoping)",
+			},
+			"service": map[string]interface{}{
+				"type":        "string",
+				"description": "Service name (optional, specify service OR namespace)",
+			},
+			"namespace": map[string]interface{}{
+				"type":        "string",
+				"description": "Namespace name (optional, specify service OR namespace)",
+			},
+		},
+		"required": []string{"from", "to", "cluster", "region"},
+	}
+	if err := registry.RegisterTool(aggregatedName, "Get aggregated metrics for a specific service or namespace from drill-down dashboards. Use this to focus on a particular service or namespace after detecting issues in overview.", aggregatedTool.Execute, aggregatedSchema); err != nil {
+		return fmt.Errorf("failed to register aggregated tool: %w", err)
+	}
+	g.logger.Info("Registered tool: %s", aggregatedName)
+
+	// Register Details tool: grafana_{name}_metrics_details
+	detailsTool := NewDetailsTool(g.queryService, g.graphClient, g.logger)
+	detailsName := fmt.Sprintf("grafana_%s_metrics_details", g.name)
+	detailsSchema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"from": map[string]interface{}{
+				"type":        "string",
+				"description": "Start time (ISO8601: 2026-01-23T10:00:00Z)",
+			},
+			"to": map[string]interface{}{
+				"type":        "string",
+				"description": "End time (ISO8601: 2026-01-23T11:00:00Z)",
+			},
+			"cluster": map[string]interface{}{
+				"type":        "string",
+				"description": "Cluster name (required for scoping)",
+			},
+			"region": map[string]interface{}{
+				"type":        "string",
+				"description": "Region name (required for scoping)",
+			},
+		},
+		"required": []string{"from", "to", "cluster", "region"},
+	}
+	if err := registry.RegisterTool(detailsName, "Get detailed metrics from detail-level dashboards (all panels). Use this for deep investigation of specific issues after narrowing scope with aggregated tool.", detailsTool.Execute, detailsSchema); err != nil {
+		return fmt.Errorf("failed to register details tool: %w", err)
+	}
+	g.logger.Info("Registered tool: %s", detailsName)
+
+	g.logger.Info("Successfully registered 3 Grafana MCP tools")
 	return nil
 }
 
