@@ -1,5 +1,60 @@
 # Project Milestones: Spectre MCP Plugin System
 
+## v1.4 Grafana Alerts Integration (Shipped: 2026-01-23)
+
+**Delivered:** Alert rule ingestion from Grafana with state tracking, historical analysis, and progressive disclosure MCP tools—overview with flappiness indicators, aggregated with 1h state timelines, details with full 7-day history.
+
+**Phases completed:** 20-23 (10 plans total)
+
+**Key accomplishments:**
+
+- Alert rule sync via Grafana Alerting API with incremental updates (version-based)
+- STATE_TRANSITION self-edges for 7-day timeline with TTL-based retention
+- Flappiness detection with exponential scaling (0.7 threshold)
+- Multi-label categorization: onset (NEW/RECENT/CHRONIC) + pattern (flapping/stable)
+- AlertAnalysisService with 1000-entry LRU cache (5-minute TTL)
+- Three MCP tools: overview (severity grouping), aggregated (10-min bucket timelines), details (full history)
+- 959 lines of integration tests with progressive disclosure workflow validation
+
+**Stats:**
+
+- ~4,630 LOC added
+- 4 phases, 10 plans, 22 requirements
+- Same-day execution (all 4 phases completed 2026-01-23)
+- Total: 6 Grafana MCP tools (3 metrics + 3 alerts)
+
+**Git range:** Phase 20 → Phase 23
+
+**What's next:** Cross-signal correlation (alert↔log, alert↔metric anomaly) or additional integrations (Datadog, PagerDuty)
+
+---
+
+## v1.3 Grafana Metrics Integration (Shipped: 2026-01-23)
+
+**Delivered:** Grafana dashboards as structured operational knowledge with PromQL parsing, semantic service inference, 7-day baseline anomaly detection, and progressive disclosure MCP tools—overview with ranked anomalies, aggregated with service focus, details with full dashboard execution.
+
+**Phases completed:** 15-19 (17 plans total)
+
+**Key accomplishments:**
+
+- Grafana API client with Bearer token authentication and SecretWatcher hot-reload
+- PromQL parser using official Prometheus library (metrics, labels, aggregations)
+- Dashboard→Panel→Query→Metric graph relationships with incremental sync
+- Service inference from PromQL labels with cluster/namespace scoping
+- Dashboard hierarchy classification (overview, drilldown, detail)
+- Statistical z-score detector with 7-day baseline (time-of-day, weekday/weekend matching)
+- Three MCP tools with progressive disclosure and anomaly ranking
+
+**Stats:**
+
+- ~6,835 LOC added
+- 5 phases, 17 plans, 51 requirements
+- 2-day execution (2026-01-22 to 2026-01-23)
+
+**Git range:** Phase 15 → Phase 19
+
+---
+
 ## v1.2 Logz.io Integration + Secret Management (Shipped: 2026-01-22)
 
 **Delivered:** Logz.io as second log backend with Kubernetes-native secret management—SecretWatcher with hot-reload, 3 MCP tools (overview, logs, patterns), UI configuration form, and Helm chart documentation for production deployment.

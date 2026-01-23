@@ -8,23 +8,32 @@ A Kubernetes observability platform with an MCP server for AI assistants. Provid
 
 Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis in one server.
 
-## Current Milestone: v1.4 Grafana Alerts Integration
+## Current State: v1.4 Shipped
 
-**Goal:** Extend Grafana integration with alert rule ingestion, graph linking, and three progressive disclosure MCP tools for incident response.
+**No active milestone.** All planned features through v1.4 have been shipped.
 
-**Target features:**
+**Cumulative stats:** 23 phases, 66 plans, 146 requirements, ~137k LOC (Go + TypeScript)
+
+**Available capabilities:**
+- Timeline-based Kubernetes event exploration with FalkorDB graph
+- Log exploration via VictoriaLogs and Logz.io with progressive disclosure
+- Grafana metrics integration with dashboard sync, anomaly detection, and 3 MCP tools
+- Grafana alerts integration with state tracking, flappiness analysis, and 3 MCP tools
+
+## Previous State (v1.4 Shipped)
+
+**Shipped 2026-01-23:**
 - Alert rule sync via Grafana Alerting API (incremental, version-based)
-- Graph schema: Alert nodes linked to existing Metrics/Services/Dashboards via PromQL
-- 7-day baseline for flappiness detection and historical comparison
-- Alert state timeline storage (firing/pending/normal transitions)
-- `grafana_{name}_alerts_overview` — firing/pending counts by severity/cluster/service/namespace
-- `grafana_{name}_alerts_aggregated` — specific alerts with 1h state progression analysis
-- `grafana_{name}_alerts_details` — full state timeline graph data for debugging
+- Alert nodes in FalkorDB linked to Metrics/Services via PromQL extraction
+- STATE_TRANSITION self-edges for 7-day timeline with TTL-based retention
+- Flappiness detection with exponential scaling (0.7 threshold)
+- Multi-label categorization: onset (NEW/RECENT/CHRONIC) + pattern (flapping/stable)
+- AlertAnalysisService with 1000-entry LRU cache (5-minute TTL)
+- `grafana_{name}_alerts_overview` — firing/pending counts by severity with flappiness indicators
+- `grafana_{name}_alerts_aggregated` — specific alerts with 1h state timelines [F F N N]
+- `grafana_{name}_alerts_details` — full 7-day state history with rule definition
 
-**Core principles:**
-- Progressive disclosure pattern (consistent with logs and metrics)
-- Link alerts to existing graph via metric extraction from alert PromQL queries
-- Operational focus — flappiness, state changes, trending alerts for incident response
+**Cumulative stats:** 23 phases, 66 plans, 146 requirements, ~137k LOC (Go + TypeScript)
 
 ## Previous State (v1.3 Shipped)
 
@@ -120,15 +129,15 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - ✓ MCP tool: metrics_details (full dashboard, deep expansion)
 - ✓ UI form for Grafana configuration (URL, API token, hierarchy mapping)
 
-### Active (v1.4)
+### v1.4 (Shipped)
 
-- [ ] Alert rule sync via Grafana Alerting API (incremental, version-based)
-- [ ] Alert nodes in FalkorDB linked to existing Metrics/Services/Dashboards
-- [ ] Alert state timeline storage (firing/pending/normal transitions)
-- [ ] 7-day baseline for flappiness detection and historical comparison
-- [ ] MCP tool: alerts_overview (firing/pending counts by severity/cluster/service)
-- [ ] MCP tool: alerts_aggregated (specific alerts with 1h state progression)
-- [ ] MCP tool: alerts_details (full state timeline graph data)
+- ✓ Alert rule sync via Grafana Alerting API (incremental, version-based)
+- ✓ Alert nodes in FalkorDB linked to existing Metrics/Services via PromQL extraction
+- ✓ Alert state timeline storage (STATE_TRANSITION edges with 7-day TTL)
+- ✓ Flappiness detection with exponential scaling and historical baseline
+- ✓ MCP tool: alerts_overview (firing/pending counts by severity with flappiness indicators)
+- ✓ MCP tool: alerts_aggregated (specific alerts with 1h state timelines [F F N N])
+- ✓ MCP tool: alerts_details (full 7-day state history with rule definition)
 
 ### Out of Scope
 
@@ -216,6 +225,13 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 | Z-score with time-of-day matching (v1.3) | Better anomaly detection vs simple rolling average | ✓ Good |
 | Error metrics use lower thresholds (v1.3) | Errors deserve attention at 2σ vs 3σ for normal | ✓ Good |
 | Baseline cache in graph with TTL (v1.3) | Performance optimization, 1-hour refresh | ✓ Good |
+| Self-edge pattern for state transitions (v1.4) | (Alert)-[STATE_TRANSITION]->(Alert) simpler than separate node | ✓ Good |
+| 7-day TTL via expires_at timestamp (v1.4) | Query-time filtering, no cleanup job needed | ✓ Good |
+| 5-minute state sync interval (v1.4) | More responsive than 1-hour rule sync | ✓ Good |
+| Exponential flappiness scaling (v1.4) | Penalizes rapid transitions more than linear | ✓ Good |
+| LOCF interpolation for timelines (v1.4) | Fills gaps realistically in state buckets | ✓ Good |
+| Optional filter parameters (v1.4) | Maximum flexibility for AI alert queries | ✓ Good |
+| 10-minute timeline buckets (v1.4) | Compact notation [F F N N], 6 buckets per hour | ✓ Good |
 
 ## Tech Debt
 
@@ -223,4 +239,4 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - GET /{name} endpoint available but unused by UI (uses list endpoint instead)
 
 ---
-*Last updated: 2026-01-23 after v1.4 milestone started*
+*Last updated: 2026-01-23 after v1.4 milestone shipped*
