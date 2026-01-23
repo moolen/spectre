@@ -34,6 +34,7 @@ type GrafanaIntegration struct {
 	secretWatcher  *SecretWatcher       // Optional: manages API token from Kubernetes Secret
 	syncer         *DashboardSyncer     // Dashboard sync orchestrator
 	alertSyncer    *AlertSyncer         // Alert sync orchestrator
+	stateSyncer    *AlertStateSyncer    // Alert state sync orchestrator
 	graphClient    graph.Client         // Graph client for dashboard sync
 	queryService   *GrafanaQueryService // Query service for MCP tools
 	anomalyService *AnomalyService      // Anomaly detection service for MCP tools
@@ -184,6 +185,20 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			// Don't fail startup - syncer is optional enhancement
 		}
 
+		// Alert state syncer runs independently from rule syncer (5-min vs 1-hour interval)
+		g.logger.Info("Starting alert state syncer (sync interval: 5 minutes)")
+		g.stateSyncer = NewAlertStateSyncer(
+			g.client,
+			g.graphClient,
+			graphBuilder,
+			g.name, // Integration name
+			g.logger,
+		)
+		if err := g.stateSyncer.Start(g.ctx); err != nil {
+			g.logger.Warn("Failed to start alert state syncer: %v (continuing without state tracking)", err)
+			// Non-fatal - alert rules still work, just no state timeline
+		}
+
 		// Create query service for MCP tools (requires graph client)
 		g.queryService = NewGrafanaQueryService(g.client, g.graphClient, g.logger)
 		g.logger.Info("Query service created for MCP tools")
@@ -210,6 +225,12 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 		g.cancel()
 	}
 
+	// Stop alert state syncer if it exists
+	if g.stateSyncer != nil {
+		g.logger.Info("Stopping alert state syncer for integration %s", g.name)
+		g.stateSyncer.Stop()
+	}
+
 	// Stop alert syncer if it exists
 	if g.alertSyncer != nil {
 		g.logger.Info("Stopping alert syncer for integration %s", g.name)
@@ -233,6 +254,7 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.secretWatcher = nil
 	g.syncer = nil
 	g.alertSyncer = nil
+	g.stateSyncer = nil
 	g.queryService = nil
 
 	// Update health status
