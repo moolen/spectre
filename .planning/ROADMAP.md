@@ -6,7 +6,7 @@
 - ✅ **v1.1 Server Consolidation** - Phases 6-9 (shipped 2026-01-21)
 - ✅ **v1.2 Logz.io Integration + Secret Management** - Phases 10-14 (shipped 2026-01-22)
 - ✅ **v1.3 Grafana Metrics Integration** - Phases 15-19 (shipped 2026-01-23)
-- 🚧 **v1.4 Grafana Alerts Integration** - Phases 20-23 (in progress)
+- ✅ **v1.4 Grafana Alerts Integration** - Phases 20-23 (shipped 2026-01-23)
 
 ## Phases
 
@@ -140,7 +140,8 @@ Plans:
 
 </details>
 
-### 🚧 v1.4 Grafana Alerts Integration (Phases 20-23) - IN PROGRESS
+<details>
+<summary>✅ v1.4 Grafana Alerts Integration (Phases 20-23) - SHIPPED 2026-01-23</summary>
 
 **Milestone Goal:** Extend Grafana integration with alert rule ingestion, graph linking, and progressive disclosure MCP tools for incident response.
 
@@ -197,7 +198,7 @@ Plans:
 - [x] 22-02-PLAN.md — AlertAnalysisService with categorization and cache
 - [x] 22-03-PLAN.md — Integration lifecycle wiring and end-to-end tests
 
-#### Phase 23: MCP Tools
+#### ✅ Phase 23: MCP Tools
 **Goal**: AI can discover firing alerts, analyze state progression, and drill into full timeline through three progressive disclosure tools.
 **Depends on**: Phase 22
 **Requirements**: TOOL-10, TOOL-11, TOOL-12, TOOL-13, TOOL-14, TOOL-15, TOOL-16, TOOL-17, TOOL-18
@@ -212,13 +213,16 @@ Plans:
   8. Details tool includes alert rule definition and labels
   9. All alert tools are stateless (AI manages context across calls)
 **Plans**: 3 plans
+**Completed**: 2026-01-23
 
 Plans:
-- [ ] 23-01-PLAN.md — Overview tool with filtering and flappiness counts
-- [ ] 23-02-PLAN.md — Aggregated and details tools with state timeline buckets
-- [ ] 23-03-PLAN.md — Integration tests and end-to-end verification
+- [x] 23-01-PLAN.md — Overview tool with filtering and flappiness counts
+- [x] 23-02-PLAN.md — Aggregated and details tools with state timeline buckets
+- [x] 23-03-PLAN.md — Integration tests and end-to-end verification
 
-**Stats:** 4 phases, 10 plans (7 complete, 3 planned), 22 requirements
+**Stats:** 4 phases, 10 plans, 22 requirements
+
+</details>
 
 ## Progress
 
@@ -228,9 +232,9 @@ Plans:
 | v1.1 | 6-9 | 12 | 21 | ✅ Shipped 2026-01-21 |
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
-| v1.4 | 20-23 | 10 (7 complete, 3 planned) | 22 | 🚧 In progress |
+| v1.4 | 20-23 | 10 | 22 | ✅ Shipped 2026-01-23 |
 
-**Total:** 23 phases (22 complete), 66 plans (63 complete, 3 planned), 146 requirements (137 complete)
+**Total:** 23 phases, 66 plans, 146 requirements — ALL COMPLETE ✅
 
 ---
-*v1.4 roadmap updated: 2026-01-23*
+*v1.4 roadmap completed: 2026-01-23*

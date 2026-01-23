@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-01-23)
 
 **Core value:** Enable AI assistants to understand what's happening in Kubernetes clusters through unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis.
-**Current focus:** v1.4 Grafana Alerts Integration
+**Current focus:** v1.4 Grafana Alerts Integration — COMPLETE ✅
 
 ## Current Position
 
@@ -42,8 +42,7 @@ Progress: [█████████████████████] 100%
 
 **Cumulative:**
 - Total plans: 66 complete (v1.0-v1.4 Phase 23-03 COMPLETE)
-- Milestones shipped: 4 (v1.0, v1.1, v1.2, v1.3)
-- v1.4 ready for release
+- Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
 
 ## Accumulated Context
 
@@ -172,8 +171,8 @@ None yet.
 
 ## Milestone History
 
-- **v1.4 Grafana Alerts Integration** — ready 2026-01-23
-  - 4 phases (20-23), 10 plans, 27 requirements
+- **v1.4 Grafana Alerts Integration** — shipped 2026-01-23
+  - 4 phases (20-23), 10 plans, 22 requirements
   - Alert rule sync, state tracking, flappiness analysis, three MCP tools with progressive disclosure
 
 - **v1.3 Grafana Metrics Integration** — shipped 2026-01-23
@@ -205,7 +204,7 @@ None yet.
 **Resume file:** None
 **Context preserved:** Phase 23-03 COMPLETE ✅ - Comprehensive integration tests (959 lines) validate all three alert MCP tools with mockAlertGraphClient providing realistic Alert nodes and STATE_TRANSITION edges. Progressive disclosure workflow verified end-to-end: overview → aggregated → details. Edge cases covered: nil analysis service, ErrInsufficientData, parameter validation. State timeline bucketization tested with 10-minute LOCF interpolation. v1.4 Grafana Alerts Integration COMPLETE.
 
-**Next step:** v1.4 ready for release and deployment.
+**Next step:** v1.4 shipped. Run `/gsd:audit-milestone` to verify requirements and cross-phase integration, or `/gsd:complete-milestone` to archive.
 
 ---
-*Last updated: 2026-01-23 — Phase 23-03 complete, v1.4 Grafana Alerts Integration COMPLETE*
+*Last updated: 2026-01-23 — v1.4 milestone SHIPPED*
