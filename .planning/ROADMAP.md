@@ -125,10 +125,13 @@ Plans:
   4. MCP tool `grafana_{name}_metrics_overview` returns ranked anomalies with severity
   5. Anomaly detection handles missing metrics gracefully (checks scrape status, uses fallback)
   6. Baselines are cached in graph with 1-hour TTL for performance
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 19-01: TBD
+- [ ] 19-01-PLAN.md — Statistical detector with z-score analysis (TDD)
+- [ ] 19-02-PLAN.md — Baseline cache with FalkorDB storage and TTL
+- [ ] 19-03-PLAN.md — Anomaly service orchestration and Overview tool integration
+- [ ] 19-04-PLAN.md — Integration wiring, tests, and verification
 
 ## Progress
 
@@ -141,7 +144,7 @@ Phases execute in numeric order: 15 → 16 → 17 → 18 → 19
 | 16. Ingestion Pipeline | 3/3 | ✓ Complete | 2026-01-22 |
 | 17. Semantic Layer | 4/4 | ✓ Complete | 2026-01-23 |
 | 18. Query Execution & MCP Tools | 3/3 | ✓ Complete | 2026-01-23 |
-| 19. Anomaly Detection | 0/TBD | Not started | - |
+| 19. Anomaly Detection | 0/4 | Not started | - |
 
 ---
 *v1.3 roadmap created: 2026-01-22*
