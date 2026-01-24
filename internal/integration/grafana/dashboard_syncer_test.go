@@ -2,6 +2,7 @@ package grafana
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -364,7 +365,7 @@ func TestParseDashboard(t *testing.T) {
 				Type:  "graph",
 				GridPos: GrafanaGridPos{X: 0, Y: 0},
 				Targets: []GrafanaTarget{
-					{RefID: "A", Expr: "up", DatasourceUID: "prom-1"},
+					{RefID: "A", Expr: "up", DatasourceRaw: json.RawMessage(`"prom-1"`)},
 				},
 			},
 		},

@@ -32,6 +32,11 @@ func WriteIntegrationsFile(path string, config *IntegrationsFile) error {
 	// Get directory of target file for temp file creation
 	dir := filepath.Dir(path)
 
+	// Create directory if it doesn't exist (with mode 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory %q: %w", dir, err)
+	}
+
 	// Create temp file in same directory as target
 	// Pattern: .integrations.*.yaml.tmp
 	tmpFile, err := os.CreateTemp(dir, ".integrations.*.yaml.tmp")

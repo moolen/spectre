@@ -34,11 +34,6 @@ type ServiceConfig struct {
 	// Sync pipeline configuration
 	PipelineConfig sync.PipelineConfig
 
-	// Rebuild options
-	RebuildOnStart      bool
-	RebuildWindow       time.Duration
-	RebuildIfEmptyOnly  bool
-
 	// Integration
 	AutoStartPipeline bool
 }
@@ -46,12 +41,9 @@ type ServiceConfig struct {
 // DefaultServiceConfig returns default service configuration
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		GraphConfig:         graph.DefaultClientConfig(),
-		PipelineConfig:      sync.DefaultPipelineConfig(),
-		RebuildOnStart:      true,
-		RebuildWindow:       24 * time.Hour,
-		RebuildIfEmptyOnly:  true,
-		AutoStartPipeline:   true,
+		GraphConfig:       graph.DefaultClientConfig(),
+		PipelineConfig:    sync.DefaultPipelineConfig(),
+		AutoStartPipeline: true,
 	}
 }
 
@@ -170,12 +162,6 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start listener: %w", err)
 	}
 	s.logger.Info("Event listener started and ready to receive events")
-
-		// Rebuild functionality removed - graph starts empty
-		// No rebuild from storage since storage package is removed
-		if s.config.RebuildOnStart {
-			s.logger.Info("Graph rebuild on start is disabled (storage package removed - graph starts empty)")
-		}
 
 	// Start change detector for event-driven cache invalidation
 	if s.changeDetector != nil {

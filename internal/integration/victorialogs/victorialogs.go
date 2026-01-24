@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moolen/spectre/internal/integration"
@@ -37,6 +38,8 @@ type VictoriaLogsIntegration struct {
 	registry      integration.ToolRegistry     // MCP tool registry for dynamic tool registration
 	templateStore *logprocessing.TemplateStore // Template store for pattern mining
 	secretWatcher *SecretWatcher               // Optional: manages API token from Kubernetes Secret
+	healthStatus  integration.HealthStatus     // Cached health status
+	mu            sync.RWMutex                 // Protects healthStatus
 }
 
 // NewVictoriaLogsIntegration creates a new VictoriaLogs integration instance.
@@ -62,11 +65,12 @@ func NewVictoriaLogsIntegration(name string, configMap map[string]interface{}) (
 	return &VictoriaLogsIntegration{
 		name:          name,
 		config:        config,
-		client:        nil,        // Initialized in Start()
-		pipeline:      nil,        // Initialized in Start()
-		metrics:       nil,        // Initialized in Start()
-		templateStore: nil,        // Initialized in Start()
-		secretWatcher: nil,        // Initialized in Start() if config uses SecretRef
+		client:        nil,                    // Initialized in Start()
+		pipeline:      nil,                    // Initialized in Start()
+		metrics:       nil,                    // Initialized in Start()
+		templateStore: nil,                    // Initialized in Start()
+		secretWatcher: nil,                    // Initialized in Start() if config uses SecretRef
+		healthStatus:  integration.Stopped,    // Initial state
 		logger:        logging.GetLogger("integration.victorialogs." + name),
 	}, nil
 }
@@ -151,9 +155,12 @@ func (v *VictoriaLogsIntegration) Start(ctx context.Context) error {
 	// Test connectivity (warn on failure but continue - degraded state with auto-recovery)
 	if err := v.testConnection(ctx); err != nil {
 		v.logger.Warn("Failed initial connectivity test (will retry on health checks): %v", err)
+		v.setHealthStatus(integration.Degraded)
+	} else {
+		v.setHealthStatus(integration.Healthy)
 	}
 
-	v.logger.Info("VictoriaLogs integration started successfully")
+	v.logger.Info("VictoriaLogs integration started successfully (health: %s)", v.getHealthStatus().String())
 	return nil
 }
 
@@ -187,12 +194,16 @@ func (v *VictoriaLogsIntegration) Stop(ctx context.Context) error {
 	v.metrics = nil
 	v.templateStore = nil
 	v.secretWatcher = nil
+	v.setHealthStatus(integration.Stopped)
 
 	v.logger.Info("VictoriaLogs integration stopped")
 	return nil
 }
 
-// Health returns the current health status.
+// Health returns the current cached health status.
+// This method is called frequently (e.g., SSE polling every 2s) so it returns
+// cached status rather than testing connectivity. Actual connectivity tests
+// happen during Start() and periodic health checks by the integration manager.
 func (v *VictoriaLogsIntegration) Health(ctx context.Context) integration.HealthStatus {
 	// If client is nil, integration hasn't been started or has been stopped
 	if v.client == nil {
@@ -201,16 +212,43 @@ func (v *VictoriaLogsIntegration) Health(ctx context.Context) integration.Health
 
 	// If using secret ref, check if token is available
 	if v.secretWatcher != nil && !v.secretWatcher.IsHealthy() {
-		v.logger.Warn("Integration degraded: SecretWatcher has no valid token")
+		v.setHealthStatus(integration.Degraded)
 		return integration.Degraded
 	}
 
-	// Test connectivity
+	// Return cached health status - connectivity is tested by manager's periodic health checks
+	return v.getHealthStatus()
+}
+
+// CheckConnectivity implements integration.ConnectivityChecker.
+// Called by the manager during periodic health checks (every 30s) to verify actual connectivity.
+func (v *VictoriaLogsIntegration) CheckConnectivity(ctx context.Context) error {
+	if v.client == nil {
+		v.setHealthStatus(integration.Stopped)
+		return fmt.Errorf("client not initialized")
+	}
+
 	if err := v.testConnection(ctx); err != nil {
-		return integration.Degraded
+		v.setHealthStatus(integration.Degraded)
+		return err
 	}
 
-	return integration.Healthy
+	v.setHealthStatus(integration.Healthy)
+	return nil
+}
+
+// setHealthStatus updates the health status in a thread-safe manner.
+func (v *VictoriaLogsIntegration) setHealthStatus(status integration.HealthStatus) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.healthStatus = status
+}
+
+// getHealthStatus retrieves the health status in a thread-safe manner.
+func (v *VictoriaLogsIntegration) getHealthStatus() integration.HealthStatus {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.healthStatus
 }
 
 // RegisterTools registers MCP tools with the server for this integration instance.

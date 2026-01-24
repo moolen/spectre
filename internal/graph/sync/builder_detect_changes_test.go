@@ -36,6 +36,15 @@ func (m *mockGraphClientForDetectChanges) GetGraphStats(ctx context.Context) (*g
 }
 func (m *mockGraphClientForDetectChanges) InitializeSchema(ctx context.Context) error { return nil }
 func (m *mockGraphClientForDetectChanges) DeleteGraph(ctx context.Context) error      { return nil }
+func (m *mockGraphClientForDetectChanges) CreateGraph(ctx context.Context, graphName string) error {
+	return nil
+}
+func (m *mockGraphClientForDetectChanges) DeleteGraphByName(ctx context.Context, graphName string) error {
+	return nil
+}
+func (m *mockGraphClientForDetectChanges) GraphExists(ctx context.Context, graphName string) (bool, error) {
+	return true, nil
+}
 func (m *mockGraphClientForDetectChanges) ExecuteQuery(ctx context.Context, query graph.GraphQuery) (*graph.QueryResult, error) {
 	return m.queryResult, nil
 }

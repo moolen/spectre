@@ -265,7 +265,9 @@ func (e *FluxHelmReleaseExtractor) extractManagedResources(
 			WHERE (r.namespace = $namespace OR r.namespace = "")
 			  AND NOT r.deleted
 			  AND r.uid <> $helmReleaseUID
-			  AND NOT EXISTS { MATCH (:ResourceIdentity)-[:OWNS]->(r) }
+			OPTIONAL MATCH (owner:ResourceIdentity)-[:OWNS]->(r)
+			WITH r, owner
+			WHERE owner IS NULL
 			RETURN r
 			LIMIT 500
 		`,

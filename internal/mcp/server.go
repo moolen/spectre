@@ -377,25 +377,26 @@ func NewMCPToolRegistry(mcpServer *server.MCPServer) *MCPToolRegistry {
 
 // RegisterTool registers an MCP tool with the mcp-go server.
 // It adapts the integration.ToolHandler to the mcp-go handler format.
-func (r *MCPToolRegistry) RegisterTool(name string, handler integration.ToolHandler) error {
+func (r *MCPToolRegistry) RegisterTool(name string, description string, handler integration.ToolHandler, inputSchema map[string]interface{}) error {
 	// Validation
 	if name == "" {
 		return fmt.Errorf("tool name cannot be empty")
 	}
 
-	// Generic schema (tools provide args via JSON)
-	// Integration handlers will validate their own arguments
-	inputSchema := map[string]interface{}{
-		"type":       "object",
-		"properties": map[string]interface{}{},
+	// Use provided schema or fall back to empty object schema
+	if inputSchema == nil {
+		inputSchema = map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		}
 	}
 	schemaJSON, err := json.Marshal(inputSchema)
 	if err != nil {
 		return fmt.Errorf("failed to marshal schema: %w", err)
 	}
 
-	// Create MCP tool with generic schema
-	mcpTool := mcp.NewToolWithRawSchema(name, "", schemaJSON)
+	// Create MCP tool with provided schema
+	mcpTool := mcp.NewToolWithRawSchema(name, description, schemaJSON)
 
 	// Adapter: integration.ToolHandler -> server.ToolHandlerFunc
 	adaptedHandler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

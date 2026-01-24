@@ -237,7 +237,9 @@ func (e *ArgoCDApplicationExtractor) extractManagedResources(
 			MATCH (r:ResourceIdentity)
 			WHERE NOT r.deleted
 			  AND r.labels CONTAINS $labelQuery
-			  AND NOT EXISTS { MATCH (:ResourceIdentity)-[:OWNS]->(r) }
+			OPTIONAL MATCH (owner:ResourceIdentity)-[:OWNS]->(r)
+			WITH r, owner
+			WHERE owner IS NULL
 			RETURN r.uid
 		`,
 		Parameters: map[string]interface{}{

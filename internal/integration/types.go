@@ -95,6 +95,24 @@ type ToolRegistry interface {
 // Returns: result (JSON-serializable) and error
 type ToolHandler func(ctx context.Context, args []byte) (interface{}, error)
 
+// ConnectivityChecker is an optional interface that integrations can implement
+// to provide deep connectivity testing. The manager calls this during periodic
+// health checks (every 30s) to verify actual connectivity, while Health() returns
+// cached status for frequent polling (e.g., SSE every 2s).
+type ConnectivityChecker interface {
+	// CheckConnectivity performs actual connectivity testing and updates health status.
+	// Returns error if connectivity test fails.
+	CheckConnectivity(ctx context.Context) error
+}
+
+// GraphClientSetter is an optional interface that integrations can implement
+// to receive a graph database client. The manager calls this after creating
+// the integration instance but before Start().
+type GraphClientSetter interface {
+	// SetGraphClient sets the graph client for integrations that need it.
+	SetGraphClient(client interface{})
+}
+
 // InstanceConfig is a placeholder type for instance-specific configuration.
 // Each integration type provides its own concrete config struct that embeds
 // or implements this interface.

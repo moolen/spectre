@@ -42,10 +42,13 @@ func (f *RelationshipFetcher) FetchRelationships(
 	// Query to find all relationship edges between the given resources
 	// Excludes structural edges (CHANGED, EMITTED_EVENT) that connect to event nodes
 	// Only includes edges where both source and target are ResourceIdentity nodes in our set
+	//
+	// Optimized: Match relationships directly without UNWIND to avoid O(n²) complexity.
+	// This query finds all edges where both endpoints are in the UID set in a single pass.
 	cypherQuery := `
-		UNWIND $uids AS uid
-		MATCH (r:ResourceIdentity {uid: uid})-[rel]->(target:ResourceIdentity)
-		WHERE target.uid IN $uids
+		MATCH (r:ResourceIdentity)-[rel]->(target:ResourceIdentity)
+		WHERE r.uid IN $uids
+		  AND target.uid IN $uids
 		  AND NOT type(rel) IN ['CHANGED', 'EMITTED_EVENT']
 		RETURN DISTINCT r.uid as source, target.uid as target, type(rel) as relType, id(rel) as edgeId
 	`

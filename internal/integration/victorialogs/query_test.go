@@ -85,13 +85,15 @@ func TestBuildLogsQLQuery_TimeRangeValidation(t *testing.T) {
 
 func TestBuildLogsQLQuery_WithFilters(t *testing.T) {
 	// Test that validation doesn't break normal query construction
+	// Use a time range relative to now for the test
+	now := time.Now()
 	params := QueryParams{
 		Namespace: "prod",
 		Pod:       "app-pod",
 		Level:     "error",
 		TimeRange: TimeRange{
-			Start: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
-			End:   time.Date(2024, 1, 1, 13, 0, 0, 0, time.UTC),
+			Start: now.Add(-1 * time.Hour),
+			End:   now,
 		},
 		Limit: 100,
 	}
@@ -99,9 +101,13 @@ func TestBuildLogsQLQuery_WithFilters(t *testing.T) {
 	query := BuildLogsQLQuery(params)
 
 	assert.NotEmpty(t, query, "Query should be constructed")
-	assert.Contains(t, query, `namespace:="prod"`, "Query should include namespace filter")
-	assert.Contains(t, query, `pod:="app-pod"`, "Query should include pod filter")
-	assert.Contains(t, query, `level:="error"`, "Query should include level filter")
-	assert.Contains(t, query, "_time:[2024-01-01T12:00:00Z, 2024-01-01T13:00:00Z]", "Query should include time range")
+	// LogsQL uses kubernetes.* field names and field:"value" syntax (not :=)
+	assert.Contains(t, query, `kubernetes.pod_namespace:"prod"`, "Query should include namespace filter with kubernetes.* prefix")
+	assert.Contains(t, query, `kubernetes.pod_name:"app-pod"`, "Query should include pod filter with kubernetes.* prefix")
+	assert.Contains(t, query, `level:"error"`, "Query should include level filter")
+	// LogsQL uses relative time format like _time:1h or _time:60m
+	assert.Contains(t, query, "_time:", "Query should include time filter")
 	assert.Contains(t, query, "| limit 100", "Query should include limit")
+	// Verify no AND keyword (LogsQL uses space-separated filters)
+	assert.NotContains(t, query, " AND ", "Query should NOT use explicit AND keyword")
 }

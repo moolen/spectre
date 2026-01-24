@@ -21,14 +21,17 @@ func (m *MockTool) Execute(ctx context.Context, input json.RawMessage) (interfac
 }
 
 func TestSpectreServer_Creation(t *testing.T) {
-	// This test will fail if Spectre API is not running
-	// That's expected - it tests the connection logic
-	_, err := NewSpectreServer("http://invalid-url:9999", "1.0.0-test")
+	// NewSpectreServerWithOptions requires TimelineService and GraphService
+	// Without them, creation should fail
+	_, err := NewSpectreServerWithOptions(ServerOptions{
+		Version: "1.0.0-test",
+		// TimelineService and GraphService are nil
+	})
 	if err == nil {
-		t.Error("Expected error when connecting to invalid URL")
+		t.Error("Expected error when TimelineService is nil")
 	}
 
-	// Verify error message is meaningful
+	// Verify error message mentions the missing service
 	if err != nil && err.Error() == "" {
 		t.Error("Error should have a message")
 	}

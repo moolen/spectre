@@ -15,11 +15,12 @@ func (a *RootCauseAnalyzer) getManagers(ctx context.Context, resourceUIDs []stri
 		return make(map[string]*ManagerData), nil
 	}
 
+	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
 	query := graph.GraphQuery{
 		Timeout: DefaultQueryTimeoutMs,
 		Query: `
-			UNWIND $resourceUIDs as uid
-			MATCH (resource:ResourceIdentity {uid: uid})
+			MATCH (resource:ResourceIdentity)
+			WHERE resource.uid IN $resourceUIDs
 			OPTIONAL MATCH (manager:ResourceIdentity)-[manages:MANAGES]->(resource)
 			WHERE manages.confidence >= $minConfidence
 			RETURN resource.uid as resourceUID, manager, manages
@@ -99,43 +100,44 @@ func (a *RootCauseAnalyzer) getRelatedResources(ctx context.Context, resourceUID
 	// Calculate the start of the time window
 	startNs := failureTimestamp - lookbackNs
 
+	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
 	query := graph.GraphQuery{
 		Timeout: DefaultQueryTimeoutMs,
 		Query: `
 			// Direct relationships from resources
-			UNWIND $resourceUIDs as uid
-			MATCH (resource:ResourceIdentity {uid: uid})
+			MATCH (resource:ResourceIdentity)
+			WHERE resource.uid IN $resourceUIDs
 			// REFERENCES_SPEC: include deleted resources if deleted within time window
 			OPTIONAL MATCH (resource)-[refSpec:REFERENCES_SPEC]->(referencedResource:ResourceIdentity)
-			WHERE coalesce(referencedResource.deleted, false) = false 
+			WHERE coalesce(referencedResource.deleted, false) = false
 			   OR (referencedResource.deletedAt >= $startNs AND referencedResource.deletedAt <= $endNs)
 			OPTIONAL MATCH (resource)-[scheduledOn:SCHEDULED_ON]->(node:ResourceIdentity)
-			WHERE coalesce(node.deleted, false) = false 
+			WHERE coalesce(node.deleted, false) = false
 			   OR (node.deletedAt >= $startNs AND node.deletedAt <= $endNs)
 			OPTIONAL MATCH (resource)-[usesSA:USES_SERVICE_ACCOUNT]->(sa:ResourceIdentity)
-			WHERE coalesce(sa.deleted, false) = false 
+			WHERE coalesce(sa.deleted, false) = false
 			   OR (sa.deletedAt >= $startNs AND sa.deletedAt <= $endNs)
 			OPTIONAL MATCH (selector:ResourceIdentity)-[selects:SELECTS]->(resource)
 			WHERE selector.kind IN ['Service', 'NetworkPolicy']
-			  AND (coalesce(selector.deleted, false) = false 
+			  AND (coalesce(selector.deleted, false) = false
 			       OR (selector.deletedAt >= $startNs AND selector.deletedAt <= $endNs))
 
 			// Find Ingresses that reference Services that select this resource
 			OPTIONAL MATCH (ingress:ResourceIdentity)-[ref:REFERENCES_SPEC]->(selector)
 			WHERE ingress.kind = 'Ingress' AND selector.kind = 'Service'
-			  AND (coalesce(ingress.deleted, false) = false 
+			  AND (coalesce(ingress.deleted, false) = false
 			       OR (ingress.deletedAt >= $startNs AND ingress.deletedAt <= $endNs))
 
 			// Get RoleBindings that grant to service accounts used by this resource
 			OPTIONAL MATCH (rb:ResourceIdentity)-[grantsTo:GRANTS_TO]->(sa)
 			WHERE sa IS NOT NULL
-			  AND (coalesce(rb.deleted, false) = false 
+			  AND (coalesce(rb.deleted, false) = false
 			       OR (rb.deletedAt >= $startNs AND rb.deletedAt <= $endNs))
 
 			// Get the Role/ClusterRole that the RoleBinding binds to
 			OPTIONAL MATCH (rb)-[bindsRole:BINDS_ROLE]->(role:ResourceIdentity)
 			WHERE rb IS NOT NULL
-			  AND (coalesce(role.deleted, false) = false 
+			  AND (coalesce(role.deleted, false) = false
 			       OR (role.deletedAt >= $startNs AND role.deletedAt <= $endNs))
 
 			RETURN resource.uid as resourceUID,

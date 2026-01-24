@@ -42,9 +42,30 @@ type GrafanaGridPos struct {
 
 // GrafanaTarget represents a query target within a panel
 type GrafanaTarget struct {
-	RefID        string `json:"refId"`
-	Expr         string `json:"expr"`         // PromQL expression
-	DatasourceUID string `json:"datasource"`  // Can be UID or other identifier
+	RefID         string          `json:"refId"`
+	Expr          string          `json:"expr"`       // PromQL expression
+	DatasourceRaw json.RawMessage `json:"datasource"` // Can be string or object {"type": "...", "uid": "..."}
+}
+
+// GetDatasourceUID extracts the datasource UID from either string or object format
+func (t *GrafanaTarget) GetDatasourceUID() string {
+	if len(t.DatasourceRaw) == 0 {
+		return ""
+	}
+	// Try string first
+	var dsString string
+	if err := json.Unmarshal(t.DatasourceRaw, &dsString); err == nil {
+		return dsString
+	}
+	// Try object format {"type": "...", "uid": "..."}
+	var dsObject struct {
+		UID  string `json:"uid"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(t.DatasourceRaw, &dsObject); err == nil {
+		return dsObject.UID
+	}
+	return ""
 }
 
 // PromQLParserInterface defines the interface for PromQL parsing
@@ -494,7 +515,7 @@ func (gb *GraphBuilder) createQueryGraph(ctx context.Context, dashboardUID, pane
 			"queryID":        queryID,
 			"refId":          target.RefID,
 			"rawPromQL":      target.Expr,
-			"datasourceUID":  target.DatasourceUID,
+			"datasourceUID":  target.GetDatasourceUID(),
 			"aggregations":   string(aggregationsJSON),
 			"labelSelectors": string(labelSelectorsJSON),
 			"hasVariables":   extraction.HasVariables,

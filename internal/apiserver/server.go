@@ -346,3 +346,16 @@ func (s *Server) RegisterMCPEndpoint(mcpServer *server.MCPServer) error {
 	s.registerMCPHandler()
 	return nil
 }
+
+// RegisterIntegrationHandlers registers integration config management endpoints after server initialization.
+// This allows the integration manager to be created after the API server (needed for MCP registry dependency).
+func (s *Server) RegisterIntegrationHandlers(integrationManager *integration.Manager) error {
+	if integrationManager == nil {
+		return fmt.Errorf("integrationManager cannot be nil")
+	}
+	s.integrationManager = integrationManager
+
+	// Register the integration config endpoints
+	s.registerIntegrationConfigHandlers()
+	return nil
+}

@@ -50,14 +50,11 @@ var (
 	tracingTLSCAPath      string
 	tracingTLSInsecure    bool
 	// Graph reasoning layer flags
-	graphEnabled            bool
-	graphHost               string
-	graphPort               int
-	graphName               string
-	graphRetentionHours     int
-	graphRebuildOnStart     bool
-	graphRebuildIfEmpty     bool
-	graphRebuildWindowHours int
+	graphEnabled        bool
+	graphHost           string
+	graphPort           int
+	graphName           string
+	graphRetentionHours int
 	// Audit log flag
 	auditLogPath string
 	// Metadata cache configuration
@@ -107,9 +104,6 @@ func init() {
 	serverCmd.Flags().IntVar(&graphPort, "graph-port", 6379, "FalkorDB port (default: 6379)")
 	serverCmd.Flags().StringVar(&graphName, "graph-name", "spectre", "FalkorDB graph name (default: spectre)")
 	serverCmd.Flags().IntVar(&graphRetentionHours, "graph-retention-hours", 168, "Graph data retention window in hours (default: 168 = 7 days)")
-	serverCmd.Flags().BoolVar(&graphRebuildOnStart, "graph-rebuild-on-start", false, "Rebuild graph on startup (default: false)")
-	serverCmd.Flags().BoolVar(&graphRebuildIfEmpty, "graph-rebuild-if-empty", true, "Only rebuild if graph is empty (default: true)")
-	serverCmd.Flags().IntVar(&graphRebuildWindowHours, "graph-rebuild-window-hours", 168, "Time window for graph rebuild in hours (default: 168 = 7 days)")
 
 	// Audit log flag
 	serverCmd.Flags().StringVar(&auditLogPath, "audit-log", "",
@@ -279,12 +273,9 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 
 		serviceConfig := graphservice.ServiceConfig{
-			GraphConfig:        graphConfig,
-			PipelineConfig:     graphservice.DefaultServiceConfig().PipelineConfig,
-			RebuildOnStart:     graphRebuildOnStart,
-			RebuildWindow:      time.Duration(graphRebuildWindowHours) * time.Hour,
-			RebuildIfEmptyOnly: graphRebuildIfEmpty,
-			AutoStartPipeline:  true,
+			GraphConfig:       graphConfig,
+			PipelineConfig:    graphservice.DefaultServiceConfig().PipelineConfig,
+			AutoStartPipeline: true,
 		}
 
 		// Set retention window from flag
@@ -486,6 +477,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		integrationMgr, err = integration.NewManagerWithMCPRegistry(integration.ManagerConfig{
 			ConfigPath:            integrationsConfigPath,
 			MinIntegrationVersion: minIntegrationVersion,
+			GraphClient:           graphClient, // Inject graph client for dashboard/alert syncing
 		}, mcpRegistry)
 		if err != nil {
 			logger.Error("Failed to create integration manager: %v", err)

@@ -488,3 +488,84 @@ func TestWatcherDefaultDebounce(t *testing.T) {
 		t.Errorf("expected default debounce 500ms, got %d", watcher.config.DebounceMillis)
 	}
 }
+
+// TestWatcherDetectsAtomicWrite verifies that the watcher correctly detects
+// file changes when using atomic writes (temp file + rename pattern).
+// This is critical because atomic writes can cause the inode to change,
+// and the watcher must re-add the watch after a Remove/Rename event.
+func TestWatcherDetectsAtomicWrite(t *testing.T) {
+	tmpFile := createTempConfigFile(t, validConfig())
+
+	var mu sync.Mutex
+	var lastConfig *IntegrationsFile
+	var callCount atomic.Int32
+
+	callback := func(config *IntegrationsFile) error {
+		callCount.Add(1)
+		mu.Lock()
+		lastConfig = config
+		mu.Unlock()
+		return nil
+	}
+
+	watcher, err := NewIntegrationWatcher(IntegrationWatcherConfig{
+		FilePath:       tmpFile,
+		DebounceMillis: 100,
+	}, callback)
+	if err != nil {
+		t.Fatalf("NewIntegrationWatcher failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := watcher.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer watcher.Stop()
+
+	// Initial callback should have been called
+	if callCount.Load() != 1 {
+		t.Fatalf("expected 1 initial callback, got %d", callCount.Load())
+	}
+
+	// Give watcher time to fully initialize
+	time.Sleep(100 * time.Millisecond)
+
+	// Use WriteIntegrationsFile which does atomic writes (temp file + rename)
+	newConfig := &IntegrationsFile{
+		SchemaVersion: "v1",
+		Instances: []IntegrationConfig{
+			{
+				Name:    "atomic-write-instance",
+				Type:    "victorialogs",
+				Enabled: true,
+				Config: map[string]interface{}{
+					"url": "http://atomic-test:9428",
+				},
+			},
+		},
+	}
+
+	if err := WriteIntegrationsFile(tmpFile, newConfig); err != nil {
+		t.Fatalf("WriteIntegrationsFile failed: %v", err)
+	}
+
+	// Wait for debounce + processing time (longer for atomic writes)
+	time.Sleep(500 * time.Millisecond)
+
+	// Callback should have been called again
+	if callCount.Load() != 2 {
+		t.Errorf("expected 2 callbacks after atomic write, got %d", callCount.Load())
+	}
+
+	// Verify the new config was received
+	mu.Lock()
+	defer mu.Unlock()
+	if lastConfig == nil || len(lastConfig.Instances) == 0 {
+		t.Fatal("no instances in config after atomic write")
+	}
+	if lastConfig.Instances[0].Name != "atomic-write-instance" {
+		t.Errorf("expected instance name 'atomic-write-instance', got %s", lastConfig.Instances[0].Name)
+	}
+}

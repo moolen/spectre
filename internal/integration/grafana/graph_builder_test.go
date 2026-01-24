@@ -120,7 +120,7 @@ func TestCreateDashboardGraph_SimplePanel(t *testing.T) {
 					{
 						RefID:         "A",
 						Expr:          "rate(http_requests_total[5m])",
-						DatasourceUID: "prometheus-uid",
+						DatasourceRaw: json.RawMessage(`"prometheus-uid"`),
 					},
 				},
 			},

@@ -1,4 +1,4 @@
-.PHONY: help build build-ui build-mcp run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down test-graph test-graph-integration test-integration test-graph-integration-coverage test-graph-integration-single golden-generator test-golden
+.PHONY: help build build-ui build-mcp build-docs run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down test-graph test-graph-integration test-integration test-graph-integration-coverage test-graph-integration-single golden-generator test-golden docs-dev docs-preview
 
 # Default target
 help:
@@ -8,6 +8,7 @@ help:
 	@echo "  build          - Build the application binary"
 	@echo "  build-ui       - Build the React UI"
 	@echo "  build-mcp      - Build the MCP server for Claude integration"
+	@echo "  build-docs     - Build the documentation site"
 	@echo "  proto          - Generate protobuf code"
 	@echo ""
 	@echo "Run:"
@@ -48,6 +49,11 @@ help:
 	@echo "  helm-unittest-install - Install helm-unittest plugin"
 	@echo "  helm-test      - Run Helm tests (requires active k8s cluster)"
 	@echo "  helm-test-local - Create Kind cluster and run Helm tests locally"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  build-docs     - Build the documentation site for production"
+	@echo "  docs-dev       - Run documentation dev server locally"
+	@echo "  docs-preview   - Preview production build locally"
 	@echo ""
 	@echo "Other:"
 	@echo "  clean          - Clean build artifacts and temporary files"
@@ -348,6 +354,26 @@ dev-clean:
 	@echo "==> Cleaning local state..."
 	rm -rf $(DATA_LOCAL_DIR)
 	mkdir -p $(DATA_LOCAL_DIR)
+
+# ============================================================================
+# Documentation Targets
+# ============================================================================
+
+# Build documentation site for production
+build-docs:
+	@echo "Building documentation site..."
+	@cd docs && npm ci && npm run build
+	@echo "Documentation build complete: docs/dist"
+
+# Run documentation dev server
+docs-dev:
+	@echo "Starting documentation dev server..."
+	@cd docs && npm ci && npm run dev
+
+# Preview production documentation build
+docs-preview: build-docs
+	@echo "Starting documentation preview server..."
+	@cd docs && npm run preview
 
 # Default target
 .DEFAULT_GOAL := help

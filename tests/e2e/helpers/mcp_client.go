@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,7 +76,30 @@ func NewMCPClient(t *testing.T, baseURL string) *MCPClient {
 	}
 }
 
-// sendRequest sends a JSON-RPC request to the MCP server.
+// isTransientError returns true if the error is transient and the request should be retried.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Check for common transient network errors
+	transientPatterns := []string{
+		"EOF",
+		"connection reset",
+		"connection refused",
+		"broken pipe",
+		"read/write on closed pipe",
+		"use of closed network connection",
+	}
+	for _, pattern := range transientPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// sendRequest sends a JSON-RPC request to the MCP server with retry logic for transient errors.
 func (m *MCPClient) sendRequest(ctx context.Context, method string, params map[string]interface{}) (*MCPResponse, error) {
 	reqID := time.Now().UnixNano()
 
@@ -91,34 +115,67 @@ func (m *MCPClient) sendRequest(ctx context.Context, method string, params map[s
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", m.BaseURL+"/v1/mcp", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	// Retry up to 3 times with exponential backoff for transient errors
+	maxRetries := 3
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: 500ms, 1s, 2s
+			backoff := time.Duration(1<<uint(attempt-1)) * 500 * time.Millisecond
+			m.t.Logf("Retrying MCP request after transient error (attempt %d/%d, backoff %v): %v", attempt+1, maxRetries, backoff, lastErr)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", m.BaseURL+"/v1/mcp", bytes.NewReader(reqBody))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		resp, err := m.Client.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			// Check if this is a transient error that should be retried
+			if isTransientError(err) && attempt < maxRetries-1 {
+				continue
+			}
+			return nil, fmt.Errorf("failed to execute request: %w", err)
+		}
+
+		// Read body and handle response
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if readErr != nil {
+			lastErr = readErr
+			if isTransientError(readErr) && attempt < maxRetries-1 {
+				continue
+			}
+			return nil, fmt.Errorf("failed to read response body: %w", readErr)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		}
+
+		var mcpResp MCPResponse
+		if err := json.Unmarshal(body, &mcpResp); err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+
+		if mcpResp.Error != nil {
+			return &mcpResp, fmt.Errorf("MCP error %d: %s", mcpResp.Error.Code, mcpResp.Error.Message)
+		}
+
+		return &mcpResp, nil
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := m.Client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
-	}
-
-	var mcpResp MCPResponse
-	if err := json.NewDecoder(resp.Body).Decode(&mcpResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if mcpResp.Error != nil {
-		return &mcpResp, fmt.Errorf("MCP error %d: %s", mcpResp.Error.Code, mcpResp.Error.Message)
-	}
-
-	return &mcpResp, nil
+	return nil, fmt.Errorf("failed to execute request after %d retries: %w", maxRetries, lastErr)
 }
 
 // Ping sends a ping request to the MCP server.

@@ -459,6 +459,42 @@ func (k *K8sClient) UpdateConfigMap(ctx context.Context, namespace, name string,
 	return nil
 }
 
+// TriggerPodVolumeSync forces kubelet to sync volumes by updating a pod annotation.
+// This is useful after ConfigMap updates to ensure the mounted volume is updated immediately
+// instead of waiting for the kubelet's sync period (default 60-90 seconds).
+// See: https://github.com/kubernetes/kubernetes/issues/30189
+func (k *K8sClient) TriggerPodVolumeSync(ctx context.Context, namespace, labelSelector string) error {
+	k.t.Logf("Triggering volume sync for pods with selector %s in namespace %s", labelSelector, namespace)
+
+	pods, err := k.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	if len(pods.Items) == 0 {
+		return fmt.Errorf("no pods found with selector %s in namespace %s", labelSelector, namespace)
+	}
+
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.Annotations == nil {
+			pod.Annotations = make(map[string]string)
+		}
+		// Update annotation to trigger kubelet sync
+		pod.Annotations["spectre.io/config-sync-trigger"] = time.Now().Format(time.RFC3339Nano)
+
+		_, err := k.Clientset.CoreV1().Pods(namespace).Update(ctx, pod, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update pod %s annotation: %w", pod.Name, err)
+		}
+		k.t.Logf("✓ Triggered volume sync for pod %s/%s", namespace, pod.Name)
+	}
+
+	return nil
+}
+
 // WaitForNamespaceDeleted waits for a namespace to be fully deleted
 func (k *K8sClient) WaitForNamespaceDeleted(ctx context.Context, namespace string, timeout time.Duration) error {
 	k.t.Helper()

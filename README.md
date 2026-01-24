@@ -17,8 +17,8 @@ Spectre is a Kubernetes observability system that captures resource changes acro
 <div align="center">
 <table>
 <tr>
-<td><img src="./docs/static/img/screenshot-2.png" alt="Timeline View" /></td>
-<td><img src="./docs/static/img/screenshot-1.png" alt="Graph View" /></td>
+<td><img src="./assets/screenshot-2.png" alt="Timeline View" /></td>
+<td><img src="./assets/screenshot-1.png" alt="Graph View" /></td>
 </tr>
 <tr>
 <td align="center"><em>Timeline View</em></td>

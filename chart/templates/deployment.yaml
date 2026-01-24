@@ -112,12 +112,12 @@ spec:
         - --graph-port={{ .Values.graph.falkordb.port }}
         - --graph-name={{ .Values.graph.falkordb.graphName }}
         - --graph-retention-hours={{ .Values.graph.sync.retentionHours }}
-        - --graph-rebuild-on-start={{ .Values.graph.sync.rebuildOnStart }}
-        - --graph-rebuild-if-empty={{ .Values.graph.sync.rebuildIfEmptyOnly }}
-        - --graph-rebuild-window-hours={{ .Values.graph.sync.rebuildWindowHours }}
         {{- end }}
         {{- if .Values.metadataCache }}
         - --metadata-cache-refresh-seconds={{ .Values.metadataCache.refreshSeconds }}
+        {{- end }}
+        {{- if .Values.integrations.enabled }}
+        - --integrations-config={{ .Values.integrations.configPath }}
         {{- end }}
         {{- range .Values.extraArgs }}
         - {{ . }}
@@ -126,6 +126,10 @@ spec:
         - name: watcher-config
           mountPath: /etc/watcher
           readOnly: true
+        {{- if .Values.integrations.persistence.enabled }}
+        - name: integrations-data
+          mountPath: {{ .Values.integrations.persistence.mountPath }}
+        {{- end }}
         {{- with .Values.extraVolumeMounts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -194,6 +198,11 @@ spec:
       - name: graph-data
         persistentVolumeClaim:
           claimName: {{ include "spectre.fullname" . }}-graph
+      {{- end }}
+      {{- if .Values.integrations.persistence.enabled }}
+      - name: integrations-data
+        persistentVolumeClaim:
+          claimName: {{ include "spectre.fullname" . }}-integrations
       {{- end }}
       {{- with .Values.extraVolumes }}
       {{- toYaml . | nindent 6 }}

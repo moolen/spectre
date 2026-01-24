@@ -31,11 +31,10 @@ func NewSearchService(queryExecutor QueryExecutor, logger *logging.Logger, trace
 }
 
 // ParseSearchQuery parses and validates query parameters into a QueryRequest
+// The q parameter is reserved for future full-text search functionality but is currently optional.
 func (s *SearchService) ParseSearchQuery(q string, startStr, endStr string, filters map[string]string) (*models.QueryRequest, error) {
-	// Validate query string is not empty
-	if q == "" {
-		return nil, NewValidationError("query parameter 'q' is required")
-	}
+	// Note: q parameter is reserved for future full-text search but currently unused
+	// The search operates on time windows and dimensional filters only
 
 	// Parse timestamps
 	start, err := ParseTimestamp(startStr, "start")

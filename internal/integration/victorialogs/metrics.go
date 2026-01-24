@@ -9,6 +9,11 @@ type Metrics struct {
 	QueueDepth   prometheus.Gauge   // Current number of logs in pipeline buffer
 	BatchesTotal prometheus.Counter // Total number of logs sent to VictoriaLogs
 	ErrorsTotal  prometheus.Counter // Total number of pipeline errors
+
+	// collectors holds references to all registered collectors for cleanup
+	collectors []prometheus.Collector
+	// registerer is the registry used for registration (needed for unregistration)
+	registerer prometheus.Registerer
 }
 
 // NewMetrics creates Prometheus metrics for a VictoriaLogs pipeline instance.
@@ -36,14 +41,28 @@ func NewMetrics(reg prometheus.Registerer, instanceName string) *Metrics {
 		ConstLabels: prometheus.Labels{"instance": instanceName},
 	})
 
+	// Collect all metrics for registration and later cleanup
+	collectors := []prometheus.Collector{queueDepth, batchesTotal, errorsTotal}
+
 	// Register all metrics with the provided registerer
-	reg.MustRegister(queueDepth)
-	reg.MustRegister(batchesTotal)
-	reg.MustRegister(errorsTotal)
+	reg.MustRegister(collectors...)
 
 	return &Metrics{
 		QueueDepth:   queueDepth,
 		BatchesTotal: batchesTotal,
 		ErrorsTotal:  errorsTotal,
+		collectors:   collectors,
+		registerer:   reg,
+	}
+}
+
+// Unregister removes all metrics from the registry.
+// This must be called before the integration is restarted to avoid duplicate registration panics.
+func (m *Metrics) Unregister() {
+	if m.registerer == nil {
+		return
+	}
+	for _, c := range m.collectors {
+		m.registerer.Unregister(c)
 	}
 }

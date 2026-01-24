@@ -35,6 +35,7 @@ type IntegrationWatcher struct {
 	callback ReloadCallback
 	cancel   context.CancelFunc
 	stopped  chan struct{}
+	ready    chan struct{} // signals when fsnotify watcher is fully initialized
 	mu       sync.Mutex
 
 	// debounceTimer is used to coalesce multiple file change events
@@ -63,6 +64,7 @@ func NewIntegrationWatcher(config IntegrationWatcherConfig, callback ReloadCallb
 		config:   config,
 		callback: callback,
 		stopped:  make(chan struct{}),
+		ready:    make(chan struct{}),
 	}, nil
 }
 
@@ -92,12 +94,36 @@ func (w *IntegrationWatcher) Start(ctx context.Context) error {
 	// Start watching in a goroutine
 	go w.watchLoop(watchCtx)
 
+	// Wait for the watcher to be fully initialized before returning
+	// This ensures file changes won't be missed due to race conditions
+	select {
+	case <-w.ready:
+		// Watcher is ready
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("timeout waiting for file watcher to initialize")
+	}
+
 	return nil
+}
+
+// signalReady safely closes the ready channel exactly once
+func (w *IntegrationWatcher) signalReady() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	select {
+	case <-w.ready:
+		// Already closed
+	default:
+		close(w.ready)
+	}
 }
 
 // watchLoop is the main file watching loop
 func (w *IntegrationWatcher) watchLoop(ctx context.Context) {
 	defer close(w.stopped)
+	defer w.signalReady() // Ensure ready is signaled even on error paths
 
 	// Create fsnotify watcher
 	watcher, err := fsnotify.NewWatcher()
@@ -116,6 +142,9 @@ func (w *IntegrationWatcher) watchLoop(ctx context.Context) {
 	log.Printf("IntegrationWatcher: watching %s for changes (debounce: %dms)",
 		w.config.FilePath, w.config.DebounceMillis)
 
+	// Signal that the watcher is ready
+	w.signalReady()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -128,8 +157,24 @@ func (w *IntegrationWatcher) watchLoop(ctx context.Context) {
 				return
 			}
 
-			// Check if this is a relevant event (Write or Create)
-			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
+			// Check if this is a relevant event (Write, Create, Rename, or Remove)
+			// Remove is needed for atomic writes where the old file is unlinked before
+			// the new file is renamed into place - we must re-add the watch
+			if event.Op&fsnotify.Write == fsnotify.Write ||
+				event.Op&fsnotify.Create == fsnotify.Create ||
+				event.Op&fsnotify.Rename == fsnotify.Rename ||
+				event.Op&fsnotify.Remove == fsnotify.Remove {
+				// For rename/remove events, re-add the watch since the inode changed
+				// This handles atomic writes where the file is replaced
+				if event.Op&fsnotify.Rename == fsnotify.Rename ||
+					event.Op&fsnotify.Remove == fsnotify.Remove {
+					// Small delay to let the rename/recreate complete
+					time.Sleep(50 * time.Millisecond)
+					// Re-add watch (ignore error if file doesn't exist yet)
+					if err := watcher.Add(w.config.FilePath); err != nil {
+						log.Printf("IntegrationWatcher: failed to re-add watch after %s: %v", event.Op, err)
+					}
+				}
 				w.handleFileChange(ctx)
 			}
 

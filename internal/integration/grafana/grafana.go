@@ -48,11 +48,16 @@ type GrafanaIntegration struct {
 	healthStatus integration.HealthStatus
 }
 
-// SetGraphClient sets the graph client for dashboard synchronization.
+// SetGraphClient implements integration.GraphClientSetter.
+// Sets the graph client for dashboard synchronization and alert syncing.
 // This must be called before Start() if dashboard sync is desired.
-// This is a transitional API - future phases may pass graphClient via factory.
-func (g *GrafanaIntegration) SetGraphClient(graphClient graph.Client) {
-	g.graphClient = graphClient
+func (g *GrafanaIntegration) SetGraphClient(client interface{}) {
+	if gc, ok := client.(graph.Client); ok {
+		g.graphClient = gc
+		g.logger.Debug("Graph client set for integration: %s", g.name)
+	} else {
+		g.logger.Warn("SetGraphClient called with incompatible type: %T", client)
+	}
 }
 
 // NewGrafanaIntegration creates a new Grafana integration instance.
@@ -279,7 +284,10 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Health returns the current health status.
+// Health returns the current cached health status.
+// This method is called frequently (e.g., SSE polling every 2s) so it returns
+// cached status rather than testing connectivity. Actual connectivity tests
+// happen during Start() and periodic health checks by the integration manager.
 func (g *GrafanaIntegration) Health(ctx context.Context) integration.HealthStatus {
 	// If client is nil, integration hasn't been started or has been stopped
 	if g.client == nil {
@@ -288,19 +296,29 @@ func (g *GrafanaIntegration) Health(ctx context.Context) integration.HealthStatu
 
 	// If using secret ref, check if token is available
 	if g.secretWatcher != nil && !g.secretWatcher.IsHealthy() {
-		g.logger.Warn("Integration degraded: SecretWatcher has no valid token")
 		g.setHealthStatus(integration.Degraded)
 		return integration.Degraded
 	}
 
-	// Test connectivity
+	// Return cached health status - connectivity is tested by manager's periodic health checks
+	return g.getHealthStatus()
+}
+
+// CheckConnectivity implements integration.ConnectivityChecker.
+// Called by the manager during periodic health checks (every 30s) to verify actual connectivity.
+func (g *GrafanaIntegration) CheckConnectivity(ctx context.Context) error {
+	if g.client == nil {
+		g.setHealthStatus(integration.Stopped)
+		return fmt.Errorf("client not initialized")
+	}
+
 	if err := g.testConnection(ctx); err != nil {
 		g.setHealthStatus(integration.Degraded)
-		return integration.Degraded
+		return err
 	}
 
 	g.setHealthStatus(integration.Healthy)
-	return integration.Healthy
+	return nil
 }
 
 // RegisterTools registers MCP tools with the server for this integration instance.

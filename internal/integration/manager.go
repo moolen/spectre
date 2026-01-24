@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/go-version"
 	"github.com/moolen/spectre/internal/config"
+	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 )
 
@@ -28,6 +29,10 @@ type ManagerConfig struct {
 	// If set, integrations with older versions will be rejected during startup
 	// Format: semantic version string (e.g., "1.0.0")
 	MinIntegrationVersion string
+
+	// GraphClient is the optional graph database client for integrations that need it.
+	// If set, integrations implementing GraphClientSetter will receive this client.
+	GraphClient graph.Client
 }
 
 // Manager orchestrates the lifecycle of all integration instances.
@@ -51,6 +56,9 @@ type Manager struct {
 
 	// mcpRegistry is the optional MCP tool registry for integrations
 	mcpRegistry ToolRegistry
+
+	// graphClient is the optional graph database client for integrations
+	graphClient graph.Client
 }
 
 // NewManager creates a new integration lifecycle manager.
@@ -69,10 +77,11 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	}
 
 	m := &Manager{
-		config:  cfg,
-		registry: NewRegistry(),
-		stopped: make(chan struct{}),
-		logger:  logging.GetLogger("integration.manager"),
+		config:      cfg,
+		registry:    NewRegistry(),
+		stopped:     make(chan struct{}),
+		logger:      logging.GetLogger("integration.manager"),
+		graphClient: cfg.GraphClient,
 	}
 
 	// Parse minimum version if provided
@@ -215,6 +224,14 @@ func (m *Manager) startInstances(ctx context.Context, integrationsFile *config.I
 			return err // Fail fast on version mismatch
 		}
 
+		// Inject graph client if instance supports it and we have one
+		if m.graphClient != nil {
+			if setter, ok := instance.(GraphClientSetter); ok {
+				setter.SetGraphClient(m.graphClient)
+				m.logger.Debug("Injected graph client into instance: %s", instanceConfig.Name)
+			}
+		}
+
 		// Register instance
 		if err := m.registry.Register(instanceConfig.Name, instance); err != nil {
 			m.logger.Error("Failed to register instance %s: %v", instanceConfig.Name, err)
@@ -334,7 +351,15 @@ func (m *Manager) performHealthChecks(ctx context.Context) {
 			continue
 		}
 
-		// Check health
+		// If instance implements ConnectivityChecker, use it for deep health check
+		// This updates the cached health status that Health() returns
+		if checker, ok := instance.(ConnectivityChecker); ok {
+			if err := checker.CheckConnectivity(ctx); err != nil {
+				m.logger.Debug("Connectivity check failed for instance %s: %v", name, err)
+			}
+		}
+
+		// Check cached health status
 		healthStatus := instance.Health(ctx)
 
 		// Attempt auto-recovery if degraded

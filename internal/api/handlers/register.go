@@ -152,6 +152,7 @@ func RegisterHandlers(
 		// Instance-specific endpoints with path parameter
 		router.HandleFunc("/api/config/integrations/", func(w http.ResponseWriter, r *http.Request) {
 			name := strings.TrimPrefix(r.URL.Path, "/api/config/integrations/")
+			logger.Debug("Integration endpoint: path=%s, name=%s, method=%s", r.URL.Path, name, r.Method)
 			if name == "" {
 				api.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Integration name required")
 				return

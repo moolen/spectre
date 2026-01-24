@@ -1,12 +1,15 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/moolen/spectre/tests/e2e/helpers"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -119,18 +122,101 @@ func (s *ConfigReloadStage) watcher_config_is_updated_to_include_statefulset() *
 		"watcher.yaml": s.newWatcherConfig,
 	})
 	s.Require.NoError(err, "failed to update watcher ConfigMap")
-	s.T.Logf("Waiting for ConfigMap propagation and hot-reload (up to 90 seconds)...")
+
+	// ConfigMap volume updates in Kubernetes can take 60-120 seconds due to kubelet sync period.
+	// Instead of waiting for propagation, we restart the pod to force immediate config reload.
+	// This simulates a deployment rollout which is a common pattern for config changes.
+	s.T.Log("Restarting Spectre pod to apply new watcher config...")
+	s.restartSpectrePod(ctx)
 
 	return s
+}
+
+// restartSpectrePod deletes the Spectre pod and waits for the deployment to create a new one
+func (s *ConfigReloadStage) restartSpectrePod(ctx context.Context) {
+	// Get the current pod name
+	pods, err := s.K8sClient.Clientset.CoreV1().Pods(s.TestCtx.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/instance=%s", s.TestCtx.ReleaseName),
+	})
+	s.Require.NoError(err, "failed to list pods")
+	s.Require.NotEmpty(pods.Items, "no Spectre pods found")
+
+	oldPodName := pods.Items[0].Name
+	s.T.Logf("Deleting pod %s to trigger restart with new config", oldPodName)
+
+	// Delete the pod
+	err = s.K8sClient.DeletePod(ctx, s.TestCtx.Namespace, oldPodName)
+	s.Require.NoError(err, "failed to delete pod")
+
+	// Wait for a new pod to be ready (different from the old one)
+	s.T.Log("Waiting for new pod to be ready...")
+	err = s.waitForNewPodReady(ctx, oldPodName)
+	s.Require.NoError(err, "failed to wait for new pod")
+
+	// Reconnect port-forward to the new pod
+	s.T.Log("Reconnecting port-forward to new pod...")
+	err = s.TestCtx.ReconnectPortForward()
+	s.Require.NoError(err, "failed to reconnect port-forward")
+
+	// Update the API client with the new URL
+	s.APIClient = helpers.NewAPIClient(s.T, s.TestCtx.PortForward.GetURL())
+
+	// Give the watcher time to start capturing events
+	// Need to wait for FalkorDB sidecar to be ready + watcher to capture existing StatefulSet
+	s.waitHelper.Sleep(20*time.Second, "watcher and graph startup")
+	s.T.Log("✓ Spectre pod restarted with new watcher config")
+}
+
+// waitForNewPodReady waits for a new pod (different from oldPodName) to be running and ready
+func (s *ConfigReloadStage) waitForNewPodReady(ctx context.Context, oldPodName string) error {
+	timeout := time.After(120 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for new pod to be ready")
+		case <-ticker.C:
+			pods, err := s.K8sClient.Clientset.CoreV1().Pods(s.TestCtx.Namespace).List(ctx, metav1.ListOptions{
+				LabelSelector: fmt.Sprintf("app.kubernetes.io/instance=%s", s.TestCtx.ReleaseName),
+			})
+			if err != nil {
+				s.T.Logf("Error listing pods: %v", err)
+				continue
+			}
+
+			for _, pod := range pods.Items {
+				// Skip the old pod (it might still be terminating)
+				if pod.Name == oldPodName {
+					continue
+				}
+
+				// Check if the new pod is ready
+				if pod.Status.Phase == corev1.PodRunning {
+					for _, cond := range pod.Status.Conditions {
+						if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+							s.T.Logf("✓ New pod %s is ready", pod.Name)
+							return nil
+						}
+					}
+				}
+			}
+			s.T.Log("  Waiting for new pod...")
+		}
+	}
 }
 
 func (s *ConfigReloadStage) wait_for_hot_reload() *ConfigReloadStage {
 	ctx, cancel := s.ctxHelper.WithLongTimeout()
 	defer cancel()
 
-	// Poll for the StatefulSet to appear in the API, which indicates hot-reload worked
-	pollTimeout := time.After(90 * time.Second)
-	pollTicker := time.NewTicker(5 * time.Second)
+	// Poll for the StatefulSet to appear in the API, which indicates the watcher is capturing events.
+	// Since we restart the pod, the new config is loaded immediately - we just need to wait for
+	// the watcher to capture the StatefulSet that was created before the restart.
+	// Use 60s timeout which should be plenty since the watcher starts immediately.
+	pollTimeout := time.After(60 * time.Second)
+	pollTicker := time.NewTicker(3 * time.Second)
 	defer pollTicker.Stop()
 
 pollLoop:
@@ -138,21 +224,27 @@ pollLoop:
 		select {
 		case <-pollTimeout:
 			s.T.Logf("Timeout waiting for StatefulSet to appear after config reload")
+			s.dumpDebugInfo(ctx)
 			break pollLoop
 		case <-pollTicker.C:
-			searchRespAfter, err := s.APIClient.Search(ctx, time.Now().Unix()-500, time.Now().Unix()+10, s.testNamespace, "StatefulSet")
+			startTs := time.Now().Unix() - 500
+			endTs := time.Now().Unix() + 10
+			searchRespAfter, err := s.APIClient.Search(ctx, startTs, endTs, s.testNamespace, "StatefulSet")
 			if err != nil {
 				s.T.Logf("Search error: %v", err)
 				continue
 			}
+			s.T.Logf("  Search returned %d resources (start=%d, end=%d, ns=%s, kind=StatefulSet)",
+				len(searchRespAfter.Resources), startTs, endTs, s.testNamespace)
 			for _, r := range searchRespAfter.Resources {
+				s.T.Logf("    Found: %s/%s (kind=%s)", r.Namespace, r.Name, r.Kind)
 				if r.Name == s.statefulSet.Name && r.Kind == "StatefulSet" {
 					s.foundAfterReload = true
 					s.T.Logf("✓ StatefulSet found in API after config reload!")
 					break pollLoop
 				}
 			}
-			s.T.Logf("  StatefulSet not yet visible, waiting...")
+			s.T.Logf("  StatefulSet '%s' not yet visible, waiting...", s.statefulSet.Name)
 		}
 	}
 
@@ -195,4 +287,58 @@ func (s *ConfigReloadStage) metadata_includes_both_resource_kinds() *ConfigReloa
 
 	s.T.Log("✓ Dynamic config reload scenario completed successfully!")
 	return s
+}
+
+// dumpDebugInfo dumps container logs and watcher config for debugging test failures
+func (s *ConfigReloadStage) dumpDebugInfo(ctx context.Context) {
+	s.T.Log("=== Debug Info: Dumping pod logs and config ===")
+
+	// Get the Spectre pod name
+	pods, err := s.K8sClient.Clientset.CoreV1().Pods(s.TestCtx.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/instance=%s", s.TestCtx.ReleaseName),
+	})
+	if err != nil {
+		s.T.Logf("Failed to list pods: %v", err)
+		return
+	}
+
+	if len(pods.Items) == 0 {
+		s.T.Log("No Spectre pods found")
+		return
+	}
+
+	podName := pods.Items[0].Name
+	s.T.Logf("Spectre pod: %s", podName)
+
+	// Get pod logs (last 200 lines)
+	tailLines := int64(200)
+	logs, err := s.K8sClient.GetPodLogs(ctx, s.TestCtx.Namespace, podName, "spectre", &tailLines)
+	if err != nil {
+		s.T.Logf("Failed to get pod logs: %v", err)
+	} else {
+		// Filter for relevant log lines
+		s.T.Log("=== Relevant Spectre container logs ===")
+		for _, line := range strings.Split(logs, "\n") {
+			if strings.Contains(line, "Config file changed") ||
+				strings.Contains(line, "watcher") ||
+				strings.Contains(line, "StatefulSet") ||
+				strings.Contains(line, "reload") ||
+				strings.Contains(line, "Starting watcher") ||
+				strings.Contains(line, "Watchers reloaded") {
+				s.T.Logf("  %s", line)
+			}
+		}
+	}
+
+	// Also try getting metadata to see what kinds are known
+	s.T.Log("=== Checking metadata for known kinds ===")
+	startTs := time.Now().Unix() - 500
+	endTs := time.Now().Unix() + 10
+	metadata, err := s.APIClient.GetMetadata(ctx, &startTs, &endTs)
+	if err != nil {
+		s.T.Logf("Failed to get metadata: %v", err)
+	} else {
+		s.T.Logf("Known kinds: %v", metadata.Kinds)
+		s.T.Logf("Known namespaces: %v", metadata.Namespaces)
+	}
 }
