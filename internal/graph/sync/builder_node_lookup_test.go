@@ -35,6 +35,15 @@ func (m *mockGraphClient) GetGraphStats(ctx context.Context) (*graph.GraphStats,
 }
 func (m *mockGraphClient) InitializeSchema(ctx context.Context) error { return nil }
 func (m *mockGraphClient) DeleteGraph(ctx context.Context) error      { return nil }
+func (m *mockGraphClient) CreateGraph(ctx context.Context, graphName string) error {
+	return nil
+}
+func (m *mockGraphClient) DeleteGraphByName(ctx context.Context, graphName string) error {
+	return nil
+}
+func (m *mockGraphClient) GraphExists(ctx context.Context, graphName string) (bool, error) {
+	return true, nil
+}
 
 func (m *mockGraphClient) ExecuteQuery(ctx context.Context, query graph.GraphQuery) (*graph.QueryResult, error) {
 	// Check if this is a Node lookup query

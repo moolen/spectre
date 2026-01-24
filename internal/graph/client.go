@@ -45,6 +45,15 @@ type Client interface {
 
 	// DeleteGraph completely removes the graph (for testing purposes)
 	DeleteGraph(ctx context.Context) error
+
+	// CreateGraph creates a new named graph database
+	CreateGraph(ctx context.Context, graphName string) error
+
+	// DeleteGraphByName deletes a specific named graph database
+	DeleteGraphByName(ctx context.Context, graphName string) error
+
+	// GraphExists checks if a named graph exists
+	GraphExists(ctx context.Context, graphName string) (bool, error)
 }
 
 // ClientConfig holds configuration for the FalkorDB client
@@ -485,6 +494,8 @@ func (c *falkorClient) InitializeSchema(ctx context.Context) error {
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.timestamp)",
 		"CREATE INDEX FOR (n:ChangeEvent) ON (n.status)",
 		"CREATE INDEX FOR (n:K8sEvent) ON (n.timestamp)",
+		// Dashboard indexes
+		"CREATE INDEX FOR (n:Dashboard) ON (n.uid)",
 	}
 
 	for _, indexQuery := range indexes {
@@ -522,6 +533,79 @@ func (c *falkorClient) DeleteGraph(ctx context.Context) error {
 	c.graph = c.db.SelectGraph(c.config.GraphName)
 
 	return nil
+}
+
+// CreateGraph creates a new named graph database
+// FalkorDB automatically creates graphs on first query execution,
+// so this method simply selects the graph and executes a minimal query
+func (c *falkorClient) CreateGraph(ctx context.Context, graphName string) error {
+	if c.db == nil {
+		return fmt.Errorf("client not connected")
+	}
+
+	c.logger.Info("Creating graph: %s", graphName)
+
+	// Select the graph
+	graph := c.db.SelectGraph(graphName)
+
+	// Execute a minimal query to ensure the graph is created
+	// FalkorDB creates the graph database on first query execution
+	_, err := graph.Query("RETURN 1", nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create graph %s: %w", graphName, err)
+	}
+
+	c.logger.Info("Graph '%s' created successfully", graphName)
+	return nil
+}
+
+// DeleteGraphByName deletes a specific named graph database
+func (c *falkorClient) DeleteGraphByName(ctx context.Context, graphName string) error {
+	if c.db == nil {
+		return fmt.Errorf("client not connected")
+	}
+
+	c.logger.Info("Deleting graph: %s", graphName)
+
+	// Select the graph
+	graph := c.db.SelectGraph(graphName)
+
+	// Delete the graph
+	err := graph.Delete()
+	if err != nil {
+		// Ignore "empty key" error which means graph doesn't exist
+		if strings.Contains(err.Error(), "empty key") {
+			c.logger.Debug("Graph '%s' does not exist, nothing to delete", graphName)
+			return nil
+		}
+		return fmt.Errorf("failed to delete graph %s: %w", graphName, err)
+	}
+
+	c.logger.Info("Graph '%s' deleted successfully", graphName)
+	return nil
+}
+
+// GraphExists checks if a named graph exists
+func (c *falkorClient) GraphExists(ctx context.Context, graphName string) (bool, error) {
+	if c.db == nil {
+		return false, fmt.Errorf("client not connected")
+	}
+
+	// Use the Redis KEYS command to check if the graph exists
+	// FalkorDB stores graphs as Redis keys with a specific pattern
+	result := c.db.Conn.Keys(ctx, "RedisGraph_"+graphName)
+	if result.Err() != nil {
+		return false, fmt.Errorf("failed to check graph existence: %w", result.Err())
+	}
+
+	keys, err := result.Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to get keys result: %w", err)
+	}
+
+	exists := len(keys) > 0
+	c.logger.Debug("Graph '%s' exists: %v", graphName, exists)
+	return exists, nil
 }
 
 // Helper functions

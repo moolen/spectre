@@ -57,6 +57,12 @@ func UpsertResourceIdentityQuery(resource ResourceIdentity) GraphQuery {
 		// This is a deletion - always update to mark as deleted
 		query += `
 		ON MATCH SET
+			r.kind = CASE WHEN r.kind IS NULL THEN $kind ELSE r.kind END,
+			r.apiGroup = CASE WHEN r.apiGroup IS NULL THEN $apiGroup ELSE r.apiGroup END,
+			r.version = CASE WHEN r.version IS NULL THEN $version ELSE r.version END,
+			r.namespace = CASE WHEN r.namespace IS NULL THEN $namespace ELSE r.namespace END,
+			r.name = CASE WHEN r.name IS NULL THEN $name ELSE r.name END,
+			r.firstSeen = CASE WHEN r.firstSeen IS NULL THEN $firstSeen ELSE r.firstSeen END,
 			r.labels = $labels,
 			r.lastSeen = $lastSeen,
 			r.deleted = true,
@@ -64,8 +70,15 @@ func UpsertResourceIdentityQuery(resource ResourceIdentity) GraphQuery {
 		`
 	} else {
 		// This is not a deletion - only update if not already deleted
+		// Also populate core properties if they were not set (placeholder node from OWNS edge creation)
 		query += `
 		ON MATCH SET
+			r.kind = CASE WHEN r.kind IS NULL THEN $kind ELSE r.kind END,
+			r.apiGroup = CASE WHEN r.apiGroup IS NULL THEN $apiGroup ELSE r.apiGroup END,
+			r.version = CASE WHEN r.version IS NULL THEN $version ELSE r.version END,
+			r.namespace = CASE WHEN r.namespace IS NULL THEN $namespace ELSE r.namespace END,
+			r.name = CASE WHEN r.name IS NULL THEN $name ELSE r.name END,
+			r.firstSeen = CASE WHEN r.firstSeen IS NULL THEN $firstSeen ELSE r.firstSeen END,
 			r.labels = CASE WHEN NOT r.deleted THEN $labels ELSE r.labels END,
 			r.lastSeen = CASE WHEN NOT r.deleted THEN $lastSeen ELSE r.lastSeen END
 		`
@@ -151,11 +164,14 @@ func CreateK8sEventQuery(event K8sEvent) GraphQuery {
 }
 
 // CreateOwnsEdgeQuery creates an OWNS relationship between resources
+// Uses MERGE for both nodes to handle cases where the owner node doesn't exist yet
+// (e.g., when a Pod event arrives before its owning ReplicaSet event across batches).
+// The owner node will be created as a placeholder and populated later when its event arrives.
 func CreateOwnsEdgeQuery(ownerUID, ownedUID string, props OwnsEdge) GraphQuery {
 	return GraphQuery{
 		Query: `
-			MATCH (owner:ResourceIdentity {uid: $ownerUID})
-			MATCH (owned:ResourceIdentity {uid: $ownedUID})
+			MERGE (owner:ResourceIdentity {uid: $ownerUID})
+			MERGE (owned:ResourceIdentity {uid: $ownedUID})
 			MERGE (owner)-[r:OWNS]->(owned)
 			ON CREATE SET
 				r.controller = $controller,
@@ -701,6 +717,50 @@ func CreateMountsEdgeQuery(podUID, pvcUID string, props MountsEdge) GraphQuery {
 			"pvcUID":     pvcUID,
 			"volumeName": props.VolumeName,
 			"mountPath":  props.MountPath,
+		},
+	}
+}
+
+// UpsertDashboardNode creates a query to insert or update a Dashboard node
+// Uses MERGE to provide idempotency based on uid
+func UpsertDashboardNode(dashboard DashboardNode) GraphQuery {
+	// Serialize tags to JSON for storage
+	tagsJSON := "[]"
+	if dashboard.Tags != nil && len(dashboard.Tags) > 0 {
+		tagsBytes, _ := json.Marshal(dashboard.Tags)
+		tagsJSON = string(tagsBytes)
+	}
+
+	query := `
+		MERGE (d:Dashboard {uid: $uid})
+		ON CREATE SET
+			d.title = $title,
+			d.version = $version,
+			d.tags = $tags,
+			d.folder = $folder,
+			d.url = $url,
+			d.firstSeen = $firstSeen,
+			d.lastSeen = $lastSeen
+		ON MATCH SET
+			d.title = $title,
+			d.version = $version,
+			d.tags = $tags,
+			d.folder = $folder,
+			d.url = $url,
+			d.lastSeen = $lastSeen
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"uid":       dashboard.UID,
+			"title":     dashboard.Title,
+			"version":   dashboard.Version,
+			"tags":      tagsJSON,
+			"folder":    dashboard.Folder,
+			"url":       dashboard.URL,
+			"firstSeen": dashboard.FirstSeen,
+			"lastSeen":  dashboard.LastSeen,
 		},
 	}
 }

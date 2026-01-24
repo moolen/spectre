@@ -84,7 +84,7 @@ func (s *MCPFailureScenarioStage) mcp_client_is_connected() *MCPFailureScenarioS
 	// Important: Use SharedDeployment.Namespace, not testCtx.Namespace
 	// testCtx.Namespace is for test resources, SharedDeployment.Namespace is where Spectre runs
 	mcpNamespace := s.testCtx.SharedDeployment.Namespace
-	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetContext(), mcpNamespace, serviceName, 8082)
+	mcpPortForward, err := helpers.NewPortForwarder(s.t, s.testCtx.Cluster.GetContext(), mcpNamespace, serviceName, 8080)
 	s.require.NoError(err, "failed to create MCP port-forward")
 
 	err = mcpPortForward.WaitForReady(30 * time.Second)

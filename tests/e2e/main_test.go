@@ -86,12 +86,7 @@ func runWithSharedCluster(m *testing.M) int {
 			// Install Flux CRDs once (cluster-wide, available to all tests)
 			return helpers.EnsureFluxInstalled(&testing.T{}, k8sClient, kubeContext)
 		},
-		map[string]interface{}{
-			"mcp": map[string]interface{}{
-				"enabled":  true,
-				"httpAddr": ":8082",
-			},
-		},
+		nil,
 	)
 	if err != nil {
 		log.Printf("❌ Failed to deploy shared deployment: %v", err)
@@ -104,7 +99,7 @@ func runWithSharedCluster(m *testing.M) int {
 	helpers.RegisterSharedDeployment("flux", sharedDep)
 	helpers.RegisterSharedDeployment("mcp", sharedDep)
 	log.Printf("✓ Consolidated shared deployment registered: %s", sharedDep.ReleaseName)
-	log.Printf("✓ Features enabled: Flux CRDs (cluster-wide) + MCP server (port 8082)")
+	log.Printf("✓ Features enabled: Flux CRDs (cluster-wide) + MCP server (integrated on port 8080)")
 
 	log.Printf("✓ Shared deployment ready (took %v)", time.Since(sharedDeployStartTime))
 	log.Printf("📊 Total setup time: %v", time.Since(startTime))

@@ -152,13 +152,15 @@ func (f *ResourceFetcher) FetchClusterScopedResources(
 	// For depth 1, use a simple direct match which is much faster
 	// For deeper traversals, we still use variable-length paths but with limits
 	// Note: We require ChangeEvent to filter out stub nodes from K8s Event involvedObject references
+	//
+	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
 	var cypherQuery string
 	if maxDepth <= 1 {
-		// Optimized single-hop query - much faster than variable-length paths
+		// Optimized single-hop query - match all UIDs at once without UNWIND
 		cypherQuery = `
-			UNWIND $uids AS uid
-			MATCH (r:ResourceIdentity {uid: uid})-[]-(cs:ResourceIdentity)-[:CHANGED]->(:ChangeEvent)
-			WHERE (cs.namespace = '' OR cs.namespace IS NULL)
+			MATCH (r:ResourceIdentity)-[]-(cs:ResourceIdentity)-[:CHANGED]->(:ChangeEvent)
+			WHERE r.uid IN $uids
+			  AND (cs.namespace = '' OR cs.namespace IS NULL)
 			  AND cs.firstSeen <= $timestamp
 			  AND (cs.deleted = false OR cs.deleted IS NULL OR cs.deletedAt > $timestamp)
 			RETURN DISTINCT cs.uid as uid, cs.kind as kind, cs.apiGroup as apiGroup, cs.namespace as namespace,
@@ -169,9 +171,9 @@ func (f *ResourceFetcher) FetchClusterScopedResources(
 	} else {
 		// Variable-length path for deeper traversals (use sparingly)
 		cypherQuery = `
-			UNWIND $uids AS uid
-			MATCH (r:ResourceIdentity {uid: uid})-[*1..` + fmt.Sprintf("%d", maxDepth) + `]-(cs:ResourceIdentity)-[:CHANGED]->(:ChangeEvent)
-			WHERE (cs.namespace = '' OR cs.namespace IS NULL)
+			MATCH (r:ResourceIdentity)-[*1..` + fmt.Sprintf("%d", maxDepth) + `]-(cs:ResourceIdentity)-[:CHANGED]->(:ChangeEvent)
+			WHERE r.uid IN $uids
+			  AND (cs.namespace = '' OR cs.namespace IS NULL)
 			  AND cs.firstSeen <= $timestamp
 			  AND (cs.deleted = false OR cs.deleted IS NULL OR cs.deletedAt > $timestamp)
 			RETURN DISTINCT cs.uid as uid, cs.kind as kind, cs.apiGroup as apiGroup, cs.namespace as namespace,
@@ -208,16 +210,17 @@ func (f *ResourceFetcher) FetchLatestEvents(
 		return make(map[string]*ChangeEventInfo), nil
 	}
 
+	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
 	cypherQuery := `
-		UNWIND $uids AS uid
-		MATCH (r:ResourceIdentity {uid: uid})-[:CHANGED]->(e:ChangeEvent)
-		WHERE e.timestamp <= $timestamp
+		MATCH (r:ResourceIdentity)-[:CHANGED]->(e:ChangeEvent)
+		WHERE r.uid IN $uids
+		  AND e.timestamp <= $timestamp
 		WITH r.uid as resourceUID, e
 		ORDER BY e.timestamp DESC
 		WITH resourceUID, collect(e)[0] as latestEvent
 		WHERE latestEvent IS NOT NULL
-		RETURN resourceUID, 
-		       latestEvent.timestamp as timestamp, 
+		RETURN resourceUID,
+		       latestEvent.timestamp as timestamp,
 		       latestEvent.eventType as eventType,
 		       latestEvent.status as status,
 		       latestEvent.errorMessage as errorMessage,
@@ -325,10 +328,11 @@ func (f *ResourceFetcher) FetchSpecChanges(
 
 	// Query to get earliest and latest events within the lookback window
 	// We need the data field to compute the diff
+	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
 	cypherQuery := `
-		UNWIND $uids AS uid
-		MATCH (r:ResourceIdentity {uid: uid})-[:CHANGED]->(e:ChangeEvent)
-		WHERE e.timestamp >= $startTimestamp AND e.timestamp <= $timestamp
+		MATCH (r:ResourceIdentity)-[:CHANGED]->(e:ChangeEvent)
+		WHERE r.uid IN $uids
+		  AND e.timestamp >= $startTimestamp AND e.timestamp <= $timestamp
 		WITH r.uid as resourceUID, e
 		ORDER BY e.timestamp ASC
 		WITH resourceUID, collect(e) as events

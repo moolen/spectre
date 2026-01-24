@@ -9,7 +9,6 @@ import (
 	"github.com/moolen/spectre/internal/analysis"
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
 	"github.com/moolen/spectre/internal/api"
-	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -17,19 +16,19 @@ import (
 
 // CausalPathsHandler handles /v1/causal-paths requests
 type CausalPathsHandler struct {
-	discoverer *causalpaths.PathDiscoverer
-	logger     *logging.Logger
-	validator  *api.Validator
-	tracer     trace.Tracer
+	graphService *api.GraphService
+	logger       *logging.Logger
+	validator    *api.Validator
+	tracer       trace.Tracer
 }
 
 // NewCausalPathsHandler creates a new handler
-func NewCausalPathsHandler(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *CausalPathsHandler {
+func NewCausalPathsHandler(graphService *api.GraphService, logger *logging.Logger, tracer trace.Tracer) *CausalPathsHandler {
 	return &CausalPathsHandler{
-		discoverer: causalpaths.NewPathDiscoverer(graphClient),
-		logger:     logger,
-		validator:  api.NewValidator(),
-		tracer:     tracer,
+		graphService: graphService,
+		logger:       logger,
+		validator:    api.NewValidator(),
+		tracer:       tracer,
 	}
 }
 
@@ -73,8 +72,8 @@ func (h *CausalPathsHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Execute path discovery
-	result, err := h.discoverer.DiscoverCausalPaths(ctx, input)
+	// 3. Execute path discovery via GraphService
+	result, err := h.graphService.DiscoverCausalPaths(ctx, input)
 	if err != nil {
 		// Check if this is a "no data in range" error - return 200 with hint instead of 500
 		var noDataErr *analysis.ErrNoChangeEventInRange

@@ -1,7 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { IntegrationModal } from '../components/IntegrationModal';
+import { IntegrationTable } from '../components/IntegrationTable';
+import { IntegrationStatus } from '../types';
 
 /**
- * Integration configuration
+ * Integration configuration from API (alias for IntegrationStatus)
+ */
+type IntegrationConfig = IntegrationStatus;
+
+/**
+ * Mock integration for empty state
  */
 interface Integration {
   id: string;
@@ -119,45 +127,232 @@ const IntegrationCard: React.FC<{ integration: Integration }> = ({ integration }
 };
 
 /**
- * IntegrationsPage - Mock integrations showcase
+ * IntegrationsPage - Integration management with API
  */
 export default function IntegrationsPage() {
+  const [integrations, setIntegrations] = useState<IntegrationConfig[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedIntegration, setSelectedIntegration] = useState<IntegrationConfig | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [syncingIntegrations, setSyncingIntegrations] = useState<Set<string>>(new Set());
+
+  // Fetch integrations on mount
+  useEffect(() => {
+    loadIntegrations();
+  }, []);
+
+  // Subscribe to SSE for real-time status updates
+  useEffect(() => {
+    const eventSource = new EventSource('/api/config/integrations/stream');
+
+    eventSource.addEventListener('status', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setIntegrations(data || []);
+        // Clear any previous error when we receive updates
+        setError(null);
+      } catch (err) {
+        console.error('Failed to parse SSE data:', err);
+      }
+    });
+
+    eventSource.onerror = (err) => {
+      console.error('SSE connection error:', err);
+      // Don't set error state - the connection will auto-reconnect
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, []);
+
+  const loadIntegrations = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/config/integrations');
+      if (!response.ok) throw new Error('Failed to load integrations');
+      const data = await response.json();
+      setIntegrations(data || []);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message);
+      console.error('Failed to load integrations:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async (config: IntegrationConfig) => {
+    try {
+      const method = selectedIntegration ? 'PUT' : 'POST';
+      const url = selectedIntegration
+        ? `/api/config/integrations/${config.name}`
+        : '/api/config/integrations';
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to save integration');
+      }
+
+      // Reload integrations list
+      await loadIntegrations();
+      setIsModalOpen(false);
+      setSelectedIntegration(undefined);
+    } catch (err: any) {
+      console.error('Failed to save:', err);
+      alert(`Failed to save: ${err.message}`);
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    try {
+      const response = await fetch(`/api/config/integrations/${name}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to delete integration');
+      }
+
+      // Reload integrations list
+      await loadIntegrations();
+    } catch (err: any) {
+      console.error('Failed to delete:', err);
+      throw err; // Re-throw so modal can show error
+    }
+  };
+
+  const handleAddIntegration = () => {
+    setSelectedIntegration(undefined);
+    setIsModalOpen(true);
+  };
+
+  const handleEdit = (integration: IntegrationConfig) => {
+    setSelectedIntegration(integration);
+    setIsModalOpen(true);
+  };
+
+  const syncIntegration = async (name: string) => {
+    setSyncingIntegrations(prev => new Set(prev).add(name));
+
+    try {
+      const response = await fetch(`/api/config/integrations/${name}/sync`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          console.error('Sync already in progress');
+          alert('Sync already in progress');
+        } else {
+          const errorText = await response.text();
+          console.error('Sync failed:', errorText);
+          alert(`Sync failed: ${errorText}`);
+        }
+        return;
+      }
+
+      // Refresh integrations list to show updated status
+      await loadIntegrations();
+      console.log('Dashboard sync completed');
+    } catch (error) {
+      console.error('Error syncing dashboards:', error);
+      alert(`Error syncing dashboards: ${error}`);
+    } finally {
+      setSyncingIntegrations(prev => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto bg-[var(--color-app-bg)]">
       <div className="max-w-6xl mx-auto p-8">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">
-            Integrations
-          </h1>
-          <p className="text-[var(--color-text-muted)] max-w-2xl">
-            Connect Spectre with your existing tools to streamline incident response and enable seamless collaboration across your team.
-          </p>
-        </div>
-
-        {/* Integration grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {INTEGRATIONS.map((integration) => (
-            <IntegrationCard key={integration.id} integration={integration} />
-          ))}
-        </div>
-
-        {/* Request integration section */}
-        <div className="mt-12 p-6 bg-[var(--color-surface-muted)] rounded-xl border border-[var(--color-border-soft)] text-center">
-          <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">
-            Missing an integration?
-          </h3>
-          <p className="text-sm text-[var(--color-text-muted)] mb-4">
-            Let us know which tools you'd like to see integrated with Spectre.
-          </p>
+        <div className="mb-8 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">
+              Integrations
+            </h1>
+            <p className="text-[var(--color-text-muted)] max-w-2xl">
+              Connect Spectre with your existing tools to streamline incident response and enable seamless collaboration across your team.
+            </p>
+          </div>
           <button
-            disabled
-            className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium
-                       opacity-50 cursor-not-allowed"
+            onClick={handleAddIntegration}
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium
+                       hover:bg-blue-700 transition-colors flex items-center gap-2"
           >
-            Request Integration
+            <span style={{ fontSize: '18px', lineHeight: '1' }}>+</span>
+            Add Integration
           </button>
         </div>
+
+        {/* Loading state */}
+        {loading && (
+          <div className="text-center py-12">
+            <div className="inline-block w-8 h-8 border-4 border-[var(--color-border-default)] border-t-blue-600 rounded-full animate-spin"></div>
+            <p className="mt-4 text-[var(--color-text-muted)]">Loading integrations...</p>
+          </div>
+        )}
+
+        {/* Error state */}
+        {error && !loading && (
+          <div className="p-6 bg-red-500 bg-opacity-10 border border-red-500 border-opacity-30 rounded-xl text-center">
+            <p className="text-red-500 mb-4">Failed to load integrations: {error}</p>
+            <button
+              onClick={loadIntegrations}
+              className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-medium
+                         hover:bg-red-600 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Content */}
+        {!loading && !error && (
+          <>
+            {integrations.length > 0 ? (
+              // Table view for existing integrations
+              <IntegrationTable
+                integrations={integrations}
+                onEdit={handleEdit}
+                onSync={syncIntegration}
+                syncingIntegrations={syncingIntegrations}
+              />
+            ) : (
+              // Empty state with tiles
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {INTEGRATIONS.map((integration) => (
+                  <IntegrationCard key={integration.id} integration={integration} />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Modal */}
+        <IntegrationModal
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false);
+            setSelectedIntegration(undefined);
+          }}
+          onSave={handleSave}
+          onDelete={handleDelete}
+          initialConfig={selectedIntegration}
+        />
       </div>
     </div>
   );

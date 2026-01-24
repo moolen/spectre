@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/config"
@@ -20,8 +21,14 @@ import (
 	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/graphservice"
 	"github.com/moolen/spectre/internal/importexport"
+	"github.com/moolen/spectre/internal/integration"
+
+	// Import integration implementations to register their factories
+	_ "github.com/moolen/spectre/internal/integration/logzio"
+	_ "github.com/moolen/spectre/internal/integration/victorialogs"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/mcp"
 	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
 	"github.com/spf13/cobra"
@@ -43,14 +50,11 @@ var (
 	tracingTLSCAPath      string
 	tracingTLSInsecure    bool
 	// Graph reasoning layer flags
-	graphEnabled            bool
-	graphHost               string
-	graphPort               int
-	graphName               string
-	graphRetentionHours     int
-	graphRebuildOnStart     bool
-	graphRebuildIfEmpty     bool
-	graphRebuildWindowHours int
+	graphEnabled        bool
+	graphHost           string
+	graphPort           int
+	graphName           string
+	graphRetentionHours int
 	// Audit log flag
 	auditLogPath string
 	// Metadata cache configuration
@@ -63,6 +67,11 @@ var (
 	reconcilerEnabled      bool
 	reconcilerIntervalMins int
 	reconcilerBatchSize    int
+	// Integration manager configuration
+	integrationsConfigPath string
+	minIntegrationVersion  string
+	// MCP server configuration
+	stdioEnabled bool
 )
 
 var serverCmd = &cobra.Command{
@@ -95,9 +104,6 @@ func init() {
 	serverCmd.Flags().IntVar(&graphPort, "graph-port", 6379, "FalkorDB port (default: 6379)")
 	serverCmd.Flags().StringVar(&graphName, "graph-name", "spectre", "FalkorDB graph name (default: spectre)")
 	serverCmd.Flags().IntVar(&graphRetentionHours, "graph-retention-hours", 168, "Graph data retention window in hours (default: 168 = 7 days)")
-	serverCmd.Flags().BoolVar(&graphRebuildOnStart, "graph-rebuild-on-start", false, "Rebuild graph on startup (default: false)")
-	serverCmd.Flags().BoolVar(&graphRebuildIfEmpty, "graph-rebuild-if-empty", true, "Only rebuild if graph is empty (default: true)")
-	serverCmd.Flags().IntVar(&graphRebuildWindowHours, "graph-rebuild-window-hours", 168, "Time window for graph rebuild in hours (default: 168 = 7 days)")
 
 	// Audit log flag
 	serverCmd.Flags().StringVar(&auditLogPath, "audit-log", "",
@@ -123,6 +129,15 @@ func init() {
 		"Reconciliation interval in minutes (default: 5)")
 	serverCmd.Flags().IntVar(&reconcilerBatchSize, "reconciler-batch-size", 100,
 		"Maximum resources to check per reconciliation cycle (default: 100)")
+
+	// Integration manager configuration
+	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "/var/lib/spectre/config/integrations.yaml",
+		"Path to integrations configuration YAML file")
+	serverCmd.Flags().StringVar(&minIntegrationVersion, "min-integration-version", "",
+		"Minimum required integration version (e.g., '1.0.0') for version validation (optional)")
+
+	// MCP server configuration
+	serverCmd.Flags().BoolVar(&stdioEnabled, "stdio", false, "Enable stdio MCP transport alongside HTTP (default: false)")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -154,6 +169,28 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
+
+	// Note: MCP server will be created AFTER API server so it can access TimelineService
+	// Integration manager will be initialized after MCP server is ready
+	var mcpServer *server.MCPServer
+	var mcpRegistry *mcp.MCPToolRegistry
+	var integrationMgr *integration.Manager
+
+	// Prepare default integrations config file if needed
+	if integrationsConfigPath != "" {
+		// Create default config file if it doesn't exist
+		if _, err := os.Stat(integrationsConfigPath); os.IsNotExist(err) {
+			logger.Info("Creating default integrations config file: %s", integrationsConfigPath)
+			defaultConfig := &config.IntegrationsFile{
+				SchemaVersion: "v1",
+				Instances:     []config.IntegrationConfig{},
+			}
+			if err := config.WriteIntegrationsFile(integrationsConfigPath, defaultConfig); err != nil {
+				logger.Error("Failed to create default integrations config: %v", err)
+				HandleError(err, "Integration config creation error")
+			}
+		}
+	}
 
 	// Initialize tracing provider
 	tracingCfg := tracing.Config{
@@ -236,12 +273,9 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 
 		serviceConfig := graphservice.ServiceConfig{
-			GraphConfig:        graphConfig,
-			PipelineConfig:     graphservice.DefaultServiceConfig().PipelineConfig,
-			RebuildOnStart:     graphRebuildOnStart,
-			RebuildWindow:      time.Duration(graphRebuildWindowHours) * time.Hour,
-			RebuildIfEmptyOnly: graphRebuildIfEmpty,
-			AutoStartPipeline:  true,
+			GraphConfig:       graphConfig,
+			PipelineConfig:    graphservice.DefaultServiceConfig().PipelineConfig,
+			AutoStartPipeline: true,
 		}
 
 		// Set retention window from flag
@@ -387,6 +421,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			logging.Field("total_duration", totalDuration))
 	}
 
+	// Create API server first (without MCP server) to initialize TimelineService
 	apiComponent := apiserver.NewWithStorageGraphAndPipeline(
 		cfg.APIPort,
 		nil, // No storage executor
@@ -403,8 +438,73 @@ func runServer(cmd *cobra.Command, args []string) {
 			RefreshTTL:  time.Duration(namespaceGraphCacheRefreshSeconds) * time.Second,
 			MaxMemoryMB: int64(namespaceGraphCacheMemoryMB),
 		},
+		integrationsConfigPath, // Pass config path for REST API handlers
+		integrationMgr,         // Pass integration manager for REST API handlers
+		nil,                    // MCP server will be registered after creation
 	)
 	logger.Info("API server component created (graph-only)")
+
+	// Now create MCP server with TimelineService and GraphService from API server
+	logger.Info("Initializing MCP server with TimelineService and GraphService")
+	timelineService := apiComponent.GetTimelineService()
+
+	// Create GraphService if graph client is available
+	var graphService *api.GraphService
+	if graphClient != nil {
+		tracer := tracingProvider.GetTracer("graph_service")
+		graphService = api.NewGraphService(graphClient, logger, tracer)
+		logger.Info("Created GraphService for MCP graph tools")
+	}
+
+	spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
+		Version:         Version,
+		TimelineService: timelineService, // Direct service access for tools
+		GraphService:    graphService,    // Direct graph service access for tools
+	})
+	if err != nil {
+		logger.Error("Failed to create MCP server: %v", err)
+		HandleError(err, "MCP server initialization error")
+	}
+	mcpServer = spectreServer.GetMCPServer()
+	logger.Info("MCP server created with direct TimelineService and GraphService access")
+
+	// Create MCPToolRegistry adapter for integration tools
+	mcpRegistry = mcp.NewMCPToolRegistry(mcpServer)
+
+	// Initialize integration manager now that MCP registry is available
+	if integrationsConfigPath != "" {
+		logger.Info("Initializing integration manager from: %s", integrationsConfigPath)
+		integrationMgr, err = integration.NewManagerWithMCPRegistry(integration.ManagerConfig{
+			ConfigPath:            integrationsConfigPath,
+			MinIntegrationVersion: minIntegrationVersion,
+			GraphClient:           graphClient, // Inject graph client for dashboard/alert syncing
+		}, mcpRegistry)
+		if err != nil {
+			logger.Error("Failed to create integration manager: %v", err)
+			HandleError(err, "Integration manager initialization error")
+		}
+
+		// Register integration config handlers on API server now that manager is ready
+		if err := apiComponent.RegisterIntegrationHandlers(integrationMgr); err != nil {
+			logger.Error("Failed to register integration config handlers: %v", err)
+			HandleError(err, "Integration handler registration error")
+		}
+		logger.Info("Integration config handlers registered")
+
+		// Register integration manager with lifecycle manager (no dependencies)
+		if err := manager.Register(integrationMgr); err != nil {
+			logger.Error("Failed to register integration manager: %v", err)
+			HandleError(err, "Integration manager registration error")
+		}
+		logger.Info("Integration manager registered")
+	}
+
+	// Register MCP endpoint on API server now that MCP server is ready
+	if err := apiComponent.RegisterMCPEndpoint(mcpServer); err != nil {
+		logger.Error("Failed to register MCP endpoint: %v", err)
+		HandleError(err, "MCP endpoint registration error")
+	}
+	logger.Info("MCP endpoint registered on API server")
 
 	// Register namespace graph cache with GraphService for event-driven invalidation
 	// This enables the cache to be notified when events affect specific namespaces
@@ -468,6 +568,16 @@ func runServer(cmd *cobra.Command, args []string) {
 	if err := manager.Start(ctx); err != nil {
 		logger.Error("Failed to start components: %v", err)
 		HandleError(err, "Startup error")
+	}
+
+	// Start stdio MCP transport if requested
+	if stdioEnabled {
+		logger.Info("Starting stdio MCP transport alongside HTTP")
+		go func() {
+			if err := server.ServeStdio(mcpServer); err != nil {
+				logger.Error("Stdio transport error: %v", err)
+			}
+		}()
 	}
 
 	logger.Info("Application started successfully")

@@ -7,7 +7,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/api"
+	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/mcp/tools"
 )
 
@@ -18,33 +19,28 @@ type Tool interface {
 
 // SpectreServer wraps mcp-go server with Spectre-specific logic
 type SpectreServer struct {
-	mcpServer     *server.MCPServer
-	spectreClient *SpectreClient
-	tools         map[string]Tool
-	version       string
+	mcpServer       *server.MCPServer
+	timelineService *api.TimelineService
+	graphService    *api.GraphService
+	tools           map[string]Tool
+	version         string
 }
 
 // ServerOptions configures the Spectre MCP server
 type ServerOptions struct {
-	SpectreURL string
-	Version    string
-	Logger     client.Logger // Optional logger for retry messages
+	Version         string
+	TimelineService *api.TimelineService     // Required: Direct service for tools
+	GraphService    *api.GraphService        // Required: Direct graph service for tools
 }
 
-// NewSpectreServer creates a new Spectre MCP server
-func NewSpectreServer(spectreURL, version string) (*SpectreServer, error) {
-	return NewSpectreServerWithOptions(ServerOptions{
-		SpectreURL: spectreURL,
-		Version:    version,
-	})
-}
-
-// NewSpectreServerWithOptions creates a new Spectre MCP server with optional graph support
+// NewSpectreServerWithOptions creates a new Spectre MCP server with services
 func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
-	// Test connection to Spectre with retry logic for container startup
-	spectreClient := NewSpectreClient(opts.SpectreURL)
-	if err := spectreClient.PingWithRetry(opts.Logger); err != nil {
-		return nil, fmt.Errorf("failed to connect to Spectre API: %w", err)
+	// Validate required services
+	if opts.TimelineService == nil {
+		return nil, fmt.Errorf("TimelineService is required")
+	}
+	if opts.GraphService == nil {
+		return nil, fmt.Errorf("GraphService is required")
 	}
 
 	// Create mcp-go server with capabilities
@@ -56,10 +52,11 @@ func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
 	)
 
 	s := &SpectreServer{
-		mcpServer:     mcpServer,
-		spectreClient: spectreClient,
-		tools:         make(map[string]Tool),
-		version:       opts.Version,
+		mcpServer:       mcpServer,
+		timelineService: opts.TimelineService,
+		graphService:    opts.GraphService,
+		tools:           make(map[string]Tool),
+		version:         opts.Version,
 	}
 
 	// Register tools
@@ -72,11 +69,11 @@ func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
 }
 
 func (s *SpectreServer) registerTools() {
-	// Register cluster_health tool
+	// Register cluster_health tool (uses TimelineService directly)
 	s.registerTool(
 		"cluster_health",
 		"Get cluster health overview with resource status breakdown and top issues",
-		tools.NewClusterHealthTool(s.spectreClient),
+		tools.NewClusterHealthTool(s.timelineService),
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -101,11 +98,11 @@ func (s *SpectreServer) registerTools() {
 		},
 	)
 
-	// Register resource_timeline_changes tool
+	// Register resource_timeline_changes tool (uses TimelineService directly)
 	s.registerTool(
 		"resource_timeline_changes",
 		"Get semantic field-level changes for resources by UID with noise filtering and status condition summarization",
-		tools.NewResourceTimelineChangesTool(s.spectreClient),
+		tools.NewResourceTimelineChangesTool(s.timelineService),
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -135,11 +132,11 @@ func (s *SpectreServer) registerTools() {
 		},
 	)
 
-	// Register resource_timeline tool
+	// Register resource_timeline tool (uses TimelineService directly)
 	s.registerTool(
 		"resource_timeline",
 		"Get resource timeline with status segments, events, and transitions for root cause analysis",
-		tools.NewResourceTimelineTool(s.spectreClient),
+		tools.NewResourceTimelineTool(s.timelineService),
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -172,11 +169,11 @@ func (s *SpectreServer) registerTools() {
 		},
 	)
 
-	// Register detect_anomalies tool
+	// Register detect_anomalies tool (uses GraphService and TimelineService directly)
 	s.registerTool(
 		"detect_anomalies",
 		"Detect anomalies in a resource's causal subgraph including crash loops, config errors, state transitions, and networking issues",
-		tools.NewDetectAnomaliesTool(s.spectreClient),
+		tools.NewDetectAnomaliesTool(s.graphService, s.timelineService),
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -197,11 +194,11 @@ func (s *SpectreServer) registerTools() {
 		},
 	)
 
-	// Register causal_paths tool
+	// Register causal_paths tool (uses GraphService directly)
 	s.registerTool(
 		"causal_paths",
 		"Discover causal paths from root causes to a failing resource using graph-based causality analysis. Returns ranked paths with confidence scores.",
-		tools.NewCausalPathsTool(s.spectreClient),
+		tools.NewCausalPathsTool(s.graphService),
 		map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -363,4 +360,67 @@ func (s *SpectreServer) registerPrompts() {
 // GetMCPServer returns the underlying mcp-go server for transport setup
 func (s *SpectreServer) GetMCPServer() *server.MCPServer {
 	return s.mcpServer
+}
+
+// MCPToolRegistry adapts the integration.ToolRegistry interface to the mcp-go server.
+// It allows integrations to register tools dynamically during startup.
+type MCPToolRegistry struct {
+	mcpServer *server.MCPServer
+}
+
+// NewMCPToolRegistry creates a new tool registry adapter.
+func NewMCPToolRegistry(mcpServer *server.MCPServer) *MCPToolRegistry {
+	return &MCPToolRegistry{
+		mcpServer: mcpServer,
+	}
+}
+
+// RegisterTool registers an MCP tool with the mcp-go server.
+// It adapts the integration.ToolHandler to the mcp-go handler format.
+func (r *MCPToolRegistry) RegisterTool(name string, description string, handler integration.ToolHandler, inputSchema map[string]interface{}) error {
+	// Validation
+	if name == "" {
+		return fmt.Errorf("tool name cannot be empty")
+	}
+
+	// Use provided schema or fall back to empty object schema
+	if inputSchema == nil {
+		inputSchema = map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		}
+	}
+	schemaJSON, err := json.Marshal(inputSchema)
+	if err != nil {
+		return fmt.Errorf("failed to marshal schema: %w", err)
+	}
+
+	// Create MCP tool with provided schema
+	mcpTool := mcp.NewToolWithRawSchema(name, description, schemaJSON)
+
+	// Adapter: integration.ToolHandler -> server.ToolHandlerFunc
+	adaptedHandler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Marshal mcp arguments to []byte for integration handler
+		args, err := json.Marshal(request.Params.Arguments)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
+		}
+
+		// Call integration handler
+		result, err := handler(ctx, args)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Tool execution failed: %v", err)), nil
+		}
+
+		// Format result as JSON
+		resultJSON, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to format result: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(resultJSON)), nil
+	}
+
+	r.mcpServer.AddTool(mcpTool, adaptedHandler)
+	return nil
 }

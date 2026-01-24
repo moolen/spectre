@@ -1,0 +1,29 @@
+{{- if .Values.integrations.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "spectre.fullname" . }}-integrations
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "spectre.labels" . | nindent 4 }}
+    app.kubernetes.io/component: integrations
+  {{- with .Values.integrations.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- range .Values.integrations.persistence.accessModes }}
+    - {{ . }}
+    {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.integrations.persistence.size }}
+  {{- if .Values.integrations.persistence.storageClassName }}
+  storageClassName: {{ .Values.integrations.persistence.storageClassName }}
+  {{- end }}
+  {{- with .Values.integrations.persistence.selector }}
+  selector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

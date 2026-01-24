@@ -37,8 +37,21 @@ type ScenarioInfo struct {
 
 // ExpectedResults contains expected anomalies and causal paths
 type ExpectedResults struct {
-	Anomalies  []ExpectedAnomaly   `json:"anomalies"`
-	CausalPath *ExpectedCausalPath `json:"causal_path"`
+	Anomalies   []ExpectedAnomaly      `json:"anomalies"`
+	CausalPath  *ExpectedCausalPath    `json:"causal_path"`
+	Performance *ExpectedPerformance   `json:"performance,omitempty"`
+}
+
+// ExpectedPerformance defines performance thresholds for the scenario
+type ExpectedPerformance struct {
+	// MaxAnomalyExecutionMs is the maximum allowed execution time for anomaly detection
+	MaxAnomalyExecutionMs int64 `json:"max_anomaly_execution_ms,omitempty"`
+	// MaxCausalPathExecutionMs is the maximum allowed execution time for causal path discovery
+	MaxCausalPathExecutionMs int64 `json:"max_causal_path_execution_ms,omitempty"`
+	// MinNodesAnalyzed is the minimum number of nodes that should be analyzed (ensures non-degraded results)
+	MinNodesAnalyzed int `json:"min_nodes_analyzed,omitempty"`
+	// MinNodesExplored is the minimum number of nodes explored in causal path discovery
+	MinNodesExplored int `json:"min_nodes_explored,omitempty"`
 }
 
 // ExpectedAnomaly represents an expected anomaly detection result
@@ -173,20 +186,20 @@ func runGoldenScenario(t *testing.T, goldenDir, scenarioName, metaFile string) {
 
 	if len(metadata.Expected.Anomalies) > 0 {
 		t.Run("Anomalies", func(t *testing.T) {
-			testGoldenAnomalies(t, harness, resourceUID, timestamp, metadata.Expected.Anomalies)
+			testGoldenAnomalies(t, harness, resourceUID, timestamp, metadata.Expected.Anomalies, metadata.Expected.Performance)
 		})
 	}
 
 	if metadata.Expected.CausalPath != nil {
 		t.Run("CausalPaths", func(t *testing.T) {
-			testGoldenCausalPaths(t, harness, resourceUID, timestamp, metadata.Expected.CausalPath)
+			testGoldenCausalPaths(t, harness, resourceUID, timestamp, metadata.Expected.CausalPath, metadata.Expected.Performance)
 		})
 	}
 }
 
-func testGoldenAnomalies(t *testing.T, harness *TestHarness, resourceUID string, timestamp int64, expectedAnomalies []ExpectedAnomaly) {
+func testGoldenAnomalies(t *testing.T, harness *TestHarness, resourceUID string, timestamp int64, expectedAnomalies []ExpectedAnomaly, perf *ExpectedPerformance) {
 	logger := logging.GetLogger("test")
-	handler := handlers.NewAnomalyHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewAnomalyHandler(harness.GetGraphService(), logger, nil)
 
 	// Convert nanoseconds to seconds, rounding up to ensure we include events in the same second
 	endSec := (timestamp / 1_000_000_000) + 1
@@ -209,8 +222,8 @@ func testGoldenAnomalies(t *testing.T, harness *TestHarness, resourceUID string,
 	require.NotNil(t, result.Metadata, "Metadata should not be nil")
 	require.Equal(t, resourceUID, result.Metadata.ResourceUID, "Resource UID should match")
 
-	t.Logf("Anomaly detection found %d anomalies across %d nodes",
-		len(result.Anomalies), result.Metadata.NodesAnalyzed)
+	t.Logf("Anomaly detection found %d anomalies across %d nodes (execution: %dms)",
+		len(result.Anomalies), result.Metadata.NodesAnalyzed, result.Metadata.ExecutionTimeMs)
 
 	for i, a := range result.Anomalies {
 		t.Logf("  Anomaly %d: Kind=%s, Category=%s, Type=%s, Summary=%s",
@@ -223,11 +236,37 @@ func testGoldenAnomalies(t *testing.T, harness *TestHarness, resourceUID string,
 		assert.True(t, found, "Expected anomaly not found: Kind=%s, Category=%s, Type=%s",
 			expected.NodeKind, expected.Category, expected.Type)
 	}
+
+	// Performance assertions
+	// Default thresholds if not specified in metadata
+	maxExecutionMs := int64(5000) // 5 seconds default
+	minNodesAnalyzed := 1         // At least 1 node (symptom); some scenarios like Service have no ownership chain
+
+	if perf != nil {
+		if perf.MaxAnomalyExecutionMs > 0 {
+			maxExecutionMs = perf.MaxAnomalyExecutionMs
+		}
+		if perf.MinNodesAnalyzed > 0 {
+			minNodesAnalyzed = perf.MinNodesAnalyzed
+		}
+	}
+
+	// Assert execution time is within threshold
+	assert.LessOrEqual(t, result.Metadata.ExecutionTimeMs, maxExecutionMs,
+		"Anomaly detection took %dms, exceeds threshold of %dms",
+		result.Metadata.ExecutionTimeMs, maxExecutionMs)
+
+	// Assert we analyzed at least the minimum expected nodes
+	// Note: minNodesAnalyzed defaults to 1 because some scenarios (like Service) have no ownership chain
+	// Individual scenarios can override this in their .meta.json performance section
+	assert.GreaterOrEqual(t, result.Metadata.NodesAnalyzed, minNodesAnalyzed,
+		"Only %d nodes analyzed, expected at least %d",
+		result.Metadata.NodesAnalyzed, minNodesAnalyzed)
 }
 
-func testGoldenCausalPaths(t *testing.T, harness *TestHarness, resourceUID string, timestamp int64, expected *ExpectedCausalPath) {
+func testGoldenCausalPaths(t *testing.T, harness *TestHarness, resourceUID string, timestamp int64, expected *ExpectedCausalPath, perf *ExpectedPerformance) {
 	logger := logging.GetLogger("test")
-	handler := handlers.NewCausalPathsHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewCausalPathsHandler(harness.GetGraphService(), logger, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/causal-paths", http.NoBody)
 	q := req.URL.Query()
@@ -248,8 +287,8 @@ func testGoldenCausalPaths(t *testing.T, harness *TestHarness, resourceUID strin
 	require.NoError(t, err, "Failed to unmarshal response: %s", rr.Body.String())
 	require.NotNil(t, result.Metadata, "Metadata should not be nil")
 
-	t.Logf("Causal paths discovery found %d paths, explored %d nodes",
-		len(result.Paths), result.Metadata.NodesExplored)
+	t.Logf("Causal paths discovery found %d paths, explored %d nodes (execution: %dms)",
+		len(result.Paths), result.Metadata.NodesExplored, result.Metadata.QueryExecutionMs)
 	for i, path := range result.Paths {
 		t.Logf("  Path %d: confidence=%.2f, root=%s (%s)",
 			i+1, path.ConfidenceScore,
@@ -258,6 +297,32 @@ func testGoldenCausalPaths(t *testing.T, harness *TestHarness, resourceUID strin
 			t.Logf("    Step %d: %s (%s)", j+1, step.Node.Resource.Name, step.Node.Resource.Kind)
 		}
 	}
+
+	// Performance assertions
+	// Default thresholds if not specified in metadata
+	maxExecutionMs := int64(5000) // 5 seconds default
+	minNodesExplored := 1         // At least 1 node (symptom); some scenarios like Service have no ownership chain
+
+	if perf != nil {
+		if perf.MaxCausalPathExecutionMs > 0 {
+			maxExecutionMs = perf.MaxCausalPathExecutionMs
+		}
+		if perf.MinNodesExplored > 0 {
+			minNodesExplored = perf.MinNodesExplored
+		}
+	}
+
+	// Assert execution time is within threshold
+	assert.LessOrEqual(t, result.Metadata.QueryExecutionMs, maxExecutionMs,
+		"Causal path discovery took %dms, exceeds threshold of %dms",
+		result.Metadata.QueryExecutionMs, maxExecutionMs)
+
+	// Assert we explored at least the minimum expected nodes
+	// Note: minNodesExplored defaults to 1 because some scenarios (like Service) have no ownership chain
+	// Individual scenarios can override this in their .meta.json performance section
+	assert.GreaterOrEqual(t, result.Metadata.NodesExplored, minNodesExplored,
+		"Only %d nodes explored, expected at least %d",
+		result.Metadata.NodesExplored, minNodesExplored)
 
 	// Skip causal path validation if no expected path is specified (empty root_kind)
 	if expected.RootKind == "" && expected.SymptomKind == "" {

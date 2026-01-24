@@ -186,6 +186,18 @@ func (m *mockGraphClient) DeleteGraph(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockGraphClient) CreateGraph(ctx context.Context, graphName string) error {
+	return nil
+}
+
+func (m *mockGraphClient) DeleteGraphByName(ctx context.Context, graphName string) error {
+	return nil
+}
+
+func (m *mockGraphClient) GraphExists(ctx context.Context, graphName string) (bool, error) {
+	return true, nil
+}
+
 // TestTwoPhaseBatchProcessing tests that ProcessBatch correctly processes events in two phases
 func TestTwoPhaseBatchProcessing(t *testing.T) {
 	client := newMockGraphClient()

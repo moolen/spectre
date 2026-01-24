@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/models"
 )
 
 func TestClusterHealth_ErrorMessageExtraction(t *testing.T) {
@@ -29,14 +29,14 @@ func TestClusterHealth_ErrorMessageExtraction(t *testing.T) {
 		}
 	}`)
 
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:        "pod-1",
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "test-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						StartTime:    1000,
 						EndTime:      2000,
@@ -121,14 +121,14 @@ func TestClusterHealth_MultipleErrors(t *testing.T) {
 		}
 	}`)
 
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:        "deployment-1",
 				Kind:      "Deployment",
 				Namespace: "default",
 				Name:      "test-deployment",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						StartTime:    1000,
 						EndTime:      2000,
@@ -143,7 +143,7 @@ func TestClusterHealth_MultipleErrors(t *testing.T) {
 				Kind:      "Node",
 				Namespace: "",
 				Name:      "node-1",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						StartTime:    1000,
 						EndTime:      2000,
@@ -206,14 +206,14 @@ func TestClusterHealth_MultipleErrors(t *testing.T) {
 
 func TestClusterHealth_FallbackToSegmentMessage(t *testing.T) {
 	// Create a resource with empty ResourceData - should fallback to segment message
-	response := &client.TimelineResponse{
-		Resources: []client.TimelineResource{
+	response := &models.SearchResponse{
+		Resources: []models.Resource{
 			{
 				ID:        "pod-1",
 				Kind:      "Pod",
 				Namespace: "default",
 				Name:      "test-pod",
-				StatusSegments: []client.StatusSegment{
+				StatusSegments: []models.StatusSegment{
 					{
 						StartTime:    1000,
 						EndTime:      2000,

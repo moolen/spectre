@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -228,6 +229,13 @@ func (s *Server) serveStaticUI(w http.ResponseWriter, r *http.Request) {
 
 	// Clean the path to prevent directory traversal
 	path := filepath.Clean(r.URL.Path)
+
+	// Don't serve HTML for API paths - return 404 instead
+	// This prevents the SPA catch-all from masking unregistered API routes
+	if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/v1/") {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
 
 	// Handle root and SPA routes
 	originalPath := path

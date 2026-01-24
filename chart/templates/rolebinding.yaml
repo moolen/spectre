@@ -1,0 +1,17 @@
+{{- if .Values.rbac.secretAccess.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "spectre.fullname" . }}-secret-reader
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "spectre.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "spectre.serviceAccountName" . }}
+  namespace: {{ .Values.namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "spectre.fullname" . }}-secret-reader
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

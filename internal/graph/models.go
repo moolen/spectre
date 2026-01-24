@@ -12,6 +12,13 @@ const (
 	NodeTypeResourceIdentity NodeType = "ResourceIdentity"
 	NodeTypeChangeEvent      NodeType = "ChangeEvent"
 	NodeTypeK8sEvent         NodeType = "K8sEvent"
+	NodeTypeDashboard        NodeType = "Dashboard"
+	NodeTypePanel            NodeType = "Panel"
+	NodeTypeQuery            NodeType = "Query"
+	NodeTypeMetric           NodeType = "Metric"
+	NodeTypeService          NodeType = "Service"
+	NodeTypeVariable         NodeType = "Variable"
+	NodeTypeAlert            NodeType = "Alert"
 )
 
 // EdgeType represents the type of graph edge
@@ -34,6 +41,14 @@ const (
 	EdgeTypeReferencesSpec  EdgeType = "REFERENCES_SPEC"  // Explicit spec references
 	EdgeTypeManages         EdgeType = "MANAGES"          // Lifecycle management (inferred)
 	EdgeTypeCreatesObserved EdgeType = "CREATES_OBSERVED" // Observed creation correlation
+
+	// Dashboard relationship types
+	EdgeTypeContains    EdgeType = "CONTAINS"     // Dashboard -> Panel
+	EdgeTypeHas         EdgeType = "HAS"          // Panel -> Query
+	EdgeTypeUses        EdgeType = "USES"         // Query -> Metric
+	EdgeTypeTracks      EdgeType = "TRACKS"       // Metric -> Service
+	EdgeTypeHasVariable EdgeType = "HAS_VARIABLE" // Dashboard -> Variable
+	EdgeTypeMonitors    EdgeType = "MONITORS"     // Alert -> Metric/Service
 )
 
 // ResourceIdentity represents a persistent Kubernetes resource node
@@ -75,6 +90,79 @@ type K8sEvent struct {
 	Type      string `json:"type"`      // Warning, Normal, Error
 	Count     int    `json:"count"`     // event count (if repeated)
 	Source    string `json:"source"`    // component that generated event
+}
+
+// AlertNode represents a Grafana Alert Rule node in the graph
+type AlertNode struct {
+	UID         string            `json:"uid"`         // Alert rule UID (primary key)
+	Title       string            `json:"title"`       // Alert rule title
+	FolderTitle string            `json:"folderTitle"` // Folder containing the rule
+	RuleGroup   string            `json:"ruleGroup"`   // Alert rule group name
+	Condition   string            `json:"condition"`   // PromQL expression (stored for display, parsed separately)
+	Labels      map[string]string `json:"labels"`      // Alert labels
+	Annotations map[string]string `json:"annotations"` // Alert annotations including severity
+	Updated     string            `json:"updated"`     // ISO8601 timestamp for incremental sync
+	Integration string            `json:"integration"` // Integration name (e.g., "grafana_prod")
+}
+
+// DashboardNode represents a Grafana Dashboard node in the graph
+type DashboardNode struct {
+	UID       string   `json:"uid"`       // Dashboard UID (primary key)
+	Title     string   `json:"title"`     // Dashboard title
+	Version   int      `json:"version"`   // Dashboard version number
+	Tags      []string `json:"tags"`      // Dashboard tags
+	Folder    string   `json:"folder"`    // Folder path
+	URL       string   `json:"url"`       // Dashboard URL
+	FirstSeen int64    `json:"firstSeen"` // Unix nano timestamp when first seen
+	LastSeen  int64    `json:"lastSeen"`  // Unix nano timestamp when last seen
+}
+
+// PanelNode represents a Grafana Panel node in the graph
+type PanelNode struct {
+	ID           string `json:"id"`           // Unique: dashboardUID + panelID
+	DashboardUID string `json:"dashboardUID"` // Parent dashboard
+	Title        string `json:"title"`        // Panel title
+	Type         string `json:"type"`         // Panel type (graph, table, etc.)
+	GridPosX     int    `json:"gridPosX"`     // Layout position X
+	GridPosY     int    `json:"gridPosY"`     // Layout position Y
+}
+
+// QueryNode represents a PromQL query node in the graph
+type QueryNode struct {
+	ID             string            `json:"id"`             // Unique: dashboardUID + panelID + refID
+	RefID          string            `json:"refId"`          // Query reference (A, B, C, etc.)
+	RawPromQL      string            `json:"rawPromQL"`      // Original PromQL
+	DatasourceUID  string            `json:"datasourceUID"`  // Datasource UID
+	Aggregations   []string          `json:"aggregations"`   // Extracted functions
+	LabelSelectors map[string]string `json:"labelSelectors"` // Extracted matchers
+	HasVariables   bool              `json:"hasVariables"`   // Contains Grafana variables
+}
+
+// MetricNode represents a Prometheus metric node in the graph
+type MetricNode struct {
+	Name      string `json:"name"`      // Metric name (e.g., http_requests_total)
+	FirstSeen int64  `json:"firstSeen"` // Unix nano timestamp
+	LastSeen  int64  `json:"lastSeen"`  // Unix nano timestamp
+}
+
+// ServiceNode represents an inferred service node in the graph
+type ServiceNode struct {
+	Name         string `json:"name"`         // Service name (from app/service/job labels)
+	Cluster      string `json:"cluster"`      // Cluster name (scoping)
+	Namespace    string `json:"namespace"`    // Namespace (scoping)
+	InferredFrom string `json:"inferredFrom"` // Label used for inference (app/service/job)
+	FirstSeen    int64  `json:"firstSeen"`    // Unix nano timestamp
+	LastSeen     int64  `json:"lastSeen"`     // Unix nano timestamp
+}
+
+// VariableNode represents a Grafana dashboard variable node in the graph
+type VariableNode struct {
+	DashboardUID   string `json:"dashboardUID"`   // Parent dashboard UID
+	Name           string `json:"name"`           // Variable name
+	Type           string `json:"type"`           // Variable type (query/textbox/custom/interval)
+	Classification string `json:"classification"` // Classification (scoping/entity/detail/unknown)
+	FirstSeen      int64  `json:"firstSeen"`      // Unix nano timestamp
+	LastSeen       int64  `json:"lastSeen"`       // Unix nano timestamp
 }
 
 // OwnsEdge represents ownership relationship properties

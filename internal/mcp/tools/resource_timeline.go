@@ -5,21 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
-	"github.com/moolen/spectre/internal/mcp/client"
+	"github.com/moolen/spectre/internal/api"
+	"github.com/moolen/spectre/internal/models"
 )
 
 // ResourceTimelineTool implements the resource_timeline MCP tool
 type ResourceTimelineTool struct {
-	client *client.SpectreClient
+	timelineService *api.TimelineService
 }
 
-// NewResourceTimelineTool creates a new resource_timeline tool
-func NewResourceTimelineTool(client *client.SpectreClient) *ResourceTimelineTool {
+// NewResourceTimelineTool creates a new resource_timeline tool using TimelineService
+func NewResourceTimelineTool(timelineService *api.TimelineService) *ResourceTimelineTool {
 	return &ResourceTimelineTool{
-		client: client,
+		timelineService: timelineService,
 	}
 }
 
@@ -107,18 +107,32 @@ func (t *ResourceTimelineTool) Execute(ctx context.Context, input json.RawMessag
 
 	start := time.Now()
 
-	filters := make(map[string]string)
+	// Build filter map for service
+	filterParams := make(map[string][]string)
 	if params.ResourceKind != "" {
-		filters["kind"] = params.ResourceKind
+		filterParams["kind"] = []string{params.ResourceKind}
 	}
 	if params.Namespace != "" {
-		filters["namespace"] = params.Namespace
+		filterParams["namespace"] = []string{params.Namespace}
 	}
 
-	response, err := t.client.QueryTimeline(startTime, endTime, filters, 1000)
+	// Use TimelineService to parse and execute query
+	startStr := fmt.Sprintf("%d", startTime)
+	endStr := fmt.Sprintf("%d", endTime)
+
+	query, err := t.timelineService.ParseQueryParameters(ctx, startStr, endStr, filterParams)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query timeline: %w", err)
+		return nil, fmt.Errorf("failed to parse query: %w", err)
 	}
+
+	// Execute query using service
+	queryResult, eventResult, err := t.timelineService.ExecuteConcurrentQueries(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute timeline query: %w", err)
+	}
+
+	// Build timeline response using service
+	response := t.timelineService.BuildTimelineResponse(queryResult, eventResult)
 
 	timelines := make([]ResourceTimelineEvidence, 0)
 
@@ -152,18 +166,13 @@ func (t *ResourceTimelineTool) Execute(ctx context.Context, input json.RawMessag
 	return output, nil
 }
 
-func (t *ResourceTimelineTool) buildResourceTimelineEvidence(resource *client.TimelineResource) ResourceTimelineEvidence {
+func (t *ResourceTimelineTool) buildResourceTimelineEvidence(resource *models.Resource) ResourceTimelineEvidence {
 	timelineStart := getMinTimestampRT(resource)
 	timelineEnd := getMaxTimestampRT(resource)
 
-	// Extract just the UUID from resource.ID (format: group/version/kind/uid)
-	resourceUID := resource.ID
-	if parts := strings.Split(resource.ID, "/"); len(parts) >= 1 {
-		resourceUID = parts[len(parts)-1] // Take the last part (UUID)
-	}
-
+	// resource.ID is already just the UUID from models.Resource
 	evidence := ResourceTimelineEvidence{
-		ResourceUID:          resourceUID,
+		ResourceUID:          resource.ID,
 		Kind:                 resource.Kind,
 		Namespace:            resource.Namespace,
 		Name:                 resource.Name,
@@ -225,7 +234,7 @@ func (t *ResourceTimelineTool) buildResourceTimelineEvidence(resource *client.Ti
 
 // deduplicateStatusSegments merges adjacent segments with the same Status and Message.
 // Keeps the earliest StartTime and latest EndTime for merged segments.
-func (t *ResourceTimelineTool) deduplicateStatusSegments(segments []client.StatusSegment) []SegmentSummary {
+func (t *ResourceTimelineTool) deduplicateStatusSegments(segments []models.StatusSegment) []SegmentSummary {
 	if len(segments) == 0 {
 		return []SegmentSummary{}
 	}
@@ -269,7 +278,7 @@ func (t *ResourceTimelineTool) deduplicateStatusSegments(segments []client.Statu
 }
 
 // Helper functions with RT suffix to avoid conflicts with existing functions
-func getMinTimestampRT(resource *client.TimelineResource) int64 {
+func getMinTimestampRT(resource *models.Resource) int64 {
 	if len(resource.StatusSegments) > 0 {
 		return resource.StatusSegments[0].StartTime
 	}
@@ -279,7 +288,7 @@ func getMinTimestampRT(resource *client.TimelineResource) int64 {
 	return 0
 }
 
-func getMaxTimestampRT(resource *client.TimelineResource) int64 {
+func getMaxTimestampRT(resource *models.Resource) int64 {
 	maxTimestamp := int64(0)
 	if len(resource.StatusSegments) > 0 {
 		maxTimestamp = resource.StatusSegments[len(resource.StatusSegments)-1].EndTime

@@ -92,9 +92,11 @@ func TestCreateOwnsEdgeQuery(t *testing.T) {
 
 	query := CreateOwnsEdgeQuery("owner-uid", "owned-uid", props)
 
-	assert.Contains(t, query.Query, "MATCH")
+	// Uses MERGE for both nodes (no MATCH) to handle out-of-order event processing
+	assert.Contains(t, query.Query, "MERGE (owner:ResourceIdentity")
+	assert.Contains(t, query.Query, "MERGE (owned:ResourceIdentity")
 	assert.Contains(t, query.Query, "OWNS")
-	assert.Contains(t, query.Query, "MERGE")
+	assert.Contains(t, query.Query, "MERGE (owner)-[r:OWNS]->(owned)")
 
 	assert.Equal(t, "owner-uid", query.Parameters["ownerUID"])
 	assert.Equal(t, "owned-uid", query.Parameters["ownedUID"])

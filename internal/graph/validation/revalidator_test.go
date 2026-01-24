@@ -75,6 +75,18 @@ func (m *MockGraphClient) DeleteGraph(ctx context.Context) error {
 	return nil
 }
 
+func (m *MockGraphClient) CreateGraph(ctx context.Context, graphName string) error {
+	return nil
+}
+
+func (m *MockGraphClient) DeleteGraphByName(ctx context.Context, graphName string) error {
+	return nil
+}
+
+func (m *MockGraphClient) GraphExists(ctx context.Context, graphName string) (bool, error) {
+	return true, nil
+}
+
 func TestEdgeRevalidator_DefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 

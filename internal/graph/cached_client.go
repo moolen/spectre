@@ -108,6 +108,23 @@ func (c *CachedClient) DeleteGraph(ctx context.Context) error {
 	return c.underlying.DeleteGraph(ctx)
 }
 
+// CreateGraph creates a new named graph database (delegates to underlying client)
+func (c *CachedClient) CreateGraph(ctx context.Context, graphName string) error {
+	return c.underlying.CreateGraph(ctx, graphName)
+}
+
+// DeleteGraphByName deletes a specific named graph database (delegates to underlying client)
+func (c *CachedClient) DeleteGraphByName(ctx context.Context, graphName string) error {
+	// Clear cache when a graph is deleted
+	c.cache.Clear()
+	return c.underlying.DeleteGraphByName(ctx, graphName)
+}
+
+// GraphExists checks if a named graph exists (delegates to underlying client)
+func (c *CachedClient) GraphExists(ctx context.Context, graphName string) (bool, error) {
+	return c.underlying.GraphExists(ctx, graphName)
+}
+
 // CacheStats returns cache statistics
 func (c *CachedClient) CacheStats() QueryCacheStats {
 	return c.cache.Stats()

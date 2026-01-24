@@ -1,0 +1,5 @@
+{
+  "name": "Spectre Observability",
+  "description": "Unified timeline-based visibility for Kubernetes clusters.",
+  "requestFramePermissions": []
+}

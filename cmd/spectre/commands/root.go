@@ -37,7 +37,6 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(serverCmd)
-	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(debugCmd)
 }
 

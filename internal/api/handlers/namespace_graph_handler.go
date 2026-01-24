@@ -8,7 +8,6 @@ import (
 
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
-	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -28,31 +27,31 @@ func bucketTimestamp(ts int64) int64 {
 
 // NamespaceGraphHandler handles /v1/namespace-graph requests
 type NamespaceGraphHandler struct {
-	analyzer  *namespacegraph.Analyzer
-	cache     *namespacegraph.Cache
-	logger    *logging.Logger
-	validator *api.Validator
-	tracer    trace.Tracer
+	graphService *api.GraphService
+	cache        *namespacegraph.Cache
+	logger       *logging.Logger
+	validator    *api.Validator
+	tracer       trace.Tracer
 }
 
 // NewNamespaceGraphHandler creates a new handler without caching
-func NewNamespaceGraphHandler(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
+func NewNamespaceGraphHandler(graphService *api.GraphService, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
 	return &NamespaceGraphHandler{
-		analyzer:  namespacegraph.NewAnalyzer(graphClient),
-		logger:    logger,
-		validator: api.NewValidator(),
-		tracer:    tracer,
+		graphService: graphService,
+		logger:       logger,
+		validator:    api.NewValidator(),
+		tracer:       tracer,
 	}
 }
 
 // NewNamespaceGraphHandlerWithCache creates a new handler with caching enabled
-func NewNamespaceGraphHandlerWithCache(graphClient graph.Client, cache *namespacegraph.Cache, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
+func NewNamespaceGraphHandlerWithCache(graphService *api.GraphService, cache *namespacegraph.Cache, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
 	return &NamespaceGraphHandler{
-		analyzer:  namespacegraph.NewAnalyzer(graphClient),
-		cache:     cache,
-		logger:    logger,
-		validator: api.NewValidator(),
-		tracer:    tracer,
+		graphService: graphService,
+		cache:        cache,
+		logger:       logger,
+		validator:    api.NewValidator(),
+		tracer:       tracer,
 	}
 }
 
@@ -101,13 +100,13 @@ func (h *NamespaceGraphHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	h.logger.Debug("Processing namespace graph request: namespace=%s, timestamp=%d",
 		input.Namespace, input.Timestamp)
 
-	// 3. Execute analysis (use cache if available)
+	// 3. Execute analysis via GraphService (use cache if available)
 	var result *namespacegraph.NamespaceGraphResponse
 
 	if h.cache != nil {
 		result, err = h.cache.Analyze(ctx, input)
 	} else {
-		result, err = h.analyzer.Analyze(ctx, input)
+		result, err = h.graphService.AnalyzeNamespaceGraph(ctx, input)
 	}
 
 	if err != nil {

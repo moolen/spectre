@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
+	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -38,6 +40,7 @@ type Server struct {
 	querySource      api.TimelineQuerySource // Which executor to use for timeline queries
 	graphClient      graph.Client
 	graphPipeline    sync.Pipeline               // Graph sync pipeline for imports
+	timelineService  *api.TimelineService        // Shared timeline service for REST handlers and MCP tools
 	metadataCache    *api.MetadataCache          // In-memory metadata cache for fast responses
 	nsGraphCache     *namespacegraph.Cache       // In-memory namespace graph cache for fast responses
 	staticCache      *staticFileCache            // In-memory static file cache for fast UI serving
@@ -47,6 +50,11 @@ type Server struct {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	}
+	// Integration config management
+	integrationsConfigPath string
+	integrationManager     *integration.Manager
+	// MCP server
+	mcpServer *server.MCPServer
 }
 
 // NamespaceGraphCacheConfig holds configuration for the namespace graph cache
@@ -72,18 +80,24 @@ func NewWithStorageGraphAndPipeline(
 	},
 	metadataRefreshPeriod time.Duration, // How often to refresh the metadata cache
 	nsGraphCacheConfig NamespaceGraphCacheConfig, // Namespace graph cache configuration
+	integrationsConfigPath string,         // Path to integrations config file (optional)
+	integrationManager *integration.Manager, // Integration manager (optional)
+	mcpServer *server.MCPServer, // MCP server for /v1/mcp endpoint (optional)
 ) *Server {
 	s := &Server{
-		port:             port,
-		logger:           logging.GetLogger("api"),
-		queryExecutor:    storageExecutor,
-		graphExecutor:    graphExecutor,
-		querySource:      querySource,
-		graphClient:      graphClient,
-		graphPipeline:    graphPipeline,
-		router:           http.NewServeMux(),
-		readinessChecker: readinessChecker,
-		tracingProvider:  tracingProvider,
+		port:                   port,
+		logger:                 logging.GetLogger("api"),
+		queryExecutor:          storageExecutor,
+		graphExecutor:          graphExecutor,
+		querySource:            querySource,
+		graphClient:            graphClient,
+		graphPipeline:          graphPipeline,
+		router:                 http.NewServeMux(),
+		readinessChecker:       readinessChecker,
+		tracingProvider:        tracingProvider,
+		integrationsConfigPath: integrationsConfigPath,
+		integrationManager:     integrationManager,
+		mcpServer:              mcpServer,
 	}
 
 	// Create metadata cache if we have a query executor
@@ -99,6 +113,20 @@ func NewWithStorageGraphAndPipeline(
 		// Create cache with configurable refresh period
 		s.metadataCache = api.NewMetadataCache(metadataExecutor, s.logger, metadataRefreshPeriod)
 		s.logger.Info("Metadata cache created with refresh period %v (will initialize on server start)", metadataRefreshPeriod)
+	}
+
+	// Create timeline service with appropriate executor(s)
+	// This service is shared by REST handlers and MCP tools
+	tracer := s.getTracer("spectre.api.timeline")
+	if graphExecutor != nil && querySource == api.TimelineQuerySourceGraph {
+		s.logger.Info("Timeline service using GRAPH query executor")
+		s.timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, querySource, s.logger, tracer)
+	} else if graphExecutor != nil {
+		s.logger.Info("Timeline service using STORAGE query executor (graph available for comparison)")
+		s.timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, api.TimelineQuerySourceStorage, s.logger, tracer)
+	} else {
+		s.logger.Info("Timeline service using STORAGE query executor only")
+		s.timelineService = api.NewTimelineService(storageExecutor, s.logger, tracer)
 	}
 
 	// Create namespace graph cache if enabled and graph client is available
@@ -137,6 +165,28 @@ func (s *Server) configureHTTPServer(port int) {
 		WriteTimeout: 10 * time.Minute, // Allow time for processing + response writing (imports can take 5+ min)
 		IdleTimeout:  60 * time.Second,
 	}
+}
+
+// registerMCPHandler adds MCP endpoint to the router
+func (s *Server) registerMCPHandler() {
+	if s.mcpServer == nil {
+		s.logger.Debug("MCP server not configured, skipping /v1/mcp endpoint")
+		return
+	}
+
+	endpointPath := "/v1/mcp"
+	s.logger.Info("Registering MCP endpoint at %s", endpointPath)
+
+	// Create StreamableHTTP server with stateless mode
+	streamableServer := server.NewStreamableHTTPServer(
+		s.mcpServer,
+		server.WithEndpointPath(endpointPath),
+		server.WithStateLess(true), // Stateless mode per requirements
+	)
+
+	// Register on router (must be BEFORE static UI catch-all)
+	s.router.Handle(endpointPath, streamableServer)
+	s.logger.Info("MCP endpoint registered at %s", endpointPath)
 }
 
 // Start implements the lifecycle.Component interface
@@ -276,4 +326,36 @@ func (s *Server) Name() string {
 // Returns nil if caching is disabled.
 func (s *Server) GetNamespaceGraphCache() *namespacegraph.Cache {
 	return s.nsGraphCache
+}
+
+// GetTimelineService returns the shared timeline service for use by MCP tools.
+// This enables MCP tools to call the service directly instead of making HTTP requests.
+func (s *Server) GetTimelineService() *api.TimelineService {
+	return s.timelineService
+}
+
+// RegisterMCPEndpoint registers the MCP server endpoint after server initialization.
+// This allows the MCP server to be created with the TimelineService from this API server.
+func (s *Server) RegisterMCPEndpoint(mcpServer *server.MCPServer) error {
+	if mcpServer == nil {
+		return fmt.Errorf("mcpServer cannot be nil")
+	}
+	s.mcpServer = mcpServer
+
+	// Register the MCP endpoint using the existing method
+	s.registerMCPHandler()
+	return nil
+}
+
+// RegisterIntegrationHandlers registers integration config management endpoints after server initialization.
+// This allows the integration manager to be created after the API server (needed for MCP registry dependency).
+func (s *Server) RegisterIntegrationHandlers(integrationManager *integration.Manager) error {
+	if integrationManager == nil {
+		return fmt.Errorf("integrationManager cannot be nil")
+	}
+	s.integrationManager = integrationManager
+
+	// Register the integration config endpoints
+	s.registerIntegrationConfigHandlers()
+	return nil
 }

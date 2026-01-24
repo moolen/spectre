@@ -31,11 +31,12 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 	// 2. Up to MaxRecentEvents most recent events (for status context)
 	// This ensures we never miss the important config change that triggered a failure,
 	// even if there are many subsequent status-only events.
+	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
 	query := graph.GraphQuery{
 		Timeout: DefaultQueryTimeoutMs,
 		Query: `
-			UNWIND $resourceUIDs as uid
-			MATCH (resource:ResourceIdentity {uid: uid})
+			MATCH (resource:ResourceIdentity)
+			WHERE resource.uid IN $resourceUIDs
 			OPTIONAL MATCH (resource)-[:CHANGED]->(event:ChangeEvent)
 			WHERE event.timestamp <= $failureTimestamp
 			  AND event.timestamp >= $failureTimestamp - $lookback
@@ -47,7 +48,9 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 			     allEvents[0..$maxEvents] as recentEvents
 			WITH resourceUID,
 			     configEvents + [e IN recentEvents WHERE NOT e.id IN [ce IN configEvents | ce.id]] as combinedEvents
-			UNWIND combinedEvents as event
+			UNWIND CASE WHEN size(combinedEvents) > 0 THEN combinedEvents ELSE [null] END as event
+			WITH resourceUID, event
+			WHERE event IS NOT NULL
 			WITH resourceUID, event
 			ORDER BY event.timestamp DESC
 			RETURN resourceUID, collect(DISTINCT event) as events
@@ -158,11 +161,12 @@ func (a *RootCauseAnalyzer) getK8sEvents(
 		return make(map[string][]K8sEventInfo), nil
 	}
 
+	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
 	query := graph.GraphQuery{
 		Timeout: DefaultQueryTimeoutMs,
 		Query: `
-			UNWIND $resourceUIDs as uid
-			MATCH (resource:ResourceIdentity {uid: uid})
+			MATCH (resource:ResourceIdentity)
+			WHERE resource.uid IN $resourceUIDs
 			OPTIONAL MATCH (resource)-[:EMITTED_EVENT]->(k8sEvent:K8sEvent)
 			WHERE k8sEvent.timestamp <= $failureTimestamp
 			  AND k8sEvent.timestamp >= $failureTimestamp - $lookback

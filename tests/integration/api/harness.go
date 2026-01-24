@@ -7,17 +7,20 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
+	"github.com/moolen/spectre/internal/logging"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // TestHarness manages a test FalkorDB instance and provides utilities for testing API handlers
 type TestHarness struct {
-	client    graph.Client
-	pipeline  sync.Pipeline
-	container testcontainers.Container
+	client       graph.Client
+	graphService *api.GraphService
+	pipeline     sync.Pipeline
+	container    testcontainers.Container
 	config    graph.ClientConfig
 	ctx       context.Context
 	t         *testing.T
@@ -107,14 +110,19 @@ func NewTestHarness(t *testing.T) (*TestHarness, error) {
 		return nil, fmt.Errorf("failed to start pipeline: %w", err)
 	}
 
+	// Create graph service for handlers
+	logger := logging.GetLogger("test")
+	graphService := api.NewGraphService(client, logger, nil)
+
 	harness := &TestHarness{
-		client:    client,
-		pipeline:  pipeline,
-		container: container,
-		config:    config,
-		ctx:       ctx,
-		t:         t,
-		graphName: graphName,
+		client:       client,
+		graphService: graphService,
+		pipeline:     pipeline,
+		container:    container,
+		config:       config,
+		ctx:          ctx,
+		t:            t,
+		graphName:    graphName,
 	}
 
 	// Cleanup on test failure
@@ -156,6 +164,11 @@ func (h *TestHarness) SeedEventsFromAuditLog(ctx context.Context, auditLogPath s
 // GetClient returns the graph client for direct queries
 func (h *TestHarness) GetClient() graph.Client {
 	return h.client
+}
+
+// GetGraphService returns the graph service for API handlers
+func (h *TestHarness) GetGraphService() *api.GraphService {
+	return h.graphService
 }
 
 // GetPipeline returns the sync pipeline
