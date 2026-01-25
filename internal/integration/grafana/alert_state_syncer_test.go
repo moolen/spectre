@@ -35,6 +35,18 @@ func (m *mockGrafanaClientForStates) GetAlertStates(ctx context.Context) ([]Aler
 	return nil, nil
 }
 
+func (m *mockGrafanaClientForStates) GetAlertRule(ctx context.Context, uid string) (*AlertRule, error) {
+	return nil, nil
+}
+
+func (m *mockGrafanaClientForStates) ListDatasources(ctx context.Context) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockGrafanaClientForStates) QueryDataSource(ctx context.Context, datasourceUID string, expr string, from string, to string, scopedVars map[string]ScopedVar) (*QueryResponse, error) {
+	return nil, nil
+}
+
 // mockGraphClientForStates implements graph.Client for testing state sync
 type mockGraphClientForStates struct {
 	executeQueryFunc func(ctx context.Context, query graph.GraphQuery) (*graph.QueryResult, error)

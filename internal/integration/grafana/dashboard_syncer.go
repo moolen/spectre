@@ -17,7 +17,10 @@ type GrafanaClientInterface interface {
 	ListDashboards(ctx context.Context) ([]DashboardMeta, error)
 	GetDashboard(ctx context.Context, uid string) (map[string]interface{}, error)
 	ListAlertRules(ctx context.Context) ([]AlertRule, error)
+	GetAlertRule(ctx context.Context, uid string) (*AlertRule, error)
 	GetAlertStates(ctx context.Context) ([]AlertState, error)
+	ListDatasources(ctx context.Context) ([]map[string]interface{}, error)
+	QueryDataSource(ctx context.Context, datasourceUID string, expr string, from string, to string, scopedVars map[string]ScopedVar) (*QueryResponse, error)
 }
 
 // DashboardSyncer orchestrates incremental dashboard synchronization
