@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 ## Current Position
 
 Phase: 24 — Data Model & Ingestion
-Plan: 02 of 3 complete
-Status: In progress — Signal extraction and workload linkage complete
-Last activity: 2026-01-29 — Completed 24-02-PLAN.md
+Plan: 3 of 3 complete
+Status: Phase 24 complete — Graph integration with signal persistence
+Last activity: 2026-01-29 — Completed 24-03-PLAN.md
 
-Progress: [██░░░░░░░░░░░░░░░░░░░] ~8% (Phase 24/26, Plan 2 of 3)
+Progress: [███░░░░░░░░░░░░░░░░░░] ~12% (Phase 24/26, Plan 3 of 3 complete)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 2
-- Phase 24: 2/3 complete (24-01: 6 min, 24-02: 4 min)
-- Phase 25: Blocked by Phase 24
+- Plans completed: 3
+- Phase 24: 3/3 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min)
+- Phase 25: Ready to start
 - Phase 26: Blocked by Phase 25
 
 **v1.4 Velocity (previous):**
@@ -58,12 +58,14 @@ Progress: [██░░░░░░░░░░░░░░░░░░░] ~8% 
 |----------|---------|--------|------|
 | Layered classification with confidence decay | Need reliable metric → role mapping | 5 layers: 0.95 → 0.85-0.9 → 0.7-0.8 → 0.5 → 0 | 24-01 |
 | Quality scoring with alert boost | Prioritize high-value dashboards | Formula: base + 0.2*hasAlerts, capped at 1.0 | 24-01 |
-| Composite key for SignalAnchor | Deduplication across dashboards | metric_name + namespace + workload_name | 24-01 |
+| Composite key for SignalAnchor | Deduplication across dashboards | metric_name + namespace + workload_name + integration | 24-01, 24-03 |
 | 7-day TTL for signals | Stale metric cleanup | expires_at = last_seen + 7 days, query-time filtering | 24-01 |
 | Namespace-only signal inference | Signals with namespace but no workload | Returns WorkloadInference with empty workload_name (confidence 0.7) | 24-02 |
 | Low-confidence filter threshold | Filter unclassifiable metrics | Signals with confidence < 0.5 excluded from extraction | 24-02 |
 | Workload label priority | K8s workload inference | deployment > app.kubernetes.io/name > app > service > job > pod | 24-02 |
 | Deduplication winner selection | Multiple panels with same metric+workload | Highest quality signal wins, preserve FirstSeen timestamp | 24-02 |
+| Signal graph relationships | Link signals to context | SOURCED_FROM (Dashboard), REPRESENTS (Metric), MONITORS (ResourceIdentity) | 24-03 |
+| Graceful signal failure | Don't block dashboard sync | Signal extraction errors logged but don't fail syncDashboard | 24-03 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -91,8 +93,8 @@ None yet.
 
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
-| 24 | Signal anchors with role classification and quality scoring | 25 | 2/3 plans complete (24-01: types+classification, 24-02: extraction+linkage) |
-| 25 | Baseline storage and anomaly detection | 12 | Blocked by 24 |
+| 24 | Signal anchors with role classification and quality scoring | 25 | 3/3 complete (24-01: types+classification, 24-02: extraction+linkage, 24-03: graph-integration) |
+| 25 | Baseline storage and anomaly detection | 12 | Ready to start |
 | 26 | Observatory API and 8 MCP tools | 24 | Blocked by 25 |
 
 ## Milestone History
@@ -128,13 +130,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 24-02
+**Last command:** /gsd:execute-phase 24-03
 **Last session:** 2026-01-29
-**Stopped at:** Completed 24-02-PLAN.md (Signal extraction and workload linkage)
+**Stopped at:** Completed 24-03-PLAN.md (Signal graph integration)
 **Resume file:** None
-**Context preserved:** Phase 24-02 complete: Signal extractor (panel-to-SignalAnchor transformation, multi-query support, deduplication), workload linker (K8s inference with label priority, namespace-only signals). 2 commits (1babed5, 48eee9c). 24 test cases passing. Duration: 4 minutes.
+**Context preserved:** Phase 24-03 complete: BuildSignalGraph method (MERGE upsert with composite key, 4 relationships: node + SOURCED_FROM + REPRESENTS + MONITORS), DashboardSyncer integration (ingestSignals helper, graceful failure). 2 commits (53152be, 210c4fb). 5 test cases added. Duration: 3.8 minutes.
 
-**Next step:** Continue Phase 24 (Plan 03: Graph integration with SignalAnchor nodes and edges)
+**Next step:** Begin Phase 25 (Baseline storage and anomaly detection)
 
 ---
-*Last updated: 2026-01-29 — Phase 24-02 complete (signal extraction + workload linkage)*
+*Last updated: 2026-01-29 — Phase 24 complete (signal types, extraction, graph integration)*
