@@ -768,6 +768,7 @@ func (gb *GraphBuilder) createAlertMetricEdge(alertUID, metricName string, now i
 // CreateStateTransitionEdge stores an alert state transition with TTL.
 // Creates self-edge (Alert)-[STATE_TRANSITION]->(Alert) with properties:
 // - from_state, to_state, timestamp, expires_at (7-day TTL)
+// Also updates the Alert node's state and state_timestamp for efficient querying.
 // Uses MERGE to ensure Alert node exists (handles race with rule sync).
 func (gb *GraphBuilder) CreateStateTransitionEdge(
 	ctx context.Context,
@@ -779,10 +780,12 @@ func (gb *GraphBuilder) CreateStateTransitionEdge(
 	// Calculate TTL: 7 days from timestamp
 	expiresAt := timestamp.Add(7 * 24 * time.Hour)
 
-	// Create self-edge with transition properties
+	// Create self-edge with transition properties AND update node state
 	// Use MERGE for Alert node to handle race with rule sync
 	query := `
 		MERGE (a:Alert {uid: $uid, integration: $integration})
+		SET a.state = $to_state,
+		    a.state_timestamp = $timestamp
 		CREATE (a)-[t:STATE_TRANSITION]->(a)
 		SET t.from_state = $from_state,
 		    t.to_state = $to_state,
@@ -856,4 +859,175 @@ func (gb *GraphBuilder) getLastKnownState(
 	}
 
 	return state, nil
+}
+
+// BuildSignalGraph creates or updates SignalAnchor nodes with relationships to Dashboard, Metric, and optionally ResourceIdentity.
+// Uses MERGE for idempotent upsert semantics based on composite key: metric_name + workload_namespace + workload_name + integration.
+//
+// ON CREATE: Sets all fields including first_seen
+// ON MATCH: Updates role, confidence, quality_score, last_seen, expires_at (preserves first_seen)
+//
+// Relationships created:
+// - (SignalAnchor)-[:SOURCED_FROM]->(Dashboard)
+// - (SignalAnchor)-[:REPRESENTS]->(Metric)
+// - (SignalAnchor)-[:MONITORS]->(ResourceIdentity) [optional, if workload exists]
+//
+// TTL: 7 days via expires_at timestamp (query-time filtering)
+func (gb *GraphBuilder) BuildSignalGraph(ctx context.Context, signals []SignalAnchor) error {
+	if len(signals) == 0 {
+		gb.logger.Debug("No signals to build graph for")
+		return nil
+	}
+
+	gb.logger.Debug("Building signal graph for %d signals", len(signals))
+
+	for _, signal := range signals {
+		// Create SignalAnchor node with MERGE upsert
+		// Composite key: metric_name + workload_namespace + workload_name + integration
+		signalQuery := `
+			MERGE (s:SignalAnchor {
+				metric_name: $metric_name,
+				workload_namespace: $workload_namespace,
+				workload_name: $workload_name,
+				integration: $integration
+			})
+			ON CREATE SET
+				s.role = $role,
+				s.confidence = $confidence,
+				s.quality_score = $quality_score,
+				s.dashboard_uid = $dashboard_uid,
+				s.panel_id = $panel_id,
+				s.query_id = $query_id,
+				s.first_seen = $first_seen,
+				s.last_seen = $last_seen,
+				s.expires_at = $expires_at
+			ON MATCH SET
+				s.role = $role,
+				s.confidence = $confidence,
+				s.quality_score = $quality_score,
+				s.dashboard_uid = $dashboard_uid,
+				s.panel_id = $panel_id,
+				s.query_id = $query_id,
+				s.last_seen = $last_seen,
+				s.expires_at = $expires_at
+		`
+
+		_, err := gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+			Query: signalQuery,
+			Parameters: map[string]interface{}{
+				"metric_name":         signal.MetricName,
+				"workload_namespace":  signal.WorkloadNamespace,
+				"workload_name":       signal.WorkloadName,
+				"integration":         signal.SourceGrafana,
+				"role":                string(signal.Role),
+				"confidence":          signal.Confidence,
+				"quality_score":       signal.QualityScore,
+				"dashboard_uid":       signal.DashboardUID,
+				"panel_id":            signal.PanelID,
+				"query_id":            signal.QueryID,
+				"first_seen":          signal.FirstSeen,
+				"last_seen":           signal.LastSeen,
+				"expires_at":          signal.ExpiresAt,
+			},
+		})
+		if err != nil {
+			gb.logger.Warn("Failed to create SignalAnchor node for metric %s: %v", signal.MetricName, err)
+			continue
+		}
+
+		// Create SOURCED_FROM relationship to Dashboard
+		dashboardRelQuery := `
+			MATCH (s:SignalAnchor {
+				metric_name: $metric_name,
+				workload_namespace: $workload_namespace,
+				workload_name: $workload_name,
+				integration: $integration
+			})
+			MATCH (d:Dashboard {uid: $dashboard_uid})
+			MERGE (s)-[:SOURCED_FROM]->(d)
+		`
+
+		_, err = gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+			Query: dashboardRelQuery,
+			Parameters: map[string]interface{}{
+				"metric_name":         signal.MetricName,
+				"workload_namespace":  signal.WorkloadNamespace,
+				"workload_name":       signal.WorkloadName,
+				"integration":         signal.SourceGrafana,
+				"dashboard_uid":       signal.DashboardUID,
+			},
+		})
+		if err != nil {
+			gb.logger.Warn("Failed to create SOURCED_FROM edge for signal %s: %v", signal.MetricName, err)
+			// Continue despite error - signal node still useful
+		}
+
+		// Create REPRESENTS relationship to Metric
+		metricRelQuery := `
+			MATCH (s:SignalAnchor {
+				metric_name: $metric_name,
+				workload_namespace: $workload_namespace,
+				workload_name: $workload_name,
+				integration: $integration
+			})
+			MERGE (m:Metric {name: $metric_name})
+			ON CREATE SET
+				m.firstSeen = $now,
+				m.lastSeen = $now
+			ON MATCH SET
+				m.lastSeen = $now
+			MERGE (s)-[:REPRESENTS]->(m)
+		`
+
+		_, err = gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+			Query: metricRelQuery,
+			Parameters: map[string]interface{}{
+				"metric_name":         signal.MetricName,
+				"workload_namespace":  signal.WorkloadNamespace,
+				"workload_name":       signal.WorkloadName,
+				"integration":         signal.SourceGrafana,
+				"now":                 signal.LastSeen,
+			},
+		})
+		if err != nil {
+			gb.logger.Warn("Failed to create REPRESENTS edge for signal %s: %v", signal.MetricName, err)
+			// Continue despite error
+		}
+
+		// Create MONITORS relationship to ResourceIdentity (if workload name exists)
+		// ResourceIdentity nodes are created by K8s integration, we just link if they exist
+		if signal.WorkloadName != "" {
+			resourceRelQuery := `
+				MATCH (s:SignalAnchor {
+					metric_name: $metric_name,
+					workload_namespace: $workload_namespace,
+					workload_name: $workload_name,
+					integration: $integration
+				})
+				OPTIONAL MATCH (r:ResourceIdentity {
+					namespace: $workload_namespace,
+					name: $workload_name
+				})
+				WHERE r IS NOT NULL
+				MERGE (s)-[:MONITORS]->(r)
+			`
+
+			_, err = gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+				Query: resourceRelQuery,
+				Parameters: map[string]interface{}{
+					"metric_name":         signal.MetricName,
+					"workload_namespace":  signal.WorkloadNamespace,
+					"workload_name":       signal.WorkloadName,
+					"integration":         signal.SourceGrafana,
+				},
+			})
+			if err != nil {
+				gb.logger.Warn("Failed to create MONITORS edge for signal %s: %v", signal.MetricName, err)
+				// This is expected if ResourceIdentity doesn't exist yet
+			}
+		}
+	}
+
+	gb.logger.Debug("Successfully built signal graph for %d signals", len(signals))
+	return nil
 }
