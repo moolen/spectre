@@ -7,6 +7,7 @@
 - ✅ **v1.2 Logz.io Integration + Secret Management** - Phases 10-14 (shipped 2026-01-22)
 - ✅ **v1.3 Grafana Metrics Integration** - Phases 15-19 (shipped 2026-01-23)
 - ✅ **v1.4 Grafana Alerts Integration** - Phases 20-23 (shipped 2026-01-23)
+- 🚧 **v1.5 Observatory** - Phases 24-26 (in progress)
 
 ## Phases
 
@@ -224,6 +225,53 @@ Plans:
 
 </details>
 
+<details open>
+<summary>🚧 v1.5 Observatory (Phases 24-26) - IN PROGRESS</summary>
+
+**Milestone Goal:** Build a signal intelligence layer that extracts "what matters" from dashboards and exposes it for AI-driven incident investigation.
+
+**Core insight:** Dashboards encode human knowledge about "what matters" — Observatory extracts, classifies, and exposes that knowledge so AI agents can investigate incidents systematically.
+
+#### Phase 24: Data Model & Ingestion
+**Goal**: Signal anchors exist in graph with role classification, quality scoring, and K8s workload linkage.
+**Depends on**: Phase 23 (v1.4 complete)
+**Requirements**: SCHM-01, SCHM-02, SCHM-03, SCHM-04, SCHM-05, SCHM-06, SCHM-07, SCHM-08, CLAS-01, CLAS-02, CLAS-03, CLAS-04, CLAS-05, CLAS-06, QUAL-01, QUAL-02, QUAL-03, QUAL-04, QUAL-05, INGT-01, INGT-02, INGT-03, INGT-04, INGT-05, INGT-06
+**Success Criteria** (what must be TRUE):
+  1. SignalAnchor nodes appear in FalkorDB linked to Dashboard, Panel, Metric, and K8s workload nodes
+  2. Each anchor has a classified signal role (Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty) with confidence score
+  3. Each anchor has a quality score derived from its source dashboard (freshness, alerting, ownership, completeness)
+  4. Ingestion pipeline transforms existing dashboards/panels into signal anchors idempotently
+  5. Pipeline runs on schedule and can be triggered manually via existing UI sync mechanism
+**Plans**: TBD
+
+#### Phase 25: Baseline & Anomaly Detection
+**Goal**: Anomalies are detected against rolling baselines with alert-bootstrapped thresholds and hybrid collection.
+**Depends on**: Phase 24
+**Requirements**: BASE-01, BASE-02, BASE-03, BASE-04, BASE-05, BASE-06, ANOM-01, ANOM-02, ANOM-03, ANOM-04, ANOM-05, ANOM-06
+**Success Criteria** (what must be TRUE):
+  1. Rolling statistics (median, P50/P90/P99, stddev, min/max, sample count) are stored per SignalAnchor
+  2. Forward collection updates baselines periodically; opt-in catchup backfills from historical data
+  3. Anomaly score (0.0-1.0) computed via z-score and percentile comparison with confidence indicator
+  4. Grafana alert state (firing/pending/normal) treated as strong anomaly signal
+  5. Anomalies aggregate upward: metrics to signals to workloads to namespaces to clusters
+**Plans**: TBD
+
+#### Phase 26: Observatory API & MCP Tools
+**Goal**: AI can investigate incidents through 8 progressive disclosure tools covering Orient, Narrow, Investigate, Hypothesize, and Verify stages.
+**Depends on**: Phase 25
+**Requirements**: API-01, API-02, API-03, API-04, API-05, API-06, API-07, API-08, TOOL-01, TOOL-02, TOOL-03, TOOL-04, TOOL-05, TOOL-06, TOOL-07, TOOL-08, TOOL-09, TOOL-10, TOOL-11, TOOL-12, TOOL-13, TOOL-14, TOOL-15, TOOL-16
+**Success Criteria** (what must be TRUE):
+  1. Observatory API returns anomalies, workload signals, signal details, and dashboard quality rankings
+  2. API responses include scope, timestamp, summary, confidence, and suggestions for next query
+  3. Orient tools (`observatory_status`, `observatory_changes`) show cluster-wide anomaly summary and recent changes
+  4. Narrow tools (`observatory_scope`, `observatory_signals`) focus on specific namespace/workload with ranked signals
+  5. Investigate/Hypothesize/Verify tools (`observatory_signal_detail`, `observatory_compare`, `observatory_explain`, `observatory_evidence`) provide deep analysis with K8s graph integration
+**Plans**: TBD
+
+**Stats:** 3 phases, TBD plans, 61 requirements
+
+</details>
+
 ## Progress
 
 | Milestone | Phases | Plans | Requirements | Status |
@@ -233,8 +281,9 @@ Plans:
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
 | v1.4 | 20-23 | 10 | 22 | ✅ Shipped 2026-01-23 |
+| v1.5 | 24-26 | TBD | 61 | 🚧 In Progress |
 
-**Total:** 23 phases, 66 plans, 146 requirements — ALL COMPLETE ✅
+**Total:** 26 phases, 66+ plans, 207 requirements
 
 ---
-*v1.4 roadmap completed: 2026-01-23*
+*v1.5 roadmap created: 2026-01-29*

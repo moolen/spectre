@@ -37,7 +37,7 @@ Requirements for Observatory signal intelligence layer. Each maps to roadmap pha
 
 ### Ingestion Pipeline
 
-- [ ] **INGT-01**: Panel → SignalAnchor transformation extracts metrics and classifies to roles
+- [ ] **INGT-01**: Panel -> SignalAnchor transformation extracts metrics and classifies to roles
 - [ ] **INGT-02**: Pipeline is idempotent (re-running updates existing anchors, not duplicates)
 - [ ] **INGT-03**: Pipeline runs as background goroutine on configurable schedule
 - [ ] **INGT-04**: Pipeline can be triggered manually via existing UI mechanism
@@ -59,7 +59,7 @@ Requirements for Observatory signal intelligence layer. Each maps to roadmap pha
 - [ ] **ANOM-02**: Anomaly score uses percentile comparison (current vs historical P99)
 - [ ] **ANOM-03**: Anomaly output includes score (0.0-1.0) and confidence (0.0-1.0)
 - [ ] **ANOM-04**: Cold start handled gracefully (returns "insufficient data" state)
-- [ ] **ANOM-05**: Anomalies aggregate from metrics → signals → workloads → namespaces → clusters
+- [ ] **ANOM-05**: Anomalies aggregate from metrics -> signals -> workloads -> namespaces -> clusters
 - [ ] **ANOM-06**: Grafana alert state (firing/pending/normal) used as strong anomaly signal
 
 ### Observatory API
@@ -122,8 +122,8 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ### Cross-Signal Correlation
 
-- **CORR-V2-01**: Alert↔Log automatic correlation (time-based linking)
-- **CORR-V2-02**: Alert↔Metric anomaly correlation
+- **CORR-V2-01**: Alert<->Log automatic correlation (time-based linking)
+- **CORR-V2-02**: Alert<->Metric anomaly correlation
 - **CORR-V2-03**: Cascade detection (alert A causes alert B)
 
 ## Out of Scope
@@ -145,73 +145,76 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCHM-01 | — | Pending |
-| SCHM-02 | — | Pending |
-| SCHM-03 | — | Pending |
-| SCHM-04 | — | Pending |
-| SCHM-05 | — | Pending |
-| SCHM-06 | — | Pending |
-| SCHM-07 | — | Pending |
-| SCHM-08 | — | Pending |
-| CLAS-01 | — | Pending |
-| CLAS-02 | — | Pending |
-| CLAS-03 | — | Pending |
-| CLAS-04 | — | Pending |
-| CLAS-05 | — | Pending |
-| CLAS-06 | — | Pending |
-| QUAL-01 | — | Pending |
-| QUAL-02 | — | Pending |
-| QUAL-03 | — | Pending |
-| QUAL-04 | — | Pending |
-| QUAL-05 | — | Pending |
-| INGT-01 | — | Pending |
-| INGT-02 | — | Pending |
-| INGT-03 | — | Pending |
-| INGT-04 | — | Pending |
-| INGT-05 | — | Pending |
-| INGT-06 | — | Pending |
-| BASE-01 | — | Pending |
-| BASE-02 | — | Pending |
-| BASE-03 | — | Pending |
-| BASE-04 | — | Pending |
-| BASE-05 | — | Pending |
-| BASE-06 | — | Pending |
-| ANOM-01 | — | Pending |
-| ANOM-02 | — | Pending |
-| ANOM-03 | — | Pending |
-| ANOM-04 | — | Pending |
-| ANOM-05 | — | Pending |
-| ANOM-06 | — | Pending |
-| API-01 | — | Pending |
-| API-02 | — | Pending |
-| API-03 | — | Pending |
-| API-04 | — | Pending |
-| API-05 | — | Pending |
-| API-06 | — | Pending |
-| API-07 | — | Pending |
-| API-08 | — | Pending |
-| TOOL-01 | — | Pending |
-| TOOL-02 | — | Pending |
-| TOOL-03 | — | Pending |
-| TOOL-04 | — | Pending |
-| TOOL-05 | — | Pending |
-| TOOL-06 | — | Pending |
-| TOOL-07 | — | Pending |
-| TOOL-08 | — | Pending |
-| TOOL-09 | — | Pending |
-| TOOL-10 | — | Pending |
-| TOOL-11 | — | Pending |
-| TOOL-12 | — | Pending |
-| TOOL-13 | — | Pending |
-| TOOL-14 | — | Pending |
-| TOOL-15 | — | Pending |
-| TOOL-16 | — | Pending |
+| SCHM-01 | Phase 24 | Pending |
+| SCHM-02 | Phase 24 | Pending |
+| SCHM-03 | Phase 24 | Pending |
+| SCHM-04 | Phase 24 | Pending |
+| SCHM-05 | Phase 24 | Pending |
+| SCHM-06 | Phase 24 | Pending |
+| SCHM-07 | Phase 24 | Pending |
+| SCHM-08 | Phase 24 | Pending |
+| CLAS-01 | Phase 24 | Pending |
+| CLAS-02 | Phase 24 | Pending |
+| CLAS-03 | Phase 24 | Pending |
+| CLAS-04 | Phase 24 | Pending |
+| CLAS-05 | Phase 24 | Pending |
+| CLAS-06 | Phase 24 | Pending |
+| QUAL-01 | Phase 24 | Pending |
+| QUAL-02 | Phase 24 | Pending |
+| QUAL-03 | Phase 24 | Pending |
+| QUAL-04 | Phase 24 | Pending |
+| QUAL-05 | Phase 24 | Pending |
+| INGT-01 | Phase 24 | Pending |
+| INGT-02 | Phase 24 | Pending |
+| INGT-03 | Phase 24 | Pending |
+| INGT-04 | Phase 24 | Pending |
+| INGT-05 | Phase 24 | Pending |
+| INGT-06 | Phase 24 | Pending |
+| BASE-01 | Phase 25 | Pending |
+| BASE-02 | Phase 25 | Pending |
+| BASE-03 | Phase 25 | Pending |
+| BASE-04 | Phase 25 | Pending |
+| BASE-05 | Phase 25 | Pending |
+| BASE-06 | Phase 25 | Pending |
+| ANOM-01 | Phase 25 | Pending |
+| ANOM-02 | Phase 25 | Pending |
+| ANOM-03 | Phase 25 | Pending |
+| ANOM-04 | Phase 25 | Pending |
+| ANOM-05 | Phase 25 | Pending |
+| ANOM-06 | Phase 25 | Pending |
+| API-01 | Phase 26 | Pending |
+| API-02 | Phase 26 | Pending |
+| API-03 | Phase 26 | Pending |
+| API-04 | Phase 26 | Pending |
+| API-05 | Phase 26 | Pending |
+| API-06 | Phase 26 | Pending |
+| API-07 | Phase 26 | Pending |
+| API-08 | Phase 26 | Pending |
+| TOOL-01 | Phase 26 | Pending |
+| TOOL-02 | Phase 26 | Pending |
+| TOOL-03 | Phase 26 | Pending |
+| TOOL-04 | Phase 26 | Pending |
+| TOOL-05 | Phase 26 | Pending |
+| TOOL-06 | Phase 26 | Pending |
+| TOOL-07 | Phase 26 | Pending |
+| TOOL-08 | Phase 26 | Pending |
+| TOOL-09 | Phase 26 | Pending |
+| TOOL-10 | Phase 26 | Pending |
+| TOOL-11 | Phase 26 | Pending |
+| TOOL-12 | Phase 26 | Pending |
+| TOOL-13 | Phase 26 | Pending |
+| TOOL-14 | Phase 26 | Pending |
+| TOOL-15 | Phase 26 | Pending |
+| TOOL-16 | Phase 26 | Pending |
 
 **Coverage:**
-- v1.5 requirements: 54 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 54
+- v1.5 requirements: 61 total
+- Mapped to phases: 61
+- Phase 24: 25 requirements (SCHM-*, CLAS-*, QUAL-*, INGT-*)
+- Phase 25: 12 requirements (BASE-*, ANOM-*)
+- Phase 26: 24 requirements (API-*, TOOL-*)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-01-29*
-*Last updated: 2026-01-29 after initial definition*
+*Last updated: 2026-01-29 after roadmap creation*

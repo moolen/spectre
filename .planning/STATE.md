@@ -5,21 +5,27 @@
 See: .planning/PROJECT.md (updated 2026-01-29)
 
 **Core value:** Enable AI assistants to understand what's happening in Kubernetes clusters through unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis.
-**Current focus:** v1.5 Observatory — Defining requirements
+**Current focus:** v1.5 Observatory — Phase 24: Data Model & Ingestion
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements for v1.5 Observatory
-Last activity: 2026-01-29 — Milestone v1.5 started
+Phase: 24 — Data Model & Ingestion
+Plan: Not started
+Status: Roadmap created, ready for phase planning
+Last activity: 2026-01-29 — Roadmap v1.5 created
 
-Progress: [░░░░░░░░░░░░░░░░░░░░░] 0% (v1.5 in requirements phase)
+Progress: [░░░░░░░░░░░░░░░░░░░░░] 0% (Phase 24/26)
 
 ## Performance Metrics
 
-**v1.4 Velocity (current):**
-- Plans completed: 10 (COMPLETE ✅)
+**v1.5 Status (current):**
+- Plans completed: 0
+- Phase 24: Not started
+- Phase 25: Not started
+- Phase 26: Not started
+
+**v1.4 Velocity (previous):**
+- Plans completed: 10 (COMPLETE)
 - Phase 20 duration: ~10 min
 - Phase 21-01 duration: 4 min
 - Phase 21-02 duration: 8 min
@@ -41,125 +47,26 @@ Progress: [░░░░░░░░░░░░░░░░░░░░░] 0% (
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 66 complete (v1.0-v1.4 Phase 23-03 COMPLETE)
+- Total plans: 66 complete (v1.0-v1.4)
 - Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
 
 ## Accumulated Context
 
 ### Decisions
 
-Recent decisions from PROJECT.md affecting v1.4:
-- Query via Grafana API (not direct Prometheus) — simpler auth, variable handling
-- No metric storage — query historical ranges on-demand
-- Dashboards are intent, not truth — treat as fuzzy signals
-- Progressive disclosure — overview → aggregated → details
+Recent decisions from PROJECT.md affecting v1.5:
+- Signal anchors link metrics to signal roles to workloads
+- Role taxonomy: Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty
+- Dashboard quality scoring: freshness, usage, alerting, ownership, completeness
+- Hybrid collection: forward-looking periodic + opt-in catchup backfill
+- Progressive disclosure: Orient -> Narrow -> Investigate -> Hypothesize -> Verify
 
-From Phase 15:
-- SecretWatcher duplication (temporary) - refactor to common package deferred — 15-01
-- Dashboard access required for health check, datasource access optional — 15-01
-- Follows VictoriaLogs integration pattern exactly for consistency — 15-01
-- Generic factory pattern eliminates need for type-specific switch cases in test handler — 15-03
-- Blank import pattern for factory registration via init() functions — 15-03
-
-From Phase 16:
-- Use official Prometheus parser instead of custom regex parsing — 16-01
-- Detect variable syntax before parsing to handle unparseable queries gracefully — 16-01
-- Return partial extraction for queries with variables instead of error — 16-01
-- MERGE-based upsert semantics for all nodes — 16-02
-- Full dashboard replace pattern - simpler than incremental panel updates — 16-02
-- Graceful degradation: log parse errors but continue with other panels/queries — 16-02
-- IntegrationStatus type in types.go - unified status representation — 16-03
-
-From Phase 17:
-- Service identity = {name, cluster, namespace} for proper scoping — 17-01
-- Multiple service nodes when labels disagree instead of choosing one — 17-01
-- Variable classification uses case-insensitive pattern matching — 17-02
-- Per-tag HierarchyMap mapping - each tag maps to level, first match wins — 17-03
-- Default to "detail" level when no hierarchy signals present — 17-03
-
-From Phase 18:
-- Query types defined in client.go alongside client methods — 18-01
-- formatTimeSeriesResponse is package-private (called by query service) — 18-01
-- Dashboard JSON fetched from graph (not Grafana API) since it's already synced — 18-01
-- Only first target per panel executed (most panels have single target) — 18-01
-- dashboardInfo type shared across all tools — 18-02
-- Query service requires graph client (tools not registered without it) — 18-03
-- Tool descriptions guide AI on progressive disclosure usage — 18-03
-
-From Phase 19:
-- Sample variance (n-1) for standard deviation computation — 19-01
-- Error metrics use lower thresholds (2σ critical vs 3σ for normal metrics) — 19-01
-- Absolute z-score for bidirectional anomaly detection — 19-01
-- Pattern-based error metric detection (5xx, error, failed, failure) — 19-01
-- TTL implementation via expires_at Unix timestamp in graph (no application-side cleanup) — 19-02
-- Weekday/weekend separation for different baseline patterns — 19-02
-- DataFrame parsing: ExecuteDashboard returns time-series data in Values arrays, not single snapshots — 19-03
-- Metric name extraction via __name__ label with fallback to label pair construction — 19-03
-- Omit dashboard results when anomalies found (minimal context optimization) — 19-03
-- Run anomaly detection on first dashboard only (primary overview dashboard) — 19-03
-- Integration tests focus on helper function validation rather than complex service mocking — 19-04
-- Map iteration non-determinism handled via acceptAnyKey pattern in tests — 19-04
-- Time-based tests use explicit date construction with day-of-week comments — 19-04
-
-From Phase 20:
-- Alert rule metadata stored in AlertNode (definition), state tracking deferred to Phase 21 — 20-01
-- AlertQuery.Model as json.RawMessage for flexible PromQL parsing — 20-01
-- Integration field in AlertNode for multi-Grafana support — 20-01
-- ISO8601 string comparison for timestamp-based incremental sync (no parse needed) — 20-02
-- Shared GraphBuilder instance between Dashboard and Alert syncers — 20-02
-- Integration name parameter in GraphBuilder constructor for consistent node tagging — 20-02
-- First PromQL expression stored as condition field for alert display — 20-02
-- Alert→Service relationships accessed transitively via Metrics (no direct edge) — 20-02
-
-From Phase 21:
-- Prometheus-compatible /api/prometheus/grafana/api/v1/rules endpoint for alert states — 21-01
-- 7-day TTL via expires_at RFC3339 timestamp with WHERE filtering (no cleanup job) — 21-01
-- State deduplication via getLastKnownState comparison before edge creation — 21-01
-- Map "alerting" to "firing" state, normalize to lowercase — 21-01
-- Extract UID from grafana_uid label in Prometheus response — 21-01
-- Self-edge pattern for state transitions: (Alert)-[STATE_TRANSITION]->(Alert) — 21-01
-- Return "unknown" for missing state (not error) to handle first sync gracefully — 21-01
-- MERGE for Alert node in state sync to handle race with rule sync — 21-01
-- Periodic state sync with 5-minute interval (independent from 1-hour rule sync) — 21-02
-- State aggregation: worst-case across instances (firing > pending > normal) — 21-02
-- Per-alert last_synced_at timestamp for staleness tracking (not global) — 21-02
-- Partial failures OK: continue sync with other alerts on graph errors — 21-02
-- strings.Contains for query detection in mocks (more reliable than parameter matching) — 21-02
-
-From Phase 22:
-- Exponential scaling for flappiness (1 - exp(-k*count)) instead of linear ratio — 22-01
-- Duration multipliers penalize short-lived states (1.3x) vs long-lived (0.8x) — 22-01
-- LOCF daily buckets with state carryover for multi-day baseline variance — 22-01
-- 24h minimum data requirement for statistically meaningful baselines — 22-01
-- Transitions at period boundaries are inclusive (careful timestamp logic) — 22-01
-- Sample variance (N-1) via gonum.org/v1/gonum/stat.StdDev for unbiased estimator — 22-01
-- 5-minute cache TTL with 1000-entry LRU for analysis results — 22-02
-- Multi-label categorization: independent onset and pattern categories — 22-02
-- LOCF interpolation for state duration computation fills gaps realistically — 22-02
-- Chronic threshold: >80% firing over 7 days using LOCF — 22-02
-- Flapping overrides trend patterns (flappiness > 0.7) — 22-02
-- ErrInsufficientData with Available/Required fields for clear error messages — 22-02
-- AlertAnalysisService created in Start after graphClient (no Start/Stop methods) — 22-03
-- GetAnalysisService() getter returns nil when graph disabled (clear signal to MCP tools) — 22-03
-- Service shares graphClient with AlertSyncer and AlertStateSyncer (no separate client) — 22-03
-
-From Phase 23:
-- All MCP tool filter parameters optional (empty required array) for maximum flexibility — 23-01
-- Flappiness threshold 0.7 used consistently across all alert tools — 23-01
-- Handle nil AlertAnalysisService gracefully (graph disabled scenario) — 23-01
-- ErrInsufficientData checked with errors.As (new alerts lack 24h history) — 23-01
-- Severity case normalization via strings.ToLower for robust matching — 23-01
-- Minimal AlertSummary response (name + firing_duration) to minimize MCP tokens — 23-01
-- Group alerts by severity in response for efficient AI triage — 23-01
-- 10-minute buckets for compact state timelines (6 buckets per hour) — 23-02
-- Left-to-right timeline ordering (oldest→newest) for natural reading — 23-02
-- Category display format: "CHRONIC + flapping" combines onset and pattern — 23-02
-- LOCF interpolation for state timeline bucketization — 23-02
-- Details tool warns when >5 alerts (large response protection) — 23-02
-- Graceful degradation: "new (insufficient history)" for missing analysis — 23-02
-- mockAlertGraphClient implements both Alert node queries and STATE_TRANSITION edge queries — 23-03
-- Progressive disclosure test validates workflow across all three tools in single scenario — 23-03
-- Label filter matching extracts values from query string for severity filtering — 23-03
+From v1.4 (relevant to v1.5):
+- Self-edge pattern for state transitions works well
+- TTL via expires_at timestamp with query-time filtering
+- Exponential scaling for flappiness detection
+- LOCF interpolation for timeline bucketization
+- 5-minute cache TTL with LRU for analysis results
 
 ### Pending Todos
 
@@ -169,7 +76,19 @@ None yet.
 
 None yet.
 
+## v1.5 Phase Overview
+
+| Phase | Goal | Requirements | Status |
+|-------|------|--------------|--------|
+| 24 | Signal anchors with role classification and quality scoring | 25 | Not started |
+| 25 | Baseline storage and anomaly detection | 12 | Blocked by 24 |
+| 26 | Observatory API and 8 MCP tools | 24 | Blocked by 25 |
+
 ## Milestone History
+
+- **v1.5 Observatory** — in progress
+  - 3 phases (24-26), TBD plans, 61 requirements
+  - Signal intelligence layer for AI-driven incident investigation
 
 - **v1.4 Grafana Alerts Integration** — shipped 2026-01-23
   - 4 phases (20-23), 10 plans, 22 requirements
@@ -198,13 +117,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:new-milestone
+**Last command:** /gsd:roadmap
 **Last session:** 2026-01-29
-**Stopped at:** Defining requirements for v1.5 Observatory
+**Stopped at:** Roadmap v1.5 created
 **Resume file:** None
-**Context preserved:** v1.5 Observatory milestone started. Building signal intelligence layer for AI-driven incident investigation. 3 phases planned: Data Model & Ingestion → Baseline & Anomaly → API & Tools. 8 MCP tools following Orient → Narrow → Investigate → Hypothesize → Verify progression.
+**Context preserved:** v1.5 Observatory milestone roadmap complete. 3 phases: Phase 24 (Data Model & Ingestion, 25 reqs), Phase 25 (Baseline & Anomaly, 12 reqs), Phase 26 (API & Tools, 24 reqs). 61 total requirements mapped.
 
-**Next step:** Complete requirements definition, then create roadmap.
+**Next step:** `/gsd:plan-phase 24`
 
 ---
-*Last updated: 2026-01-29 — v1.5 milestone started*
+*Last updated: 2026-01-29 — v1.5 roadmap created*
