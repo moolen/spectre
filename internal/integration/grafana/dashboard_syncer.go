@@ -315,7 +315,7 @@ func (ds *DashboardSyncer) needsSync(ctx context.Context, uid string) (bool, err
 	return needsSync, nil
 }
 
-// syncDashboard performs full dashboard replace (delete old panels/queries, recreate)
+// syncDashboard performs full dashboard replace (delete old panels/queries, recreate) and extracts signals
 func (ds *DashboardSyncer) syncDashboard(ctx context.Context, dashboard *GrafanaDashboard) error {
 	ds.logger.Debug("Syncing dashboard: %s (version: %d)", dashboard.UID, dashboard.Version)
 
@@ -329,8 +329,87 @@ func (ds *DashboardSyncer) syncDashboard(ctx context.Context, dashboard *Grafana
 		return fmt.Errorf("failed to create dashboard graph: %w", err)
 	}
 
+	// Ingest signals after dashboard sync (graceful failure - don't block dashboard sync)
+	if err := ds.ingestSignals(ctx, dashboard); err != nil {
+		ds.logger.Warn("Failed to ingest signals for dashboard %s: %v (continuing)", dashboard.UID, err)
+		// Don't return error - signal extraction failure should not fail dashboard sync
+	}
+
 	ds.logger.Debug("Successfully synced dashboard: %s", dashboard.UID)
 	return nil
+}
+
+// ingestSignals extracts signals from dashboard and writes them to graph
+func (ds *DashboardSyncer) ingestSignals(ctx context.Context, dashboard *GrafanaDashboard) error {
+	// Get dashboard metadata for quality scoring
+	// For now, use stub methods for alert count and views
+	alertRuleCount := ds.getAlertRuleCount(dashboard.UID)
+	viewsLast30Days := ds.getViewsLast30Days(dashboard.UID)
+
+	// Get dashboard updated time (use current time as fallback)
+	updated := time.Now()
+	// TODO: Extract updated time from dashboard metadata when available
+
+	// Get folder title (use empty string as fallback)
+	folderTitle := ""
+	// TODO: Extract folder title from dashboard metadata when available
+
+	// Get description (use empty string as fallback)
+	description := ""
+	// TODO: Extract description from dashboard metadata when available
+
+	// Compute dashboard quality score
+	qualityScore := ComputeDashboardQuality(
+		dashboard,
+		alertRuleCount,
+		viewsLast30Days,
+		updated,
+		folderTitle,
+		description,
+	)
+
+	ds.logger.Debug("Dashboard %s quality score: %.2f", dashboard.UID, qualityScore)
+
+	// Extract signals from dashboard
+	now := time.Now().UnixNano()
+	signals, err := ExtractSignalsFromDashboard(
+		dashboard,
+		qualityScore,
+		ds.graphBuilder.integrationName,
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to extract signals: %w", err)
+	}
+
+	if len(signals) == 0 {
+		ds.logger.Debug("No signals extracted from dashboard %s", dashboard.UID)
+		return nil
+	}
+
+	ds.logger.Debug("Extracted %d signals from dashboard %s", len(signals), dashboard.UID)
+
+	// Write signals to graph
+	if err := ds.graphBuilder.BuildSignalGraph(ctx, signals); err != nil {
+		return fmt.Errorf("failed to build signal graph: %w", err)
+	}
+
+	ds.logger.Debug("Successfully ingested %d signals for dashboard %s", len(signals), dashboard.UID)
+	return nil
+}
+
+// getAlertRuleCount returns the number of alert rules attached to a dashboard
+// TODO: Implement by querying Grafana API or graph
+func (ds *DashboardSyncer) getAlertRuleCount(dashboardUID string) int {
+	// Stub implementation - return 0 for now
+	return 0
+}
+
+// getViewsLast30Days returns the view count for a dashboard in the last 30 days
+// TODO: Implement by querying Grafana Stats API
+func (ds *DashboardSyncer) getViewsLast30Days(dashboardUID string) int {
+	// Stub implementation - return 0 for now
+	return 0
 }
 
 // parseDashboard parses Grafana API response into GrafanaDashboard struct
