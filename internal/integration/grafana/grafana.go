@@ -35,6 +35,7 @@ type GrafanaIntegration struct {
 	syncer         *DashboardSyncer     // Dashboard sync orchestrator
 	alertSyncer     *AlertSyncer           // Alert sync orchestrator
 	stateSyncer     *AlertStateSyncer      // Alert state sync orchestrator
+	baselineCollector *BaselineCollector    // Baseline collector for anomaly detection
 	analysisService *AlertAnalysisService  // Alert analysis service for historical analysis
 	graphClient     graph.Client           // Graph client for dashboard sync
 	queryService    *GrafanaQueryService   // Query service for MCP tools
@@ -222,6 +223,21 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			g.logger,
 		)
 		g.logger.Info("Alert analysis service created for integration %s", g.name)
+
+		// Create and start baseline collector for anomaly detection
+		g.baselineCollector = NewBaselineCollector(
+			g.client,
+			g.queryService,
+			g.graphClient,
+			g.name,
+			g.logger,
+		)
+		if err := g.baselineCollector.Start(g.ctx); err != nil {
+			g.logger.Warn("Failed to start baseline collector: %v (continuing without baseline collection)", err)
+			// Non-fatal - anomaly detection still works with existing baselines
+		} else {
+			g.logger.Info("Baseline collector started for integration %s", g.name)
+		}
 	} else {
 		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
 	}
@@ -237,6 +253,12 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	// Cancel context
 	if g.cancel != nil {
 		g.cancel()
+	}
+
+	// Stop baseline collector first (depends on query service and graph client)
+	if g.baselineCollector != nil {
+		g.logger.Info("Stopping baseline collector for integration %s", g.name)
+		g.baselineCollector.Stop()
 	}
 
 	// Stop alert state syncer if it exists
@@ -275,6 +297,7 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.syncer = nil
 	g.alertSyncer = nil
 	g.stateSyncer = nil
+	g.baselineCollector = nil
 	g.queryService = nil
 
 	// Update health status
