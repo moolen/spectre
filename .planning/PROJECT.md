@@ -8,9 +8,20 @@ A Kubernetes observability platform with an MCP server for AI assistants. Provid
 
 Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis in one server.
 
-## Current State: v1.4 Shipped
+## Current Milestone: v1.5 Observatory
 
-**No active milestone.** All planned features through v1.4 have been shipped.
+**Goal:** Build a signal intelligence layer that extracts "what matters" from dashboards and exposes it for AI-driven incident investigation.
+
+**Target features:**
+- Signal anchors: graph nodes linking metrics → signal roles → workloads
+- Role classification: Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty taxonomy
+- Dashboard quality scoring: freshness, usage, alerting, ownership, completeness
+- Baseline & anomaly detection: rolling stats with hybrid forward/catchup collection
+- 8 MCP tools: Orient → Narrow → Investigate → Hypothesize → Verify progression
+
+**Core insight:** Dashboards encode human knowledge about "what matters" — Observatory extracts, classifies, and exposes that knowledge so AI agents can investigate incidents systematically.
+
+## Previous State: v1.4 Shipped
 
 **Cumulative stats:** 23 phases, 66 plans, 146 requirements, ~137k LOC (Go + TypeScript)
 

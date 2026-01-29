@@ -2,19 +2,19 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-01-23)
+See: .planning/PROJECT.md (updated 2026-01-29)
 
 **Core value:** Enable AI assistants to understand what's happening in Kubernetes clusters through unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis.
-**Current focus:** v1.4 Grafana Alerts Integration — COMPLETE ✅
+**Current focus:** v1.5 Observatory — Defining requirements
 
 ## Current Position
 
-Phase: 23 (MCP Tools) — COMPLETE ✅
-Plan: 3/3 complete (23-03 DONE)
-Status: Phase 23 complete - Integration tests for all alert MCP tools with progressive disclosure workflow validation
-Last activity: 2026-01-23 — Completed 23-03-PLAN.md (Alert tools integration tests)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements for v1.5 Observatory
+Last activity: 2026-01-29 — Milestone v1.5 started
 
-Progress: [█████████████████████] 100% (10/10 plans in v1.4 COMPLETE)
+Progress: [░░░░░░░░░░░░░░░░░░░░░] 0% (v1.5 in requirements phase)
 
 ## Performance Metrics
 
@@ -198,13 +198,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** Execute plan 23-03
-**Last session:** 2026-01-23
-**Stopped at:** Completed 23-03-PLAN.md (Alert tools integration tests)
+**Last command:** /gsd:new-milestone
+**Last session:** 2026-01-29
+**Stopped at:** Defining requirements for v1.5 Observatory
 **Resume file:** None
-**Context preserved:** Phase 23-03 COMPLETE ✅ - Comprehensive integration tests (959 lines) validate all three alert MCP tools with mockAlertGraphClient providing realistic Alert nodes and STATE_TRANSITION edges. Progressive disclosure workflow verified end-to-end: overview → aggregated → details. Edge cases covered: nil analysis service, ErrInsufficientData, parameter validation. State timeline bucketization tested with 10-minute LOCF interpolation. v1.4 Grafana Alerts Integration COMPLETE.
+**Context preserved:** v1.5 Observatory milestone started. Building signal intelligence layer for AI-driven incident investigation. 3 phases planned: Data Model & Ingestion → Baseline & Anomaly → API & Tools. 8 MCP tools following Orient → Narrow → Investigate → Hypothesize → Verify progression.
 
-**Next step:** v1.4 archived. Run `/gsd:new-milestone` to start next milestone, or `/gsd:progress` to check project status.
+**Next step:** Complete requirements definition, then create roadmap.
 
 ---
-*Last updated: 2026-01-23 — v1.4 milestone SHIPPED*
+*Last updated: 2026-01-29 — v1.5 milestone started*
