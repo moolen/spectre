@@ -261,7 +261,14 @@ Plans:
   3. Anomaly score (0.0-1.0) computed via z-score and percentile comparison with confidence indicator
   4. Grafana alert state (firing/pending/normal) treated as strong anomaly signal
   5. Anomalies aggregate upward: metrics to signals to workloads to namespaces to clusters
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+- [ ] 25-01-PLAN.md — SignalBaseline types and rolling statistics computation
+- [ ] 25-02-PLAN.md — Hybrid anomaly scorer (z-score + percentile + alert override)
+- [ ] 25-03-PLAN.md — SignalBaseline graph storage and BaselineCollector syncer
+- [ ] 25-04-PLAN.md — BackfillService and hierarchical anomaly aggregation
+- [ ] 25-05-PLAN.md — Integration test, lifecycle wiring, and verification
 
 #### Phase 26: Observatory API & MCP Tools
 **Goal**: AI can investigate incidents through 8 progressive disclosure tools covering Orient, Narrow, Investigate, Hypothesize, and Verify stages.
@@ -275,7 +282,7 @@ Plans:
   5. Investigate/Hypothesize/Verify tools (`observatory_signal_detail`, `observatory_compare`, `observatory_explain`, `observatory_evidence`) provide deep analysis with K8s graph integration
 **Plans**: TBD
 
-**Stats:** 3 phases, TBD plans, 61 requirements
+**Stats:** 3 phases, 9+ plans, 61 requirements
 
 </details>
 
@@ -288,9 +295,9 @@ Plans:
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
 | v1.4 | 20-23 | 10 | 22 | ✅ Shipped 2026-01-23 |
-| v1.5 | 24-26 | TBD | 61 | 🚧 In Progress |
+| v1.5 | 24-26 | 9+ | 61 | 🚧 In Progress |
 
-**Total:** 26 phases, 66+ plans, 207 requirements
+**Total:** 26 phases, 75+ plans, 207 requirements
 
 ---
-*v1.5 roadmap created: 2026-01-29*
+*v1.5 roadmap updated: 2026-01-29*
