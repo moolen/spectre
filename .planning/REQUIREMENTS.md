@@ -7,42 +7,42 @@
 
 Requirements for Observatory signal intelligence layer. Each maps to roadmap phases.
 
-### Signal Schema
+### Signal Schema ✅
 
-- [ ] **SCHM-01**: SignalAnchor nodes exist in FalkorDB with links to source dashboard/panel
-- [ ] **SCHM-02**: SignalAnchor nodes link to metric(s) they represent
-- [ ] **SCHM-03**: SignalAnchor nodes have classified signal role from taxonomy
-- [ ] **SCHM-04**: SignalAnchor nodes have classification confidence score (0.0-1.0)
-- [ ] **SCHM-05**: SignalAnchor nodes have quality score derived from source dashboard
-- [ ] **SCHM-06**: SignalAnchor nodes track K8s workload scope (namespace + workload) when inferrable
-- [ ] **SCHM-07**: SignalAnchor nodes track source Grafana instance for multi-source support
-- [ ] **SCHM-08**: Graph relationships connect anchors to Dashboard, Panel, Metric, and K8s workload nodes
+- [x] **SCHM-01**: SignalAnchor nodes exist in FalkorDB with links to source dashboard/panel
+- [x] **SCHM-02**: SignalAnchor nodes link to metric(s) they represent
+- [x] **SCHM-03**: SignalAnchor nodes have classified signal role from taxonomy
+- [x] **SCHM-04**: SignalAnchor nodes have classification confidence score (0.0-1.0)
+- [x] **SCHM-05**: SignalAnchor nodes have quality score derived from source dashboard
+- [x] **SCHM-06**: SignalAnchor nodes track K8s workload scope (namespace + workload) when inferrable
+- [x] **SCHM-07**: SignalAnchor nodes track source Grafana instance for multi-source support
+- [x] **SCHM-08**: Graph relationships connect anchors to Dashboard, Panel, Metric, and K8s workload nodes
 
-### Role Classification
+### Role Classification ✅
 
-- [ ] **CLAS-01**: Signal role taxonomy implemented (Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty)
-- [ ] **CLAS-02**: Keyword/heuristic matching classifies metrics against panel titles, descriptions, metric names
-- [ ] **CLAS-03**: Hardcoded mappings for well-known metrics (kube_*, cadvisor, node-exporter, Go runtime, HTTP)
-- [ ] **CLAS-04**: Classification confidence computed based on match strength
-- [ ] **CLAS-05**: Panels with multiple metrics can have different roles per metric
-- [ ] **CLAS-06**: K8s workload scope inferred from PromQL label selectors (namespace, job, service, app)
+- [x] **CLAS-01**: Signal role taxonomy implemented (Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty)
+- [x] **CLAS-02**: Keyword/heuristic matching classifies metrics against panel titles, descriptions, metric names
+- [x] **CLAS-03**: Hardcoded mappings for well-known metrics (kube_*, cadvisor, node-exporter, Go runtime, HTTP)
+- [x] **CLAS-04**: Classification confidence computed based on match strength
+- [x] **CLAS-05**: Panels with multiple metrics can have different roles per metric
+- [x] **CLAS-06**: K8s workload scope inferred from PromQL label selectors (namespace, job, service, app)
 
-### Dashboard Quality
+### Dashboard Quality ✅
 
-- [ ] **QUAL-01**: Dashboard quality score computed (0.0-1.0) based on freshness, alerting, ownership, completeness
-- [ ] **QUAL-02**: Freshness scoring uses days since last modification with decay function
-- [ ] **QUAL-03**: Alerting bonus: dashboards with associated alert rules score higher
-- [ ] **QUAL-04**: Ownership bonus: dashboards in team-specific folders score higher than "General"
-- [ ] **QUAL-05**: Completeness bonus: dashboards with meaningful titles and descriptions score higher
+- [x] **QUAL-01**: Dashboard quality score computed (0.0-1.0) based on freshness, alerting, ownership, completeness
+- [x] **QUAL-02**: Freshness scoring uses days since last modification with decay function
+- [x] **QUAL-03**: Alerting bonus: dashboards with associated alert rules score higher
+- [x] **QUAL-04**: Ownership bonus: dashboards in team-specific folders score higher than "General"
+- [x] **QUAL-05**: Completeness bonus: dashboards with meaningful titles and descriptions score higher
 
-### Ingestion Pipeline
+### Ingestion Pipeline ✅
 
-- [ ] **INGT-01**: Panel -> SignalAnchor transformation extracts metrics and classifies to roles
-- [ ] **INGT-02**: Pipeline is idempotent (re-running updates existing anchors, not duplicates)
-- [ ] **INGT-03**: Pipeline runs as background goroutine on configurable schedule
-- [ ] **INGT-04**: Pipeline can be triggered manually via existing UI mechanism
-- [ ] **INGT-05**: Pipeline tracks last sync time per Grafana source
-- [ ] **INGT-06**: Pipeline integrates with existing Grafana dashboard sync mechanism
+- [x] **INGT-01**: Panel -> SignalAnchor transformation extracts metrics and classifies to roles
+- [x] **INGT-02**: Pipeline is idempotent (re-running updates existing anchors, not duplicates)
+- [x] **INGT-03**: Pipeline runs as background goroutine on configurable schedule
+- [x] **INGT-04**: Pipeline can be triggered manually via existing UI mechanism
+- [x] **INGT-05**: Pipeline tracks last sync time per Grafana source
+- [x] **INGT-06**: Pipeline integrates with existing Grafana dashboard sync mechanism
 
 ### Baseline Storage
 
@@ -145,31 +145,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCHM-01 | Phase 24 | Pending |
-| SCHM-02 | Phase 24 | Pending |
-| SCHM-03 | Phase 24 | Pending |
-| SCHM-04 | Phase 24 | Pending |
-| SCHM-05 | Phase 24 | Pending |
-| SCHM-06 | Phase 24 | Pending |
-| SCHM-07 | Phase 24 | Pending |
-| SCHM-08 | Phase 24 | Pending |
-| CLAS-01 | Phase 24 | Pending |
-| CLAS-02 | Phase 24 | Pending |
-| CLAS-03 | Phase 24 | Pending |
-| CLAS-04 | Phase 24 | Pending |
-| CLAS-05 | Phase 24 | Pending |
-| CLAS-06 | Phase 24 | Pending |
-| QUAL-01 | Phase 24 | Pending |
-| QUAL-02 | Phase 24 | Pending |
-| QUAL-03 | Phase 24 | Pending |
-| QUAL-04 | Phase 24 | Pending |
-| QUAL-05 | Phase 24 | Pending |
-| INGT-01 | Phase 24 | Pending |
-| INGT-02 | Phase 24 | Pending |
-| INGT-03 | Phase 24 | Pending |
-| INGT-04 | Phase 24 | Pending |
-| INGT-05 | Phase 24 | Pending |
-| INGT-06 | Phase 24 | Pending |
+| SCHM-01 | Phase 24 | Complete |
+| SCHM-02 | Phase 24 | Complete |
+| SCHM-03 | Phase 24 | Complete |
+| SCHM-04 | Phase 24 | Complete |
+| SCHM-05 | Phase 24 | Complete |
+| SCHM-06 | Phase 24 | Complete |
+| SCHM-07 | Phase 24 | Complete |
+| SCHM-08 | Phase 24 | Complete |
+| CLAS-01 | Phase 24 | Complete |
+| CLAS-02 | Phase 24 | Complete |
+| CLAS-03 | Phase 24 | Complete |
+| CLAS-04 | Phase 24 | Complete |
+| CLAS-05 | Phase 24 | Complete |
+| CLAS-06 | Phase 24 | Complete |
+| QUAL-01 | Phase 24 | Complete |
+| QUAL-02 | Phase 24 | Complete |
+| QUAL-03 | Phase 24 | Complete |
+| QUAL-04 | Phase 24 | Complete |
+| QUAL-05 | Phase 24 | Complete |
+| INGT-01 | Phase 24 | Complete |
+| INGT-02 | Phase 24 | Complete |
+| INGT-03 | Phase 24 | Complete |
+| INGT-04 | Phase 24 | Complete |
+| INGT-05 | Phase 24 | Complete |
+| INGT-06 | Phase 24 | Complete |
 | BASE-01 | Phase 25 | Pending |
 | BASE-02 | Phase 25 | Pending |
 | BASE-03 | Phase 25 | Pending |
@@ -217,4 +217,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-29*
-*Last updated: 2026-01-29 after roadmap creation*
+*Last updated: 2026-01-29 after Phase 24 completion (25/61 complete)*

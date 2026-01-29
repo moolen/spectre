@@ -232,7 +232,7 @@ Plans:
 
 **Core insight:** Dashboards encode human knowledge about "what matters" — Observatory extracts, classifies, and exposes that knowledge so AI agents can investigate incidents systematically.
 
-#### Phase 24: Data Model & Ingestion
+#### ✅ Phase 24: Data Model & Ingestion
 **Goal**: Signal anchors exist in graph with role classification, quality scoring, and K8s workload linkage.
 **Depends on**: Phase 23 (v1.4 complete)
 **Requirements**: SCHM-01, SCHM-02, SCHM-03, SCHM-04, SCHM-05, SCHM-06, SCHM-07, SCHM-08, CLAS-01, CLAS-02, CLAS-03, CLAS-04, CLAS-05, CLAS-06, QUAL-01, QUAL-02, QUAL-03, QUAL-04, QUAL-05, INGT-01, INGT-02, INGT-03, INGT-04, INGT-05, INGT-06
@@ -243,12 +243,13 @@ Plans:
   4. Ingestion pipeline transforms existing dashboards/panels into signal anchors idempotently
   5. Pipeline runs on schedule and can be triggered manually via existing UI sync mechanism
 **Plans**: 4 plans
+**Completed**: 2026-01-29
 
 Plans:
-- [ ] 24-01-PLAN.md — SignalAnchor types, layered classifier, quality scorer
-- [ ] 24-02-PLAN.md — Signal extractor and K8s workload linker
-- [ ] 24-03-PLAN.md — GraphBuilder integration and DashboardSyncer hook
-- [ ] 24-04-PLAN.md — Integration tests and verification
+- [x] 24-01-PLAN.md — SignalAnchor types, layered classifier, quality scorer
+- [x] 24-02-PLAN.md — Signal extractor and K8s workload linker
+- [x] 24-03-PLAN.md — GraphBuilder integration and DashboardSyncer hook
+- [x] 24-04-PLAN.md — Integration tests and verification
 
 #### Phase 25: Baseline & Anomaly Detection
 **Goal**: Anomalies are detected against rolling baselines with alert-bootstrapped thresholds and hybrid collection.
