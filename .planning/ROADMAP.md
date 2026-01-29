@@ -281,9 +281,19 @@ Plans:
   3. Orient tools (`observatory_status`, `observatory_changes`) show cluster-wide anomaly summary and recent changes
   4. Narrow tools (`observatory_scope`, `observatory_signals`) focus on specific namespace/workload with ranked signals
   5. Investigate/Hypothesize/Verify tools (`observatory_signal_detail`, `observatory_compare`, `observatory_explain`, `observatory_evidence`) provide deep analysis with K8s graph integration
-**Plans**: TBD
+**Plans**: 8 plans
 
-**Stats:** 3 phases, 9+ plans, 61 requirements
+Plans:
+- [ ] 26-01-PLAN.md — Core ObservatoryService with cluster/namespace anomaly queries
+- [ ] 26-02-PLAN.md — ObservatoryInvestigateService for signal detail and comparison
+- [ ] 26-03-PLAN.md — ObservatoryEvidenceService for K8s graph traversal and evidence aggregation
+- [ ] 26-04-PLAN.md — Orient tools (observatory_status, observatory_changes)
+- [ ] 26-05-PLAN.md — Narrow tools (observatory_scope, observatory_signals)
+- [ ] 26-06-PLAN.md — Investigate tools (observatory_signal_detail, observatory_compare)
+- [ ] 26-07-PLAN.md — Hypothesize/Verify tools (observatory_explain, observatory_evidence)
+- [ ] 26-08-PLAN.md — Tool registration, lifecycle wiring, and integration tests
+
+**Stats:** 3 phases, 17 plans, 61 requirements
 
 </details>
 
@@ -296,9 +306,9 @@ Plans:
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
 | v1.4 | 20-23 | 10 | 22 | ✅ Shipped 2026-01-23 |
-| v1.5 | 24-26 | 9+ | 61 | 🚧 In Progress |
+| v1.5 | 24-26 | 17 | 61 | 🚧 In Progress |
 
-**Total:** 26 phases, 75+ plans, 207 requirements
+**Total:** 26 phases, 83 plans, 207 requirements
 
 ---
-*v1.5 roadmap updated: 2026-01-29*
+*v1.5 roadmap updated: 2026-01-30*
