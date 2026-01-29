@@ -46,21 +46,21 @@ Requirements for Observatory signal intelligence layer. Each maps to roadmap pha
 
 ### Baseline Storage
 
-- [ ] **BASE-01**: Rolling statistics stored per SignalAnchor (median, P50, P90, P99)
-- [ ] **BASE-02**: Rolling statistics include standard deviation, min/max, sample count
-- [ ] **BASE-03**: Baseline tracks time window covered by samples
-- [ ] **BASE-04**: Forward-looking collection updates baselines periodically via Grafana queries
-- [ ] **BASE-05**: Opt-in catchup mode backfills baseline from historical data (rate-limited)
-- [ ] **BASE-06**: Alert rule thresholds bootstrap initial anomaly boundaries
+- [x] **BASE-01**: Rolling statistics stored per SignalAnchor (median, P50, P90, P99)
+- [x] **BASE-02**: Rolling statistics include standard deviation, min/max, sample count
+- [x] **BASE-03**: Baseline tracks time window covered by samples
+- [x] **BASE-04**: Forward-looking collection updates baselines periodically via Grafana queries
+- [x] **BASE-05**: Opt-in catchup mode backfills baseline from historical data (rate-limited)
+- [x] **BASE-06**: Alert rule thresholds bootstrap initial anomaly boundaries
 
 ### Anomaly Detection
 
-- [ ] **ANOM-01**: Anomaly score computed using z-score (standard deviations from mean)
-- [ ] **ANOM-02**: Anomaly score uses percentile comparison (current vs historical P99)
-- [ ] **ANOM-03**: Anomaly output includes score (0.0-1.0) and confidence (0.0-1.0)
-- [ ] **ANOM-04**: Cold start handled gracefully (returns "insufficient data" state)
-- [ ] **ANOM-05**: Anomalies aggregate from metrics -> signals -> workloads -> namespaces -> clusters
-- [ ] **ANOM-06**: Grafana alert state (firing/pending/normal) used as strong anomaly signal
+- [x] **ANOM-01**: Anomaly score computed using z-score (standard deviations from mean)
+- [x] **ANOM-02**: Anomaly score uses percentile comparison (current vs historical P99)
+- [x] **ANOM-03**: Anomaly output includes score (0.0-1.0) and confidence (0.0-1.0)
+- [x] **ANOM-04**: Cold start handled gracefully (returns "insufficient data" state)
+- [x] **ANOM-05**: Anomalies aggregate from metrics -> signals -> workloads -> namespaces -> clusters
+- [x] **ANOM-06**: Grafana alert state (firing/pending/normal) used as strong anomaly signal
 
 ### Observatory API
 
@@ -170,18 +170,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INGT-04 | Phase 24 | Complete |
 | INGT-05 | Phase 24 | Complete |
 | INGT-06 | Phase 24 | Complete |
-| BASE-01 | Phase 25 | Pending |
-| BASE-02 | Phase 25 | Pending |
-| BASE-03 | Phase 25 | Pending |
-| BASE-04 | Phase 25 | Pending |
-| BASE-05 | Phase 25 | Pending |
-| BASE-06 | Phase 25 | Pending |
-| ANOM-01 | Phase 25 | Pending |
-| ANOM-02 | Phase 25 | Pending |
-| ANOM-03 | Phase 25 | Pending |
-| ANOM-04 | Phase 25 | Pending |
-| ANOM-05 | Phase 25 | Pending |
-| ANOM-06 | Phase 25 | Pending |
+| BASE-01 | Phase 25 | Complete |
+| BASE-02 | Phase 25 | Complete |
+| BASE-03 | Phase 25 | Complete |
+| BASE-04 | Phase 25 | Complete |
+| BASE-05 | Phase 25 | Complete |
+| BASE-06 | Phase 25 | Complete |
+| ANOM-01 | Phase 25 | Complete |
+| ANOM-02 | Phase 25 | Complete |
+| ANOM-03 | Phase 25 | Complete |
+| ANOM-04 | Phase 25 | Complete |
+| ANOM-05 | Phase 25 | Complete |
+| ANOM-06 | Phase 25 | Complete |
 | API-01 | Phase 26 | Pending |
 | API-02 | Phase 26 | Pending |
 | API-03 | Phase 26 | Pending |

@@ -251,7 +251,7 @@ Plans:
 - [x] 24-03-PLAN.md — GraphBuilder integration and DashboardSyncer hook
 - [x] 24-04-PLAN.md — Integration tests and verification
 
-#### Phase 25: Baseline & Anomaly Detection
+#### ✅ Phase 25: Baseline & Anomaly Detection
 **Goal**: Anomalies are detected against rolling baselines with alert-bootstrapped thresholds and hybrid collection.
 **Depends on**: Phase 24
 **Requirements**: BASE-01, BASE-02, BASE-03, BASE-04, BASE-05, BASE-06, ANOM-01, ANOM-02, ANOM-03, ANOM-04, ANOM-05, ANOM-06
@@ -262,13 +262,14 @@ Plans:
   4. Grafana alert state (firing/pending/normal) treated as strong anomaly signal
   5. Anomalies aggregate upward: metrics to signals to workloads to namespaces to clusters
 **Plans**: 5 plans
+**Completed**: 2026-01-30
 
 Plans:
-- [ ] 25-01-PLAN.md — SignalBaseline types and rolling statistics computation
-- [ ] 25-02-PLAN.md — Hybrid anomaly scorer (z-score + percentile + alert override)
-- [ ] 25-03-PLAN.md — SignalBaseline graph storage and BaselineCollector syncer
-- [ ] 25-04-PLAN.md — BackfillService and hierarchical anomaly aggregation
-- [ ] 25-05-PLAN.md — Integration test, lifecycle wiring, and verification
+- [x] 25-01-PLAN.md — SignalBaseline types and rolling statistics computation
+- [x] 25-02-PLAN.md — Hybrid anomaly scorer (z-score + percentile + alert override)
+- [x] 25-03-PLAN.md — SignalBaseline graph storage and BaselineCollector syncer
+- [x] 25-04-PLAN.md — BackfillService and hierarchical anomaly aggregation
+- [x] 25-05-PLAN.md — Integration test, lifecycle wiring, and verification
 
 #### Phase 26: Observatory API & MCP Tools
 **Goal**: AI can investigate incidents through 8 progressive disclosure tools covering Orient, Narrow, Investigate, Hypothesize, and Verify stages.
