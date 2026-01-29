@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 ## Current Position
 
 Phase: 25 — Baseline & Anomaly Detection (IN PROGRESS)
-Plan: 1 of 4 complete
-Status: Plan 25-01 complete — SignalBaseline type and RollingStats computation
-Last activity: 2026-01-29 — Completed 25-01-PLAN.md
+Plan: 2 of 4 complete
+Status: Plan 25-02 complete — Hybrid anomaly scoring with TDD
+Last activity: 2026-01-29 — Completed 25-02-PLAN.md
 
-Progress: [█████░░░░░░░░░░░░░░░] ~20% (Phase 24 complete, 25-01 done, 5 plans shipped)
+Progress: [██████░░░░░░░░░░░░░░] ~24% (Phase 24 complete, 25-01 + 25-02 done, 6 plans shipped)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 5
+- Plans completed: 6
 - Phase 24: 4/4 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min, 24-04: 11 min) — PHASE COMPLETE
-- Phase 25: 1/4 complete (25-01: 2 min)
+- Phase 25: 2/4 complete (25-01: 2 min, 25-02: 2.5 min)
 - Phase 26: Blocked by Phase 25
 
 **v1.4 Velocity (previous):**
@@ -47,9 +47,9 @@ Progress: [█████░░░░░░░░░░░░░░░] ~20% (P
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 71 complete (v1.0-v1.4: 66, v1.5: 5)
+- Total plans: 72 complete (v1.0-v1.4: 66, v1.5: 6)
 - Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
-- v1.5 progress: 5/TBD plans complete
+- v1.5 progress: 6/TBD plans complete
 
 ## Accumulated Context
 
@@ -70,6 +70,9 @@ Progress: [█████░░░░░░░░░░░░░░░] ~20% (P
 | SignalBaseline composite key alignment | Match SignalAnchor identity | metric_name + namespace + workload + integration | 25-01 |
 | MinSamplesRequired = 10 | Cold start baseline threshold | Per CONTEXT.md decision | 25-01 |
 | Empty input returns zero RollingStats | Not error, just zero SampleCount | Error reserved for explicit cold start check | 25-01 |
+| Z-score sigmoid normalization | Map unbounded z-score to 0-1 | 1 - exp(-|z|/2): z=2->0.63, z=3->0.78 | 25-02 |
+| Hybrid anomaly MAX aggregation | Either method can flag anomaly | score = MAX(zScore, percentile) per CONTEXT.md | 25-02 |
+| Alert firing override | Human decision takes precedence | score=1.0, confidence=1.0, method="alert-override" | 25-02 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -98,7 +101,7 @@ None yet.
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
 | 24 | Signal anchors with role classification and quality scoring | 25 | 4/4 COMPLETE |
-| 25 | Baseline storage and anomaly detection | 12 | 1/4 complete (25-01: types+stats) |
+| 25 | Baseline storage and anomaly detection | 12 | 2/4 complete (25-01: types+stats, 25-02: anomaly-scorer) |
 | 26 | Observatory API and 8 MCP tools | 24 | Blocked by 25 |
 
 ## Milestone History
@@ -134,21 +137,23 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 25-01
+**Last command:** /gsd:execute-phase 25-02
 **Last session:** 2026-01-29
-**Stopped at:** Completed 25-01-PLAN.md (SignalBaseline type and RollingStats computation)
+**Stopped at:** Completed 25-02-PLAN.md (Hybrid anomaly scoring with TDD)
 **Resume file:** None
-**Context preserved:** Phase 25-01 complete: SignalBaseline type (179 lines) with identity fields matching SignalAnchor, RollingStats computation using gonum/stat, InsufficientSamplesError for cold start, 13 unit tests (260 lines). 2 commits (10e2d93, d58fde6). Duration: 2 minutes.
+**Context preserved:** Phase 25-02 complete: AnomalyScore type, ComputeAnomalyScore function (z-score + percentile hybrid), ApplyAlertOverride function, 18 TDD tests (427 lines). 2 commits (0948894, 0917225). Duration: 2.5 minutes.
 
-**Next step:** Continue Phase 25 (25-02: Graph storage for baselines)
+**Next step:** Continue Phase 25 (25-03: Graph storage for baselines)
 
-**Phase 25-01 Summary:**
-- SignalBaseline struct with composite key matching SignalAnchor
-- RollingStats computation using gonum/stat (Mean, StdDev, Quantile)
-- InsufficientSamplesError type for cold start handling
-- MinSamplesRequired = 10 constant
-- 13 unit tests covering computation and edge cases
-- Duration: 2 min
+**Phase 25-02 Summary:**
+- AnomalyScore struct with Score, Confidence, Method, ZScore fields
+- ComputeAnomalyScore: hybrid z-score + percentile with MAX aggregation
+- Z-score normalized via sigmoid: 1 - exp(-|z|/2)
+- Percentile scoring for values above P99 or below Min
+- Confidence = MIN(sampleConfidence, qualityScore)
+- ApplyAlertOverride for firing alerts (score=1.0)
+- 18 TDD tests covering all scoring paths
+- Duration: 2.5 min
 
 ---
-*Last updated: 2026-01-29 — Phase 25-01 complete (SignalBaseline type and statistics computation ready)*
+*Last updated: 2026-01-29 — Phase 25-02 complete (anomaly scoring ready for integration)*
