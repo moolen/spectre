@@ -10,17 +10,17 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 ## Current Position
 
 Phase: 24 — Data Model & Ingestion
-Plan: 01 of 3 complete
-Status: In progress — Signal types and classification complete
-Last activity: 2026-01-29 — Completed 24-01-PLAN.md
+Plan: 02 of 3 complete
+Status: In progress — Signal extraction and workload linkage complete
+Last activity: 2026-01-29 — Completed 24-02-PLAN.md
 
-Progress: [█░░░░░░░░░░░░░░░░░░░░] ~4% (Phase 24/26, Plan 1 of 3)
+Progress: [██░░░░░░░░░░░░░░░░░░░] ~8% (Phase 24/26, Plan 2 of 3)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 1
-- Phase 24: 1/3 complete (24-01 duration: 6 min)
+- Plans completed: 2
+- Phase 24: 2/3 complete (24-01: 6 min, 24-02: 4 min)
 - Phase 25: Blocked by Phase 24
 - Phase 26: Blocked by Phase 25
 
@@ -60,6 +60,10 @@ Progress: [█░░░░░░░░░░░░░░░░░░░░] ~4% 
 | Quality scoring with alert boost | Prioritize high-value dashboards | Formula: base + 0.2*hasAlerts, capped at 1.0 | 24-01 |
 | Composite key for SignalAnchor | Deduplication across dashboards | metric_name + namespace + workload_name | 24-01 |
 | 7-day TTL for signals | Stale metric cleanup | expires_at = last_seen + 7 days, query-time filtering | 24-01 |
+| Namespace-only signal inference | Signals with namespace but no workload | Returns WorkloadInference with empty workload_name (confidence 0.7) | 24-02 |
+| Low-confidence filter threshold | Filter unclassifiable metrics | Signals with confidence < 0.5 excluded from extraction | 24-02 |
+| Workload label priority | K8s workload inference | deployment > app.kubernetes.io/name > app > service > job > pod | 24-02 |
+| Deduplication winner selection | Multiple panels with same metric+workload | Highest quality signal wins, preserve FirstSeen timestamp | 24-02 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -87,7 +91,7 @@ None yet.
 
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
-| 24 | Signal anchors with role classification and quality scoring | 25 | 1/3 plans complete (24-01: types + classification) |
+| 24 | Signal anchors with role classification and quality scoring | 25 | 2/3 plans complete (24-01: types+classification, 24-02: extraction+linkage) |
 | 25 | Baseline storage and anomaly detection | 12 | Blocked by 24 |
 | 26 | Observatory API and 8 MCP tools | 24 | Blocked by 25 |
 
@@ -124,13 +128,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 24-01
+**Last command:** /gsd:execute-phase 24-02
 **Last session:** 2026-01-29
-**Stopped at:** Completed 24-01-PLAN.md (Signal types and classification)
+**Stopped at:** Completed 24-02-PLAN.md (Signal extraction and workload linkage)
 **Resume file:** None
-**Context preserved:** Phase 24-01 complete: SignalAnchor types, 5-layer classifier (0.95→0 confidence), 5-factor quality scorer (alert boost). 3 commits (49aa933, bcee61e, 120a084). 70 test cases passing. Duration: 6 minutes.
+**Context preserved:** Phase 24-02 complete: Signal extractor (panel-to-SignalAnchor transformation, multi-query support, deduplication), workload linker (K8s inference with label priority, namespace-only signals). 2 commits (1babed5, 48eee9c). 24 test cases passing. Duration: 4 minutes.
 
-**Next step:** Continue Phase 24 (Plans 02-03: Signal extraction and graph integration)
+**Next step:** Continue Phase 24 (Plan 03: Graph integration with SignalAnchor nodes and edges)
 
 ---
-*Last updated: 2026-01-29 — Phase 24-01 complete (signal types + classification)*
+*Last updated: 2026-01-29 — Phase 24-02 complete (signal extraction + workload linkage)*
