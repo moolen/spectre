@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-29)
 
 **Core value:** Enable AI assistants to understand what's happening in Kubernetes clusters through unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis.
-**Current focus:** v1.5 Observatory — Phase 24: Data Model & Ingestion
+**Current focus:** v1.5 Observatory — Phase 25: Baseline & Anomaly Detection
 
 ## Current Position
 
-Phase: 24 — Data Model & Ingestion (COMPLETE)
-Plan: 4 of 4 complete
-Status: Phase 24 complete — Signal ingestion pipeline verified
-Last activity: 2026-01-29 — Completed 24-04-PLAN.md
+Phase: 25 — Baseline & Anomaly Detection (IN PROGRESS)
+Plan: 1 of 4 complete
+Status: Plan 25-01 complete — SignalBaseline type and RollingStats computation
+Last activity: 2026-01-29 — Completed 25-01-PLAN.md
 
-Progress: [████░░░░░░░░░░░░░░░░] ~16% (Phase 24/26 complete, 4 plans shipped)
+Progress: [█████░░░░░░░░░░░░░░░] ~20% (Phase 24 complete, 25-01 done, 5 plans shipped)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 4
+- Plans completed: 5
 - Phase 24: 4/4 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min, 24-04: 11 min) — PHASE COMPLETE
-- Phase 25: Ready to start
+- Phase 25: 1/4 complete (25-01: 2 min)
 - Phase 26: Blocked by Phase 25
 
 **v1.4 Velocity (previous):**
@@ -47,9 +47,9 @@ Progress: [████░░░░░░░░░░░░░░░░] ~16% (P
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 70 complete (v1.0-v1.4: 66, v1.5: 4)
+- Total plans: 71 complete (v1.0-v1.4: 66, v1.5: 5)
 - Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
-- v1.5 progress: 4/TBD plans complete
+- v1.5 progress: 5/TBD plans complete
 
 ## Accumulated Context
 
@@ -67,6 +67,9 @@ Progress: [████░░░░░░░░░░░░░░░░] ~16% (P
 | Deduplication winner selection | Multiple panels with same metric+workload | Highest quality signal wins, preserve FirstSeen timestamp | 24-02 |
 | Signal graph relationships | Link signals to context | SOURCED_FROM (Dashboard), REPRESENTS (Metric), MONITORS (ResourceIdentity) | 24-03 |
 | Graceful signal failure | Don't block dashboard sync | Signal extraction errors logged but don't fail syncDashboard | 24-03 |
+| SignalBaseline composite key alignment | Match SignalAnchor identity | metric_name + namespace + workload + integration | 25-01 |
+| MinSamplesRequired = 10 | Cold start baseline threshold | Per CONTEXT.md decision | 25-01 |
+| Empty input returns zero RollingStats | Not error, just zero SampleCount | Error reserved for explicit cold start check | 25-01 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -94,8 +97,8 @@ None yet.
 
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
-| 24 | Signal anchors with role classification and quality scoring | 25 | 4/4 COMPLETE (24-01: types+classification, 24-02: extraction+linkage, 24-03: graph-integration, 24-04: integration-test+verification) |
-| 25 | Baseline storage and anomaly detection | 12 | Ready to start |
+| 24 | Signal anchors with role classification and quality scoring | 25 | 4/4 COMPLETE |
+| 25 | Baseline storage and anomaly detection | 12 | 1/4 complete (25-01: types+stats) |
 | 26 | Observatory API and 8 MCP tools | 24 | Blocked by 25 |
 
 ## Milestone History
@@ -131,19 +134,21 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-phase 24-04
+**Last command:** /gsd:execute-phase 25-01
 **Last session:** 2026-01-29
-**Stopped at:** Completed 24-04-PLAN.md (Signal ingestion integration test and verification)
+**Stopped at:** Completed 25-01-PLAN.md (SignalBaseline type and RollingStats computation)
 **Resume file:** None
-**Context preserved:** Phase 24-04 complete: End-to-end integration test (543 lines, 10 test cases) covering signal extraction, classification, quality scoring, graph persistence, TTL, relationships. Human verification APPROVED. 1 commit (836e0e2). Duration: 11 minutes. **PHASE 24 COMPLETE.**
+**Context preserved:** Phase 25-01 complete: SignalBaseline type (179 lines) with identity fields matching SignalAnchor, RollingStats computation using gonum/stat, InsufficientSamplesError for cold start, 13 unit tests (260 lines). 2 commits (10e2d93, d58fde6). Duration: 2 minutes.
 
-**Next step:** Begin Phase 25 (Baseline storage and anomaly detection)
+**Next step:** Continue Phase 25 (25-02: Graph storage for baselines)
 
-**Phase 24 Complete Summary:**
-- 4 plans executed (24-01: types+classification, 24-02: extraction+linkage, 24-03: graph-integration, 24-04: integration-test)
-- Total duration: ~25 minutes
-- Deliverables: SignalAnchor data model with 7 roles, layered classifier (5 layers), quality scorer (5 factors), signal extractor, K8s workload linker, graph persistence with MERGE upsert, signal relationships (SOURCED_FROM, REPRESENTS, MONITORS), TTL mechanism (7 days), integration test coverage (10 tests)
-- All requirements met for Phase 25 and Phase 26
+**Phase 25-01 Summary:**
+- SignalBaseline struct with composite key matching SignalAnchor
+- RollingStats computation using gonum/stat (Mean, StdDev, Quantile)
+- InsufficientSamplesError type for cold start handling
+- MinSamplesRequired = 10 constant
+- 13 unit tests covering computation and edge cases
+- Duration: 2 min
 
 ---
-*Last updated: 2026-01-29 — Phase 24 COMPLETE (signal ingestion pipeline verified and ready for baseline storage)*
+*Last updated: 2026-01-29 — Phase 25-01 complete (SignalBaseline type and statistics computation ready)*
