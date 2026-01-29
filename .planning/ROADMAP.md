@@ -242,7 +242,13 @@ Plans:
   3. Each anchor has a quality score derived from its source dashboard (freshness, alerting, ownership, completeness)
   4. Ingestion pipeline transforms existing dashboards/panels into signal anchors idempotently
   5. Pipeline runs on schedule and can be triggered manually via existing UI sync mechanism
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 24-01-PLAN.md — SignalAnchor types, layered classifier, quality scorer
+- [ ] 24-02-PLAN.md — Signal extractor and K8s workload linker
+- [ ] 24-03-PLAN.md — GraphBuilder integration and DashboardSyncer hook
+- [ ] 24-04-PLAN.md — Integration tests and verification
 
 #### Phase 25: Baseline & Anomaly Detection
 **Goal**: Anomalies are detected against rolling baselines with alert-bootstrapped thresholds and hybrid collection.
