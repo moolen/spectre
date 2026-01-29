@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 ## Current Position
 
 Phase: 24 — Data Model & Ingestion
-Plan: Not started
-Status: Roadmap created, ready for phase planning
-Last activity: 2026-01-29 — Roadmap v1.5 created
+Plan: 01 of 3 complete
+Status: In progress — Signal types and classification complete
+Last activity: 2026-01-29 — Completed 24-01-PLAN.md
 
-Progress: [░░░░░░░░░░░░░░░░░░░░░] 0% (Phase 24/26)
+Progress: [█░░░░░░░░░░░░░░░░░░░░] ~4% (Phase 24/26, Plan 1 of 3)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 0
-- Phase 24: Not started
-- Phase 25: Not started
-- Phase 26: Not started
+- Plans completed: 1
+- Phase 24: 1/3 complete (24-01 duration: 6 min)
+- Phase 25: Blocked by Phase 24
+- Phase 26: Blocked by Phase 25
 
 **v1.4 Velocity (previous):**
 - Plans completed: 10 (COMPLETE)
@@ -54,6 +54,13 @@ Progress: [░░░░░░░░░░░░░░░░░░░░░] 0% (
 
 ### Decisions
 
+| Decision | Context | Impact | When |
+|----------|---------|--------|------|
+| Layered classification with confidence decay | Need reliable metric → role mapping | 5 layers: 0.95 → 0.85-0.9 → 0.7-0.8 → 0.5 → 0 | 24-01 |
+| Quality scoring with alert boost | Prioritize high-value dashboards | Formula: base + 0.2*hasAlerts, capped at 1.0 | 24-01 |
+| Composite key for SignalAnchor | Deduplication across dashboards | metric_name + namespace + workload_name | 24-01 |
+| 7-day TTL for signals | Stale metric cleanup | expires_at = last_seen + 7 days, query-time filtering | 24-01 |
+
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
 - Role taxonomy: Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty
@@ -80,7 +87,7 @@ None yet.
 
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
-| 24 | Signal anchors with role classification and quality scoring | 25 | Not started |
+| 24 | Signal anchors with role classification and quality scoring | 25 | 1/3 plans complete (24-01: types + classification) |
 | 25 | Baseline storage and anomaly detection | 12 | Blocked by 24 |
 | 26 | Observatory API and 8 MCP tools | 24 | Blocked by 25 |
 
@@ -117,13 +124,13 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:roadmap
+**Last command:** /gsd:execute-phase 24-01
 **Last session:** 2026-01-29
-**Stopped at:** Roadmap v1.5 created
+**Stopped at:** Completed 24-01-PLAN.md (Signal types and classification)
 **Resume file:** None
-**Context preserved:** v1.5 Observatory milestone roadmap complete. 3 phases: Phase 24 (Data Model & Ingestion, 25 reqs), Phase 25 (Baseline & Anomaly, 12 reqs), Phase 26 (API & Tools, 24 reqs). 61 total requirements mapped.
+**Context preserved:** Phase 24-01 complete: SignalAnchor types, 5-layer classifier (0.95→0 confidence), 5-factor quality scorer (alert boost). 3 commits (49aa933, bcee61e, 120a084). 70 test cases passing. Duration: 6 minutes.
 
-**Next step:** `/gsd:plan-phase 24`
+**Next step:** Continue Phase 24 (Plans 02-03: Signal extraction and graph integration)
 
 ---
-*Last updated: 2026-01-29 — v1.5 roadmap created*
+*Last updated: 2026-01-29 — Phase 24-01 complete (signal types + classification)*
