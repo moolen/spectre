@@ -14,7 +14,19 @@ import (
 // 5. Unknown (0)
 //
 // Returns first matching classification, or Unknown if no match.
+// Metrics containing ":relabel" are filtered out and return SignalUnknown with confidence 0.
 func ClassifyMetric(metricName string, extraction *QueryExtraction, panelTitle string) ClassificationResult {
+	// Filter: Relabeling recording rules should be excluded from signal classification
+	// These are intermediate metrics used for label manipulation, not observable signals
+	if strings.Contains(metricName, ":relabel") {
+		return ClassificationResult{
+			Role:       SignalUnknown,
+			Confidence: 0.0,
+			Layer:      0,
+			Reason:     "filtered: relabeling recording rule",
+		}
+	}
+
 	// Layer 1: Hardcoded known metrics
 	if result := classifyKnownMetric(metricName); result != nil {
 		return *result
@@ -59,7 +71,7 @@ func classifyKnownMetric(metricName string) *ClassificationResult {
 		"kube_deployment_status_replicas_available": SignalAvailability,
 		"kube_deployment_status_replicas_unavailable": SignalAvailability,
 
-		// Saturation metrics
+		// Saturation metrics - container/node resources
 		"container_cpu_usage_seconds_total":   SignalSaturation,
 		"node_cpu_seconds_total":              SignalSaturation,
 		"node_memory_MemAvailable_bytes":      SignalSaturation,
@@ -70,9 +82,43 @@ func classifyKnownMetric(metricName string) *ClassificationResult {
 		"kube_pod_container_resource_limits":  SignalSaturation,
 		"kube_pod_container_resource_requests": SignalSaturation,
 
-		// Traffic metrics
+		// Saturation metrics - Kubernetes recording rules for resource requests/limits
+		"cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests":    SignalSaturation,
+		"cluster:namespace:pod_cpu:active:kube_pod_container_resource_limits":      SignalSaturation,
+		"cluster:namespace:pod_memory:active:kube_pod_container_resource_requests": SignalSaturation,
+		"cluster:namespace:pod_memory:active:kube_pod_container_resource_limits":   SignalSaturation,
+
+		// Saturation metrics - Kubernetes recording rules for CPU/memory usage
+		"node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate":   SignalSaturation,
+		"node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate":    SignalSaturation,
+		"node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate5m":  SignalSaturation,
+		"node_namespace_pod_container:container_memory_working_set_bytes":            SignalSaturation,
+		"node_namespace_pod_container:container_memory_rss":                          SignalSaturation,
+		"node_namespace_pod_container:container_memory_cache":                        SignalSaturation,
+
+		// Traffic metrics - HTTP
 		"http_requests_total":           SignalTraffic,
 		"nginx_ingress_controller_requests": SignalTraffic,
+
+		// Traffic metrics - CoreDNS
+		"coredns_dns_requests_total":  SignalTraffic,
+		"coredns_dns_responses_total": SignalTraffic,
+
+		// Latency metrics - CoreDNS
+		"coredns_dns_request_duration_seconds":        SignalLatency,
+		"coredns_dns_request_duration_seconds_bucket": SignalLatency,
+		"coredns_dns_request_duration_seconds_sum":    SignalLatency,
+		"coredns_dns_request_duration_seconds_count":  SignalLatency,
+
+		// Traffic metrics - CoreDNS response/request sizes (throughput indicator)
+		"coredns_dns_response_size_bytes":        SignalTraffic,
+		"coredns_dns_response_size_bytes_bucket": SignalTraffic,
+		"coredns_dns_response_size_bytes_sum":    SignalTraffic,
+		"coredns_dns_response_size_bytes_count":  SignalTraffic,
+		"coredns_dns_request_size_bytes":         SignalTraffic,
+		"coredns_dns_request_size_bytes_bucket":  SignalTraffic,
+		"coredns_dns_request_size_bytes_sum":     SignalTraffic,
+		"coredns_dns_request_size_bytes_count":   SignalTraffic,
 
 		// Error metrics
 		"http_request_errors_total":     SignalErrors,
@@ -172,8 +218,8 @@ func classifyMetricName(metricName string) *ClassificationResult {
 		}
 	}
 
-	// Traffic patterns (0.7) - only if not error
-	trafficPatterns := []string{"_total", "_count", "_requests"}
+	// Traffic patterns (0.7) - only if not error and not resource-related
+	trafficPatterns := []string{"_total", "_count"}
 	for _, pattern := range trafficPatterns {
 		if strings.Contains(lowerName, pattern) {
 			// Make sure it's not an error metric
@@ -185,6 +231,28 @@ func classifyMetricName(metricName string) *ClassificationResult {
 					Reason:     fmt.Sprintf("metric name contains traffic indicator: %s", pattern),
 				}
 			}
+		}
+	}
+
+	// Specific traffic pattern: _requests (but not resource_requests which is Saturation)
+	if strings.Contains(lowerName, "_requests") && !strings.Contains(lowerName, "resource_requests") {
+		if !strings.Contains(lowerName, "error") && !strings.Contains(lowerName, "failed") {
+			return &ClassificationResult{
+				Role:       SignalTraffic,
+				Confidence: 0.7,
+				Layer:      3,
+				Reason:     "metric name contains traffic indicator: _requests",
+			}
+		}
+	}
+
+	// Size bytes patterns (0.7) - throughput/bandwidth indicators
+	if strings.Contains(lowerName, "_size_bytes") || strings.Contains(lowerName, "_bytes_total") {
+		return &ClassificationResult{
+			Role:       SignalTraffic,
+			Confidence: 0.7,
+			Layer:      3,
+			Reason:     "metric name contains size/bytes indicator for throughput",
 		}
 	}
 

@@ -397,3 +397,184 @@ func TestClassifyMetric_AvoidFalsePositives(t *testing.T) {
 		}
 	})
 }
+
+func TestClassifyMetric_KubernetesRecordingRules(t *testing.T) {
+	tests := []struct {
+		name         string
+		metricName   string
+		expectedRole SignalRole
+		expectFilter bool
+	}{
+		{
+			name:         "CPU resource requests recording rule → Saturation",
+			metricName:   "cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests",
+			expectedRole: SignalSaturation,
+		},
+		{
+			name:         "Memory resource requests recording rule → Saturation",
+			metricName:   "cluster:namespace:pod_memory:active:kube_pod_container_resource_requests",
+			expectedRole: SignalSaturation,
+		},
+		{
+			name:         "CPU usage recording rule → Saturation",
+			metricName:   "node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate5m",
+			expectedRole: SignalSaturation,
+		},
+		{
+			name:         "Memory working set recording rule → Saturation",
+			metricName:   "node_namespace_pod_container:container_memory_working_set_bytes",
+			expectedRole: SignalSaturation,
+		},
+		{
+			name:         "Relabel recording rule → filtered",
+			metricName:   "namespace_workload_pod:kube_pod_owner:relabel",
+			expectedRole: SignalUnknown,
+			expectFilter: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ClassifyMetric(tt.metricName, nil, "")
+
+			if result.Role != tt.expectedRole {
+				t.Errorf("expected role %s, got %s (reason: %s)", tt.expectedRole, result.Role, result.Reason)
+			}
+
+			if tt.expectFilter {
+				if result.Layer != 0 {
+					t.Errorf("expected Layer 0 for filtered metric, got %d", result.Layer)
+				}
+				if result.Confidence != 0.0 {
+					t.Errorf("expected confidence 0.0 for filtered metric, got %.2f", result.Confidence)
+				}
+			}
+		})
+	}
+}
+
+func TestClassifyMetric_CoreDNS(t *testing.T) {
+	tests := []struct {
+		name         string
+		metricName   string
+		expectedRole SignalRole
+	}{
+		{
+			name:         "CoreDNS requests → Traffic",
+			metricName:   "coredns_dns_requests_total",
+			expectedRole: SignalTraffic,
+		},
+		{
+			name:         "CoreDNS responses → Traffic",
+			metricName:   "coredns_dns_responses_total",
+			expectedRole: SignalTraffic,
+		},
+		{
+			name:         "CoreDNS request duration → Latency",
+			metricName:   "coredns_dns_request_duration_seconds",
+			expectedRole: SignalLatency,
+		},
+		{
+			name:         "CoreDNS request duration bucket → Latency",
+			metricName:   "coredns_dns_request_duration_seconds_bucket",
+			expectedRole: SignalLatency,
+		},
+		{
+			name:         "CoreDNS response size bytes bucket → Traffic",
+			metricName:   "coredns_dns_response_size_bytes_bucket",
+			expectedRole: SignalTraffic,
+		},
+		{
+			name:         "CoreDNS request size bytes bucket → Traffic",
+			metricName:   "coredns_dns_request_size_bytes_bucket",
+			expectedRole: SignalTraffic,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ClassifyMetric(tt.metricName, nil, "")
+
+			if result.Role != tt.expectedRole {
+				t.Errorf("expected role %s, got %s (reason: %s)", tt.expectedRole, result.Role, result.Reason)
+			}
+			// CoreDNS metrics should be in Layer 1 (known metrics)
+			if result.Layer != 1 {
+				t.Errorf("expected Layer 1 for CoreDNS metric, got %d", result.Layer)
+			}
+		})
+	}
+}
+
+func TestClassifyMetric_RequestsPatternFix(t *testing.T) {
+	tests := []struct {
+		name         string
+		metricName   string
+		expectedRole SignalRole
+	}{
+		{
+			name:         "http_requests → Traffic (generic requests)",
+			metricName:   "service_http_requests",
+			expectedRole: SignalTraffic,
+		},
+		{
+			name:         "api_requests_total → Traffic (generic requests)",
+			metricName:   "api_requests_total",
+			expectedRole: SignalTraffic,
+		},
+		{
+			name:         "kube_pod_container_resource_requests → Saturation (not Traffic)",
+			metricName:   "kube_pod_container_resource_requests",
+			expectedRole: SignalSaturation,
+		},
+		{
+			name:         "custom_resource_requests → Unknown (contains resource_requests)",
+			metricName:   "custom_resource_requests_bytes",
+			expectedRole: SignalUnknown, // Filtered out from _requests pattern
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ClassifyMetric(tt.metricName, nil, "")
+
+			if result.Role != tt.expectedRole {
+				t.Errorf("expected role %s, got %s (reason: %s)", tt.expectedRole, result.Role, result.Reason)
+			}
+		})
+	}
+}
+
+func TestClassifyMetric_SizeBytesTraffic(t *testing.T) {
+	tests := []struct {
+		name         string
+		metricName   string
+		expectedRole SignalRole
+	}{
+		{
+			name:         "response_size_bytes → Traffic",
+			metricName:   "http_response_size_bytes",
+			expectedRole: SignalTraffic,
+		},
+		{
+			name:         "request_size_bytes → Traffic",
+			metricName:   "grpc_request_size_bytes_sum",
+			expectedRole: SignalTraffic,
+		},
+		{
+			name:         "network_bytes_total → Traffic",
+			metricName:   "network_received_bytes_total",
+			expectedRole: SignalTraffic,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ClassifyMetric(tt.metricName, nil, "")
+
+			if result.Role != tt.expectedRole {
+				t.Errorf("expected role %s, got %s (reason: %s)", tt.expectedRole, result.Role, result.Reason)
+			}
+		})
+	}
+}
