@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 Phase: 26 — Observatory API and MCP Tools
 Plan: 3 of TBD complete
 Status: In progress
-Last activity: 2026-01-30 — Completed 26-03-PLAN.md
+Last activity: 2026-01-30 — Completed 26-01-PLAN.md
 
 Progress: [██████████░░░░░░░░░░] ~42% (Phase 24-25 complete, 12 plans shipped)
 
@@ -22,7 +22,7 @@ Progress: [██████████░░░░░░░░░░] ~42% (P
 - Plans completed: 12
 - Phase 24: 4/4 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min, 24-04: 11 min) — PHASE COMPLETE
 - Phase 25: 5/5 complete (25-01: 2 min, 25-02: 2.5 min, 25-03: 7 min, 25-04: 11 min, 25-05: 8 min) — PHASE COMPLETE
-- Phase 26: 3/TBD complete (26-01: TBD, 26-02: 3 min, 26-03: 4 min)
+- Phase 26: 3/TBD complete (26-01: 9 min, 26-02: 3 min, 26-03: 4 min)
 
 **v1.4 Velocity (previous):**
 - Plans completed: 10 (COMPLETE)
@@ -77,6 +77,10 @@ Progress: [██████████░░░░░░░░░░] ~42% (P
 | Backfill rate limit 2 req/sec | Slower than forward (10 req/sec) | Protect Grafana during bulk ops | 25-04 |
 | MAX aggregation for anomaly scores | Worst signal bubbles up | Per CONTEXT.md hierarchy | 25-04 |
 | Quality tiebreaker | Equal scores need deterministic TopSource | Higher quality wins when scores equal | 25-04 |
+| Internal anomaly threshold = 0.5 | Fixed threshold per CONTEXT.md | Scores >= 0.5 considered anomalous | 26-01 |
+| Top 5 hotspots for Orient stage | Cluster-wide summary limits | Per RESEARCH.md recommendation | 26-01 |
+| Top 20 workloads/dashboards | Narrow stage limits | Per RESEARCH.md recommendation | 26-01 |
+| Confidence tiebreaker | Equal scores need deterministic ordering | Higher confidence wins when scores equal | 26-01 |
 | Aggregation cache 5min + jitter | Prevent thundering herd | Random 0-30s jitter on TTL | 25-04 |
 | Welford's online algorithm | Incremental statistics without storing samples | Mean/variance update via delta formula | 25-03 |
 | Rate limiting 10 req/sec | Protect Grafana API | 100ms ticker interval | 25-03 |
@@ -154,21 +158,22 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan 26-03
+**Last command:** /gsd:execute-plan 26-01
 **Last session:** 2026-01-30
-**Stopped at:** Completed 26-03-PLAN.md (ObservatoryEvidenceService)
+**Stopped at:** Completed 26-01-PLAN.md (ObservatoryService core)
 **Resume file:** None
-**Context preserved:** Phase 26 in progress: ObservatoryEvidenceService implemented with 8 passing tests.
+**Context preserved:** Phase 26 in progress: ObservatoryService core implemented with 10 passing tests.
 
 **Next step:** Continue Phase 26 (Observatory API and MCP tools)
 
-**Phase 26-03 Summary:**
-- ObservatoryEvidenceService for Hypothesize/Verify stages
-- GetCandidateCauses: 2-hop upstream K8s graph traversal + recent changes
-- GetSignalEvidence: metric values, alert states, log excerpts
-- Graceful degradation when data sources unavailable
-- 8 unit tests with race detector enabled
-- Duration: 4 min
+**Phase 26-01 Summary:**
+- ObservatoryService with 4 core methods for MCP tool foundation
+- GetClusterAnomalies: Top 5 hotspots filtered by 0.5 threshold
+- GetNamespaceAnomalies: Top 20 workloads with anomaly details
+- GetWorkloadAnomalyDetail: Signal-level anomalies with roles
+- GetDashboardQuality: Top 20 dashboards ranked by quality
+- 10 unit tests with race detector enabled
+- Duration: 9 min
 
 ---
-*Last updated: 2026-01-30 — Phase 26-03 complete (ObservatoryEvidenceService)*
+*Last updated: 2026-01-30 — Phase 26-01 complete (ObservatoryService core)*
