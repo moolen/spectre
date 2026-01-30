@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 ## Current Position
 
 Phase: 26 — Observatory API and MCP Tools
-Plan: 2 of TBD complete
+Plan: 3 of TBD complete
 Status: In progress
-Last activity: 2026-01-30 — Completed 26-02-PLAN.md
+Last activity: 2026-01-30 — Completed 26-03-PLAN.md
 
-Progress: [██████████░░░░░░░░░░] ~40% (Phase 24-25 complete, 11 plans shipped)
+Progress: [██████████░░░░░░░░░░] ~42% (Phase 24-25 complete, 12 plans shipped)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 11
+- Plans completed: 12
 - Phase 24: 4/4 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min, 24-04: 11 min) — PHASE COMPLETE
 - Phase 25: 5/5 complete (25-01: 2 min, 25-02: 2.5 min, 25-03: 7 min, 25-04: 11 min, 25-05: 8 min) — PHASE COMPLETE
-- Phase 26: 2/TBD complete (26-01: TBD, 26-02: 3 min)
+- Phase 26: 3/TBD complete (26-01: TBD, 26-02: 3 min, 26-03: 4 min)
 
 **v1.4 Velocity (previous):**
 - Plans completed: 10 (COMPLETE)
@@ -47,9 +47,9 @@ Progress: [██████████░░░░░░░░░░] ~40% (P
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 77 complete (v1.0-v1.4: 66, v1.5: 11)
+- Total plans: 78 complete (v1.0-v1.4: 66, v1.5: 12)
 - Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
-- v1.5 progress: 11/TBD plans complete
+- v1.5 progress: 12/TBD plans complete
 
 ## Accumulated Context
 
@@ -85,6 +85,10 @@ Progress: [██████████░░░░░░░░░░] ~40% (P
 | QueryService interface abstraction | Enable unit testing without Grafana | FetchCurrentValue, FetchHistoricalValue methods | 26-02 |
 | Baseline fallback on query failure | Graceful degradation | Use baseline mean when Grafana unavailable | 26-02 |
 | Default 24h lookback for compare | Time comparison window | Captures daily patterns | 26-02 |
+| EvidenceAlertState type naming | Avoid collision with AlertState | Separate type for evidence aggregation | 26-03 |
+| Graceful degradation for evidence | Partial results on error | Each data source fails independently | 26-03 |
+| Log excerpt 5-min window ERROR only | Evidence scoping | Limit 10 excerpts, ERROR/FATAL levels | 26-03 |
+| 2-hop upstream traversal | K8s graph depth | workload -> service -> ingress/deployment | 26-03 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -114,7 +118,7 @@ None yet.
 |-------|------|--------------|--------|
 | 24 | Signal anchors with role classification and quality scoring | 25 | 4/4 COMPLETE |
 | 25 | Baseline storage and anomaly detection | 12 | 5/5 COMPLETE |
-| 26 | Observatory API and 8 MCP tools | 24 | 2/TBD in progress |
+| 26 | Observatory API and 8 MCP tools | 24 | 3/TBD in progress |
 
 ## Milestone History
 
@@ -150,20 +154,21 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan 26-02
+**Last command:** /gsd:execute-plan 26-03
 **Last session:** 2026-01-30
-**Stopped at:** Completed 26-02-PLAN.md (ObservatoryInvestigateService)
+**Stopped at:** Completed 26-03-PLAN.md (ObservatoryEvidenceService)
 **Resume file:** None
-**Context preserved:** Phase 26 in progress: ObservatoryInvestigateService implemented with 9 passing tests.
+**Context preserved:** Phase 26 in progress: ObservatoryEvidenceService implemented with 8 passing tests.
 
 **Next step:** Continue Phase 26 (Observatory API and MCP tools)
 
-**Phase 26-02 Summary:**
-- ObservatoryInvestigateService for Narrow/Investigate stages
-- GetWorkloadSignals, GetSignalDetail, CompareSignal methods
-- QueryService interface for Grafana metric fetching
-- 9 unit tests with race detector enabled
-- Duration: 3 min
+**Phase 26-03 Summary:**
+- ObservatoryEvidenceService for Hypothesize/Verify stages
+- GetCandidateCauses: 2-hop upstream K8s graph traversal + recent changes
+- GetSignalEvidence: metric values, alert states, log excerpts
+- Graceful degradation when data sources unavailable
+- 8 unit tests with race detector enabled
+- Duration: 4 min
 
 ---
-*Last updated: 2026-01-30 — Phase 26-02 complete (ObservatoryInvestigateService)*
+*Last updated: 2026-01-30 — Phase 26-03 complete (ObservatoryEvidenceService)*
