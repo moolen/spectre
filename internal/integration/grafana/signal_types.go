@@ -1,35 +1,41 @@
 package grafana
 
-// SignalRole represents the operational role of a metric in observability.
-// Based on Google's Four Golden Signals (Latency, Traffic, Errors, Saturation)
-// plus observability-specific extensions (Availability, Churn, Novelty).
-type SignalRole string
+import (
+	"github.com/moolen/spectre/internal/observatory"
+)
 
+// SignalRole is an alias for observatory.SignalRole.
+// Represents the operational role of a metric in observability.
+// Based on Google's Four Golden Signals (Latency, Traffic, Errors, Saturation)
+// plus observability-specific extensions (Availability, Novelty).
+type SignalRole = observatory.SignalRole
+
+// Signal role constants - aliased from observatory package
 const (
 	// SignalAvailability indicates uptime/health metrics (up, kube_pod_status_phase)
-	SignalAvailability SignalRole = "Availability"
+	SignalAvailability = observatory.SignalAvailability
 
 	// SignalLatency indicates response time/duration metrics (histogram_quantile, *_duration_*)
-	SignalLatency SignalRole = "Latency"
+	SignalLatency = observatory.SignalLatency
 
 	// SignalErrors indicates failure/error rate metrics (*_error_*, *_failed_*)
-	SignalErrors SignalRole = "Errors"
+	SignalErrors = observatory.SignalErrors
 
 	// SignalTraffic indicates throughput/request rate metrics (rate(*_total), *_count)
-	SignalTraffic SignalRole = "Traffic"
+	SignalTraffic = observatory.SignalTraffic
 
 	// SignalSaturation indicates resource utilization metrics (cpu, memory, disk)
-	SignalSaturation SignalRole = "Saturation"
+	SignalSaturation = observatory.SignalSaturation
 
 	// SignalChurn indicates workload churn/restarts (pod restarts, deployments)
 	// Deprecated: use SignalNovelty instead (v1.5+)
-	SignalChurn SignalRole = "Novelty"
+	SignalChurn = observatory.SignalNovelty
 
 	// SignalNovelty indicates change events/deployments (replaces Churn in v1.5)
-	SignalNovelty SignalRole = "Novelty"
+	SignalNovelty = observatory.SignalNovelty
 
 	// SignalUnknown indicates metrics that could not be classified
-	SignalUnknown SignalRole = "Unknown"
+	SignalUnknown = observatory.SignalUnknown
 )
 
 // SignalAnchor links a Grafana metric to a classified signal role and K8s workload.
@@ -41,6 +47,9 @@ const (
 //
 // Deduplication: Same metric+workload from multiple dashboards → highest quality wins
 // Composite key: metric_name + workload_namespace + workload_name
+//
+// Note: This is a Grafana-specific extension of observatory.SignalAnchor with
+// additional fields for dashboard/panel tracking.
 type SignalAnchor struct {
 	// MetricName is the PromQL metric name (e.g., "container_cpu_usage_seconds_total")
 	MetricName string
@@ -95,44 +104,10 @@ type SignalAnchor struct {
 	ExpiresAt int64
 }
 
-// ClassificationResult represents the output of layered classification.
-// Used internally by classifier to track confidence and reasoning.
-type ClassificationResult struct {
-	// Role is the classified signal role
-	Role SignalRole
+// ClassificationResult is an alias for observatory.ClassificationResult.
+// Represents the output of layered signal classification.
+type ClassificationResult = observatory.ClassificationResult
 
-	// Confidence is the classification confidence (0.0-1.0)
-	Confidence float64
-
-	// Layer indicates which classification layer matched (1-5)
-	// 1: Hardcoded known metrics (confidence ~0.95)
-	// 2: PromQL structure patterns (confidence ~0.85-0.9)
-	// 3: Metric name patterns (confidence ~0.7-0.8)
-	// 4: Panel title/description (confidence ~0.5)
-	// 5: Unknown/unclassified (confidence 0)
-	Layer int
-
-	// Reason is a human-readable explanation of why this classification was chosen
-	// Examples: "matched hardcoded metric: up", "histogram_quantile indicates latency"
-	Reason string
-}
-
-// WorkloadInference represents an inferred K8s workload from PromQL labels.
-// Used to link SignalAnchors to ResourceIdentity nodes in the K8s graph.
-type WorkloadInference struct {
-	// Namespace is the K8s namespace (from namespace label)
-	Namespace string
-
-	// WorkloadName is the inferred workload name
-	// Extracted from deployment/app/service/job labels in priority order
-	WorkloadName string
-
-	// InferredFrom is the label key used for inference
-	// Examples: "deployment", "app.kubernetes.io/name", "app", "service", "job"
-	InferredFrom string
-
-	// Confidence is the inference confidence (0.7-0.9)
-	// Higher confidence for explicit labels (deployment=0.9)
-	// Lower confidence for generic labels (app=0.7)
-	Confidence float64
-}
+// WorkloadInference is an alias for observatory.WorkloadInference.
+// Represents an inferred K8s workload from PromQL labels.
+type WorkloadInference = observatory.WorkloadInference

@@ -212,6 +212,17 @@ type ClassificationResult struct {
 	Reason string
 }
 
+// QueryContext provides context about a metric's query for classification.
+// Different metric sources (PromQL, SQL, etc.) can implement this interface.
+type QueryContext interface {
+	// MetricNames returns all metric names in the query.
+	GetMetricNames() []string
+
+	// Aggregations returns all aggregation functions in the query.
+	// Examples: "sum", "rate", "histogram_quantile"
+	GetAggregations() []string
+}
+
 // WorkloadInference represents an inferred K8s workload from metric labels.
 type WorkloadInference struct {
 	// Namespace is the K8s namespace

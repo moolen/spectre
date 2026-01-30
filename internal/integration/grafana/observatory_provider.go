@@ -2,6 +2,9 @@ package grafana
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/moolen/spectre/internal/graph"
@@ -13,8 +16,19 @@ import (
 // It adapts Grafana's graph-based signal storage to the Observatory interface.
 type GrafanaObservatoryProvider struct {
 	graphClient     graph.Client
+	grafanaClient   *GrafanaClient
 	integrationName string
 	logger          *logging.Logger
+
+	// Cache for current values (metric|ns|workload -> cachedValue)
+	valueCache   sync.Map
+	valueCacheTTL time.Duration
+}
+
+// cachedValue holds a cached current value with expiration.
+type cachedValue struct {
+	value     float64
+	expiresAt time.Time
 }
 
 // NewGrafanaObservatoryProvider creates a new Grafana provider for Observatory.
@@ -27,7 +41,14 @@ func NewGrafanaObservatoryProvider(
 		graphClient:     graphClient,
 		integrationName: integrationName,
 		logger:          logger,
+		valueCacheTTL:   2 * time.Minute, // Cache values for 2 minutes
 	}
+}
+
+// SetGrafanaClient sets the Grafana HTTP client for executing metric queries.
+// This enables GetCurrentValue to fetch live metric values from Grafana.
+func (p *GrafanaObservatoryProvider) SetGrafanaClient(client *GrafanaClient) {
+	p.grafanaClient = client
 }
 
 // Name returns the unique identifier for this provider.
@@ -184,15 +205,289 @@ func (p *GrafanaObservatoryProvider) parseSignalAnchorRow(
 }
 
 // GetCurrentValue fetches the current value of a metric for anomaly scoring.
-// Currently returns not found (uses baseline mean as fallback).
-// Future: Query Prometheus/Grafana for live values.
+// Queries Grafana for the live metric value using the signal's associated dashboard/panel.
+// Uses caching to avoid repeated queries for the same metric within the TTL period.
+//
+// Returns (value, found, error):
+// - (value, true, nil) - Successfully fetched the current value
+// - (0, false, nil) - Metric not found or no Grafana client configured (uses baseline mean fallback)
+// - (0, false, error) - Query failed
 func (p *GrafanaObservatoryProvider) GetCurrentValue(
 	ctx context.Context,
 	metricName, namespace, workload string,
 ) (float64, bool, error) {
-	// For now, return not found to use baseline mean fallback.
-	// Full implementation would query Prometheus via GrafanaQueryService.
-	return 0, false, nil
+	// Build cache key
+	cacheKey := fmt.Sprintf("%s|%s|%s", metricName, namespace, workload)
+
+	// Check cache first
+	if cached, ok := p.valueCache.Load(cacheKey); ok {
+		cv := cached.(*cachedValue)
+		if time.Now().Before(cv.expiresAt) {
+			return cv.value, true, nil
+		}
+		// Expired, delete from cache
+		p.valueCache.Delete(cacheKey)
+	}
+
+	// If no Grafana client, fall back to baseline mean
+	if p.grafanaClient == nil {
+		return 0, false, nil
+	}
+
+	// Look up the SignalAnchor to get dashboard_uid and panel_id
+	dashboardUID, panelID, datasourceUID, err := p.getSignalSource(ctx, metricName, namespace, workload)
+	if err != nil {
+		p.logger.Debug("Failed to get signal source for %s: %v", metricName, err)
+		return 0, false, nil // Graceful degradation
+	}
+	if dashboardUID == "" {
+		return 0, false, nil // No dashboard associated
+	}
+
+	// Get the PromQL query from the dashboard
+	promQL, err := p.getPromQLFromDashboard(ctx, dashboardUID, panelID)
+	if err != nil {
+		p.logger.Debug("Failed to get PromQL for %s from dashboard %s panel %d: %v",
+			metricName, dashboardUID, panelID, err)
+		return 0, false, nil // Graceful degradation
+	}
+	if promQL == "" {
+		return 0, false, nil // No query found
+	}
+
+	// Execute instant query via Grafana
+	value, err := p.executeInstantQuery(ctx, datasourceUID, promQL)
+	if err != nil {
+		p.logger.Debug("Failed to execute instant query for %s: %v", metricName, err)
+		return 0, false, nil // Graceful degradation
+	}
+
+	// Cache the result
+	p.valueCache.Store(cacheKey, &cachedValue{
+		value:     value,
+		expiresAt: time.Now().Add(p.valueCacheTTL),
+	})
+
+	return value, true, nil
+}
+
+// getSignalSource retrieves the dashboard UID, panel ID, and datasource UID for a signal.
+func (p *GrafanaObservatoryProvider) getSignalSource(
+	ctx context.Context,
+	metricName, namespace, workload string,
+) (dashboardUID string, panelID int, datasourceUID string, err error) {
+	query := `
+		MATCH (s:SignalAnchor {
+			metric_name: $metric_name,
+			workload_namespace: $namespace,
+			workload_name: $workload_name,
+			integration: $integration
+		})
+		WHERE s.expires_at > $now
+		OPTIONAL MATCH (s)-[:SOURCED_FROM]->(d:Dashboard)
+		RETURN s.dashboard_uid AS dashboard_uid,
+		       s.panel_id AS panel_id,
+		       d.default_datasource_uid AS datasource_uid
+	`
+
+	result, err := p.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+		Query: query,
+		Parameters: map[string]any{
+			"metric_name":   metricName,
+			"namespace":     namespace,
+			"workload_name": workload,
+			"integration":   p.integrationName,
+			"now":           time.Now().Unix(),
+		},
+	})
+	if err != nil {
+		return "", 0, "", err
+	}
+
+	if len(result.Rows) == 0 {
+		return "", 0, "", nil
+	}
+
+	// Parse results
+	colIdx := make(map[string]int)
+	for i, col := range result.Columns {
+		colIdx[col] = i
+	}
+
+	row := result.Rows[0]
+	if idx, ok := colIdx["dashboard_uid"]; ok && idx < len(row) {
+		if v, ok := row[idx].(string); ok {
+			dashboardUID = v
+		}
+	}
+	if idx, ok := colIdx["panel_id"]; ok && idx < len(row) {
+		panelID = parseInt(row[idx])
+	}
+	if idx, ok := colIdx["datasource_uid"]; ok && idx < len(row) {
+		if v, ok := row[idx].(string); ok {
+			datasourceUID = v
+		}
+	}
+
+	return dashboardUID, panelID, datasourceUID, nil
+}
+
+// getPromQLFromDashboard retrieves the PromQL query from a dashboard's panel.
+func (p *GrafanaObservatoryProvider) getPromQLFromDashboard(
+	ctx context.Context,
+	dashboardUID string,
+	panelID int,
+) (string, error) {
+	// Query the dashboard JSON from graph
+	query := `
+		MATCH (d:Dashboard {uid: $uid})
+		RETURN d.json AS json
+	`
+
+	result, err := p.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+		Query: query,
+		Parameters: map[string]any{
+			"uid": dashboardUID,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if len(result.Rows) == 0 || len(result.Rows[0]) == 0 {
+		return "", nil
+	}
+
+	jsonStr, ok := result.Rows[0][0].(string)
+	if !ok || jsonStr == "" {
+		return "", nil
+	}
+
+	// Parse dashboard JSON
+	var dashboardJSON map[string]any
+	if err := json.Unmarshal([]byte(jsonStr), &dashboardJSON); err != nil {
+		return "", err
+	}
+
+	// Find the panel with matching ID
+	panels, ok := dashboardJSON["panels"].([]any)
+	if !ok {
+		return "", nil
+	}
+
+	for _, p := range panels {
+		panel, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		// Check panel ID
+		id, _ := panel["id"].(float64)
+		if int(id) != panelID {
+			// Check nested panels (rows)
+			if nestedPanels, ok := panel["panels"].([]any); ok {
+				for _, np := range nestedPanels {
+					nestedPanel, ok := np.(map[string]any)
+					if !ok {
+						continue
+					}
+					nestedID, _ := nestedPanel["id"].(float64)
+					if int(nestedID) == panelID {
+						return extractPromQLFromPanel(nestedPanel), nil
+					}
+				}
+			}
+			continue
+		}
+
+		return extractPromQLFromPanel(panel), nil
+	}
+
+	return "", nil
+}
+
+// extractPromQLFromPanel extracts the PromQL expression from a panel's targets.
+func extractPromQLFromPanel(panel map[string]any) string {
+	targets, ok := panel["targets"].([]any)
+	if !ok || len(targets) == 0 {
+		return ""
+	}
+
+	// Get the first target's expression
+	target, ok := targets[0].(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	expr, _ := target["expr"].(string)
+	return expr
+}
+
+// executeInstantQuery executes a PromQL instant query via Grafana.
+func (p *GrafanaObservatoryProvider) executeInstantQuery(
+	ctx context.Context,
+	datasourceUID, promQL string,
+) (float64, error) {
+	if datasourceUID == "" {
+		// Try to get default datasource
+		datasources, err := p.grafanaClient.ListDatasources(ctx)
+		if err != nil {
+			return 0, err
+		}
+		for _, ds := range datasources {
+			dsType, _ := ds["type"].(string)
+			isDefault, _ := ds["isDefault"].(bool)
+			if dsType == "prometheus" && isDefault {
+				datasourceUID, _ = ds["uid"].(string)
+				break
+			}
+		}
+		if datasourceUID == "" {
+			// Find any prometheus datasource
+			for _, ds := range datasources {
+				dsType, _ := ds["type"].(string)
+				if dsType == "prometheus" {
+					datasourceUID, _ = ds["uid"].(string)
+					break
+				}
+			}
+		}
+	}
+
+	if datasourceUID == "" {
+		return 0, fmt.Errorf("no Prometheus datasource found")
+	}
+
+	// Execute instant query (now to now)
+	now := time.Now()
+	from := fmt.Sprintf("%d", now.Add(-1*time.Minute).UnixMilli())
+	to := fmt.Sprintf("%d", now.UnixMilli())
+
+	response, err := p.grafanaClient.QueryDataSource(ctx, datasourceUID, promQL, from, to, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	// Extract the most recent value from the response
+	for _, queryResult := range response.Results {
+		if queryResult.Error != "" {
+			continue
+		}
+		for _, frame := range queryResult.Frames {
+			if len(frame.Data.Values) >= 2 && len(frame.Data.Values[1]) > 0 {
+				// Values[0] = timestamps, Values[1] = values
+				values := frame.Data.Values[1]
+				// Get the last (most recent) value
+				if len(values) > 0 {
+					if v, ok := values[len(values)-1].(float64); ok {
+						return v, nil
+					}
+				}
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("no data returned from query")
 }
 
 // GetBaseline retrieves the baseline statistics for a signal.

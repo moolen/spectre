@@ -268,6 +268,10 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			g.name,
 			g.logger,
 		)
+		// Set the Grafana client for live metric queries (enables GetCurrentValue)
+		if g.client != nil {
+			g.observatoryProvider.SetGrafanaClient(g.client)
+		}
 		g.logger.Info("Observatory provider created for integration %s", g.name)
 
 		// Create registry and register this integration's provider

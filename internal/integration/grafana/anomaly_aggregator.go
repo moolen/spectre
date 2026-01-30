@@ -35,14 +35,20 @@ type AggregatedAnomaly struct {
 	TopSourceQuality float64
 }
 
+// CurrentValueProvider allows injection of current metric values for testing.
+// Returns (value, ok) where ok=false means use baseline.Mean as fallback.
+// This enables tests to inject anomalous values that differ from baseline means.
+type CurrentValueProvider func(metricName, namespace, workload string) (float64, bool)
+
 // AnomalyAggregator computes hierarchical anomaly scores.
 // Aggregation follows: signal -> workload -> namespace -> cluster
 // Uses MAX aggregation (per CONTEXT.md: "worst signal anomaly").
 type AnomalyAggregator struct {
-	graphClient     graph.Client
-	cache           *AggregationCache
-	integrationName string
-	logger          *logging.Logger
+	graphClient          graph.Client
+	cache                *AggregationCache
+	integrationName      string
+	logger               *logging.Logger
+	currentValueProvider CurrentValueProvider // Optional: for test injection
 }
 
 // NewAnomalyAggregator creates a new AnomalyAggregator instance.
@@ -53,6 +59,13 @@ func NewAnomalyAggregator(graphClient graph.Client, integrationName string, logg
 		integrationName: integrationName,
 		logger:          logger,
 	}
+}
+
+// SetCurrentValueProvider sets a custom provider for current metric values.
+// Used in tests to inject values that differ from baseline for anomaly detection.
+// When provider is nil or returns ok=false, baseline.Mean is used as fallback.
+func (a *AnomalyAggregator) SetCurrentValueProvider(provider CurrentValueProvider) {
+	a.currentValueProvider = provider
 }
 
 // AggregateWorkloadAnomaly computes the aggregated anomaly score for a workload.
@@ -341,9 +354,15 @@ func (a *AnomalyAggregator) getWorkloadSignals(ctx context.Context, namespace, w
 			}
 		}
 
-		// For now, use baseline mean as current value proxy
-		// In production, this would come from recent Grafana query
-		if signal.Baseline != nil {
+		// Determine current value: use provider if set, otherwise baseline mean
+		if a.currentValueProvider != nil {
+			if val, ok := a.currentValueProvider(signal.MetricName, namespace, workloadName); ok {
+				signal.CurrentValue = val
+			} else if signal.Baseline != nil {
+				signal.CurrentValue = signal.Baseline.Mean
+			}
+		} else if signal.Baseline != nil {
+			// Default: use baseline mean as current value proxy
 			signal.CurrentValue = signal.Baseline.Mean
 		}
 
