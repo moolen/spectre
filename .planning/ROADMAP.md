@@ -7,7 +7,7 @@
 - ✅ **v1.2 Logz.io Integration + Secret Management** - Phases 10-14 (shipped 2026-01-22)
 - ✅ **v1.3 Grafana Metrics Integration** - Phases 15-19 (shipped 2026-01-23)
 - ✅ **v1.4 Grafana Alerts Integration** - Phases 20-23 (shipped 2026-01-23)
-- 🚧 **v1.5 Observatory** - Phases 24-26 (in progress)
+- ✅ **v1.5 Observatory** - Phases 24-26 (shipped 2026-01-30)
 
 ## Phases
 
@@ -225,8 +225,8 @@ Plans:
 
 </details>
 
-<details open>
-<summary>🚧 v1.5 Observatory (Phases 24-26) - IN PROGRESS</summary>
+<details>
+<summary>✅ v1.5 Observatory (Phases 24-26) - SHIPPED 2026-01-30</summary>
 
 **Milestone Goal:** Build a signal intelligence layer that extracts "what matters" from dashboards and exposes it for AI-driven incident investigation.
 
@@ -271,7 +271,7 @@ Plans:
 - [x] 25-04-PLAN.md — BackfillService and hierarchical anomaly aggregation
 - [x] 25-05-PLAN.md — Integration test, lifecycle wiring, and verification
 
-#### Phase 26: Observatory API & MCP Tools
+#### ✅ Phase 26: Observatory API & MCP Tools
 **Goal**: AI can investigate incidents through 8 progressive disclosure tools covering Orient, Narrow, Investigate, Hypothesize, and Verify stages.
 **Depends on**: Phase 25
 **Requirements**: API-01, API-02, API-03, API-04, API-05, API-06, API-07, API-08, TOOL-01, TOOL-02, TOOL-03, TOOL-04, TOOL-05, TOOL-06, TOOL-07, TOOL-08, TOOL-09, TOOL-10, TOOL-11, TOOL-12, TOOL-13, TOOL-14, TOOL-15, TOOL-16
@@ -282,16 +282,17 @@ Plans:
   4. Narrow tools (`observatory_scope`, `observatory_signals`) focus on specific namespace/workload with ranked signals
   5. Investigate/Hypothesize/Verify tools (`observatory_signal_detail`, `observatory_compare`, `observatory_explain`, `observatory_evidence`) provide deep analysis with K8s graph integration
 **Plans**: 8 plans
+**Completed**: 2026-01-30
 
 Plans:
-- [ ] 26-01-PLAN.md — Core ObservatoryService with cluster/namespace anomaly queries
-- [ ] 26-02-PLAN.md — ObservatoryInvestigateService for signal detail and comparison
-- [ ] 26-03-PLAN.md — ObservatoryEvidenceService for K8s graph traversal and evidence aggregation
-- [ ] 26-04-PLAN.md — Orient tools (observatory_status, observatory_changes)
-- [ ] 26-05-PLAN.md — Narrow tools (observatory_scope, observatory_signals)
-- [ ] 26-06-PLAN.md — Investigate tools (observatory_signal_detail, observatory_compare)
-- [ ] 26-07-PLAN.md — Hypothesize/Verify tools (observatory_explain, observatory_evidence)
-- [ ] 26-08-PLAN.md — Tool registration, lifecycle wiring, and integration tests
+- [x] 26-01-PLAN.md — Core ObservatoryService with cluster/namespace anomaly queries
+- [x] 26-02-PLAN.md — ObservatoryInvestigateService for signal detail and comparison
+- [x] 26-03-PLAN.md — ObservatoryEvidenceService for K8s graph traversal and evidence aggregation
+- [x] 26-04-PLAN.md — Orient tools (observatory_status, observatory_changes)
+- [x] 26-05-PLAN.md — Narrow tools (observatory_scope, observatory_signals)
+- [x] 26-06-PLAN.md — Investigate tools (observatory_signal_detail, observatory_compare)
+- [x] 26-07-PLAN.md — Hypothesize/Verify tools (observatory_explain, observatory_evidence)
+- [x] 26-08-PLAN.md — Tool registration, lifecycle wiring, and integration tests
 
 **Stats:** 3 phases, 17 plans, 61 requirements
 
@@ -306,7 +307,7 @@ Plans:
 | v1.2 | 10-14 | 8 | 21 | ✅ Shipped 2026-01-22 |
 | v1.3 | 15-19 | 17 | 51 | ✅ Shipped 2026-01-23 |
 | v1.4 | 20-23 | 10 | 22 | ✅ Shipped 2026-01-23 |
-| v1.5 | 24-26 | 17 | 61 | 🚧 In Progress |
+| v1.5 | 24-26 | 17 | 61 | ✅ Shipped 2026-01-30 |
 
 **Total:** 26 phases, 83 plans, 207 requirements
 

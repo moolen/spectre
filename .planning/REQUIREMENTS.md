@@ -62,47 +62,47 @@ Requirements for Observatory signal intelligence layer. Each maps to roadmap pha
 - [x] **ANOM-05**: Anomalies aggregate from metrics -> signals -> workloads -> namespaces -> clusters
 - [x] **ANOM-06**: Grafana alert state (firing/pending/normal) used as strong anomaly signal
 
-### Observatory API
+### Observatory API ✅
 
-- [ ] **API-01**: GetAnomalies returns current anomalies optionally scoped by cluster/namespace/workload
-- [ ] **API-02**: GetWorkloadSignals returns all signals for a workload with current state
-- [ ] **API-03**: GetSignalDetail returns baseline, current value, anomaly score, source dashboard
-- [ ] **API-04**: GetSignalsByRole returns anchors filtered by role across a scope
-- [ ] **API-05**: GetDashboardQuality returns dashboard quality rankings
-- [ ] **API-06**: API response envelope includes scope, timestamp, summary, confidence, suggestions
-- [ ] **API-07**: Suggestions field guides progressive disclosure (what to query next)
-- [ ] **API-08**: API integrates with GraphService for K8s topology queries
+- [x] **API-01**: GetAnomalies returns current anomalies optionally scoped by cluster/namespace/workload
+- [x] **API-02**: GetWorkloadSignals returns all signals for a workload with current state
+- [x] **API-03**: GetSignalDetail returns baseline, current value, anomaly score, source dashboard
+- [x] **API-04**: ~~GetSignalsByRole returns anchors filtered by role across a scope~~ (SUPERSEDED: AI handles role filtering)
+- [x] **API-05**: GetDashboardQuality returns dashboard quality rankings
+- [x] **API-06**: ~~API response envelope includes scope, timestamp, summary, confidence, suggestions~~ (SUPERSEDED: minimal responses)
+- [x] **API-07**: ~~Suggestions field guides progressive disclosure (what to query next)~~ (SUPERSEDED: AI handles next steps)
+- [x] **API-08**: API integrates with GraphService for K8s topology queries
 
-### MCP Tools - Orient
+### MCP Tools - Orient ✅
 
-- [ ] **TOOL-01**: `observatory_status` returns cluster/namespace anomaly summary
-- [ ] **TOOL-02**: `observatory_status` returns top 5 hotspots with severity
-- [ ] **TOOL-03**: `observatory_changes` returns recent Flux deployments, config changes, image updates
-- [ ] **TOOL-04**: `observatory_changes` leverages existing K8s graph for change events
+- [x] **TOOL-01**: `observatory_status` returns cluster/namespace anomaly summary
+- [x] **TOOL-02**: `observatory_status` returns top 5 hotspots with severity
+- [x] **TOOL-03**: `observatory_changes` returns recent Flux deployments, config changes, image updates
+- [x] **TOOL-04**: `observatory_changes` leverages existing K8s graph for change events
 
-### MCP Tools - Narrow
+### MCP Tools - Narrow ✅
 
-- [ ] **TOOL-05**: `observatory_scope` accepts namespace/workload filter parameters
-- [ ] **TOOL-06**: `observatory_scope` returns signals and anomalies ranked by severity
-- [ ] **TOOL-07**: `observatory_signals` returns all anchors for a workload grouped by role
-- [ ] **TOOL-08**: `observatory_signals` includes current state per anchor
+- [x] **TOOL-05**: `observatory_scope` accepts namespace/workload filter parameters
+- [x] **TOOL-06**: `observatory_scope` returns signals and anomalies ranked by severity
+- [x] **TOOL-07**: `observatory_signals` returns all anchors for a workload grouped by role
+- [x] **TOOL-08**: `observatory_signals` includes current state per anchor
 
-### MCP Tools - Investigate
+### MCP Tools - Investigate ✅
 
-- [ ] **TOOL-09**: `observatory_signal_detail` returns baseline, current value, anomaly score
-- [ ] **TOOL-10**: `observatory_signal_detail` returns source dashboard and confidence
-- [ ] **TOOL-11**: `observatory_compare` accepts two signal IDs or signal + event
-- [ ] **TOOL-12**: `observatory_compare` returns correlation analysis result
+- [x] **TOOL-09**: `observatory_signal_detail` returns baseline, current value, anomaly score
+- [x] **TOOL-10**: `observatory_signal_detail` returns source dashboard and confidence
+- [x] **TOOL-11**: `observatory_compare` accepts two signal IDs or signal + event
+- [x] **TOOL-12**: `observatory_compare` returns correlation analysis result
 
-### MCP Tools - Hypothesize
+### MCP Tools - Hypothesize ✅
 
-- [ ] **TOOL-13**: `observatory_explain` accepts anomalous signal ID
-- [ ] **TOOL-14**: `observatory_explain` returns candidate causes from K8s graph (upstream deps, recent changes)
+- [x] **TOOL-13**: `observatory_explain` accepts anomalous signal ID
+- [x] **TOOL-14**: `observatory_explain` returns candidate causes from K8s graph (upstream deps, recent changes)
 
-### MCP Tools - Verify
+### MCP Tools - Verify ✅
 
-- [ ] **TOOL-15**: `observatory_evidence` returns raw metric values for a signal
-- [ ] **TOOL-16**: `observatory_evidence` returns log snippets when relevant
+- [x] **TOOL-15**: `observatory_evidence` returns raw metric values for a signal
+- [x] **TOOL-16**: `observatory_evidence` returns log snippets when relevant
 
 ## v2 Requirements
 

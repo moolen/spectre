@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-01-29)
 
 **Core value:** Enable AI assistants to understand what's happening in Kubernetes clusters through unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis.
-**Current focus:** v1.5 Observatory — Phase 26: Observatory API and MCP Tools
+**Current focus:** v1.5 Observatory COMPLETE — Ready for milestone audit
 
 ## Current Position
 
@@ -48,8 +48,8 @@ Progress: [████████████████████] ~100% (
 
 **Cumulative:**
 - Total plans: 83 complete (v1.0-v1.4: 66, v1.5: 17)
-- Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
-- v1.5 progress: 17/17 plans complete — MILESTONE COMPLETE
+- Milestones shipped: 6 (v1.0, v1.1, v1.2, v1.3, v1.4, v1.5)
+- v1.5: 17/17 plans — MILESTONE COMPLETE
 
 ## Accumulated Context
 
