@@ -9,20 +9,20 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 
 ## Current Position
 
-Phase: 25 — Baseline & Anomaly Detection (COMPLETE)
-Plan: 5 of 5 complete
-Status: Phase 25 COMPLETE — Ready for Phase 26
-Last activity: 2026-01-30 — Completed 25-05-PLAN.md
+Phase: 26 — Observatory API and MCP Tools
+Plan: 2 of TBD complete
+Status: In progress
+Last activity: 2026-01-30 — Completed 26-02-PLAN.md
 
-Progress: [█████████░░░░░░░░░░░] ~36% (Phase 24-25 complete, 9 plans shipped)
+Progress: [██████████░░░░░░░░░░] ~40% (Phase 24-25 complete, 11 plans shipped)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 9
+- Plans completed: 11
 - Phase 24: 4/4 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min, 24-04: 11 min) — PHASE COMPLETE
 - Phase 25: 5/5 complete (25-01: 2 min, 25-02: 2.5 min, 25-03: 7 min, 25-04: 11 min, 25-05: 8 min) — PHASE COMPLETE
-- Phase 26: Ready to start
+- Phase 26: 2/TBD complete (26-01: TBD, 26-02: 3 min)
 
 **v1.4 Velocity (previous):**
 - Plans completed: 10 (COMPLETE)
@@ -47,9 +47,9 @@ Progress: [█████████░░░░░░░░░░░] ~36% (P
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 75 complete (v1.0-v1.4: 66, v1.5: 9)
+- Total plans: 77 complete (v1.0-v1.4: 66, v1.5: 11)
 - Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
-- v1.5 progress: 9/TBD plans complete
+- v1.5 progress: 11/TBD plans complete
 
 ## Accumulated Context
 
@@ -82,6 +82,9 @@ Progress: [█████████░░░░░░░░░░░] ~36% (P
 | Rate limiting 10 req/sec | Protect Grafana API | 100ms ticker interval | 25-03 |
 | BaselineCollector lifecycle pattern | Follow AlertStateSyncer | Start after analysis service, stop before stateSyncer | 25-05 |
 | Non-fatal collector start | Warn but continue | Anomaly detection works with existing baselines | 25-05 |
+| QueryService interface abstraction | Enable unit testing without Grafana | FetchCurrentValue, FetchHistoricalValue methods | 26-02 |
+| Baseline fallback on query failure | Graceful degradation | Use baseline mean when Grafana unavailable | 26-02 |
+| Default 24h lookback for compare | Time comparison window | Captures daily patterns | 26-02 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -111,7 +114,7 @@ None yet.
 |-------|------|--------------|--------|
 | 24 | Signal anchors with role classification and quality scoring | 25 | 4/4 COMPLETE |
 | 25 | Baseline storage and anomaly detection | 12 | 5/5 COMPLETE |
-| 26 | Observatory API and 8 MCP tools | 24 | Ready to start |
+| 26 | Observatory API and 8 MCP tools | 24 | 2/TBD in progress |
 
 ## Milestone History
 
@@ -147,28 +150,20 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan 25-05
+**Last command:** /gsd:execute-plan 26-02
 **Last session:** 2026-01-30
-**Stopped at:** Completed 25-05-PLAN.md (Integration test & lifecycle)
+**Stopped at:** Completed 26-02-PLAN.md (ObservatoryInvestigateService)
 **Resume file:** None
-**Context preserved:** Phase 25 COMPLETE: All baseline storage and anomaly detection functionality implemented and tested. 10 total commits for phase 25.
+**Context preserved:** Phase 26 in progress: ObservatoryInvestigateService implemented with 9 passing tests.
 
-**Next step:** Begin Phase 26 (Observatory API and MCP tools)
+**Next step:** Continue Phase 26 (Observatory API and MCP tools)
 
-**Phase 25-05 Summary:**
-- BaselineCollector wired into Grafana integration lifecycle
-- End-to-end integration test suite (11 tests, 947 lines)
-- Test coverage for cold start, alert override, aggregation, TTL
-- All tests pass with race detector enabled
-- Duration: 8 min
-
-**Phase 25 Complete:**
-- 25-01: SignalBaseline types + RollingStatistics (2 min)
-- 25-02: Hybrid anomaly scorer with alert override (2.5 min)
-- 25-03: Graph storage + BaselineCollector syncer (7 min)
-- 25-04: BackfillService + AnomalyAggregator (11 min)
-- 25-05: Integration test + lifecycle wiring (8 min)
-- Total: ~30.5 min for full baseline & anomaly detection layer
+**Phase 26-02 Summary:**
+- ObservatoryInvestigateService for Narrow/Investigate stages
+- GetWorkloadSignals, GetSignalDetail, CompareSignal methods
+- QueryService interface for Grafana metric fetching
+- 9 unit tests with race detector enabled
+- Duration: 3 min
 
 ---
-*Last updated: 2026-01-30 — Phase 25 COMPLETE (baseline & anomaly detection ready for Observatory)*
+*Last updated: 2026-01-30 — Phase 26-02 complete (ObservatoryInvestigateService)*
