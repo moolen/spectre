@@ -44,6 +44,12 @@ type GrafanaIntegration struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 
+	// Observatory services (Phase 26)
+	observatoryService    *ObservatoryService
+	investigateService    *ObservatoryInvestigateService
+	evidenceService       *ObservatoryEvidenceService
+	anomalyAggregator     *AnomalyAggregator
+
 	// Thread-safe health status
 	mu           sync.RWMutex
 	healthStatus integration.HealthStatus
@@ -238,6 +244,35 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 		} else {
 			g.logger.Info("Baseline collector started for integration %s", g.name)
 		}
+
+		// Initialize Observatory services (Phase 26)
+		// These services enable the 8 observatory MCP tools for AI-driven incident investigation
+		g.anomalyAggregator = NewAnomalyAggregator(g.graphClient, g.name, g.logger)
+		g.logger.Info("Anomaly aggregator created for integration %s", g.name)
+
+		g.observatoryService = NewObservatoryService(
+			g.graphClient,
+			g.anomalyAggregator,
+			g.name,
+			g.logger,
+		)
+		g.logger.Info("Observatory service created for integration %s", g.name)
+
+		g.investigateService = NewObservatoryInvestigateService(
+			g.graphClient,
+			g.queryService,
+			g.name,
+			g.logger,
+		)
+		g.logger.Info("Observatory investigate service created for integration %s", g.name)
+
+		g.evidenceService = NewObservatoryEvidenceService(
+			g.graphClient,
+			g.queryService,
+			g.name,
+			g.logger,
+		)
+		g.logger.Info("Observatory evidence service created for integration %s", g.name)
 	} else {
 		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
 	}
@@ -299,6 +334,12 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.stateSyncer = nil
 	g.baselineCollector = nil
 	g.queryService = nil
+
+	// Clear observatory services (no Stop method needed - stateless)
+	g.observatoryService = nil
+	g.investigateService = nil
+	g.evidenceService = nil
+	g.anomalyAggregator = nil
 
 	// Update health status
 	g.setHealthStatus(integration.Stopped)
@@ -551,6 +592,202 @@ func (g *GrafanaIntegration) RegisterTools(registry integration.ToolRegistry) er
 	g.logger.Info("Registered tool: %s", alertsDetailsName)
 
 	g.logger.Info("Successfully registered 6 Grafana MCP tools")
+
+	// Register Observatory tools (Phase 26)
+	// These tools enable AI-driven incident investigation with progressive disclosure
+	if g.observatoryService != nil && g.investigateService != nil && g.evidenceService != nil {
+		if err := g.registerObservatoryTools(registry); err != nil {
+			return fmt.Errorf("failed to register observatory tools: %w", err)
+		}
+		g.logger.Info("Successfully registered 8 Observatory MCP tools")
+	} else {
+		g.logger.Warn("Observatory services not initialized, skipping observatory tool registration")
+	}
+
+	return nil
+}
+
+// registerObservatoryTools registers the 8 observatory MCP tools for AI-driven investigation.
+// Tools follow progressive disclosure pattern: Orient -> Narrow -> Investigate -> Hypothesize -> Verify
+func (g *GrafanaIntegration) registerObservatoryTools(registry integration.ToolRegistry) error {
+	// Create tool instances
+	statusTool := NewObservatoryStatusTool(g.observatoryService, g.logger)
+	changesTool := NewObservatoryChangesTool(g.graphClient, g.name, g.logger)
+	scopeTool := NewObservatoryScopeTool(g.observatoryService, g.logger)
+	signalsTool := NewObservatorySignalsTool(g.investigateService, g.logger)
+	signalDetailTool := NewObservatorySignalDetailTool(g.investigateService, g.logger)
+	compareTool := NewObservatoryCompareTool(g.investigateService, g.logger)
+	explainTool := NewObservatoryExplainTool(g.evidenceService, g.logger)
+	evidenceTool := NewObservatoryEvidenceTool(g.evidenceService, g.logger)
+
+	// ============================================================================
+	// Orient Stage Tools - Cluster-wide situation awareness
+	// ============================================================================
+
+	// observatory_status: Top 5 anomaly hotspots
+	if err := registry.RegisterTool(
+		"observatory_status",
+		"Get cluster-wide anomaly summary with top 5 hotspots by namespace/workload. Returns numeric scores (0.0-1.0) and empty array when nothing is anomalous.",
+		statusTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"cluster":   map[string]interface{}{"type": "string", "description": "Optional: filter to specific cluster"},
+				"namespace": map[string]interface{}{"type": "string", "description": "Optional: filter to specific namespace"},
+			},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_status: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_status")
+
+	// observatory_changes: Recent K8s deployment and config changes
+	if err := registry.RegisterTool(
+		"observatory_changes",
+		"Get recent K8s changes (deployments, config updates, Flux reconciliations) that could explain anomalies. Returns max 20 changes.",
+		changesTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace": map[string]interface{}{"type": "string", "description": "Optional: filter to specific namespace"},
+				"lookback":  map[string]interface{}{"type": "string", "description": "Lookback duration (default: 1h, max: 24h). Format: 30m, 1h, 2h, etc."},
+			},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_changes: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_changes")
+
+	// ============================================================================
+	// Narrow Stage Tools - Workload scoping
+	// ============================================================================
+
+	// observatory_scope: Namespace or workload anomaly scoping
+	if err := registry.RegisterTool(
+		"observatory_scope",
+		"Get anomalies for a namespace or specific workload, ranked by severity. Returns flat list sorted by anomaly score.",
+		scopeTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace": map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":  map[string]interface{}{"type": "string", "description": "Optional: narrow to specific workload within namespace"},
+			},
+			"required": []string{"namespace"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_scope: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_scope")
+
+	// observatory_signals: Workload signal enumeration
+	if err := registry.RegisterTool(
+		"observatory_signals",
+		"Get all signal anchors for a workload with current anomaly state. Returns metric name, role, score, confidence, and quality.",
+		signalsTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace": map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":  map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+			},
+			"required": []string{"namespace", "workload"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_signals: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_signals")
+
+	// ============================================================================
+	// Investigate Stage Tools - Deep signal inspection
+	// ============================================================================
+
+	// observatory_signal_detail: Baseline stats and source dashboard
+	if err := registry.RegisterTool(
+		"observatory_signal_detail",
+		"Get detailed signal info: baseline stats (mean, std_dev, percentiles), current value, anomaly score, confidence, and source dashboard.",
+		signalDetailTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace":   map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":    map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+				"metric_name": map[string]interface{}{"type": "string", "description": "Metric name (required)"},
+			},
+			"required": []string{"namespace", "workload", "metric_name"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_signal_detail: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_signal_detail")
+
+	// observatory_compare: Time-based signal comparison
+	if err := registry.RegisterTool(
+		"observatory_compare",
+		"Compare signal value and anomaly score between current and past time. ScoreDelta positive means worsening.",
+		compareTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace":   map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":    map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+				"metric_name": map[string]interface{}{"type": "string", "description": "Metric name (required)"},
+				"lookback":    map[string]interface{}{"type": "string", "description": "Comparison lookback (default: 24h, max: 7d). Format: 1h, 12h, 24h, etc."},
+			},
+			"required": []string{"namespace", "workload", "metric_name"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_compare: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_compare")
+
+	// ============================================================================
+	// Hypothesize Stage Tools - Root cause analysis
+	// ============================================================================
+
+	// observatory_explain: K8s graph candidates
+	if err := registry.RegisterTool(
+		"observatory_explain",
+		"Get candidate root causes: upstream K8s dependencies (2-hop traversal) and recent changes (last 1h) for an anomalous signal.",
+		explainTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace":   map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":    map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+				"metric_name": map[string]interface{}{"type": "string", "description": "Anomalous metric name (required)"},
+			},
+			"required": []string{"namespace", "workload", "metric_name"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_explain: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_explain")
+
+	// ============================================================================
+	// Verify Stage Tools - Evidence gathering
+	// ============================================================================
+
+	// observatory_evidence: Raw metric values, alerts, logs
+	if err := registry.RegisterTool(
+		"observatory_evidence",
+		"Get raw evidence for hypothesis verification: metric values, alert states, and log excerpts (ERROR level, 5-min window).",
+		evidenceTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace":   map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":    map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+				"metric_name": map[string]interface{}{"type": "string", "description": "Metric name (required)"},
+				"lookback":    map[string]interface{}{"type": "string", "description": "Evidence lookback (default: 1h). Format: 30m, 1h, 2h, etc."},
+			},
+			"required": []string{"namespace", "workload", "metric_name"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_evidence: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_evidence")
+
 	return nil
 }
 
