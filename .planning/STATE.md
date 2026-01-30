@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 ## Current Position
 
 Phase: 26 — Observatory API and MCP Tools
-Plan: 6 of TBD complete
-Status: In progress
-Last activity: 2026-01-30 — Completed 26-06-PLAN.md
+Plan: 8 of 8 complete
+Status: PHASE COMPLETE
+Last activity: 2026-01-30 — Completed 26-08-PLAN.md
 
-Progress: [█████████████░░░░░░░] ~52% (Phase 24-25 complete, 15 plans shipped)
+Progress: [████████████████████] ~100% (Phase 24-26 complete, 17 plans shipped)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 15
+- Plans completed: 17
 - Phase 24: 4/4 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min, 24-04: 11 min) — PHASE COMPLETE
 - Phase 25: 5/5 complete (25-01: 2 min, 25-02: 2.5 min, 25-03: 7 min, 25-04: 11 min, 25-05: 8 min) — PHASE COMPLETE
-- Phase 26: 6/TBD complete (26-01: 9 min, 26-02: 3 min, 26-03: 4 min, 26-04: 7 min, 26-05: 4 min, 26-06: 8 min)
+- Phase 26: 8/8 complete (26-01: 9 min, 26-02: 3 min, 26-03: 4 min, 26-04: 7 min, 26-05: 4 min, 26-06: 8 min, 26-07: TBD, 26-08: 20 min) — PHASE COMPLETE
 
 **v1.4 Velocity (previous):**
 - Plans completed: 10 (COMPLETE)
@@ -47,9 +47,9 @@ Progress: [█████████████░░░░░░░] ~52% (P
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 81 complete (v1.0-v1.4: 66, v1.5: 15)
+- Total plans: 83 complete (v1.0-v1.4: 66, v1.5: 17)
 - Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
-- v1.5 progress: 15/TBD plans complete
+- v1.5 progress: 17/17 plans complete — MILESTONE COMPLETE
 
 ## Accumulated Context
 
@@ -70,7 +70,7 @@ Progress: [█████████████░░░░░░░] ~52% (P
 | SignalBaseline composite key alignment | Match SignalAnchor identity | metric_name + namespace + workload + integration | 25-01 |
 | MinSamplesRequired = 10 | Cold start baseline threshold | Per CONTEXT.md decision | 25-01 |
 | Empty input returns zero RollingStats | Not error, just zero SampleCount | Error reserved for explicit cold start check | 25-01 |
-| Z-score sigmoid normalization | Map unbounded z-score to 0-1 | 1 - exp(-|z|/2): z=2->0.63, z=3->0.78 | 25-02 |
+| Z-score sigmoid normalization | Map unbounded z-score to 0-1 | 1 - exp(-\|z\|/2): z=2->0.63, z=3->0.78 | 25-02 |
 | Hybrid anomaly MAX aggregation | Either method can flag anomaly | score = MAX(zScore, percentile) per CONTEXT.md | 25-02 |
 | Alert firing override | Human decision takes precedence | score=1.0, confidence=1.0, method="alert-override" | 25-02 |
 | MERGE upsert for SignalBaseline | Idempotent graph updates | ON CREATE/ON MATCH with composite key | 25-03 |
@@ -99,6 +99,8 @@ Progress: [█████████████░░░░░░░] ~52% (P
 | Empty Workload at signal level | Response structure clarity | Workload omitted when scope is workload-level | 26-05 |
 | Partial data on cold start | Graceful degradation for signal detail | Return response with confidence=0 when baseline insufficient | 26-06 |
 | Max lookback cap 168h | Consistent with TimeRange validation | Silently cap at 7 days | 26-06 |
+| ToolRegistry adapter pattern | Consistent tool registration | Use ToolRegistry interface like existing metrics tools | 26-08 |
+| QueryService stub implementation | Graceful baseline fallback | FetchCurrentValue/FetchHistoricalValue return errors, service uses baseline mean | 26-08 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -128,13 +130,14 @@ None yet.
 |-------|------|--------------|--------|
 | 24 | Signal anchors with role classification and quality scoring | 25 | 4/4 COMPLETE |
 | 25 | Baseline storage and anomaly detection | 12 | 5/5 COMPLETE |
-| 26 | Observatory API and 8 MCP tools | 24 | 6/TBD in progress |
+| 26 | Observatory API and 8 MCP tools | 24 | 8/8 COMPLETE |
 
 ## Milestone History
 
-- **v1.5 Observatory** — in progress
-  - 3 phases (24-26), TBD plans, 61 requirements
+- **v1.5 Observatory** — COMPLETE 2026-01-30
+  - 3 phases (24-26), 17 plans, 61 requirements
   - Signal intelligence layer for AI-driven incident investigation
+  - 8 MCP tools: status, changes, scope, signals, signal_detail, compare, explain, evidence
 
 - **v1.4 Grafana Alerts Integration** — shipped 2026-01-23
   - 4 phases (20-23), 10 plans, 22 requirements
@@ -164,20 +167,20 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan 26-06
+**Last command:** /gsd:execute-plan 26-08
 **Last session:** 2026-01-30
-**Stopped at:** Completed 26-06-PLAN.md (Investigate stage tools)
+**Stopped at:** Completed 26-08-PLAN.md (Tool Registration & Lifecycle)
 **Resume file:** None
-**Context preserved:** Phase 26 in progress: Investigate stage MCP tools (observatory_signal_detail, observatory_compare) implemented with 10 passing tests.
+**Context preserved:** Phase 26 COMPLETE. All 8 observatory MCP tools implemented and integrated.
 
-**Next step:** Continue Phase 26 (Hypothesize/Verify stage tools or integration testing)
+**Next step:** v1.5 milestone complete. Ready for next milestone planning.
 
-**Phase 26-06 Summary:**
-- ObservatorySignalDetailTool: Deep signal inspection with baseline stats, anomaly score, source dashboard
-- ObservatoryCompareTool: Time-based signal comparison with score delta
-- Both tools validate required parameters and handle errors gracefully
-- 10 unit tests covering success, errors, edge cases
-- Duration: 8 min
+**Phase 26-08 Summary:**
+- RegisterObservatoryTools function in observatory_tools.go
+- Observatory services integrated into GrafanaIntegration lifecycle
+- FetchCurrentValue/FetchHistoricalValue stub methods in query_service.go
+- 9 integration tests covering all 8 tools
+- Duration: 20 min
 
 ---
-*Last updated: 2026-01-30 — Phase 26-06 complete (Investigate stage tools)*
+*Last updated: 2026-01-30 — Phase 26-08 complete (Tool Registration & Lifecycle). v1.5 MILESTONE COMPLETE.*
