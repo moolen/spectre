@@ -16,13 +16,15 @@ import (
 // Per TOOL-09: Returns baseline, current value, anomaly score, and source dashboard
 // Per TOOL-10: Returns confidence for statistical reliability
 type ObservatorySignalDetailTool struct {
-	investigateService *ObservatoryInvestigateService
+	investigateService ObservatoryInvestigateServiceInterface
 	logger             *logging.Logger
 }
 
 // NewObservatorySignalDetailTool creates a new signal detail tool.
+// Accepts ObservatoryInvestigateServiceInterface to support both Grafana-specific and
+// multi-provider registry-based services.
 func NewObservatorySignalDetailTool(
-	investigateService *ObservatoryInvestigateService,
+	investigateService ObservatoryInvestigateServiceInterface,
 	logger *logging.Logger,
 ) *ObservatorySignalDetailTool {
 	return &ObservatorySignalDetailTool{

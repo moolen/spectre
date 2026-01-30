@@ -12,13 +12,15 @@ import (
 // ObservatoryScopeTool provides the Narrow stage MCP tool for scoping anomalies
 // to a specific namespace or workload. Returns signals and anomalies ranked by severity.
 type ObservatoryScopeTool struct {
-	service *ObservatoryService
+	service ObservatoryServiceInterface
 	logger  *logging.Logger
 }
 
 // NewObservatoryScopeTool creates a new observatory scope tool.
+// Accepts ObservatoryServiceInterface to support both Grafana-specific and
+// multi-provider registry-based services.
 func NewObservatoryScopeTool(
-	service *ObservatoryService,
+	service ObservatoryServiceInterface,
 	logger *logging.Logger,
 ) *ObservatoryScopeTool {
 	return &ObservatoryScopeTool{

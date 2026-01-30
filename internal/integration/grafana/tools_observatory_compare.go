@@ -16,13 +16,15 @@ import (
 // Per TOOL-12: No categorical labels - just numeric scores
 // Per CONTEXT.md: "Compare tool compares across time only (current vs N hours/days ago)"
 type ObservatoryCompareTool struct {
-	investigateService *ObservatoryInvestigateService
+	investigateService ObservatoryInvestigateServiceInterface
 	logger             *logging.Logger
 }
 
 // NewObservatoryCompareTool creates a new compare tool.
+// Accepts ObservatoryInvestigateServiceInterface to support both Grafana-specific and
+// multi-provider registry-based services.
 func NewObservatoryCompareTool(
-	investigateService *ObservatoryInvestigateService,
+	investigateService ObservatoryInvestigateServiceInterface,
 	logger *logging.Logger,
 ) *ObservatoryCompareTool {
 	return &ObservatoryCompareTool{

@@ -13,6 +13,7 @@ import (
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/observatory"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -45,10 +46,13 @@ type GrafanaIntegration struct {
 	cancel         context.CancelFunc
 
 	// Observatory services (Phase 26)
-	observatoryService    *ObservatoryService
-	investigateService    *ObservatoryInvestigateService
-	evidenceService       *ObservatoryEvidenceService
-	anomalyAggregator     *AnomalyAggregator
+	evidenceService   *ObservatoryEvidenceService // Evidence service for explain/evidence tools
+	anomalyAggregator *AnomalyAggregator          // Anomaly aggregator for scoring
+
+	// Observatory multi-provider support (Phase 26.5)
+	// Registry-based services enable multi-provider signal aggregation
+	observatoryRegistry *observatory.Registry       // Multi-provider registry
+	observatoryProvider *GrafanaObservatoryProvider // This integration's provider
 
 	// Thread-safe health status
 	mu           sync.RWMutex
@@ -246,25 +250,8 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 		}
 
 		// Initialize Observatory services (Phase 26)
-		// These services enable the 8 observatory MCP tools for AI-driven incident investigation
 		g.anomalyAggregator = NewAnomalyAggregator(g.graphClient, g.name, g.logger)
 		g.logger.Info("Anomaly aggregator created for integration %s", g.name)
-
-		g.observatoryService = NewObservatoryService(
-			g.graphClient,
-			g.anomalyAggregator,
-			g.name,
-			g.logger,
-		)
-		g.logger.Info("Observatory service created for integration %s", g.name)
-
-		g.investigateService = NewObservatoryInvestigateService(
-			g.graphClient,
-			g.queryService,
-			g.name,
-			g.logger,
-		)
-		g.logger.Info("Observatory investigate service created for integration %s", g.name)
 
 		g.evidenceService = NewObservatoryEvidenceService(
 			g.graphClient,
@@ -273,6 +260,23 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			g.logger,
 		)
 		g.logger.Info("Observatory evidence service created for integration %s", g.name)
+
+		// Initialize Observatory multi-provider registry (Phase 26.5)
+		// Create provider that implements observatory.Provider interface
+		g.observatoryProvider = NewGrafanaObservatoryProvider(
+			g.graphClient,
+			g.name,
+			g.logger,
+		)
+		g.logger.Info("Observatory provider created for integration %s", g.name)
+
+		// Create registry and register this integration's provider
+		g.observatoryRegistry = observatory.NewRegistry()
+		if err := g.observatoryRegistry.Register(g.observatoryProvider); err != nil {
+			g.logger.Warn("Failed to register observatory provider: %v", err)
+		} else {
+			g.logger.Info("Observatory registry initialized with provider %s", g.name)
+		}
 	} else {
 		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
 	}
@@ -336,10 +340,15 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.queryService = nil
 
 	// Clear observatory services (no Stop method needed - stateless)
-	g.observatoryService = nil
-	g.investigateService = nil
 	g.evidenceService = nil
 	g.anomalyAggregator = nil
+
+	// Clear observatory multi-provider support
+	if g.observatoryRegistry != nil && g.observatoryProvider != nil {
+		g.observatoryRegistry.Unregister(g.observatoryProvider.Name())
+	}
+	g.observatoryRegistry = nil
+	g.observatoryProvider = nil
 
 	// Update health status
 	g.setHealthStatus(integration.Stopped)
@@ -595,13 +604,13 @@ func (g *GrafanaIntegration) RegisterTools(registry integration.ToolRegistry) er
 
 	// Register Observatory tools (Phase 26)
 	// These tools enable AI-driven incident investigation with progressive disclosure
-	if g.observatoryService != nil && g.investigateService != nil && g.evidenceService != nil {
+	if g.observatoryRegistry != nil && g.evidenceService != nil {
 		if err := g.registerObservatoryTools(registry); err != nil {
 			return fmt.Errorf("failed to register observatory tools: %w", err)
 		}
 		g.logger.Info("Successfully registered 8 Observatory MCP tools")
 	} else {
-		g.logger.Warn("Observatory services not initialized, skipping observatory tool registration")
+		g.logger.Warn("Observatory registry not initialized, skipping observatory tool registration")
 	}
 
 	return nil
@@ -609,14 +618,30 @@ func (g *GrafanaIntegration) RegisterTools(registry integration.ToolRegistry) er
 
 // registerObservatoryTools registers the 8 observatory MCP tools for AI-driven investigation.
 // Tools follow progressive disclosure pattern: Orient -> Narrow -> Investigate -> Hypothesize -> Verify
+//
+// Tools use the registry-based Observatory services via adapters, enabling multi-provider support.
 func (g *GrafanaIntegration) registerObservatoryTools(registry integration.ToolRegistry) error {
-	// Create tool instances
-	statusTool := NewObservatoryStatusTool(g.observatoryService, g.logger)
+	// Create registry-based services via adapters
+	if g.observatoryRegistry == nil {
+		return fmt.Errorf("observatory registry not initialized")
+	}
+
+	obsService := g.NewObservatoryServiceFromRegistry()
+	invService := g.NewObservatoryInvestigateServiceFromRegistry()
+	if obsService == nil || invService == nil {
+		return fmt.Errorf("failed to create observatory services from registry")
+	}
+
+	observatorySvc := NewObservatoryServiceAdapter(obsService)
+	investigateSvc := NewObservatoryInvestigateServiceAdapter(invService)
+
+	// Create tool instances with registry-based services
+	statusTool := NewObservatoryStatusTool(observatorySvc, g.logger)
 	changesTool := NewObservatoryChangesTool(g.graphClient, g.name, g.logger)
-	scopeTool := NewObservatoryScopeTool(g.observatoryService, g.logger)
-	signalsTool := NewObservatorySignalsTool(g.investigateService, g.logger)
-	signalDetailTool := NewObservatorySignalDetailTool(g.investigateService, g.logger)
-	compareTool := NewObservatoryCompareTool(g.investigateService, g.logger)
+	scopeTool := NewObservatoryScopeTool(observatorySvc, g.logger)
+	signalsTool := NewObservatorySignalsTool(investigateSvc, g.logger)
+	signalDetailTool := NewObservatorySignalDetailTool(investigateSvc, g.logger)
+	compareTool := NewObservatoryCompareTool(investigateSvc, g.logger)
 	explainTool := NewObservatoryExplainTool(g.evidenceService, g.logger)
 	evidenceTool := NewObservatoryEvidenceTool(g.evidenceService, g.logger)
 
@@ -859,6 +884,39 @@ func (g *GrafanaIntegration) Status() integration.IntegrationStatus {
 // Returns nil if service not initialized (graph disabled or startup failed)
 func (g *GrafanaIntegration) GetAnalysisService() *AlertAnalysisService {
 	return g.analysisService
+}
+
+// GetObservatoryRegistry returns the Observatory multi-provider registry.
+// Returns nil if not initialized (graph disabled or startup failed).
+// This can be used to register additional providers or access cross-provider services.
+func (g *GrafanaIntegration) GetObservatoryRegistry() *observatory.Registry {
+	return g.observatoryRegistry
+}
+
+// GetObservatoryProvider returns this integration's Observatory provider.
+// Returns nil if not initialized (graph disabled or startup failed).
+func (g *GrafanaIntegration) GetObservatoryProvider() *GrafanaObservatoryProvider {
+	return g.observatoryProvider
+}
+
+// NewObservatoryServiceFromRegistry creates an observatory.Service using the registry.
+// This allows using the new multi-provider Observatory service instead of
+// the legacy Grafana-specific services. Returns nil if registry not initialized.
+func (g *GrafanaIntegration) NewObservatoryServiceFromRegistry() *observatory.Service {
+	if g.observatoryRegistry == nil {
+		return nil
+	}
+	return observatory.NewService(g.observatoryRegistry)
+}
+
+// NewObservatoryInvestigateServiceFromRegistry creates an observatory.InvestigateService.
+// This allows using the new multi-provider investigation service.
+// Returns nil if registry not initialized.
+func (g *GrafanaIntegration) NewObservatoryInvestigateServiceFromRegistry() *observatory.InvestigateService {
+	if g.observatoryRegistry == nil {
+		return nil
+	}
+	return observatory.NewInvestigateService(g.observatoryRegistry)
 }
 
 // getCurrentNamespace reads the namespace from the ServiceAccount mount.

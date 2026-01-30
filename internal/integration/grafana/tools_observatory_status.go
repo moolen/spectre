@@ -12,13 +12,15 @@ import (
 // ObservatoryStatusTool provides cluster-wide anomaly summary for the Orient stage.
 // Returns top 5 hotspots with numeric scores - the entry point for AI-driven investigation.
 type ObservatoryStatusTool struct {
-	service *ObservatoryService
+	service ObservatoryServiceInterface
 	logger  *logging.Logger
 }
 
 // NewObservatoryStatusTool creates a new observatory status tool.
+// Accepts ObservatoryServiceInterface to support both Grafana-specific and
+// multi-provider registry-based services.
 func NewObservatoryStatusTool(
-	service *ObservatoryService,
+	service ObservatoryServiceInterface,
 	logger *logging.Logger,
 ) *ObservatoryStatusTool {
 	return &ObservatoryStatusTool{

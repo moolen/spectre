@@ -12,13 +12,15 @@ import (
 // ObservatorySignalsTool provides the Narrow stage MCP tool for viewing all
 // signal anchors for a workload with their current anomaly state.
 type ObservatorySignalsTool struct {
-	investigateService *ObservatoryInvestigateService
+	investigateService ObservatoryInvestigateServiceInterface
 	logger             *logging.Logger
 }
 
 // NewObservatorySignalsTool creates a new observatory signals tool.
+// Accepts ObservatoryInvestigateServiceInterface to support both Grafana-specific and
+// multi-provider registry-based services.
 func NewObservatorySignalsTool(
-	investigateService *ObservatoryInvestigateService,
+	investigateService ObservatoryInvestigateServiceInterface,
 	logger *logging.Logger,
 ) *ObservatorySignalsTool {
 	return &ObservatorySignalsTool{
