@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 ## Current Position
 
 Phase: 26 — Observatory API and MCP Tools
-Plan: 3 of TBD complete
+Plan: 4 of TBD complete
 Status: In progress
-Last activity: 2026-01-30 — Completed 26-01-PLAN.md
+Last activity: 2026-01-30 — Completed 26-04-PLAN.md
 
-Progress: [██████████░░░░░░░░░░] ~42% (Phase 24-25 complete, 12 plans shipped)
+Progress: [███████████░░░░░░░░░] ~45% (Phase 24-25 complete, 13 plans shipped)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 12
+- Plans completed: 13
 - Phase 24: 4/4 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min, 24-04: 11 min) — PHASE COMPLETE
 - Phase 25: 5/5 complete (25-01: 2 min, 25-02: 2.5 min, 25-03: 7 min, 25-04: 11 min, 25-05: 8 min) — PHASE COMPLETE
-- Phase 26: 3/TBD complete (26-01: 9 min, 26-02: 3 min, 26-03: 4 min)
+- Phase 26: 4/TBD complete (26-01: 9 min, 26-02: 3 min, 26-03: 4 min, 26-04: 7 min)
 
 **v1.4 Velocity (previous):**
 - Plans completed: 10 (COMPLETE)
@@ -47,9 +47,9 @@ Progress: [██████████░░░░░░░░░░] ~42% (P
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 78 complete (v1.0-v1.4: 66, v1.5: 12)
+- Total plans: 79 complete (v1.0-v1.4: 66, v1.5: 13)
 - Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
-- v1.5 progress: 12/TBD plans complete
+- v1.5 progress: 13/TBD plans complete
 
 ## Accumulated Context
 
@@ -93,6 +93,8 @@ Progress: [██████████░░░░░░░░░░] ~42% (P
 | Graceful degradation for evidence | Partial results on error | Each data source fails independently | 26-03 |
 | Log excerpt 5-min window ERROR only | Evidence scoping | Limit 10 excerpts, ERROR/FATAL levels | 26-03 |
 | 2-hop upstream traversal | K8s graph depth | workload -> service -> ingress/deployment | 26-03 |
+| Query ChangeEvent for K8s changes | Orient stage changes tool | ChangeEvent via ResourceIdentity with configChanged filter | 26-04 |
+| Deployment-related kinds filter | K8s change detection | Deployment, HelmRelease, Kustomization, ConfigMap, Secret, StatefulSet, DaemonSet, ReplicaSet | 26-04 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -122,7 +124,7 @@ None yet.
 |-------|------|--------------|--------|
 | 24 | Signal anchors with role classification and quality scoring | 25 | 4/4 COMPLETE |
 | 25 | Baseline storage and anomaly detection | 12 | 5/5 COMPLETE |
-| 26 | Observatory API and 8 MCP tools | 24 | 3/TBD in progress |
+| 26 | Observatory API and 8 MCP tools | 24 | 4/TBD in progress |
 
 ## Milestone History
 
@@ -158,22 +160,20 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan 26-01
+**Last command:** /gsd:execute-plan 26-04
 **Last session:** 2026-01-30
-**Stopped at:** Completed 26-01-PLAN.md (ObservatoryService core)
+**Stopped at:** Completed 26-04-PLAN.md (Orient stage tools)
 **Resume file:** None
-**Context preserved:** Phase 26 in progress: ObservatoryService core implemented with 10 passing tests.
+**Context preserved:** Phase 26 in progress: Orient stage MCP tools (observatory_status, observatory_changes) implemented with 10 passing tests.
 
-**Next step:** Continue Phase 26 (Observatory API and MCP tools)
+**Next step:** Continue Phase 26 (Narrow and Investigate stage tools)
 
-**Phase 26-01 Summary:**
-- ObservatoryService with 4 core methods for MCP tool foundation
-- GetClusterAnomalies: Top 5 hotspots filtered by 0.5 threshold
-- GetNamespaceAnomalies: Top 20 workloads with anomaly details
-- GetWorkloadAnomalyDetail: Signal-level anomalies with roles
-- GetDashboardQuality: Top 20 dashboards ranked by quality
-- 10 unit tests with race detector enabled
-- Duration: 9 min
+**Phase 26-04 Summary:**
+- ObservatoryStatusTool: Cluster-wide anomaly summary, top 5 hotspots
+- ObservatoryChangesTool: Recent K8s deployment/config changes from graph
+- Both tools accept optional namespace filter
+- 10 unit tests covering success, empty, filtering, lookback parsing
+- Duration: 7 min
 
 ---
-*Last updated: 2026-01-30 — Phase 26-01 complete (ObservatoryService core)*
+*Last updated: 2026-01-30 — Phase 26-04 complete (Orient stage tools)*
