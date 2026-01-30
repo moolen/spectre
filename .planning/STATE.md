@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-01-29)
 ## Current Position
 
 Phase: 26 — Observatory API and MCP Tools
-Plan: 5 of TBD complete
+Plan: 6 of TBD complete
 Status: In progress
-Last activity: 2026-01-30 — Completed 26-05-PLAN.md
+Last activity: 2026-01-30 — Completed 26-06-PLAN.md
 
-Progress: [████████████░░░░░░░░] ~50% (Phase 24-25 complete, 14 plans shipped)
+Progress: [█████████████░░░░░░░] ~52% (Phase 24-25 complete, 15 plans shipped)
 
 ## Performance Metrics
 
 **v1.5 Status (current):**
-- Plans completed: 14
+- Plans completed: 15
 - Phase 24: 4/4 complete (24-01: 6 min, 24-02: 4 min, 24-03: 3.8 min, 24-04: 11 min) — PHASE COMPLETE
 - Phase 25: 5/5 complete (25-01: 2 min, 25-02: 2.5 min, 25-03: 7 min, 25-04: 11 min, 25-05: 8 min) — PHASE COMPLETE
-- Phase 26: 5/TBD complete (26-01: 9 min, 26-02: 3 min, 26-03: 4 min, 26-04: 7 min, 26-05: 4 min)
+- Phase 26: 6/TBD complete (26-01: 9 min, 26-02: 3 min, 26-03: 4 min, 26-04: 7 min, 26-05: 4 min, 26-06: 8 min)
 
 **v1.4 Velocity (previous):**
 - Plans completed: 10 (COMPLETE)
@@ -47,9 +47,9 @@ Progress: [████████████░░░░░░░░] ~50% (P
 - v1.0: 19 plans completed
 
 **Cumulative:**
-- Total plans: 80 complete (v1.0-v1.4: 66, v1.5: 14)
+- Total plans: 81 complete (v1.0-v1.4: 66, v1.5: 15)
 - Milestones shipped: 5 (v1.0, v1.1, v1.2, v1.3, v1.4)
-- v1.5 progress: 14/TBD plans complete
+- v1.5 progress: 15/TBD plans complete
 
 ## Accumulated Context
 
@@ -97,6 +97,8 @@ Progress: [████████████░░░░░░░░] ~50% (P
 | Deployment-related kinds filter | K8s change detection | Deployment, HelmRelease, Kustomization, ConfigMap, Secret, StatefulSet, DaemonSet, ReplicaSet | 26-04 |
 | SignalSummary includes QualityScore | Tool response completeness | QualityScore now exposed in GetWorkloadSignals | 26-05 |
 | Empty Workload at signal level | Response structure clarity | Workload omitted when scope is workload-level | 26-05 |
+| Partial data on cold start | Graceful degradation for signal detail | Return response with confidence=0 when baseline insufficient | 26-06 |
+| Max lookback cap 168h | Consistent with TimeRange validation | Silently cap at 7 days | 26-06 |
 
 Recent decisions from PROJECT.md affecting v1.5:
 - Signal anchors link metrics to signal roles to workloads
@@ -126,7 +128,7 @@ None yet.
 |-------|------|--------------|--------|
 | 24 | Signal anchors with role classification and quality scoring | 25 | 4/4 COMPLETE |
 | 25 | Baseline storage and anomaly detection | 12 | 5/5 COMPLETE |
-| 26 | Observatory API and 8 MCP tools | 24 | 5/TBD in progress |
+| 26 | Observatory API and 8 MCP tools | 24 | 6/TBD in progress |
 
 ## Milestone History
 
@@ -162,20 +164,20 @@ None yet.
 
 ## Session Continuity
 
-**Last command:** /gsd:execute-plan 26-05
+**Last command:** /gsd:execute-plan 26-06
 **Last session:** 2026-01-30
-**Stopped at:** Completed 26-05-PLAN.md (Narrow stage MCP tools)
+**Stopped at:** Completed 26-06-PLAN.md (Investigate stage tools)
 **Resume file:** None
-**Context preserved:** Phase 26 in progress: Narrow stage MCP tools (observatory_scope, observatory_signals) implemented with 9 passing tests.
+**Context preserved:** Phase 26 in progress: Investigate stage MCP tools (observatory_signal_detail, observatory_compare) implemented with 10 passing tests.
 
-**Next step:** Continue Phase 26 (remaining MCP tools)
+**Next step:** Continue Phase 26 (Hypothesize/Verify stage tools or integration testing)
 
-**Phase 26-05 Summary:**
-- ObservatoryScopeTool: Namespace/workload scope filtering for anomalies
-- ObservatorySignalsTool: Workload signal enumeration with current state
-- Both tools return flat lists sorted by anomaly score descending
-- 9 unit tests covering success, empty, sorted, missing params
-- Duration: 4 min
+**Phase 26-06 Summary:**
+- ObservatorySignalDetailTool: Deep signal inspection with baseline stats, anomaly score, source dashboard
+- ObservatoryCompareTool: Time-based signal comparison with score delta
+- Both tools validate required parameters and handle errors gracefully
+- 10 unit tests covering success, errors, edge cases
+- Duration: 8 min
 
 ---
-*Last updated: 2026-01-30 — Phase 26-05 complete (Narrow stage MCP tools)*
+*Last updated: 2026-01-30 — Phase 26-06 complete (Investigate stage tools)*
