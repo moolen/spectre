@@ -75,6 +75,9 @@ type SignalSummary struct {
 
 	// Confidence is the statistical confidence (0.0-1.0)
 	Confidence float64 `json:"confidence"`
+
+	// QualityScore is the source dashboard quality (0.0-1.0)
+	QualityScore float64 `json:"quality_score"`
 }
 
 // SignalDetailResult provides detailed baseline and anomaly information for a signal.
@@ -261,10 +264,11 @@ func (s *ObservatoryInvestigateService) GetWorkloadSignals(
 		}
 
 		signals = append(signals, SignalSummary{
-			MetricName: metricName,
-			Role:       role,
-			Score:      score.Score,
-			Confidence: score.Confidence,
+			MetricName:   metricName,
+			Role:         role,
+			Score:        score.Score,
+			Confidence:   score.Confidence,
+			QualityScore: qualityScore,
 		})
 	}
 
