@@ -1,0 +1,76 @@
+{
+  "resources": [
+    {
+      "uid": "deployment/prod/nginx",
+      "kind": "Deployment",
+      "namespace": "prod",
+      "name": "nginx"
+    },
+    {
+      "uid": "service/prod/nginx-svc",
+      "kind": "Service",
+      "namespace": "prod",
+      "name": "nginx-svc"
+    },
+    {
+      "uid": "ingress/prod/nginx-ingress",
+      "kind": "Ingress",
+      "namespace": "prod",
+      "name": "nginx-ingress"
+    },
+    {
+      "uid": "deployment/prod/api-server",
+      "kind": "Deployment",
+      "namespace": "prod",
+      "name": "api-server"
+    },
+    {
+      "uid": "service/prod/api-svc",
+      "kind": "Service",
+      "namespace": "prod",
+      "name": "api-svc"
+    }
+  ],
+  "dependencies": [
+    {
+      "from_uid": "ingress/prod/nginx-ingress",
+      "to_uid": "service/prod/nginx-svc",
+      "relationship": "DEPENDS_ON"
+    },
+    {
+      "from_uid": "service/prod/nginx-svc",
+      "to_uid": "deployment/prod/nginx",
+      "relationship": "DEPENDS_ON"
+    },
+    {
+      "from_uid": "deployment/prod/nginx",
+      "to_uid": "service/prod/api-svc",
+      "relationship": "DEPENDS_ON"
+    },
+    {
+      "from_uid": "service/prod/api-svc",
+      "to_uid": "deployment/prod/api-server",
+      "relationship": "DEPENDS_ON"
+    }
+  ],
+  "events": [
+    {
+      "uid": "event/prod/api-deploy-update",
+      "kind": "Event",
+      "namespace": "prod",
+      "name": "api-server-deploy-update",
+      "reason": "DeploymentUpdated",
+      "timestamp_offset": "-30m",
+      "affects_uid": "deployment/prod/api-server"
+    },
+    {
+      "uid": "event/prod/nginx-scaled",
+      "kind": "Event",
+      "namespace": "prod",
+      "name": "nginx-scaled-up",
+      "reason": "ScaledUp",
+      "timestamp_offset": "-2h",
+      "affects_uid": "deployment/prod/nginx"
+    }
+  ]
+}
