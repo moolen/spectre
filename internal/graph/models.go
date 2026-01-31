@@ -52,6 +52,7 @@ const (
 
 	// Observatory relationship types
 	EdgeTypeMonitorsWorkload EdgeType = "MONITORS_WORKLOAD" // SignalAnchor -> ResourceIdentity
+	EdgeTypeCorrelatesWith   EdgeType = "CORRELATES_WITH"   // SignalAnchor -> Alert
 )
 
 // ResourceIdentity represents a persistent Kubernetes resource node
@@ -312,6 +313,53 @@ type MonitorsWorkloadEdge struct {
 	Source        string  `json:"source"`        // "scrape_target" | "promql_inference"
 	Job           string  `json:"job"`           // Prometheus job name
 	Confidence    float64 `json:"confidence"`    // 0-1, direct match (1.0) vs fallback (0.8)
+}
+
+// CorrelatesWithEdge links SignalAnchors to Alerts based on historical correlation.
+// Created/updated by SignalValidationJob when alert state transitions correlate
+// with significant signal changes.
+type CorrelatesWithEdge struct {
+	// Workload context (SignalAnchor may link to multiple workloads)
+	WorkloadUID  string `json:"workloadUid"`
+	WorkloadName string `json:"workloadName"`
+	Namespace    string `json:"namespace"`
+
+	// Observation tracking
+	TransitionsEvaluated int `json:"transitionsEvaluated"` // Total transitions checked
+	SignificantChanges   int `json:"significantChanges"`   // Count showing correlation
+
+	// Statistical measures (latest evaluation)
+	Stats SignalCorrelationStats `json:"stats"`
+
+	// Aggregate score (0-1) with 90-day decay
+	// This is the primary score used by MCP tools
+	CorrelationScore float64 `json:"correlationScore"`
+
+	// Timestamps
+	FirstEvaluated  int64 `json:"firstEvaluated"`  // Unix nanos
+	LastEvaluated   int64 `json:"lastEvaluated"`   // Unix nanos
+	LastSignificant int64 `json:"lastSignificant"` // Unix nanos - last correlation found
+}
+
+// SignalCorrelationStats holds all statistical measures for review
+type SignalCorrelationStats struct {
+	// Welch's t-test
+	TStatistic float64 `json:"tStatistic"`
+	PValue     float64 `json:"pValue"`
+
+	// Effect size
+	CohensD float64 `json:"cohensD"`
+
+	// Simple threshold (mean shifted > 2σ)
+	ThresholdExceeded bool `json:"thresholdExceeded"`
+
+	// Raw statistics
+	MeanBefore    float64 `json:"meanBefore"`
+	MeanAfter     float64 `json:"meanAfter"`
+	StddevBefore  float64 `json:"stddevBefore"`
+	StddevAfter   float64 `json:"stddevAfter"`
+	SamplesBefore int     `json:"samplesBefore"`
+	SamplesAfter  int     `json:"samplesAfter"`
 }
 
 // Node represents a generic graph node

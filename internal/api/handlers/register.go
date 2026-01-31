@@ -178,6 +178,26 @@ func RegisterHandlers(
 				return
 			}
 
+			// Check for /signals/validate/status suffix (GET signal validation status)
+			if strings.HasSuffix(name, "/signals/validate/status") {
+				if r.Method != http.MethodGet {
+					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
+					return
+				}
+				configHandler.HandleSignalValidationStatus(w, r)
+				return
+			}
+
+			// Check for /signals/validate suffix (POST trigger signal validation)
+			if strings.HasSuffix(name, "/signals/validate") {
+				if r.Method != http.MethodPost {
+					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+					return
+				}
+				configHandler.HandleSignalValidation(w, r)
+				return
+			}
+
 			// Route by method for /{name} operations
 			switch r.Method {
 			case http.MethodGet:

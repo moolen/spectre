@@ -23,6 +23,8 @@ interface IntegrationTableProps {
   onEdit: (integration: Integration) => void;
   onSync?: (name: string) => void;
   syncingIntegrations?: Set<string>;
+  onValidateSignals?: (name: string) => void;
+  validatingIntegrations?: Set<string>;
 }
 
 const getStatusColor = (health?: string): string => {
@@ -64,7 +66,7 @@ const formatDate = (dateString?: string): string => {
   }
 };
 
-export function IntegrationTable({ integrations, onEdit, onSync, syncingIntegrations }: IntegrationTableProps) {
+export function IntegrationTable({ integrations, onEdit, onSync, syncingIntegrations, onValidateSignals, validatingIntegrations }: IntegrationTableProps) {
   if (integrations.length === 0) {
     return null;
   }
@@ -308,43 +310,83 @@ export function IntegrationTable({ integrations, onEdit, onSync, syncingIntegrat
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {integration.type === 'grafana' && onSync && (
-                  <button
-                    onClick={() => onSync(integration.name)}
-                    disabled={syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress}
-                    style={{
-                      padding: '6px 12px',
-                      fontSize: '13px',
-                      backgroundColor: '#3b82f6',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? 'not-allowed' : 'pointer',
-                      opacity: syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? 0.5 : 1,
-                      transition: 'all 0.15s',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!syncingIntegrations?.has(integration.name) && !integration.syncStatus?.inProgress) {
-                        e.currentTarget.style.backgroundColor = '#2563eb';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = '#3b82f6';
-                    }}
-                  >
-                    {syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? (
-                      <>
-                        <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>
-                        Syncing...
-                      </>
-                    ) : (
-                      'Sync Now'
-                    )}
-                  </button>
-                )}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {integration.type === 'grafana' && onSync && (
+                    <button
+                      onClick={() => onSync(integration.name)}
+                      disabled={syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '13px',
+                        backgroundColor: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? 'not-allowed' : 'pointer',
+                        opacity: syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? 0.5 : 1,
+                        transition: 'all 0.15s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!syncingIntegrations?.has(integration.name) && !integration.syncStatus?.inProgress) {
+                          e.currentTarget.style.backgroundColor = '#2563eb';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#3b82f6';
+                      }}
+                    >
+                      {syncingIntegrations?.has(integration.name) || integration.syncStatus?.inProgress ? (
+                        <>
+                          <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>
+                          Syncing...
+                        </>
+                      ) : (
+                        'Sync Now'
+                      )}
+                    </button>
+                  )}
+                  {integration.type === 'grafana' && integration.config.prometheusUrl && onValidateSignals && (
+                    <button
+                      onClick={() => onValidateSignals(integration.name)}
+                      disabled={validatingIntegrations?.has(integration.name)}
+                      title="Validate signal-alert correlations"
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '13px',
+                        backgroundColor: '#8b5cf6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: validatingIntegrations?.has(integration.name) ? 'not-allowed' : 'pointer',
+                        opacity: validatingIntegrations?.has(integration.name) ? 0.5 : 1,
+                        transition: 'all 0.15s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!validatingIntegrations?.has(integration.name)) {
+                          e.currentTarget.style.backgroundColor = '#7c3aed';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#8b5cf6';
+                      }}
+                    >
+                      {validatingIntegrations?.has(integration.name) ? (
+                        <>
+                          <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>
+                          Validating...
+                        </>
+                      ) : (
+                        'Validate Signals'
+                      )}
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

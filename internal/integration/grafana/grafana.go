@@ -56,9 +56,12 @@ type GrafanaIntegration struct {
 	observatoryProvider *GrafanaObservatoryProvider // This integration's provider
 
 	// Scrape target linking (links SignalAnchors to K8s workloads)
-	prometheusClient       *PrometheusClient       // Direct Prometheus API client
-	prometheusSecretWatcher *SecretWatcher         // Optional: manages Prometheus API token
-	scrapeTargetLinker     *ScrapeTargetLinker     // Scrape target linker
+	prometheusClient        *PrometheusClient       // Direct Prometheus API client
+	prometheusSecretWatcher *SecretWatcher          // Optional: manages Prometheus API token
+	scrapeTargetLinker      *ScrapeTargetLinker     // Scrape target linker
+
+	// Signal validation (correlates alerts with signal behavior)
+	signalValidationJob *SignalValidationJob // Signal validation job
 
 	// Thread-safe health status
 	mu           sync.RWMutex
@@ -389,6 +392,26 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			} else {
 				g.logger.Info("Scrape target linking disabled for integration %s", g.name)
 			}
+
+			// Create and start signal validation job if enabled
+			if g.config.IsSignalValidationEnabled() {
+				svConfig := g.config.GetSignalValidationConfig()
+				g.signalValidationJob = NewSignalValidationJob(
+					g.client,
+					g.graphClient,
+					g.name,
+					g.config.MetricsDatasourceUID,
+					svConfig,
+					g.logger,
+				)
+				if err := g.signalValidationJob.Start(g.ctx); err != nil {
+					g.logger.Warn("Failed to start signal validation job: %v (continuing without signal validation)", err)
+				} else {
+					g.logger.Info("Signal validation job started for integration %s (interval: %s)", g.name, svConfig.GetRunInterval())
+				}
+			} else {
+				g.logger.Info("Signal validation disabled for integration %s", g.name)
+			}
 		}
 	} else {
 		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
@@ -407,7 +430,13 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 		g.cancel()
 	}
 
-	// Stop scrape target linker first (depends on Prometheus client)
+	// Stop signal validation job first (depends on Prometheus/Grafana)
+	if g.signalValidationJob != nil {
+		g.logger.Info("Stopping signal validation job for integration %s", g.name)
+		g.signalValidationJob.Stop()
+	}
+
+	// Stop scrape target linker (depends on Prometheus client)
 	if g.scrapeTargetLinker != nil {
 		g.logger.Info("Stopping scrape target linker for integration %s", g.name)
 		g.scrapeTargetLinker.Stop()
@@ -483,10 +512,11 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.observatoryRegistry = nil
 	g.observatoryProvider = nil
 
-	// Clear scrape target linking
+	// Clear scrape target linking and signal validation
 	g.prometheusClient = nil
 	g.prometheusSecretWatcher = nil
 	g.scrapeTargetLinker = nil
+	g.signalValidationJob = nil
 
 	// Update health status
 	g.setHealthStatus(integration.Stopped)
@@ -1055,6 +1085,12 @@ func (g *GrafanaIntegration) NewObservatoryInvestigateServiceFromRegistry() *obs
 		return nil
 	}
 	return observatory.NewInvestigateService(g.observatoryRegistry)
+}
+
+// SignalValidationJob returns the signal validation job for API access.
+// Returns nil if not initialized (PrometheusURL not configured or startup failed).
+func (g *GrafanaIntegration) SignalValidationJob() *SignalValidationJob {
+	return g.signalValidationJob
 }
 
 // getCurrentNamespace reads the namespace from the ServiceAccount mount.
