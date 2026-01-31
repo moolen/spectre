@@ -130,6 +130,10 @@ func (s *Server) registerIntegrationConfigHandlers() {
 	// Instance-specific endpoints with path parameter
 	s.router.HandleFunc("/api/config/integrations/", func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Path[len("/api/config/integrations/"):]
+		// Normalize trailing slash
+		if len(name) > 0 && name[len(name)-1] == '/' {
+			name = name[:len(name)-1]
+		}
 		if name == "" {
 			api.WriteError(w, 404, "NOT_FOUND", "Integration name required")
 			return
@@ -152,6 +156,26 @@ func (s *Server) registerIntegrationConfigHandlers() {
 				return
 			}
 			configHandler.HandleSync(w, r)
+			return
+		}
+
+		// Check for /signals/validate/status suffix (GET signal validation status)
+		if len(name) > 24 && name[len(name)-24:] == "/signals/validate/status" {
+			if r.Method != "GET" {
+				api.WriteError(w, 405, "METHOD_NOT_ALLOWED", "GET required")
+				return
+			}
+			configHandler.HandleSignalValidationStatus(w, r)
+			return
+		}
+
+		// Check for /signals/validate suffix (POST trigger signal validation)
+		if len(name) > 17 && name[len(name)-17:] == "/signals/validate" {
+			if r.Method != "POST" {
+				api.WriteError(w, 405, "METHOD_NOT_ALLOWED", "POST required")
+				return
+			}
+			configHandler.HandleSignalValidation(w, r)
 			return
 		}
 
