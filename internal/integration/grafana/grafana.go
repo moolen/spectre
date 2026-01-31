@@ -985,7 +985,7 @@ func (g *GrafanaIntegration) registerObservatoryTools(registry integration.ToolR
 }
 
 // testConnection tests connectivity to Grafana by executing minimal queries.
-// Tests both dashboard access (required) and datasource access (optional, warns on failure).
+// Tests dashboard access (required), datasource access (optional), and Prometheus (if configured).
 func (g *GrafanaIntegration) testConnection(ctx context.Context) error {
 	// Test 1: Dashboard read access (REQUIRED)
 	dashboards, err := g.client.ListDashboards(ctx)
@@ -1001,6 +1001,14 @@ func (g *GrafanaIntegration) testConnection(ctx context.Context) error {
 		// Continue - datasource access is not critical for initial connectivity
 	} else {
 		g.logger.Debug("Datasource access test passed: found %d datasources", len(datasources))
+	}
+
+	// Test 3: Prometheus connectivity (if configured)
+	if g.prometheusClient != nil {
+		if err := g.prometheusClient.TestConnection(ctx); err != nil {
+			return fmt.Errorf("prometheus connection test failed: %w", err)
+		}
+		g.logger.Debug("Prometheus connection test passed")
 	}
 
 	return nil
@@ -1089,7 +1097,11 @@ func (g *GrafanaIntegration) NewObservatoryInvestigateServiceFromRegistry() *obs
 
 // SignalValidationJob returns the signal validation job for API access.
 // Returns nil if not initialized (PrometheusURL not configured or startup failed).
-func (g *GrafanaIntegration) SignalValidationJob() *SignalValidationJob {
+// Returns interface{} to satisfy the SignalValidator interface used by API handlers.
+func (g *GrafanaIntegration) SignalValidationJob() interface{} {
+	if g.signalValidationJob == nil {
+		return nil
+	}
 	return g.signalValidationJob
 }
 
