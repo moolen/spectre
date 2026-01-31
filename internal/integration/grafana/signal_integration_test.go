@@ -78,13 +78,13 @@ func TestSignalIngestionEndToEnd(t *testing.T) {
 
 				if metricName == "kube_pod_status_phase" {
 					assert.Equal(t, "Availability", query.Parameters["role"])
-					assert.Equal(t, 0.95, query.Parameters["confidence"])
+					assert.Equal(t, 0.95, query.Parameters["confidence"]) // Curated: 0.95
 					assert.Equal(t, "production", query.Parameters["workload_namespace"])
 					foundAvailability = true
 				}
 				if metricName == "container_cpu_usage_seconds_total" {
 					assert.Equal(t, "Saturation", query.Parameters["role"])
-					assert.Equal(t, 0.95, query.Parameters["confidence"])
+					assert.Equal(t, 0.9, query.Parameters["confidence"]) // Curated: 0.9
 					assert.Equal(t, "production", query.Parameters["workload_namespace"])
 					assert.Equal(t, "web", query.Parameters["workload_name"])
 					foundSaturation = true
@@ -100,6 +100,7 @@ func TestSignalIngestionEndToEnd(t *testing.T) {
 	t.Run("PromQLStructure_Layer2Classification", func(t *testing.T) {
 		mockGraph.queries = []graph.GraphQuery{} // Reset queries
 
+		// Use a custom metric name not in curated data to test Layer 2 classification
 		dashboard := &GrafanaDashboard{
 			UID:     "test-dashboard-2",
 			Title:   "Latency Dashboard",
@@ -113,7 +114,7 @@ func TestSignalIngestionEndToEnd(t *testing.T) {
 					Targets: []GrafanaTarget{
 						{
 							RefID: "A",
-							Expr:  `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))`,
+							Expr:  `histogram_quantile(0.99, rate(myapp_custom_latency_bucket[5m]))`,
 						},
 					},
 				},
@@ -123,14 +124,14 @@ func TestSignalIngestionEndToEnd(t *testing.T) {
 		err := syncer.syncDashboard(ctx, dashboard)
 		require.NoError(t, err)
 
-		// Verify: histogram_quantile classified as Latency with 0.9 confidence
+		// Verify: histogram_quantile classified as Latency with 0.9 confidence (Layer 2)
 		foundLatency := false
 		for _, query := range mockGraph.queries {
 			if query.Parameters["role"] != nil && query.Parameters["confidence"] != nil {
 				metricName, ok := query.Parameters["metric_name"].(string)
 				if ok {
 					// histogram_quantile extracts the _bucket suffix metric
-					if metricName == "http_request_duration_seconds_bucket" {
+					if metricName == "myapp_custom_latency_bucket" {
 						assert.Equal(t, "Latency", query.Parameters["role"])
 						assert.Equal(t, 0.9, query.Parameters["confidence"])
 						foundLatency = true

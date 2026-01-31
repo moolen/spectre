@@ -60,84 +60,31 @@ func ClassifyMetric(metricName string, queryCtx QueryContext, panelTitle string)
 	}
 }
 
-// classifyKnownMetric matches hardcoded known metrics from common exporters.
-// Layer 1: High confidence (0.95) based on exact metric name matching.
+// classifyKnownMetric matches known metrics from embedded curated metric definitions.
+// Layer 1: High confidence based on curated metric database with exact name or pattern matching.
+// Confidence values come from the curated data (typically 0.8-1.0).
 func classifyKnownMetric(metricName string) *ClassificationResult {
-	knownMetrics := map[string]SignalRole{
-		// Availability metrics
-		"up":                                            SignalAvailability,
-		"kube_pod_status_phase":                         SignalAvailability,
-		"kube_node_status_condition":                    SignalAvailability,
-		"kube_deployment_status_replicas_available":     SignalAvailability,
-		"kube_deployment_status_replicas_unavailable":   SignalAvailability,
-
-		// Saturation metrics - container/node resources
-		"container_cpu_usage_seconds_total":             SignalSaturation,
-		"node_cpu_seconds_total":                        SignalSaturation,
-		"node_memory_MemAvailable_bytes":                SignalSaturation,
-		"container_memory_usage_bytes":                  SignalSaturation,
-		"container_memory_working_set_bytes":            SignalSaturation,
-		"node_filesystem_avail_bytes":                   SignalSaturation,
-		"node_filesystem_size_bytes":                    SignalSaturation,
-		"kube_pod_container_resource_limits":            SignalSaturation,
-		"kube_pod_container_resource_requests":          SignalSaturation,
-
-		// Saturation metrics - Kubernetes recording rules for resource requests/limits
-		"cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests":    SignalSaturation,
-		"cluster:namespace:pod_cpu:active:kube_pod_container_resource_limits":      SignalSaturation,
-		"cluster:namespace:pod_memory:active:kube_pod_container_resource_requests": SignalSaturation,
-		"cluster:namespace:pod_memory:active:kube_pod_container_resource_limits":   SignalSaturation,
-
-		// Saturation metrics - Kubernetes recording rules for CPU/memory usage
-		"node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate":  SignalSaturation,
-		"node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate":   SignalSaturation,
-		"node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate5m": SignalSaturation,
-		"node_namespace_pod_container:container_memory_working_set_bytes":           SignalSaturation,
-		"node_namespace_pod_container:container_memory_rss":                         SignalSaturation,
-		"node_namespace_pod_container:container_memory_cache":                       SignalSaturation,
-
-		// Traffic metrics - HTTP
-		"http_requests_total":               SignalTraffic,
-		"nginx_ingress_controller_requests": SignalTraffic,
-
-		// Traffic metrics - CoreDNS
-		"coredns_dns_requests_total":  SignalTraffic,
-		"coredns_dns_responses_total": SignalTraffic,
-
-		// Latency metrics - CoreDNS
-		"coredns_dns_request_duration_seconds":        SignalLatency,
-		"coredns_dns_request_duration_seconds_bucket": SignalLatency,
-		"coredns_dns_request_duration_seconds_sum":    SignalLatency,
-		"coredns_dns_request_duration_seconds_count":  SignalLatency,
-
-		// Traffic metrics - CoreDNS response/request sizes (throughput indicator)
-		"coredns_dns_response_size_bytes":        SignalTraffic,
-		"coredns_dns_response_size_bytes_bucket": SignalTraffic,
-		"coredns_dns_response_size_bytes_sum":    SignalTraffic,
-		"coredns_dns_response_size_bytes_count":  SignalTraffic,
-		"coredns_dns_request_size_bytes":         SignalTraffic,
-		"coredns_dns_request_size_bytes_bucket":  SignalTraffic,
-		"coredns_dns_request_size_bytes_sum":     SignalTraffic,
-		"coredns_dns_request_size_bytes_count":   SignalTraffic,
-
-		// Error metrics
-		"http_request_errors_total": SignalErrors,
-
-		// Churn/Novelty metrics
-		"kube_pod_container_status_restarts_total": SignalNovelty,
-		"kube_deployment_spec_replicas":            SignalNovelty,
+	curated := LookupCuratedMetric(metricName)
+	if curated == nil {
+		return nil
 	}
 
-	if role, ok := knownMetrics[metricName]; ok {
-		return &ClassificationResult{
-			Role:       role,
-			Confidence: 0.95,
-			Layer:      1,
-			Reason:     fmt.Sprintf("matched hardcoded metric: %s", metricName),
-		}
+	role := curated.ToSignalRole()
+	if role == SignalUnknown {
+		return nil
 	}
 
-	return nil
+	matchType := "exact name"
+	if curated.NamePattern != nil && *curated.NamePattern != "" {
+		matchType = "pattern"
+	}
+
+	return &ClassificationResult{
+		Role:       role,
+		Confidence: curated.Confidence,
+		Layer:      1,
+		Reason:     fmt.Sprintf("matched curated metric (%s): %s", matchType, curated.Name),
+	}
 }
 
 // classifyQueryStructure analyzes query structure for classification hints.

@@ -30,12 +30,12 @@ func TestComputeDashboardQuality_Freshness(t *testing.T) {
 		{
 			name:         "180 days old → ~0.67",
 			daysAgo:      180,
-			expectedFreshness: 1.0 - (180-90)/(365-90), // ~0.6727
+			expectedFreshness: 1.0 - (180.0-90.0)/(365.0-90.0), // ~0.6727
 		},
 		{
 			name:         "270 days old → ~0.35",
 			daysAgo:      270,
-			expectedFreshness: 1.0 - (270-90)/(365-90), // ~0.3455
+			expectedFreshness: 1.0 - (270.0-90.0)/(365.0-90.0), // ~0.3455
 		},
 		{
 			name:         "365 days old → 0.0",

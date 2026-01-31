@@ -35,7 +35,7 @@ func TestExtractSignalsFromPanel_SingleQuery(t *testing.T) {
 	signal := signals[0]
 	assert.Equal(t, "container_cpu_usage_seconds_total", signal.MetricName)
 	assert.Equal(t, SignalSaturation, signal.Role)
-	assert.Equal(t, 0.95, signal.Confidence) // Layer 1: hardcoded metric
+	assert.Equal(t, 0.9, signal.Confidence) // Layer 1: curated metric (confidence from JSON)
 	assert.Equal(t, 0.8, signal.QualityScore)
 	assert.Equal(t, "prod", signal.WorkloadNamespace)
 	assert.Equal(t, "", signal.WorkloadName) // No workload labels
