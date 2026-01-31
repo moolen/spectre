@@ -586,3 +586,127 @@ func (c *GrafanaClient) ListDatasources(ctx context.Context) ([]map[string]inter
 	c.logger.Debug("Listed %d datasources from Grafana", len(datasources))
 	return datasources, nil
 }
+
+// Datasource represents a Grafana datasource with typed fields.
+type Datasource struct {
+	ID        int    `json:"id"`
+	UID       string `json:"uid"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	IsDefault bool   `json:"isDefault"`
+}
+
+// GetDefaultPrometheusDatasource finds the default Prometheus datasource.
+// Returns the datasource with isDefault=true if available, otherwise the first Prometheus datasource.
+// Returns nil if no Prometheus datasource is found.
+func (c *GrafanaClient) GetDefaultPrometheusDatasource(ctx context.Context) (*Datasource, error) {
+	datasources, err := c.ListDatasources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list datasources: %w", err)
+	}
+
+	var firstProm *Datasource
+	for _, ds := range datasources {
+		dsType, _ := ds["type"].(string)
+		if dsType != "prometheus" {
+			continue
+		}
+
+		parsed := &Datasource{
+			UID:  ds["uid"].(string),
+			Name: ds["name"].(string),
+			Type: dsType,
+		}
+		if id, ok := ds["id"].(float64); ok {
+			parsed.ID = int(id)
+		}
+		if isDefault, ok := ds["isDefault"].(bool); ok {
+			parsed.IsDefault = isDefault
+		}
+
+		if parsed.IsDefault {
+			c.logger.Debug("Found default Prometheus datasource: %s (uid: %s)", parsed.Name, parsed.UID)
+			return parsed, nil
+		}
+		if firstProm == nil {
+			firstProm = parsed
+		}
+	}
+
+	if firstProm != nil {
+		c.logger.Debug("Using first Prometheus datasource (no default): %s (uid: %s)", firstProm.Name, firstProm.UID)
+	}
+	return firstProm, nil
+}
+
+// PrometheusLabelValuesResponse represents the response from Prometheus label values API.
+type PrometheusLabelValuesResponse struct {
+	Status string   `json:"status"`
+	Data   []string `json:"data"`
+}
+
+// ListMetricNames fetches all metric names from a Prometheus datasource.
+// Uses the Prometheus label values API via Grafana's datasource proxy.
+// If datasourceUID is empty, it will use the default Prometheus datasource.
+func (c *GrafanaClient) ListMetricNames(ctx context.Context, datasourceUID string) ([]string, error) {
+	// If no datasource specified, find the default Prometheus datasource
+	if datasourceUID == "" {
+		ds, err := c.GetDefaultPrometheusDatasource(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("get default prometheus datasource: %w", err)
+		}
+		if ds == nil {
+			return nil, fmt.Errorf("no prometheus datasource found")
+		}
+		datasourceUID = ds.UID
+	}
+
+	// Build request URL for Prometheus label values API via Grafana proxy
+	// /api/datasources/proxy/uid/{uid}/api/v1/label/__name__/values
+	reqURL := fmt.Sprintf("%s/api/datasources/proxy/uid/%s/api/v1/label/__name__/values", c.config.URL, datasourceUID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create list metric names request: %w", err)
+	}
+
+	// Add Bearer token authentication if using secret watcher
+	if c.secretWatcher != nil {
+		token, err := c.secretWatcher.GetToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get API token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	// Execute request
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute list metric names request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// CRITICAL: Always read response body to completion for connection reuse
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Error("Grafana list metric names failed: status=%d body=%s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("list metric names failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse JSON response
+	var result PrometheusLabelValuesResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse metric names response: %w", err)
+	}
+
+	if result.Status != "success" {
+		return nil, fmt.Errorf("prometheus API returned non-success status: %s", result.Status)
+	}
+
+	c.logger.Debug("Listed %d metric names from Prometheus datasource %s", len(result.Data), datasourceUID)
+	return result.Data, nil
+}

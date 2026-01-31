@@ -496,6 +496,16 @@ func (c *falkorClient) InitializeSchema(ctx context.Context) error {
 		"CREATE INDEX FOR (n:K8sEvent) ON (n.timestamp)",
 		// Dashboard indexes
 		"CREATE INDEX FOR (n:Dashboard) ON (n.uid)",
+		// SignalAnchor indexes (Observatory)
+		// Composite index on metric_name + workload_namespace + workload_name for MERGE performance
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.metric_name)",
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.workload_namespace)",
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.workload_name)",
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.expires_at)",
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.source_provider)",
+		// SignalBaseline indexes (Observatory)
+		"CREATE INDEX FOR (n:SignalBaseline) ON (n.metric_name)",
+		"CREATE INDEX FOR (n:SignalBaseline) ON (n.expires_at)",
 	}
 
 	for _, indexQuery := range indexes {

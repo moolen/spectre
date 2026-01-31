@@ -36,6 +36,7 @@ type GrafanaIntegration struct {
 	syncer         *DashboardSyncer     // Dashboard sync orchestrator
 	alertSyncer     *AlertSyncer           // Alert sync orchestrator
 	stateSyncer     *AlertStateSyncer      // Alert state sync orchestrator
+	metricsSyncer   *MetricsSyncer         // Curated metrics sync orchestrator
 	baselineCollector *BaselineCollector    // Baseline collector for anomaly detection
 	analysisService *AlertAnalysisService  // Alert analysis service for historical analysis
 	graphClient     graph.Client           // Graph client for dashboard sync
@@ -249,6 +250,30 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			g.logger.Info("Baseline collector started for integration %s", g.name)
 		}
 
+		// Create and start metrics syncer for curated metric ingestion
+		if g.config.IsMetricsSyncEnabled() {
+			syncConfig := MetricsSyncerConfig{
+				SyncInterval:      g.config.GetMetricsSyncInterval(),
+				RateLimitInterval: 100 * time.Millisecond, // 10 req/sec
+				DatasourceUID:     g.config.MetricsDatasourceUID,
+			}
+			g.metricsSyncer = NewMetricsSyncerWithConfig(
+				g.client,
+				g.graphClient,
+				g.name,
+				g.logger,
+				syncConfig,
+			)
+			if err := g.metricsSyncer.Start(g.ctx); err != nil {
+				g.logger.Warn("Failed to start metrics syncer: %v (continuing without curated metric sync)", err)
+				// Non-fatal - dashboard-based signals still work
+			} else {
+				g.logger.Info("Metrics syncer started for integration %s (interval: %s)", g.name, syncConfig.SyncInterval)
+			}
+		} else {
+			g.logger.Info("Metrics sync disabled for integration %s", g.name)
+		}
+
 		// Initialize Observatory services (Phase 26)
 		g.anomalyAggregator = NewAnomalyAggregator(g.graphClient, g.name, g.logger)
 		g.logger.Info("Anomaly aggregator created for integration %s", g.name)
@@ -298,7 +323,13 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 		g.cancel()
 	}
 
-	// Stop baseline collector first (depends on query service and graph client)
+	// Stop metrics syncer first (no dependencies on other services)
+	if g.metricsSyncer != nil {
+		g.logger.Info("Stopping metrics syncer for integration %s", g.name)
+		g.metricsSyncer.Stop()
+	}
+
+	// Stop baseline collector (depends on query service and graph client)
 	if g.baselineCollector != nil {
 		g.logger.Info("Stopping baseline collector for integration %s", g.name)
 		g.baselineCollector.Stop()
@@ -340,6 +371,7 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.syncer = nil
 	g.alertSyncer = nil
 	g.stateSyncer = nil
+	g.metricsSyncer = nil
 	g.baselineCollector = nil
 	g.queryService = nil
 

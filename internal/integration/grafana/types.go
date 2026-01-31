@@ -3,6 +3,7 @@ package grafana
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // SecretRef references a Kubernetes Secret for sensitive values
@@ -28,6 +29,21 @@ type Config struct {
 	// Example: {"prod": "overview", "staging": "drilldown"}
 	// Optional: if not specified, dashboards default to "detail" when no hierarchy tags found
 	HierarchyMap map[string]string `json:"hierarchyMap,omitempty" yaml:"hierarchyMap,omitempty"`
+
+	// MetricsSyncEnabled enables automatic curated metric ingestion.
+	// When enabled, metrics are fetched from Prometheus and matched against curated definitions.
+	// Default: true
+	MetricsSyncEnabled *bool `json:"metricsSyncEnabled,omitempty" yaml:"metricsSyncEnabled,omitempty"`
+
+	// MetricsSyncInterval is how often to run metrics sync.
+	// Format: Go duration string (e.g., "1h", "30m")
+	// Default: "1h"
+	MetricsSyncInterval string `json:"metricsSyncInterval,omitempty" yaml:"metricsSyncInterval,omitempty"`
+
+	// MetricsDatasourceUID is the Prometheus datasource UID to query for metrics.
+	// If empty, the default Prometheus datasource is used.
+	// Default: "" (use default)
+	MetricsDatasourceUID string `json:"metricsDatasourceUID,omitempty" yaml:"metricsDatasourceUID,omitempty"`
 }
 
 // Validate checks config for common errors
@@ -66,4 +82,26 @@ func (c *Config) Validate() error {
 // UsesSecretRef returns true if config uses Kubernetes Secret for authentication
 func (c *Config) UsesSecretRef() bool {
 	return c.APITokenRef != nil && c.APITokenRef.SecretName != ""
+}
+
+// IsMetricsSyncEnabled returns whether metrics sync is enabled.
+// Defaults to true if not specified.
+func (c *Config) IsMetricsSyncEnabled() bool {
+	if c.MetricsSyncEnabled == nil {
+		return true // Default: enabled
+	}
+	return *c.MetricsSyncEnabled
+}
+
+// GetMetricsSyncInterval returns the metrics sync interval.
+// Defaults to 1 hour if not specified or invalid.
+func (c *Config) GetMetricsSyncInterval() time.Duration {
+	if c.MetricsSyncInterval == "" {
+		return time.Hour
+	}
+	d, err := time.ParseDuration(c.MetricsSyncInterval)
+	if err != nil {
+		return time.Hour // Default on parse error
+	}
+	return d
 }
