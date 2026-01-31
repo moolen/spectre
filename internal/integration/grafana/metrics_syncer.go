@@ -34,6 +34,17 @@ func DefaultMetricsSyncerConfig() MetricsSyncerConfig {
 	}
 }
 
+// SignalAnchorCallback is called when a SignalAnchor is created or updated.
+// Implementations can use this to trigger additional actions, such as
+// linking the anchor to K8s workloads via scrape target metadata.
+type SignalAnchorCallback interface {
+	// OnSignalAnchorCreated is called after a new SignalAnchor is created.
+	// metricName: the metric name of the anchor
+	// workloadNamespace: the workload namespace (empty for global anchors)
+	// workloadName: the workload name (empty for global anchors)
+	OnSignalAnchorCreated(ctx context.Context, metricName, workloadNamespace, workloadName string) error
+}
+
 // MetricsSyncer orchestrates periodic curated metric ingestion and SignalAnchor creation.
 // It fetches metric names from Prometheus via Grafana, matches against curated metrics,
 // and creates/updates SignalAnchors in the graph database.
@@ -53,6 +64,9 @@ type MetricsSyncer struct {
 
 	// Rate limiting
 	rateLimiter *time.Ticker
+
+	// Callbacks for event-driven linking
+	callbacks []SignalAnchorCallback
 
 	// Thread-safe status
 	mu           sync.RWMutex
@@ -98,6 +112,12 @@ func NewMetricsSyncerWithConfig(
 		rateLimiter:     time.NewTicker(config.RateLimitInterval),
 		stopped:         make(chan struct{}),
 	}
+}
+
+// RegisterCallback registers a callback to be invoked when SignalAnchors are created.
+// Callbacks are invoked synchronously, so implementations should be fast or spawn goroutines.
+func (ms *MetricsSyncer) RegisterCallback(cb SignalAnchorCallback) {
+	ms.callbacks = append(ms.callbacks, cb)
 }
 
 // Start begins the sync loop (initial sync + periodic sync).
@@ -316,7 +336,19 @@ func (ms *MetricsSyncer) upsertSingleAnchor(ctx context.Context, match MatchResu
 
 	// Check if a node was created using stats
 	// NodesCreated > 0 means new anchor was created
-	return result.Stats.NodesCreated > 0, nil
+	wasCreated := result.Stats.NodesCreated > 0
+
+	// Invoke callbacks for new anchors
+	if wasCreated && len(ms.callbacks) > 0 {
+		for _, cb := range ms.callbacks {
+			if err := cb.OnSignalAnchorCreated(ctx, match.GrafanaMetric, "", ""); err != nil {
+				ms.logger.Debug("Callback failed for anchor %s: %v", match.GrafanaMetric, err)
+				// Continue with other callbacks - don't fail the upsert
+			}
+		}
+	}
+
+	return wasCreated, nil
 }
 
 // datasourceDisplay returns a display string for the datasource config.

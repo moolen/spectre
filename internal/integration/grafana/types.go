@@ -44,6 +44,24 @@ type Config struct {
 	// If empty, the default Prometheus datasource is used.
 	// Default: "" (use default)
 	MetricsDatasourceUID string `json:"metricsDatasourceUID,omitempty" yaml:"metricsDatasourceUID,omitempty"`
+
+	// PrometheusURL is the direct Prometheus API URL for scrape target discovery.
+	// This enables linking SignalAnchors to K8s workloads via scrape target metadata.
+	// Example: http://prometheus:9090
+	PrometheusURL string `json:"prometheusUrl,omitempty" yaml:"prometheusUrl,omitempty"`
+
+	// PrometheusAPITokenRef references a Kubernetes Secret containing the Prometheus API token.
+	// Optional: only needed if Prometheus requires authentication.
+	PrometheusAPITokenRef *SecretRef `json:"prometheusApiTokenRef,omitempty" yaml:"prometheusApiTokenRef,omitempty"`
+
+	// ScrapeTargetLinkingEnabled enables linking SignalAnchors to K8s workloads.
+	// Default: true when PrometheusURL is set
+	ScrapeTargetLinkingEnabled *bool `json:"scrapeTargetLinkingEnabled,omitempty" yaml:"scrapeTargetLinkingEnabled,omitempty"`
+
+	// ScrapeTargetLinkingInterval is how often to refresh scrape target links.
+	// Format: Go duration string (e.g., "5m", "10m")
+	// Default: "5m"
+	ScrapeTargetLinkingInterval string `json:"scrapeTargetLinkingInterval,omitempty" yaml:"scrapeTargetLinkingInterval,omitempty"`
 }
 
 // Validate checks config for common errors
@@ -55,10 +73,22 @@ func (c *Config) Validate() error {
 	// Normalize URL: remove trailing slash for consistency
 	c.URL = strings.TrimSuffix(c.URL, "/")
 
+	// Normalize PrometheusURL: remove trailing slash for consistency
+	if c.PrometheusURL != "" {
+		c.PrometheusURL = strings.TrimSuffix(c.PrometheusURL, "/")
+	}
+
 	// Validate SecretRef if present
 	if c.APITokenRef != nil && c.APITokenRef.SecretName != "" {
 		if c.APITokenRef.Key == "" {
 			return fmt.Errorf("apiTokenRef.key is required when apiTokenRef is specified")
+		}
+	}
+
+	// Validate PrometheusAPITokenRef if present
+	if c.PrometheusAPITokenRef != nil && c.PrometheusAPITokenRef.SecretName != "" {
+		if c.PrometheusAPITokenRef.Key == "" {
+			return fmt.Errorf("prometheusApiTokenRef.key is required when prometheusApiTokenRef is specified")
 		}
 	}
 
@@ -104,4 +134,33 @@ func (c *Config) GetMetricsSyncInterval() time.Duration {
 		return time.Hour // Default on parse error
 	}
 	return d
+}
+
+// IsScrapeTargetLinkingEnabled returns whether scrape target linking is enabled.
+// Returns true if PrometheusURL is set and not explicitly disabled.
+func (c *Config) IsScrapeTargetLinkingEnabled() bool {
+	// If explicitly set, use that value
+	if c.ScrapeTargetLinkingEnabled != nil {
+		return *c.ScrapeTargetLinkingEnabled
+	}
+	// Default: enabled when PrometheusURL is configured
+	return c.PrometheusURL != ""
+}
+
+// GetScrapeTargetLinkingInterval returns the scrape target linking sync interval.
+// Defaults to 5 minutes if not specified or invalid.
+func (c *Config) GetScrapeTargetLinkingInterval() time.Duration {
+	if c.ScrapeTargetLinkingInterval == "" {
+		return 5 * time.Minute
+	}
+	d, err := time.ParseDuration(c.ScrapeTargetLinkingInterval)
+	if err != nil {
+		return 5 * time.Minute // Default on parse error
+	}
+	return d
+}
+
+// UsesPrometheusSecretRef returns true if config uses Kubernetes Secret for Prometheus authentication
+func (c *Config) UsesPrometheusSecretRef() bool {
+	return c.PrometheusAPITokenRef != nil && c.PrometheusAPITokenRef.SecretName != ""
 }

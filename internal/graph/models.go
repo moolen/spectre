@@ -49,6 +49,9 @@ const (
 	EdgeTypeTracks      EdgeType = "TRACKS"       // Metric -> Service
 	EdgeTypeHasVariable EdgeType = "HAS_VARIABLE" // Dashboard -> Variable
 	EdgeTypeMonitors    EdgeType = "MONITORS"     // Alert -> Metric/Service
+
+	// Observatory relationship types
+	EdgeTypeMonitorsWorkload EdgeType = "MONITORS_WORKLOAD" // SignalAnchor -> ResourceIdentity
 )
 
 // ResourceIdentity represents a persistent Kubernetes resource node
@@ -297,6 +300,18 @@ type CreatesObservedEdge struct {
 	ObservedLagMs    int64   `json:"observedLagMs"`    // Time between reconcile and creation
 	ReconcileEventID string  `json:"reconcileEventId"` // Event ID of triggering reconcile
 	Evidence         string  `json:"evidence"`         // Why we believe this
+}
+
+// MonitorsWorkloadEdge links SignalAnchors to K8s workloads via scrape target metadata.
+// This enables incident responders to quickly identify which metrics relate to which services.
+type MonitorsWorkloadEdge struct {
+	FirstLinked   int64   `json:"firstLinked"`   // Unix nanos - when link established
+	LastConfirmed int64   `json:"lastConfirmed"` // Unix nanos - last time scrape target seen
+	Stale         bool    `json:"stale"`         // true if target disappeared
+	StaleAt       int64   `json:"staleAt"`       // Unix nanos - when marked stale
+	Source        string  `json:"source"`        // "scrape_target" | "promql_inference"
+	Job           string  `json:"job"`           // Prometheus job name
+	Confidence    float64 `json:"confidence"`    // 0-1, direct match (1.0) vs fallback (0.8)
 }
 
 // Node represents a generic graph node

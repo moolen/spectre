@@ -55,6 +55,11 @@ type GrafanaIntegration struct {
 	observatoryRegistry *observatory.Registry       // Multi-provider registry
 	observatoryProvider *GrafanaObservatoryProvider // This integration's provider
 
+	// Scrape target linking (links SignalAnchors to K8s workloads)
+	prometheusClient       *PrometheusClient       // Direct Prometheus API client
+	prometheusSecretWatcher *SecretWatcher         // Optional: manages Prometheus API token
+	scrapeTargetLinker     *ScrapeTargetLinker     // Scrape target linker
+
 	// Thread-safe health status
 	mu           sync.RWMutex
 	healthStatus integration.HealthStatus
@@ -306,6 +311,85 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 		} else {
 			g.logger.Info("Observatory registry initialized with provider %s", g.name)
 		}
+
+		// Initialize Prometheus client and scrape target linker if URL configured
+		if g.config.PrometheusURL != "" {
+			g.logger.Info("Initializing Prometheus client (url: %s)", g.config.PrometheusURL)
+
+			// Create SecretWatcher for Prometheus if config uses secret ref
+			if g.config.UsesPrometheusSecretRef() {
+				g.logger.Info("Creating SecretWatcher for Prometheus secret: %s, key: %s",
+					g.config.PrometheusAPITokenRef.SecretName, g.config.PrometheusAPITokenRef.Key)
+
+				// Reuse the Kubernetes client from the main secret watcher setup
+				k8sConfig, err := rest.InClusterConfig()
+				if err != nil {
+					g.logger.Warn("Failed to get in-cluster config for Prometheus secret watcher: %v", err)
+				} else {
+					clientset, err := kubernetes.NewForConfig(k8sConfig)
+					if err != nil {
+						g.logger.Warn("Failed to create Kubernetes clientset for Prometheus: %v", err)
+					} else {
+						namespace, err := getCurrentNamespace()
+						if err != nil {
+							g.logger.Warn("Failed to determine namespace for Prometheus secret: %v", err)
+						} else {
+							prometheusSecretWatcher, err := NewSecretWatcher(
+								clientset,
+								namespace,
+								g.config.PrometheusAPITokenRef.SecretName,
+								g.config.PrometheusAPITokenRef.Key,
+								g.logger,
+							)
+							if err != nil {
+								g.logger.Warn("Failed to create Prometheus secret watcher: %v", err)
+							} else {
+								if err := prometheusSecretWatcher.Start(g.ctx); err != nil {
+									g.logger.Warn("Failed to start Prometheus secret watcher: %v", err)
+								} else {
+									g.prometheusSecretWatcher = prometheusSecretWatcher
+									g.logger.Info("Prometheus SecretWatcher started successfully")
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Create Prometheus client
+			g.prometheusClient = NewPrometheusClient(
+				g.config.PrometheusURL,
+				g.config.PrometheusAPITokenRef,
+				g.prometheusSecretWatcher,
+				g.logger,
+			)
+			g.logger.Info("Prometheus client created for integration %s", g.name)
+
+			// Create and start scrape target linker if enabled
+			if g.config.IsScrapeTargetLinkingEnabled() {
+				linkerConfig := ScrapeTargetLinkerConfig{
+					SyncInterval:      g.config.GetScrapeTargetLinkingInterval(),
+					RateLimitInterval: 100 * time.Millisecond,
+					StaleTTL:          7 * 24 * time.Hour,
+				}
+				g.scrapeTargetLinker = NewScrapeTargetLinker(
+					g.prometheusClient, g.graphClient, g.name, g.logger, linkerConfig,
+				)
+				if err := g.scrapeTargetLinker.Start(g.ctx); err != nil {
+					g.logger.Warn("Failed to start scrape target linker: %v (continuing without workload linking)", err)
+				} else {
+					g.logger.Info("Scrape target linker started for integration %s (interval: %s)", g.name, linkerConfig.SyncInterval)
+
+					// Register callback with metrics syncer for event-driven linking
+					if g.metricsSyncer != nil {
+						g.metricsSyncer.RegisterCallback(g.scrapeTargetLinker)
+						g.logger.Info("Registered scrape target linker callback with metrics syncer")
+					}
+				}
+			} else {
+				g.logger.Info("Scrape target linking disabled for integration %s", g.name)
+			}
+		}
 	} else {
 		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
 	}
@@ -323,7 +407,20 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 		g.cancel()
 	}
 
-	// Stop metrics syncer first (no dependencies on other services)
+	// Stop scrape target linker first (depends on Prometheus client)
+	if g.scrapeTargetLinker != nil {
+		g.logger.Info("Stopping scrape target linker for integration %s", g.name)
+		g.scrapeTargetLinker.Stop()
+	}
+
+	// Stop Prometheus secret watcher if it exists
+	if g.prometheusSecretWatcher != nil {
+		if err := g.prometheusSecretWatcher.Stop(); err != nil {
+			g.logger.Error("Error stopping Prometheus secret watcher: %v", err)
+		}
+	}
+
+	// Stop metrics syncer (no dependencies on other services)
 	if g.metricsSyncer != nil {
 		g.logger.Info("Stopping metrics syncer for integration %s", g.name)
 		g.metricsSyncer.Stop()
@@ -385,6 +482,11 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	}
 	g.observatoryRegistry = nil
 	g.observatoryProvider = nil
+
+	// Clear scrape target linking
+	g.prometheusClient = nil
+	g.prometheusSecretWatcher = nil
+	g.scrapeTargetLinker = nil
 
 	// Update health status
 	g.setHealthStatus(integration.Stopped)
