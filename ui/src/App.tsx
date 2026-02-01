@@ -16,21 +16,36 @@ const appContainerStyles: React.CSSProperties = {
   overflow: 'hidden',
 };
 
+// Fixed sidebar widths
+const SIDEBAR_COLLAPSED = 64;
+const SIDEBAR_EXPANDED = 220;
+
 function App() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
-  const mainContentStyles: React.CSSProperties = {
+  // Outer wrapper: clips the content and handles the sidebar space
+  // Uses marginLeft to reserve space for collapsed sidebar (no resize on hover)
+  const outerWrapperStyles: React.CSSProperties = {
     flex: 1,
     height: '100vh',
     overflow: 'hidden',
-    marginLeft: sidebarExpanded ? '220px' : '64px',
-    transition: 'margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+    marginLeft: `${SIDEBAR_COLLAPSED}px`,
+  };
+
+  // Inner wrapper: translates content when sidebar expands (no layout change)
+  // Uses transform instead of margin to avoid triggering resize
+  const innerWrapperStyles: React.CSSProperties = {
+    height: '100%',
+    width: '100%',
+    transform: sidebarExpanded ? `translateX(${SIDEBAR_EXPANDED - SIDEBAR_COLLAPSED}px)` : 'translateX(0)',
+    transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
   };
 
   return (
     <div style={appContainerStyles}>
       <Sidebar onHoverChange={setSidebarExpanded} />
-      <main style={mainContentStyles}>
+      <div style={outerWrapperStyles}>
+        <main style={innerWrapperStyles}>
         <Toaster
           position="top-right"
           theme="dark"
@@ -47,7 +62,8 @@ function App() {
           <Route path="/integrations" element={<IntegrationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
