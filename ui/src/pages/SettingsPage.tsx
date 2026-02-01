@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Theme, TimeFormat, useSettings, COMMON_KINDS, DEFAULT_KINDS } from '../hooks/useSettings';
+import { Theme, TimeFormat, useSettings, COMMON_KINDS, DEFAULT_KINDS, OBSERVATORY_NODE_TYPES, DEFAULT_OBSERVATORY_NODE_TYPES } from '../hooks/useSettings';
 import { TimeInputWithCalendar } from '../components/TimeInputWithCalendar';
 import { validateTimeRange } from '../utils/timeParsing';
 import { apiClient } from '../services/api';
@@ -22,6 +22,8 @@ const SettingsPage: React.FC = () => {
     setCompactMode,
     defaultKinds,
     setDefaultKinds,
+    defaultObservatoryNodeTypes,
+    setDefaultObservatoryNodeTypes,
   } = useSettings();
 
   // Export state
@@ -304,6 +306,78 @@ const SettingsPage: React.FC = () => {
                   </button>
                   <span className="ml-auto text-xs text-[var(--color-text-muted)]">
                     {defaultKinds.length} of {COMMON_KINDS.length} selected
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Observatory Section */}
+          <section className="bg-[var(--color-surface-elevated)] rounded-xl border border-[var(--color-border-soft)] p-6">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-6">
+              Observatory
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-base font-medium text-[var(--color-text-primary)]">Default Node Types</h3>
+                <p className="text-sm text-[var(--color-text-muted)] mb-4">
+                  Select which node types are shown by default in the Observatory view.
+                </p>
+              </div>
+
+              {/* Node type checkboxes grid */}
+              <div className="bg-[var(--color-surface-muted)] rounded-lg border border-[var(--color-border-soft)] p-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {OBSERVATORY_NODE_TYPES.map((nodeType) => (
+                    <label
+                      key={nodeType}
+                      className="flex items-center gap-2 cursor-pointer group"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={defaultObservatoryNodeTypes.includes(nodeType)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setDefaultObservatoryNodeTypes([...defaultObservatoryNodeTypes, nodeType]);
+                          } else {
+                            setDefaultObservatoryNodeTypes(defaultObservatoryNodeTypes.filter(t => t !== nodeType));
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]
+                                   text-brand-500 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
+                      />
+                      <span className="text-sm text-[var(--color-text-primary)] group-hover:text-brand-400 transition-colors">
+                        {nodeType}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div className="mt-4 pt-4 border-t border-[var(--color-border-soft)] flex items-center gap-4">
+                  <button
+                    onClick={() => setDefaultObservatoryNodeTypes(DEFAULT_OBSERVATORY_NODE_TYPES)}
+                    className="px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]
+                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors"
+                  >
+                    Reset to Defaults
+                  </button>
+                  <button
+                    onClick={() => setDefaultObservatoryNodeTypes(OBSERVATORY_NODE_TYPES)}
+                    className="px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]
+                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={() => setDefaultObservatoryNodeTypes([])}
+                    className="px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]
+                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors"
+                  >
+                    Clear All
+                  </button>
+                  <span className="ml-auto text-xs text-[var(--color-text-muted)]">
+                    {defaultObservatoryNodeTypes.length} of {OBSERVATORY_NODE_TYPES.length} selected
                   </span>
                 </div>
               </div>

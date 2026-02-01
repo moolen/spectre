@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   ObservatoryGraph,
   ObservatoryGraphHandle,
@@ -9,31 +9,26 @@ import {
 import { useObservatoryGraph } from '../hooks/useObservatoryGraph';
 import { D3ObservatoryNode, ObservatoryNodeType } from '../types/observatoryGraph';
 import { SelectDropdown } from '../components/SelectDropdown';
+import { useSettings, OBSERVATORY_NODE_TYPES } from '../hooks/useSettings';
 
-// All available node types for the filter
-const NODE_TYPE_OPTIONS: ObservatoryNodeType[] = [
-  'SignalAnchor',
-  'Alert',
-  'Dashboard',
-  'Panel',
-  'Query',
-  'Metric',
-  'Service',
-  'Workload',
-  'SignalBaseline',
-];
+// All available node types for the filter (use the same list as settings)
+const NODE_TYPE_OPTIONS: ObservatoryNodeType[] = OBSERVATORY_NODE_TYPES as ObservatoryNodeType[];
 
 /**
  * Observatory page for visualizing SignalAnchors, Alerts, Dashboards, and their relationships
  */
 export default function ObservatoryPage() {
+  const { defaultObservatoryNodeTypes } = useSettings();
   const [selectedNode, setSelectedNode] = useState<D3ObservatoryNode | null>(null);
   const [nodeSearch, setNodeSearch] = useState<string>('');
   const [namespace, setNamespace] = useState<string | null>(null);
   const [workload, setWorkload] = useState<string | null>(null);
   const [includeBaselines, setIncludeBaselines] = useState(false);
-  const [selectedNodeTypes, setSelectedNodeTypes] = useState<string[]>([]);
+  const [selectedNodeTypes, setSelectedNodeTypes] = useState<string[]>(defaultObservatoryNodeTypes);
   const graphRef = useRef<ObservatoryGraphHandle>(null);
+
+  // Track if this is the initial data load (to trigger fit-to-view)
+  const initialLoadRef = useRef(true);
 
   const { data, isLoading, error, refetch } = useObservatoryGraph({
     namespace: namespace || undefined,
@@ -69,13 +64,49 @@ export default function ObservatoryPage() {
     return Array.from(workloads).sort();
   }, [data, namespace]);
 
-  // Reset workload when namespace changes
+  // Reset workload when namespace changes and trigger fit-to-view
   const handleNamespaceChange = useCallback((value: string | string[] | null) => {
     const newNamespace = value as string | null;
     setNamespace(newNamespace);
     // Reset workload filter when namespace changes
     setWorkload(null);
   }, []);
+
+  // Handle workload change
+  const handleWorkloadChange = useCallback((value: string | string[] | null) => {
+    setWorkload(value as string | null);
+  }, []);
+
+  // Auto fit-to-view when data changes due to filter changes
+  // Use a ref to track previous values and detect actual changes
+  const prevFiltersRef = useRef({ namespace, workload });
+  useEffect(() => {
+    const filtersChanged =
+      prevFiltersRef.current.namespace !== namespace ||
+      prevFiltersRef.current.workload !== workload;
+
+    if (filtersChanged && data && !isLoading) {
+      // Small delay to allow the graph to render first
+      const timeoutId = setTimeout(() => {
+        graphRef.current?.fitToView();
+      }, 100);
+      prevFiltersRef.current = { namespace, workload };
+      return () => clearTimeout(timeoutId);
+    }
+    prevFiltersRef.current = { namespace, workload };
+  }, [namespace, workload, data, isLoading]);
+
+  // Auto fit-to-view on initial data load
+  useEffect(() => {
+    if (initialLoadRef.current && data && !isLoading) {
+      initialLoadRef.current = false;
+      // Small delay to allow the graph to render first
+      const timeoutId = setTimeout(() => {
+        graphRef.current?.fitToView();
+      }, 200);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [data, isLoading]);
 
   const handleNodeClick = useCallback((node: D3ObservatoryNode | null) => {
     setSelectedNode(node);
@@ -144,7 +175,7 @@ export default function ObservatoryPage() {
           label="All Workloads"
           options={availableWorkloads}
           selected={workload}
-          onChange={(value) => setWorkload(value as string | null)}
+          onChange={handleWorkloadChange}
           multiple={false}
           minWidth="160px"
         />
