@@ -140,6 +140,19 @@ export default function ObservatoryPage() {
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Graph area */}
         <div className="flex-1 relative overflow-hidden min-w-0">
+          {/* Loading state - shown when loading and no data yet */}
+          {isLoading && !filteredData && !error && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center">
+                <svg className="animate-spin w-12 h-12 text-purple-500 mx-auto mb-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <h3 className="text-gray-400 font-semibold mb-2">Loading Observatory Graph</h3>
+                <p className="text-gray-500 text-sm">Fetching signal anchors, alerts, and dashboards...</p>
+              </div>
+            </div>
+          )}
           {error && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="bg-red-900/20 border border-red-500/50 rounded-lg p-4 max-w-md">
@@ -150,6 +163,24 @@ export default function ObservatoryPage() {
                   className="mt-3 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-medium transition-colors"
                 >
                   Retry
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Fallback for unexpected null data after loading */}
+          {!isLoading && !error && !filteredData && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center">
+                <div className="text-4xl mb-4">⚠️</div>
+                <h3 className="text-gray-400 font-semibold mb-2">Unable to load data</h3>
+                <p className="text-gray-500 text-sm max-w-md mb-4">
+                  The Observatory data could not be loaded. This might be a temporary issue.
+                </p>
+                <button
+                  onClick={refetch}
+                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm font-medium transition-colors"
+                >
+                  Try Again
                 </button>
               </div>
             </div>
