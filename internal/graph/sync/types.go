@@ -66,6 +66,18 @@ type GraphBuilder interface {
 
 	// ClearBatchCache clears the batch cache after processing is complete
 	ClearBatchCache()
+
+	// GetStateCacheStats returns state cache statistics (hits, misses, size)
+	// Returns (0, 0, 0) if state cache is not enabled
+	GetStateCacheStats() (hits, misses int64, size int)
+
+	// GetLabelIndex returns the label index for Pod selector lookups
+	// Returns nil if label index is not enabled
+	GetLabelIndex() *LabelIndex
+
+	// GetLabelIndexStats returns label index statistics (hits, misses, namespaces, resources)
+	// Returns (0, 0, 0, 0) if label index is not enabled
+	GetLabelIndexStats() (hits, misses int64, namespaces, resources int)
 }
 
 // CausalityEngine infers causality relationships between events
@@ -178,6 +190,9 @@ type PipelineConfig struct {
 	SyncTimeout   time.Duration // Timeout for graph operations
 	RetryAttempts int           // Number of retries on failure
 	RetryDelay    time.Duration // Delay between retries
+
+	// Caching
+	StateCacheSize int // Max number of resource states to cache (0 = use default)
 }
 
 // DefaultPipelineConfig returns default pipeline configuration
@@ -195,5 +210,6 @@ func DefaultPipelineConfig() PipelineConfig {
 		SyncTimeout:            120 * time.Second,
 		RetryAttempts:          3,
 		RetryDelay:             1 * time.Second,
+		StateCacheSize:         DefaultStateCacheSize,
 	}
 }

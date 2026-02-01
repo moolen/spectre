@@ -800,3 +800,598 @@ func FindStaleInferredEdgesQuery(cutoffTimestamp int64) GraphQuery {
 		},
 	}
 }
+
+// =============================================================================
+// Batch Query Builders - Phase 2 Optimization
+// These functions use Cypher UNWIND to batch multiple operations into single queries,
+// reducing the number of database round-trips from O(n) to O(1) per batch.
+// =============================================================================
+
+// BatchUpsertResourceIdentitiesQuery creates a single query to upsert multiple ResourceIdentity nodes.
+// This reduces N individual MERGE queries to a single batched operation.
+// Note: This uses a simplified approach - for deletions, use the original UpsertResourceIdentityQuery
+// which has special handling to prevent un-deleting resources.
+func BatchUpsertResourceIdentitiesQuery(resources []ResourceIdentity) GraphQuery {
+	// Build parameters list for UNWIND
+	resourceParams := make([]map[string]interface{}, len(resources))
+	for i, r := range resources {
+		// Serialize labels to JSON
+		labelsJSON := "{}"
+		if r.Labels != nil && len(r.Labels) > 0 {
+			labelsBytes, _ := json.Marshal(r.Labels)
+			labelsJSON = string(labelsBytes)
+		}
+		resourceParams[i] = map[string]interface{}{
+			"uid":       r.UID,
+			"kind":      r.Kind,
+			"apiGroup":  r.APIGroup,
+			"version":   r.Version,
+			"namespace": r.Namespace,
+			"name":      r.Name,
+			"labels":    labelsJSON,
+			"firstSeen": r.FirstSeen,
+			"lastSeen":  r.LastSeen,
+			"deleted":   r.Deleted,
+			"deletedAt": r.DeletedAt,
+		}
+	}
+
+	// Note: This batched version doesn't handle the special case where a resource
+	// might already be deleted. For deletions, use individual queries to ensure
+	// the deleted flag is set correctly regardless of previous state.
+	query := `
+		UNWIND $resources AS r
+		MERGE (n:ResourceIdentity {uid: r.uid})
+		ON CREATE SET
+			n.kind = r.kind,
+			n.apiGroup = r.apiGroup,
+			n.version = r.version,
+			n.namespace = r.namespace,
+			n.name = r.name,
+			n.labels = r.labels,
+			n.firstSeen = r.firstSeen,
+			n.lastSeen = r.lastSeen,
+			n.deleted = r.deleted,
+			n.deletedAt = r.deletedAt
+		ON MATCH SET
+			n.kind = CASE WHEN n.kind IS NULL THEN r.kind ELSE n.kind END,
+			n.apiGroup = CASE WHEN n.apiGroup IS NULL THEN r.apiGroup ELSE n.apiGroup END,
+			n.version = CASE WHEN n.version IS NULL THEN r.version ELSE n.version END,
+			n.namespace = CASE WHEN n.namespace IS NULL THEN r.namespace ELSE n.namespace END,
+			n.name = CASE WHEN n.name IS NULL THEN r.name ELSE n.name END,
+			n.firstSeen = CASE WHEN n.firstSeen IS NULL THEN r.firstSeen ELSE n.firstSeen END,
+			n.labels = CASE WHEN NOT n.deleted THEN r.labels ELSE n.labels END,
+			n.lastSeen = CASE WHEN NOT n.deleted THEN r.lastSeen ELSE n.lastSeen END
+		RETURN count(n) as upsertedCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"resources": resourceParams,
+		},
+	}
+}
+
+// BatchCreateChangeEventsQuery creates a single query to insert multiple ChangeEvent nodes.
+func BatchCreateChangeEventsQuery(events []ChangeEvent) GraphQuery {
+	eventParams := make([]map[string]interface{}, len(events))
+	for i, e := range events {
+		eventParams[i] = map[string]interface{}{
+			"id":              e.ID,
+			"timestamp":       e.Timestamp,
+			"eventType":       e.EventType,
+			"status":          e.Status,
+			"errorMessage":    e.ErrorMessage,
+			"containerIssues": e.ContainerIssues,
+			"configChanged":   e.ConfigChanged,
+			"statusChanged":   e.StatusChanged,
+			"replicasChanged": e.ReplicasChanged,
+			"impactScore":     e.ImpactScore,
+			"data":            e.Data,
+		}
+	}
+
+	query := `
+		UNWIND $events AS e
+		MERGE (n:ChangeEvent {id: e.id})
+		ON CREATE SET
+			n.timestamp = e.timestamp,
+			n.eventType = e.eventType,
+			n.status = e.status,
+			n.errorMessage = e.errorMessage,
+			n.containerIssues = e.containerIssues,
+			n.configChanged = e.configChanged,
+			n.statusChanged = e.statusChanged,
+			n.replicasChanged = e.replicasChanged,
+			n.impactScore = e.impactScore,
+			n.data = e.data
+		RETURN count(n) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"events": eventParams,
+		},
+	}
+}
+
+// BatchCreateK8sEventsQuery creates a single query to insert multiple K8sEvent nodes.
+func BatchCreateK8sEventsQuery(events []K8sEvent) GraphQuery {
+	eventParams := make([]map[string]interface{}, len(events))
+	for i, e := range events {
+		eventParams[i] = map[string]interface{}{
+			"id":        e.ID,
+			"timestamp": e.Timestamp,
+			"reason":    e.Reason,
+			"message":   e.Message,
+			"type":      e.Type,
+			"count":     e.Count,
+			"source":    e.Source,
+		}
+	}
+
+	query := `
+		UNWIND $events AS e
+		MERGE (n:K8sEvent {id: e.id})
+		ON CREATE SET
+			n.timestamp = e.timestamp,
+			n.reason = e.reason,
+			n.message = e.message,
+			n.type = e.type,
+			n.count = e.count,
+			n.source = e.source
+		RETURN count(n) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"events": eventParams,
+		},
+	}
+}
+
+// BatchEdgeParams represents parameters for a single edge in a batch operation.
+type BatchEdgeParams struct {
+	FromUID    string
+	ToUID      string
+	Properties map[string]interface{}
+}
+
+// BatchCreateOwnsEdgesQuery creates multiple OWNS edges in a single query.
+func BatchCreateOwnsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":          e.FromUID,
+			"toUID":            e.ToUID,
+			"controller":       e.Properties["controller"],
+			"blockOwnerDeletion": e.Properties["blockOwnerDeletion"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (owner:ResourceIdentity {uid: e.fromUID})
+		MATCH (owned:ResourceIdentity {uid: e.toUID})
+		MERGE (owner)-[r:OWNS]->(owned)
+		ON CREATE SET
+			r.controller = e.controller,
+			r.blockOwnerDeletion = e.blockOwnerDeletion
+		ON MATCH SET
+			r.controller = e.controller,
+			r.blockOwnerDeletion = e.blockOwnerDeletion
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateChangedEdgesQuery creates multiple CHANGED edges in a single query.
+func BatchCreateChangedEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":        e.FromUID,
+			"toUID":          e.ToUID,
+			"sequenceNumber": e.Properties["sequenceNumber"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (resource:ResourceIdentity {uid: e.fromUID})
+		MATCH (event:ChangeEvent {id: e.toUID})
+		MERGE (resource)-[r:CHANGED]->(event)
+		ON CREATE SET r.sequenceNumber = e.sequenceNumber
+		ON MATCH SET r.sequenceNumber = e.sequenceNumber
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateSelectsEdgesQuery creates multiple SELECTS edges in a single query.
+func BatchCreateSelectsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":   e.FromUID,
+			"toUID":     e.ToUID,
+			"selector":  e.Properties["selector"],
+			"matchType": e.Properties["matchType"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (selector:ResourceIdentity {uid: e.fromUID})
+		MATCH (selected:ResourceIdentity {uid: e.toUID})
+		MERGE (selector)-[r:SELECTS]->(selected)
+		ON CREATE SET
+			r.selector = e.selector,
+			r.matchType = e.matchType
+		ON MATCH SET
+			r.selector = e.selector,
+			r.matchType = e.matchType
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateScheduledOnEdgesQuery creates multiple SCHEDULED_ON edges in a single query.
+func BatchCreateScheduledOnEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":      e.FromUID,
+			"toUID":        e.ToUID,
+			"scheduledAt":  e.Properties["scheduledAt"],
+			"hostIP":       e.Properties["hostIP"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (pod:ResourceIdentity {uid: e.fromUID})
+		MATCH (node:ResourceIdentity {uid: e.toUID})
+		MERGE (pod)-[r:SCHEDULED_ON]->(node)
+		ON CREATE SET
+			r.scheduledAt = e.scheduledAt,
+			r.hostIP = e.hostIP
+		ON MATCH SET
+			r.scheduledAt = e.scheduledAt,
+			r.hostIP = e.hostIP
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateMountsEdgesQuery creates multiple MOUNTS edges in a single query.
+func BatchCreateMountsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":   e.FromUID,
+			"toUID":     e.ToUID,
+			"mountPath": e.Properties["mountPath"],
+			"readOnly":  e.Properties["readOnly"],
+			"subPath":   e.Properties["subPath"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (pod:ResourceIdentity {uid: e.fromUID})
+		MATCH (volume:ResourceIdentity {uid: e.toUID})
+		MERGE (pod)-[r:MOUNTS]->(volume)
+		ON CREATE SET
+			r.mountPath = e.mountPath,
+			r.readOnly = e.readOnly,
+			r.subPath = e.subPath
+		ON MATCH SET
+			r.mountPath = e.mountPath,
+			r.readOnly = e.readOnly,
+			r.subPath = e.subPath
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateReferencesSpecEdgesQuery creates multiple REFERENCES_SPEC edges in a single query.
+func BatchCreateReferencesSpecEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":       e.FromUID,
+			"toUID":         e.ToUID,
+			"referenceType": e.Properties["referenceType"],
+			"fieldPath":     e.Properties["fieldPath"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (source:ResourceIdentity {uid: e.fromUID})
+		MATCH (target:ResourceIdentity {uid: e.toUID})
+		MERGE (source)-[r:REFERENCES_SPEC]->(target)
+		ON CREATE SET
+			r.referenceType = e.referenceType,
+			r.fieldPath = e.fieldPath
+		ON MATCH SET
+			r.referenceType = e.referenceType,
+			r.fieldPath = e.fieldPath
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateManagesEdgesQuery creates multiple MANAGES edges in a single query.
+func BatchCreateManagesEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":         e.FromUID,
+			"toUID":           e.ToUID,
+			"confidence":      e.Properties["confidence"],
+			"inferredAt":      e.Properties["inferredAt"],
+			"reason":          e.Properties["reason"],
+			"validationState": e.Properties["validationState"],
+			"lastValidated":   e.Properties["lastValidated"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (cr:ResourceIdentity {uid: e.fromUID})
+		MATCH (managed:ResourceIdentity {uid: e.toUID})
+		MERGE (cr)-[r:MANAGES]->(managed)
+		ON CREATE SET
+			r.confidence = e.confidence,
+			r.inferredAt = e.inferredAt,
+			r.reason = e.reason,
+			r.validationState = e.validationState,
+			r.lastValidated = e.lastValidated
+		ON MATCH SET
+			r.confidence = e.confidence,
+			r.inferredAt = e.inferredAt,
+			r.reason = e.reason,
+			r.validationState = e.validationState,
+			r.lastValidated = e.lastValidated
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateEmittedEventEdgesQuery creates multiple EMITTED_EVENT edges in a single query.
+func BatchCreateEmittedEventEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID": e.FromUID,
+			"toUID":   e.ToUID,
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (resource:ResourceIdentity {uid: e.fromUID})
+		MATCH (event:K8sEvent {id: e.toUID})
+		MERGE (resource)-[r:EMITTED_EVENT]->(event)
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateUsesServiceAccountEdgesQuery creates multiple USES_SERVICE_ACCOUNT edges in a single query.
+func BatchCreateUsesServiceAccountEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID": e.FromUID,
+			"toUID":   e.ToUID,
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (pod:ResourceIdentity {uid: e.fromUID})
+		MATCH (sa:ResourceIdentity {uid: e.toUID})
+		MERGE (pod)-[r:USES_SERVICE_ACCOUNT]->(sa)
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateBindsRoleEdgesQuery creates multiple BINDS_ROLE edges in a single query.
+func BatchCreateBindsRoleEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":  e.FromUID,
+			"toUID":    e.ToUID,
+			"roleKind": e.Properties["roleKind"],
+			"roleName": e.Properties["roleName"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (binding:ResourceIdentity {uid: e.fromUID})
+		MATCH (role:ResourceIdentity {uid: e.toUID})
+		MERGE (binding)-[r:BINDS_ROLE]->(role)
+		ON CREATE SET
+			r.roleKind = e.roleKind,
+			r.roleName = e.roleName
+		ON MATCH SET
+			r.roleKind = e.roleKind,
+			r.roleName = e.roleName
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateGrantsToEdgesQuery creates multiple GRANTS_TO edges in a single query.
+func BatchCreateGrantsToEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":     e.FromUID,
+			"toUID":       e.ToUID,
+			"subjectKind": e.Properties["subjectKind"],
+			"subjectName": e.Properties["subjectName"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (binding:ResourceIdentity {uid: e.fromUID})
+		MATCH (subject:ResourceIdentity {uid: e.toUID})
+		MERGE (binding)-[r:GRANTS_TO]->(subject)
+		ON CREATE SET
+			r.subjectKind = e.subjectKind,
+			r.subjectName = e.subjectName
+		ON MATCH SET
+			r.subjectKind = e.subjectKind,
+			r.subjectName = e.subjectName
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateCreatesObservedEdgesQuery creates multiple CREATES_OBSERVED edges in a single query.
+func BatchCreateCreatesObservedEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":    e.FromUID,
+			"toUID":      e.ToUID,
+			"observedAt": e.Properties["observedAt"],
+			"reason":     e.Properties["reason"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (cr:ResourceIdentity {uid: e.fromUID})
+		MATCH (resource:ResourceIdentity {uid: e.toUID})
+		MERGE (cr)-[r:CREATES_OBSERVED]->(resource)
+		ON CREATE SET
+			r.observedAt = e.observedAt,
+			r.reason = e.reason
+		ON MATCH SET
+			r.observedAt = e.observedAt,
+			r.reason = e.reason
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
+
+// BatchCreateTriggeredByEdgesQuery creates multiple TRIGGERED_BY edges in a single query.
+func BatchCreateTriggeredByEdgesQuery(edges []BatchEdgeParams) GraphQuery {
+	edgeParams := make([]map[string]interface{}, len(edges))
+	for i, e := range edges {
+		edgeParams[i] = map[string]interface{}{
+			"fromUID":    e.FromUID,
+			"toUID":      e.ToUID,
+			"confidence": e.Properties["confidence"],
+			"lagMs":      e.Properties["lagMs"],
+			"reason":     e.Properties["reason"],
+		}
+	}
+
+	query := `
+		UNWIND $edges AS e
+		MATCH (effect:ChangeEvent {id: e.fromUID})
+		MATCH (cause:ChangeEvent {id: e.toUID})
+		MERGE (effect)-[r:TRIGGERED_BY]->(cause)
+		ON CREATE SET
+			r.confidence = e.confidence,
+			r.lagMs = e.lagMs,
+			r.reason = e.reason
+		ON MATCH SET
+			r.confidence = e.confidence,
+			r.lagMs = e.lagMs,
+			r.reason = e.reason
+		RETURN count(r) as createdCount
+	`
+
+	return GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"edges": edgeParams,
+		},
+	}
+}
