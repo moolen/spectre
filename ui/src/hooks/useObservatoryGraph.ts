@@ -52,7 +52,8 @@ export function useObservatoryGraph(options: UseObservatoryGraphOptions): UseObs
   } = options;
 
   const [data, setData] = useState<ObservatoryGraphResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  // Start loading immediately if enabled (prevents flash of "no data" state)
+  const [isLoading, setIsLoading] = useState(enabled);
   const [error, setError] = useState<Error | null>(null);
 
   // Ref to track current fetch session to avoid race conditions
