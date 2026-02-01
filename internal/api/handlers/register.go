@@ -110,6 +110,13 @@ func RegisterHandlers(
 		router.HandleFunc("/v1/namespace-graph", withMethod(http.MethodGet, namespaceGraphHandler.Handle))
 	}
 
+	// Register observatory graph handler if graph service is available
+	if graphService != nil {
+		observatoryGraphHandler := NewObservatoryGraphHandler(graphService.GetObservatoryAnalyzer(), logger, tracer)
+		router.HandleFunc("/v1/observatory-graph", withMethod(http.MethodGet, observatoryGraphHandler.Handle))
+		logger.Info("Registered /v1/observatory-graph endpoint")
+	}
+
 	// Register import handler if graph pipeline is available
 	if graphPipeline != nil {
 		importHandler := NewImportHandler(graphPipeline, logger)

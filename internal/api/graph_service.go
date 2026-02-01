@@ -7,6 +7,7 @@ import (
 	"github.com/moolen/spectre/internal/analysis/anomaly"
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
+	observatorygraph "github.com/moolen/spectre/internal/analysis/observatory_graph"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/trace"
@@ -21,20 +22,22 @@ type GraphService struct {
 	tracer      trace.Tracer
 
 	// Wrapped analyzers
-	pathDiscoverer  *causalpaths.PathDiscoverer
-	anomalyDetector *anomaly.AnomalyDetector
-	namespaceAnalyzer *namespacegraph.Analyzer
+	pathDiscoverer      *causalpaths.PathDiscoverer
+	anomalyDetector     *anomaly.AnomalyDetector
+	namespaceAnalyzer   *namespacegraph.Analyzer
+	observatoryAnalyzer *observatorygraph.Analyzer
 }
 
 // NewGraphService creates a new GraphService instance
 func NewGraphService(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *GraphService {
 	return &GraphService{
-		graphClient:       graphClient,
-		logger:            logger,
-		tracer:            tracer,
-		pathDiscoverer:    causalpaths.NewPathDiscoverer(graphClient),
-		anomalyDetector:   anomaly.NewDetector(graphClient),
-		namespaceAnalyzer: namespacegraph.NewAnalyzer(graphClient),
+		graphClient:         graphClient,
+		logger:              logger,
+		tracer:              tracer,
+		pathDiscoverer:      causalpaths.NewPathDiscoverer(graphClient),
+		anomalyDetector:     anomaly.NewDetector(graphClient),
+		namespaceAnalyzer:   namespacegraph.NewAnalyzer(graphClient),
+		observatoryAnalyzer: observatorygraph.NewAnalyzer(graphClient),
 	}
 }
 
@@ -115,4 +118,36 @@ func (s *GraphService) AnalyzeNamespaceGraph(ctx context.Context, input namespac
 	s.logger.Debug("GraphService: Namespace graph has %d nodes and %d edges",
 		result.Metadata.NodeCount, result.Metadata.EdgeCount)
 	return result, nil
+}
+
+// AnalyzeObservatoryGraph analyzes Observatory data (SignalAnchors, Alerts, Dashboards, etc.)
+func (s *GraphService) AnalyzeObservatoryGraph(ctx context.Context, input observatorygraph.AnalyzeInput) (*observatorygraph.ObservatoryGraphResponse, error) {
+	// Add tracing span
+	var span trace.Span
+	if s.tracer != nil {
+		ctx, span = s.tracer.Start(ctx, "graph.analyzeObservatoryGraph")
+		defer span.End()
+	}
+
+	s.logger.Debug("GraphService: Analyzing observatory graph for integration=%s namespace=%s",
+		input.Integration, input.Namespace)
+
+	// Delegate to the observatory analyzer
+	result, err := s.observatoryAnalyzer.Analyze(ctx, input)
+	if err != nil {
+		if span != nil {
+			span.RecordError(err)
+		}
+		s.logger.Error("GraphService: Failed to analyze observatory graph: %v", err)
+		return nil, fmt.Errorf("observatory graph analysis failed: %w", err)
+	}
+
+	s.logger.Debug("GraphService: Observatory graph has %d nodes and %d edges",
+		result.Metadata.NodeCount, result.Metadata.EdgeCount)
+	return result, nil
+}
+
+// GetObservatoryAnalyzer returns the observatory analyzer for direct use
+func (s *GraphService) GetObservatoryAnalyzer() *observatorygraph.Analyzer {
+	return s.observatoryAnalyzer
 }

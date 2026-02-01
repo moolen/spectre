@@ -6,6 +6,7 @@ import SettingsPage from './pages/SettingsPage';
 import NamespaceGraphPage from './pages/NamespaceGraphPage';
 import AgentsPage from './pages/AgentsPage';
 import IntegrationsPage from './pages/IntegrationsPage';
+import ObservatoryPage from './pages/ObservatoryPage';
 import Sidebar from './components/Sidebar';
 
 const appContainerStyles: React.CSSProperties = {
@@ -41,6 +42,7 @@ function App() {
         <Routes>
           <Route path="/" element={<TimelinePage />} />
           <Route path="/graph" element={<NamespaceGraphPage />} />
+          <Route path="/observatory" element={<ObservatoryPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

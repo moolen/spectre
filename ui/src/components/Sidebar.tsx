@@ -31,6 +31,28 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    path: '/observatory',
+    label: 'Observatory',
+    icon: (
+      // Telescope icon for Observatory - simple refractor telescope
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        {/* Telescope tube */}
+        <line x1="4" y1="10" x2="18" y2="4" />
+        <line x1="4" y1="13" x2="18" y2="7" />
+        {/* Front lens */}
+        <line x1="18" y1="3" x2="19" y2="8" />
+        {/* Eyepiece */}
+        <line x1="3" y1="9" x2="4" y2="14" />
+        {/* Tripod mount */}
+        <circle cx="11" cy="12" r="1.5" fill="currentColor" />
+        {/* Tripod legs */}
+        <line x1="11" y1="13.5" x2="7" y2="21" />
+        <line x1="11" y1="13.5" x2="15" y2="21" />
+        <line x1="11" y1="13.5" x2="11" y2="18" />
+      </svg>
+    ),
+  },
+  {
     path: '/integrations',
     label: 'Integrations',
     icon: (
