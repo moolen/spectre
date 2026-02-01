@@ -280,13 +280,24 @@ func (l *ScrapeTargetLinker) syncAll(ctx context.Context) error {
 		}
 	}
 
-	// Step 4: Mark stale: links not seen in this sync
+	// Step 4: Link universal container metrics to ALL workloads
+	// Metrics like container_* from kubelet/cadvisor apply to all containers,
+	// not just those with direct scrape targets
+	universalCreated, err := l.linkUniversalMetrics(ctx)
+	if err != nil {
+		l.logger.Warn("Failed to link universal metrics: %v", err)
+	} else if universalCreated > 0 {
+		l.logger.Info("Linked universal container metrics: %d relationships created", universalCreated)
+		created += universalCreated
+	}
+
+	// Step 5: Mark stale: links not seen in this sync
 	staleCount, err := l.markStaleLinks(ctx, activeLinks)
 	if err != nil {
 		l.logger.Warn("Failed to mark stale links: %v", err)
 	}
 
-	// Step 5: GC: delete links stale beyond TTL
+	// Step 6: GC: delete links stale beyond TTL
 	deletedCount, err := l.gcStaleLinks(ctx)
 	if err != nil {
 		l.logger.Warn("Failed to GC stale links: %v", err)
@@ -485,6 +496,50 @@ func (l *ScrapeTargetLinker) createOrUpdateLink(ctx context.Context, _ string, w
 
 	// Check if new links were created
 	return result.Stats.RelationshipsCreated > 0, nil
+}
+
+// linkUniversalMetrics links SignalAnchors with "universal" container metrics to ALL workloads.
+// Metrics like container_* from kubelet/cadvisor are available for all pods, not just those
+// with direct scrape targets. This ensures comprehensive coverage.
+func (l *ScrapeTargetLinker) linkUniversalMetrics(ctx context.Context) (int, error) {
+	now := time.Now().UnixNano()
+
+	// Link container_* metrics (from kubelet/cadvisor) to ALL workloads.
+	// These metrics are available for every container in the cluster.
+	// Note: FalkorDB quirks - use NOT deleted, OR for kind matching, size() for empty strings
+	query := `
+		MATCH (s:SignalAnchor)
+		WHERE s.metric_name STARTS WITH 'container_'
+		  AND size(s.workload_namespace) = 0
+		  AND size(s.workload_name) = 0
+		MATCH (r:ResourceIdentity)
+		WHERE (r.kind = 'Deployment' OR r.kind = 'StatefulSet' OR r.kind = 'DaemonSet')
+		  AND NOT r.deleted
+		MERGE (s)-[m:MONITORS_WORKLOAD]->(r)
+		ON CREATE SET
+			m.first_linked = $now,
+			m.last_confirmed = $now,
+			m.stale = false,
+			m.source = 'universal_metric',
+			m.job = 'kubelet',
+			m.confidence = 0.6
+		ON MATCH SET
+			m.last_confirmed = $now,
+			m.stale = false
+		RETURN count(m) AS link_count
+	`
+
+	result, err := l.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
+		Query: query,
+		Parameters: map[string]interface{}{
+			"now": now,
+		},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("execute universal metrics link query: %w", err)
+	}
+
+	return result.Stats.RelationshipsCreated, nil
 }
 
 // linkSingleAnchor attempts to link a specific SignalAnchor to workloads.
