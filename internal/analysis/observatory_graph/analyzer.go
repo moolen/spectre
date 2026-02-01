@@ -94,40 +94,66 @@ func (a *Analyzer) querySignalAnchors(ctx context.Context, input AnalyzeInput, n
 		"limit": input.Limit,
 	}
 
-	// Build WHERE clause
+	// Build WHERE clause for direct SignalAnchor filtering
 	whereClause := "WHERE s.expires_at > $now"
 	if input.Integration != "" {
 		whereClause += " AND s.integration = $integration"
 		params["integration"] = input.Integration
 	}
-	if input.Namespace != "" {
-		whereClause += " AND s.workload_namespace = $namespace"
-		params["namespace"] = input.Namespace
-	}
-	if input.WorkloadName != "" {
-		whereClause += " AND s.workload_name = $workload"
-		params["workload"] = input.WorkloadName
-	}
+	// Note: namespace and workload filtering is handled differently below
+	// to support both direct SignalAnchor properties AND connected workloads
 
 	nodes := make([]Node, 0)
 	edges := make([]Edge, 0)
 
 	// Query 1: Get SignalAnchors
-	signalQuery := `
-		MATCH (s:SignalAnchor)
-		` + whereClause + `
-		RETURN
-			s.metric_name AS metric_name,
-			s.workload_namespace AS workload_namespace,
-			s.workload_name AS workload_name,
-			s.role AS role,
-			s.confidence AS confidence,
-			s.quality_score AS quality_score,
-			s.integration AS integration,
-			s.dashboard_uid AS dashboard_uid,
-			s.panel_id AS panel_id
-		LIMIT $limit
-	`
+	// When filtering by namespace/workload, we need to find SignalAnchors that either:
+	// - Have the namespace/workload set directly on the SignalAnchor, OR
+	// - Are connected to workloads in that namespace via MONITORS_WORKLOAD
+	var signalQuery string
+	if input.Namespace != "" || input.WorkloadName != "" {
+		// Use a query that includes SignalAnchors connected to matching workloads
+		workloadWhere := ""
+		if input.Namespace != "" {
+			workloadWhere += " AND w.namespace = $namespace"
+			params["namespace"] = input.Namespace
+		}
+		if input.WorkloadName != "" {
+			workloadWhere += " AND w.name = $workload"
+			params["workload"] = input.WorkloadName
+		}
+		signalQuery = `
+			MATCH (s:SignalAnchor)-[:MONITORS_WORKLOAD]->(w:ResourceIdentity)
+			` + whereClause + workloadWhere + `
+			RETURN DISTINCT
+				s.metric_name AS metric_name,
+				s.workload_namespace AS workload_namespace,
+				s.workload_name AS workload_name,
+				s.role AS role,
+				s.confidence AS confidence,
+				s.quality_score AS quality_score,
+				s.integration AS integration,
+				s.dashboard_uid AS dashboard_uid,
+				s.panel_id AS panel_id
+			LIMIT $limit
+		`
+	} else {
+		signalQuery = `
+			MATCH (s:SignalAnchor)
+			` + whereClause + `
+			RETURN
+				s.metric_name AS metric_name,
+				s.workload_namespace AS workload_namespace,
+				s.workload_name AS workload_name,
+				s.role AS role,
+				s.confidence AS confidence,
+				s.quality_score AS quality_score,
+				s.integration AS integration,
+				s.dashboard_uid AS dashboard_uid,
+				s.panel_id AS panel_id
+			LIMIT $limit
+		`
+	}
 
 	result, err := a.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
 		Query:      signalQuery,
@@ -177,9 +203,17 @@ func (a *Analyzer) querySignalAnchors(ctx context.Context, input AnalyzeInput, n
 	// Query 2: Get MONITORS_WORKLOAD relationships
 	// Use a higher limit for relationship queries since each SignalAnchor can have many relationships
 	relationshipLimit := input.Limit * RelationshipLimitMultiplier
+	// When filtering by namespace/workload, filter on the ResourceIdentity (workload) side
+	workloadWhereClause := whereClause
+	if input.Namespace != "" {
+		workloadWhereClause += " AND w.namespace = $namespace"
+	}
+	if input.WorkloadName != "" {
+		workloadWhereClause += " AND w.name = $workload"
+	}
 	workloadQuery := `
 		MATCH (s:SignalAnchor)-[:MONITORS_WORKLOAD]->(w:ResourceIdentity)
-		` + whereClause + `
+		` + workloadWhereClause + `
 		RETURN
 			s.metric_name AS metric_name,
 			s.workload_namespace AS workload_namespace,
