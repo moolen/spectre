@@ -29,16 +29,53 @@ const NODE_TYPE_OPTIONS: ObservatoryNodeType[] = [
 export default function ObservatoryPage() {
   const [selectedNode, setSelectedNode] = useState<D3ObservatoryNode | null>(null);
   const [nodeSearch, setNodeSearch] = useState<string>('');
-  const [namespace, setNamespace] = useState<string>('');
+  const [namespace, setNamespace] = useState<string | null>(null);
+  const [workload, setWorkload] = useState<string | null>(null);
   const [includeBaselines, setIncludeBaselines] = useState(false);
   const [selectedNodeTypes, setSelectedNodeTypes] = useState<string[]>([]);
   const graphRef = useRef<ObservatoryGraphHandle>(null);
 
   const { data, isLoading, error, refetch } = useObservatoryGraph({
     namespace: namespace || undefined,
+    workload: workload || undefined,
     includeBaselines,
     limit: 200,
   });
+
+  // Extract available namespaces from Workload nodes
+  const availableNamespaces = useMemo(() => {
+    if (!data?.graph?.nodes) return [];
+    const namespaces = new Set<string>();
+    for (const node of data.graph.nodes) {
+      if (node.type === 'Workload' && node.properties?.namespace) {
+        namespaces.add(node.properties.namespace as string);
+      }
+    }
+    return Array.from(namespaces).sort();
+  }, [data]);
+
+  // Extract available workloads for the selected namespace from Workload nodes
+  const availableWorkloads = useMemo(() => {
+    if (!data?.graph?.nodes) return [];
+    const workloads = new Set<string>();
+    for (const node of data.graph.nodes) {
+      if (node.type === 'Workload' && node.label) {
+        // If namespace is selected, only show workloads for that namespace
+        if (!namespace || node.properties?.namespace === namespace) {
+          workloads.add(node.label);
+        }
+      }
+    }
+    return Array.from(workloads).sort();
+  }, [data, namespace]);
+
+  // Reset workload when namespace changes
+  const handleNamespaceChange = useCallback((value: string | string[] | null) => {
+    const newNamespace = value as string | null;
+    setNamespace(newNamespace);
+    // Reset workload filter when namespace changes
+    setWorkload(null);
+  }, []);
 
   const handleNodeClick = useCallback((node: D3ObservatoryNode | null) => {
     setSelectedNode(node);
@@ -95,12 +132,21 @@ export default function ObservatoryPage() {
           placeholder="Search nodes..."
           className="px-3 py-1.5 bg-[#111111] border border-[#2a2a2a] rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 w-48"
         />
-        <input
-          type="text"
-          value={namespace}
-          onChange={e => setNamespace(e.target.value)}
-          placeholder="Filter by namespace..."
-          className="px-3 py-1.5 bg-[#111111] border border-[#2a2a2a] rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 w-48"
+        <SelectDropdown
+          label="All Namespaces"
+          options={availableNamespaces}
+          selected={namespace}
+          onChange={handleNamespaceChange}
+          multiple={false}
+          minWidth="160px"
+        />
+        <SelectDropdown
+          label="All Workloads"
+          options={availableWorkloads}
+          selected={workload}
+          onChange={(value) => setWorkload(value as string | null)}
+          multiple={false}
+          minWidth="160px"
         />
         <SelectDropdown
           label="All Types"
