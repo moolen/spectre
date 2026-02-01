@@ -106,16 +106,17 @@ graph:
 
       # AOF (Append Only File) persistence - more durable than RDB snapshots
       # AOF logs every write operation, making it recoverable even after crashes
+      # NOTE: Disabled due to FalkorDB crash during AOF replay - using RDB only
       aof:
-        enabled: true
+        enabled: false
         # Sync policy: always (safest, slowest), everysec (recommended), no (fastest, riskiest)
         fsync: "everysec"
 
       # RDB snapshot configuration
       rdb:
-        # Save RDB snapshot: "seconds changes" (e.g., save after 300s if 10+ changes)
-        # Empty string disables RDB saves (use with AOF for durability)
-        save: "300 10"
+        # Save RDB snapshot: "seconds changes" (e.g., save after 60s if 100+ changes)
+        # More frequent saves since AOF is disabled
+        save: "60 100 300 10"
 
     # Health check configuration
     # Note: FalkorDB can take time to initialize, especially with persistence enabled
@@ -303,7 +304,7 @@ startupProbe:
 podAnnotations: {}
 podLabels: {}
 priorityClassName: ""
-terminationGracePeriodSeconds: 15
+terminationGracePeriodSeconds: 60
 dnsPolicy: ClusterFirst
 dnsConfig: {}
 hostAliases: []

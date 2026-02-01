@@ -208,6 +208,11 @@ spec:
         readinessProbe:
           {{- omit .Values.graph.falkordb.readinessProbe "enabled" | toYaml | nindent 10 }}
         {{- end }}
+        # Graceful shutdown: SHUTDOWN SAVE persists data before exit
+        lifecycle:
+          preStop:
+            exec:
+              command: ["redis-cli", "SHUTDOWN", "SAVE"]
         resources:
           {{- toYaml .Values.graph.falkordb.resources | nindent 12 }}
       {{- end }}
