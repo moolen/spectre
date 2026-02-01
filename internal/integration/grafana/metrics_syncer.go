@@ -282,15 +282,20 @@ func (ms *MetricsSyncer) upsertSingleAnchor(ctx context.Context, match MatchResu
 	// Convert signal role from curated metric
 	role := string(match.CuratedMetric.ToSignalRole())
 
-	// MERGE on composite key: (metric_name, workload_namespace, workload_name)
-	// Global anchors use empty strings for workload fields
+	// Use composite uid for MERGE to avoid FalkorDB issues with empty string matching
+	// Format: metric_name:workload_namespace:workload_name (matches Observatory graph ID format)
+	workloadNamespace := "" // Global anchor
+	workloadName := ""      // Global anchor
+	uid := match.GrafanaMetric + ":" + workloadNamespace + ":" + workloadName
+
+	// MERGE on composite uid to ensure uniqueness
+	// FalkorDB has issues with MERGE on multiple properties when some are empty strings
 	query := `
-		MERGE (s:SignalAnchor {
-			metric_name: $metricName,
-			workload_namespace: $workloadNamespace,
-			workload_name: $workloadName
-		})
+		MERGE (s:SignalAnchor {uid: $uid})
 		ON CREATE SET
+			s.metric_name = $metricName,
+			s.workload_namespace = $workloadNamespace,
+			s.workload_name = $workloadName,
 			s.first_seen = $now,
 			s.role = $role,
 			s.confidence = $confidence,
@@ -314,9 +319,10 @@ func (ms *MetricsSyncer) upsertSingleAnchor(ctx context.Context, match MatchResu
 	`
 
 	params := map[string]interface{}{
+		"uid":               uid,
 		"metricName":        match.GrafanaMetric,
-		"workloadNamespace": "", // Global anchor
-		"workloadName":      "", // Global anchor
+		"workloadNamespace": workloadNamespace,
+		"workloadName":      workloadName,
 		"role":              role,
 		"confidence":        match.CuratedMetric.Confidence,
 		"qualityScore":      match.CuratedMetric.Importance,

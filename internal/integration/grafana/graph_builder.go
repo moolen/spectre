@@ -882,16 +882,18 @@ func (gb *GraphBuilder) BuildSignalGraph(ctx context.Context, signals []SignalAn
 	gb.logger.Debug("Building signal graph for %d signals", len(signals))
 
 	for _, signal := range signals {
-		// Create SignalAnchor node with MERGE upsert
-		// Composite key: metric_name + workload_namespace + workload_name + integration
+		// Use composite uid for MERGE to avoid FalkorDB issues with empty string matching
+		// Format: metric_name:workload_namespace:workload_name (matches Observatory graph ID format)
+		uid := signal.MetricName + ":" + signal.WorkloadNamespace + ":" + signal.WorkloadName
+
+		// Create SignalAnchor node with MERGE upsert on composite uid
 		signalQuery := `
-			MERGE (s:SignalAnchor {
-				metric_name: $metric_name,
-				workload_namespace: $workload_namespace,
-				workload_name: $workload_name,
-				integration: $integration
-			})
+			MERGE (s:SignalAnchor {uid: $uid})
 			ON CREATE SET
+				s.metric_name = $metric_name,
+				s.workload_namespace = $workload_namespace,
+				s.workload_name = $workload_name,
+				s.integration = $integration,
 				s.role = $role,
 				s.confidence = $confidence,
 				s.quality_score = $quality_score,
@@ -902,6 +904,7 @@ func (gb *GraphBuilder) BuildSignalGraph(ctx context.Context, signals []SignalAn
 				s.last_seen = $last_seen,
 				s.expires_at = $expires_at
 			ON MATCH SET
+				s.integration = $integration,
 				s.role = $role,
 				s.confidence = $confidence,
 				s.quality_score = $quality_score,
@@ -915,6 +918,7 @@ func (gb *GraphBuilder) BuildSignalGraph(ctx context.Context, signals []SignalAn
 		_, err := gb.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
 			Query: signalQuery,
 			Parameters: map[string]interface{}{
+				"uid":                 uid,
 				"metric_name":         signal.MetricName,
 				"workload_namespace":  signal.WorkloadNamespace,
 				"workload_name":       signal.WorkloadName,

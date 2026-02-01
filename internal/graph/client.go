@@ -497,7 +497,9 @@ func (c *falkorClient) InitializeSchema(ctx context.Context) error {
 		// Dashboard indexes
 		"CREATE INDEX FOR (n:Dashboard) ON (n.uid)",
 		// SignalAnchor indexes (Observatory)
-		// Composite index on metric_name + workload_namespace + workload_name for MERGE performance
+		// Primary index on uid for MERGE - format: metric_name:workload_namespace:workload_name
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.uid)",
+		// Additional indexes for query performance
 		"CREATE INDEX FOR (n:SignalAnchor) ON (n.metric_name)",
 		"CREATE INDEX FOR (n:SignalAnchor) ON (n.workload_namespace)",
 		"CREATE INDEX FOR (n:SignalAnchor) ON (n.workload_name)",
