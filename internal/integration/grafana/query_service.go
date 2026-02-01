@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moolen/spectre/internal/graph"
@@ -56,6 +57,10 @@ type GrafanaQueryService struct {
 	grafanaClient *GrafanaClient
 	graphClient   graph.Client
 	logger        *logging.Logger
+
+	// Cached Prometheus datasource UID for fallback resolution
+	promDatasourceMu  sync.Mutex
+	promDatasourceUID string
 }
 
 // NewGrafanaQueryService creates a new query service.
@@ -102,7 +107,7 @@ func (s *GrafanaQueryService) ExecuteDashboard(
 	}
 
 	// Parse panels from dashboard JSON
-	panels, err := s.extractPanels(dashboardJSON)
+	panels, err := s.extractPanels(ctx, dashboardJSON)
 	if err != nil {
 		return nil, fmt.Errorf("extract panels from dashboard %s: %w", dashboardUID, err)
 	}
@@ -233,7 +238,7 @@ func (s *GrafanaQueryService) fetchDashboardFromGraph(ctx context.Context, uid s
 
 // extractPanels parses dashboard JSON and extracts panels with queries.
 // Also resolves variable-based datasources to actual UIDs.
-func (s *GrafanaQueryService) extractPanels(dashboardJSON map[string]interface{}) ([]dashboardPanel, error) {
+func (s *GrafanaQueryService) extractPanels(ctx context.Context, dashboardJSON map[string]interface{}) ([]dashboardPanel, error) {
 	panels := make([]dashboardPanel, 0)
 
 	// Extract default datasource UID from dashboard templating
@@ -254,7 +259,7 @@ func (s *GrafanaQueryService) extractPanels(dashboardJSON map[string]interface{}
 		panel := s.extractPanelInfo(panelMap)
 		if panel != nil && len(panel.Targets) > 0 {
 			// Resolve variable-based datasource
-			panel.DatasourceUID = s.resolveDatasourceUID(panel.DatasourceUID, defaultDatasourceUID)
+			panel.DatasourceUID = s.resolveDatasourceUID(ctx, panel.DatasourceUID, defaultDatasourceUID)
 			if panel.DatasourceUID != "" {
 				panels = append(panels, *panel)
 			}
@@ -270,7 +275,7 @@ func (s *GrafanaQueryService) extractPanels(dashboardJSON map[string]interface{}
 				nestedPanel := s.extractPanelInfo(nestedMap)
 				if nestedPanel != nil && len(nestedPanel.Targets) > 0 {
 					// Resolve variable-based datasource
-					nestedPanel.DatasourceUID = s.resolveDatasourceUID(nestedPanel.DatasourceUID, defaultDatasourceUID)
+					nestedPanel.DatasourceUID = s.resolveDatasourceUID(ctx, nestedPanel.DatasourceUID, defaultDatasourceUID)
 					if nestedPanel.DatasourceUID != "" {
 						panels = append(panels, *nestedPanel)
 					}
@@ -345,17 +350,78 @@ func (s *GrafanaQueryService) extractDefaultDatasource(dashboardJSON map[string]
 
 // resolveDatasourceUID resolves variable-based datasources to actual UIDs.
 // Returns the original UID if not a variable, or the default if it is.
-func (s *GrafanaQueryService) resolveDatasourceUID(uid string, defaultUID string) string {
-	// If UID is empty or a variable reference, use the default
-	if uid == "" || strings.HasPrefix(uid, "$") || strings.HasPrefix(uid, "${") {
-		if defaultUID != "" {
+// Falls back to querying Grafana API for a Prometheus datasource if needed.
+func (s *GrafanaQueryService) resolveDatasourceUID(ctx context.Context, uid string, defaultUID string) string {
+	// Check if a UID needs resolution (is not a real datasource UID)
+	needsResolution := func(u string) bool {
+		return u == "" ||
+			u == "default" ||
+			strings.HasPrefix(u, "$") ||
+			strings.HasPrefix(u, "${") ||
+			strings.HasPrefix(u, "-- ")
+	}
+
+	if needsResolution(uid) {
+		// Check if defaultUID is a valid (non-special) UID
+		if defaultUID != "" && !needsResolution(defaultUID) {
 			return defaultUID
 		}
+		// Try to get a Prometheus datasource from Grafana API
+		if promUID := s.getPrometheusDatasourceUID(ctx); promUID != "" {
+			return promUID
+		}
 		// Log that we couldn't resolve the datasource
-		s.logger.Debug("Could not resolve datasource variable %q, no default available", uid)
+		s.logger.Debug("Could not resolve datasource %q, no default or fallback available", uid)
 		return ""
 	}
 	return uid
+}
+
+// getPrometheusDatasourceUID fetches and caches a Prometheus datasource UID from Grafana.
+// It first looks for the default Prometheus datasource, then falls back to any Prometheus datasource.
+// Uses a mutex to allow retries if the initial lookup fails.
+func (s *GrafanaQueryService) getPrometheusDatasourceUID(ctx context.Context) string {
+	s.promDatasourceMu.Lock()
+	defer s.promDatasourceMu.Unlock()
+
+	// Return cached value if available
+	if s.promDatasourceUID != "" {
+		return s.promDatasourceUID
+	}
+
+	datasources, err := s.grafanaClient.ListDatasources(ctx)
+	if err != nil {
+		s.logger.Debug("Failed to list datasources for fallback resolution: %v", err)
+		return ""
+	}
+
+	// First pass: look for default Prometheus datasource
+	for _, ds := range datasources {
+		dsType, _ := ds["type"].(string)
+		isDefault, _ := ds["isDefault"].(bool)
+		if dsType == "prometheus" && isDefault {
+			if uid, ok := ds["uid"].(string); ok {
+				s.promDatasourceUID = uid
+				s.logger.Debug("Using default Prometheus datasource for variable resolution: %s", uid)
+				return uid
+			}
+		}
+	}
+
+	// Second pass: find any Prometheus datasource
+	for _, ds := range datasources {
+		dsType, _ := ds["type"].(string)
+		if dsType == "prometheus" {
+			if uid, ok := ds["uid"].(string); ok {
+				s.promDatasourceUID = uid
+				s.logger.Debug("Using Prometheus datasource for variable resolution: %s", uid)
+				return uid
+			}
+		}
+	}
+
+	s.logger.Warn("No Prometheus datasource found in Grafana for variable resolution")
+	return ""
 }
 
 // extractPanelInfo extracts panel information from a panel map.
