@@ -107,11 +107,12 @@ func (m *AlertSignalMatcher) FindMatchingSignals(ctx context.Context, alertUID s
 	m.logger.Debug("Extracted %d metric names from alert %s: %v", len(metricNames), alertUID, metricNames)
 
 	// Query for matching SignalAnchors with workload context
+	// Note: FalkorDB quirk - use NOT r.deleted instead of r.deleted = false
 	query := `
 UNWIND $metricNames AS metricName
 MATCH (s:SignalAnchor {metric_name: metricName})-[mw:MONITORS_WORKLOAD]->(r:ResourceIdentity)
-WHERE r.deleted = false
-  AND mw.stale = false
+WHERE NOT r.deleted
+  AND NOT mw.stale
 RETURN DISTINCT
     s.metric_name AS metricName,
     s.workload_namespace AS workloadNamespace,

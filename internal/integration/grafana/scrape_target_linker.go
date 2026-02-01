@@ -362,11 +362,13 @@ func (l *ScrapeTargetLinker) findWorkloadByLabel(ctx context.Context, namespace,
 		k8sLabelKey = "app.kubernetes.io/instance"
 	}
 
+	// Note: FalkorDB quirk - use NOT r.deleted instead of r.deleted = false
+	// Also use OR chain instead of IN for array comparison
 	query := `
 		MATCH (r:ResourceIdentity)
 		WHERE r.namespace = $namespace
-		  AND r.kind IN ['Deployment', 'StatefulSet', 'DaemonSet']
-		  AND r.deleted = false
+		  AND (r.kind = 'Deployment' OR r.kind = 'StatefulSet' OR r.kind = 'DaemonSet')
+		  AND NOT r.deleted
 		  AND r.labels[$labelKey] = $labelValue
 		RETURN r.uid AS uid, r.kind AS kind, r.name AS name
 		LIMIT 1
@@ -401,15 +403,16 @@ func (l *ScrapeTargetLinker) findWorkloadByLabel(ctx context.Context, namespace,
 func (l *ScrapeTargetLinker) resolvePodOwner(ctx context.Context, namespace, podName string) (*ResourceIdentityRef, error) {
 	// Find Pod, then traverse OWNS edge backward to find Deployment/StatefulSet/DaemonSet
 	// The *1..2 handles ReplicaSet intermediate ownership (Deployment -> ReplicaSet -> Pod)
+	// Note: FalkorDB quirk - use NOT deleted instead of deleted = false
+	// Also use OR chain instead of IN for array comparison
 	query := `
-		MATCH (owner:ResourceIdentity)-[:OWNS*1..2]->(pod:ResourceIdentity {
-			kind: 'Pod',
-			namespace: $namespace,
-			name: $podName,
-			deleted: false
-		})
-		WHERE owner.kind IN ['Deployment', 'StatefulSet', 'DaemonSet']
-		  AND owner.deleted = false
+		MATCH (owner:ResourceIdentity)-[:OWNS*1..2]->(pod:ResourceIdentity)
+		WHERE pod.kind = 'Pod'
+		  AND pod.namespace = $namespace
+		  AND pod.name = $podName
+		  AND NOT pod.deleted
+		  AND (owner.kind = 'Deployment' OR owner.kind = 'StatefulSet' OR owner.kind = 'DaemonSet')
+		  AND NOT owner.deleted
 		RETURN owner.uid AS uid, owner.kind AS kind, owner.name AS name
 		LIMIT 1
 	`
@@ -445,10 +448,11 @@ func (l *ScrapeTargetLinker) createOrUpdateLink(ctx context.Context, _ string, w
 
 	// Link all global SignalAnchors (workload_namespace="") to the resolved workload
 	// This connects curated metrics to their associated workloads
+	// Note: FalkorDB requires size() = 0 for empty string comparison, not = ''
 	query := `
 		MATCH (s:SignalAnchor)
-		WHERE s.workload_namespace = ''
-		  AND s.workload_name = ''
+		WHERE size(s.workload_namespace) = 0
+		  AND size(s.workload_name) = 0
 		MATCH (r:ResourceIdentity {uid: $workloadUID})
 		MERGE (s)-[m:MONITORS_WORKLOAD]->(r)
 		ON CREATE SET
