@@ -213,8 +213,9 @@ func (a *Analyzer) querySignalAnchors(ctx context.Context, input AnalyzeInput, n
 			wl := getStringValue(wColIdx, row, "workload_name")
 			signalKey := fmt.Sprintf("%s:%s:%s", metricName, ns, wl)
 			signalID := signalIDs[signalKey]
+			// Skip if the SignalAnchor wasn't included in the first query (due to LIMIT)
 			if signalID == "" {
-				signalID = fmt.Sprintf("signal:%s", signalKey)
+				continue
 			}
 
 			workloadUID := getStringValue(wColIdx, row, "workload_uid")
@@ -271,8 +272,9 @@ func (a *Analyzer) querySignalAnchors(ctx context.Context, input AnalyzeInput, n
 			wl := getStringValue(aColIdx, row, "workload_name")
 			signalKey := fmt.Sprintf("%s:%s:%s", metricName, ns, wl)
 			signalID := signalIDs[signalKey]
+			// Skip if the SignalAnchor wasn't included in the first query (due to LIMIT)
 			if signalID == "" {
-				signalID = fmt.Sprintf("signal:%s", signalKey)
+				continue
 			}
 
 			alertUID := getStringValue(aColIdx, row, "alert_uid")
@@ -331,8 +333,9 @@ func (a *Analyzer) querySignalAnchors(ctx context.Context, input AnalyzeInput, n
 				wl := getStringValue(bColIdx, row, "workload_name")
 				signalKey := fmt.Sprintf("%s:%s:%s", metricName, ns, wl)
 				signalID := signalIDs[signalKey]
+				// Skip if the SignalAnchor wasn't included in the first query (due to LIMIT)
 				if signalID == "" {
-					signalID = fmt.Sprintf("signal:%s", signalKey)
+					continue
 				}
 
 				baselineMetric := getStringValue(bColIdx, row, "baseline_metric")
