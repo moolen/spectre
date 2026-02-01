@@ -68,6 +68,9 @@ export const ObservatoryGraph = forwardRef<ObservatoryGraphHandle, ObservatoryGr
     const simulationRef = useRef<d3.Simulation<D3ObservatoryNode, D3ObservatoryLink> | null>(null);
     const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 
+    // Track the minimum zoom scale (set by fitToView)
+    const minScaleRef = useRef<number>(0.1);
+
     // Track if the graph has been initialized
     const isInitializedRef = useRef(false);
 
@@ -253,6 +256,11 @@ export const ObservatoryGraph = forwardRef<ObservatoryGraphHandle, ObservatoryGr
               height / graphHeight,
               1.5
             ) * 0.9;
+
+          // Update the minimum scale to the fit-to-view scale
+          // This prevents zoom out beyond fit-to-view and fixes the jump issue
+          minScaleRef.current = scale;
+          zoomRef.current.scaleExtent([scale, 4]);
 
           const centerX = (minX + maxX) / 2;
           const centerY = (minY + maxY) / 2;
