@@ -14,6 +14,10 @@ const DefaultLimit = 100
 // MaxLimit is the maximum allowed limit
 const MaxLimit = 500
 
+// RelationshipLimitMultiplier increases the limit for relationship queries
+// since each SignalAnchor can have many relationships (e.g., universal metrics)
+const RelationshipLimitMultiplier = 50
+
 // Analyzer provides observatory graph analysis functionality
 type Analyzer struct {
 	graphClient graph.Client
@@ -171,6 +175,8 @@ func (a *Analyzer) querySignalAnchors(ctx context.Context, input AnalyzeInput, n
 	}
 
 	// Query 2: Get MONITORS_WORKLOAD relationships
+	// Use a higher limit for relationship queries since each SignalAnchor can have many relationships
+	relationshipLimit := input.Limit * RelationshipLimitMultiplier
 	workloadQuery := `
 		MATCH (s:SignalAnchor)-[:MONITORS_WORKLOAD]->(w:ResourceIdentity)
 		` + whereClause + `
@@ -182,12 +188,18 @@ func (a *Analyzer) querySignalAnchors(ctx context.Context, input AnalyzeInput, n
 			w.kind AS workload_kind,
 			w.name AS workload_name_full,
 			w.namespace AS workload_ns_full
-		LIMIT $limit
+		LIMIT $relationshipLimit
 	`
+
+	workloadParams := make(map[string]any)
+	for k, v := range params {
+		workloadParams[k] = v
+	}
+	workloadParams["relationshipLimit"] = relationshipLimit
 
 	workloadResult, err := a.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
 		Query:      workloadQuery,
-		Parameters: params,
+		Parameters: workloadParams,
 	})
 	if err == nil && workloadResult != nil {
 		wColIdx := make(map[string]int)

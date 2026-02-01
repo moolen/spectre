@@ -75,7 +75,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     );
   }, [options, searchQuery, sortOptions, formatOption]);
 
-  // Handle click outside
+  // Handle click outside - use capture phase to catch events before D3/SVG handlers
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -84,8 +84,8 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         setSearchQuery('');
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, []);
 
   // Focus search input when dropdown opens

@@ -28,14 +28,13 @@ const NODE_TYPE_OPTIONS: ObservatoryNodeType[] = [
  */
 export default function ObservatoryPage() {
   const [selectedNode, setSelectedNode] = useState<D3ObservatoryNode | null>(null);
-  const [integration, setIntegration] = useState<string>('');
+  const [nodeSearch, setNodeSearch] = useState<string>('');
   const [namespace, setNamespace] = useState<string>('');
   const [includeBaselines, setIncludeBaselines] = useState(false);
   const [selectedNodeTypes, setSelectedNodeTypes] = useState<string[]>([]);
   const graphRef = useRef<ObservatoryGraphHandle>(null);
 
   const { data, isLoading, error, refetch } = useObservatoryGraph({
-    integration: integration || undefined,
     namespace: namespace || undefined,
     includeBaselines,
     limit: 200,
@@ -45,19 +44,25 @@ export default function ObservatoryPage() {
     setSelectedNode(node);
   }, []);
 
-  // Filter graph data based on selected node types
+  // Filter graph data based on selected node types and search query
   const filteredData = useMemo(() => {
     if (!data) return null;
 
-    // If no types selected, show all
-    if (selectedNodeTypes.length === 0) {
+    const searchLower = nodeSearch.toLowerCase().trim();
+    const hasTypeFilter = selectedNodeTypes.length > 0;
+    const hasSearchFilter = searchLower.length > 0;
+
+    // If no filters, show all
+    if (!hasTypeFilter && !hasSearchFilter) {
       return data;
     }
 
-    // Filter nodes by type
-    const visibleNodes = data.graph.nodes.filter(node =>
-      selectedNodeTypes.includes(node.type)
-    );
+    // Filter nodes by type and/or search query
+    const visibleNodes = data.graph.nodes.filter(node => {
+      const matchesType = !hasTypeFilter || selectedNodeTypes.includes(node.type);
+      const matchesSearch = !hasSearchFilter || node.label.toLowerCase().includes(searchLower);
+      return matchesType && matchesSearch;
+    });
     const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
 
     // Filter edges to only include those between visible nodes
@@ -77,32 +82,26 @@ export default function ObservatoryPage() {
         edgeCount: visibleEdges.length,
       },
     };
-  }, [data, selectedNodeTypes]);
+  }, [data, selectedNodeTypes, nodeSearch]);
 
   return (
     <div className="h-full flex flex-col bg-[#111111]">
       {/* Control bar */}
       <div className="px-4 py-3 border-b border-[#2a2a2a] bg-[#1a1a1a] flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-400">Integration:</label>
-          <input
-            type="text"
-            value={integration}
-            onChange={e => setIntegration(e.target.value)}
-            placeholder="All integrations"
-            className="px-3 py-1.5 bg-[#111111] border border-[#2a2a2a] rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 w-40"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-400">Namespace:</label>
-          <input
-            type="text"
-            value={namespace}
-            onChange={e => setNamespace(e.target.value)}
-            placeholder="All namespaces"
-            className="px-3 py-1.5 bg-[#111111] border border-[#2a2a2a] rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 w-40"
-          />
-        </div>
+        <input
+          type="text"
+          value={nodeSearch}
+          onChange={e => setNodeSearch(e.target.value)}
+          placeholder="Search nodes..."
+          className="px-3 py-1.5 bg-[#111111] border border-[#2a2a2a] rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 w-48"
+        />
+        <input
+          type="text"
+          value={namespace}
+          onChange={e => setNamespace(e.target.value)}
+          placeholder="Filter by namespace..."
+          className="px-3 py-1.5 bg-[#111111] border border-[#2a2a2a] rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 w-48"
+        />
         <SelectDropdown
           label="All Types"
           options={NODE_TYPE_OPTIONS}
@@ -159,11 +158,11 @@ export default function ObservatoryPage() {
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
                 <div className="text-4xl mb-4">🔭</div>
-                {selectedNodeTypes.length > 0 ? (
+                {(selectedNodeTypes.length > 0 || nodeSearch.trim()) ? (
                   <>
                     <h3 className="text-gray-400 font-semibold mb-2">No matching nodes</h3>
                     <p className="text-gray-500 text-sm max-w-md">
-                      No nodes match the selected type filter. Try selecting different types or clear the filter.
+                      No nodes match the current filters. Try adjusting your search or type selection.
                     </p>
                   </>
                 ) : (
@@ -214,7 +213,7 @@ export default function ObservatoryPage() {
           {filteredData && (
             <>
               {filteredData.metadata.nodeCount} nodes, {filteredData.metadata.edgeCount} edges
-              {selectedNodeTypes.length > 0 && data && (
+              {(selectedNodeTypes.length > 0 || nodeSearch.trim()) && data && (
                 <span className="text-gray-600 ml-1">
                   (filtered from {data.metadata.nodeCount} total)
                 </span>

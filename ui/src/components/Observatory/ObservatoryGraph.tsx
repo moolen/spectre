@@ -365,9 +365,15 @@ export const ObservatoryGraph = forwardRef<ObservatoryGraphHandle, ObservatoryGr
         onNodeClickRef.current?.(null as any);
       });
 
-      // Create force simulation
+      // Create force simulation (matching NamespaceGraph parameters for consistent feel)
       const simulation = d3
         .forceSimulation<D3ObservatoryNode>(nodes)
+        .force('charge', d3.forceManyBody<D3ObservatoryNode>().strength(-800))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force(
+          'collision',
+          d3.forceCollide<D3ObservatoryNode>().radius(d => getNodeRadius(d) * COLLISION_MULTIPLIER)
+        )
         .force(
           'link',
           d3
@@ -375,12 +381,6 @@ export const ObservatoryGraph = forwardRef<ObservatoryGraphHandle, ObservatoryGr
             .id(d => d.id)
             .distance(150)
             .strength(0.3)
-        )
-        .force('charge', d3.forceManyBody().strength(-600))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force(
-          'collision',
-          d3.forceCollide<D3ObservatoryNode>().radius(d => getNodeRadius(d) * COLLISION_MULTIPLIER)
         );
 
       simulationRef.current = simulation;
@@ -415,14 +415,13 @@ export const ObservatoryGraph = forwardRef<ObservatoryGraphHandle, ObservatoryGr
       nodeSelection.exit().remove();
 
       const nodeEnter = renderNodeGroup(nodeSelection.enter());
+      const allNodes = nodeEnter.merge(nodeSelection);
 
-      // Apply drag behavior
+      // Apply drag behavior to all nodes (not just newly entered ones)
       const drag = createDragBehavior();
       if (drag) {
-        nodeEnter.call(drag);
+        allNodes.call(drag);
       }
-
-      const allNodes = nodeEnter.merge(nodeSelection);
 
       // Update positions
       simulation.on('tick', () => {
