@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { SettingsProvider } from './hooks/useSettings';
+import { BetaFeaturesProvider } from './contexts/BetaFeaturesContext';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -15,9 +16,11 @@ const baseName = (import.meta.env.BASE_URL ?? '/') as string;
 root.render(
   <React.StrictMode>
     <BrowserRouter basename={baseName}>
-      <SettingsProvider>
-        <App />
-      </SettingsProvider>
+      <BetaFeaturesProvider>
+        <SettingsProvider>
+          <App />
+        </SettingsProvider>
+      </BetaFeaturesProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

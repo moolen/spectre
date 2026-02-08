@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import TimelinePage from './pages/TimelinePage';
 import SettingsPage from './pages/SettingsPage';
@@ -8,6 +8,16 @@ import AgentsPage from './pages/AgentsPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import ObservatoryPage from './pages/ObservatoryPage';
 import Sidebar from './components/Sidebar';
+import { useBetaFeatures } from './contexts/BetaFeaturesContext';
+
+// Wrapper component for beta-only routes
+function BetaRoute({ children }: { children: React.ReactNode }) {
+  const isBetaEnabled = useBetaFeatures();
+  if (!isBetaEnabled) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
 
 const appContainerStyles: React.CSSProperties = {
   display: 'flex',
@@ -57,9 +67,9 @@ function App() {
         <Routes>
           <Route path="/" element={<TimelinePage />} />
           <Route path="/graph" element={<NamespaceGraphPage />} />
-          <Route path="/observatory" element={<ObservatoryPage />} />
+          <Route path="/observatory" element={<BetaRoute><ObservatoryPage /></BetaRoute>} />
           <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/integrations" element={<IntegrationsPage />} />
+          <Route path="/integrations" element={<BetaRoute><IntegrationsPage /></BetaRoute>} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
         </main>

@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useBetaFeatures } from '../contexts/BetaFeaturesContext';
 
 // Sidebar navigation component with auto-collapse behavior
 
@@ -11,6 +12,7 @@ interface NavItem {
   path: string;
   label: string;
   icon: React.ReactNode;
+  beta?: boolean; // If true, only shown when ?beta=true is in URL
 }
 
 const navItems: NavItem[] = [
@@ -33,6 +35,7 @@ const navItems: NavItem[] = [
   {
     path: '/observatory',
     label: 'Observatory',
+    beta: true, // Only visible with ?beta=true
     icon: (
       // Telescope icon for Observatory - simple refractor telescope
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -55,6 +58,7 @@ const navItems: NavItem[] = [
   {
     path: '/integrations',
     label: 'Integrations',
+    beta: true, // Only visible with ?beta=true
     icon: (
       // Puzzle piece / plug icon for integrations
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -232,6 +236,13 @@ const sidebarCSS = `
 `;
 
 export function Sidebar({ onHoverChange }: SidebarProps) {
+  const isBetaEnabled = useBetaFeatures();
+
+  // Filter nav items based on beta flag
+  const visibleNavItems = useMemo(() => {
+    return navItems.filter(item => !item.beta || isBetaEnabled);
+  }, [isBetaEnabled]);
+
   return (
     <aside
       className="sidebar-container"
@@ -261,7 +272,7 @@ export function Sidebar({ onHoverChange }: SidebarProps) {
 
       {/* Main Navigation */}
       <nav className="sidebar-nav">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}
