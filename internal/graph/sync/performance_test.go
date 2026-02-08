@@ -9,30 +9,88 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
+
+// setupTestContainer creates a FalkorDB container for performance testing.
+// Returns the client and a cleanup function.
+func setupTestContainer(t *testing.T) (graph.Client, func()) {
+	t.Helper()
+
+	ctx := context.Background()
+	graphName := fmt.Sprintf("perf-%s", uuid.New().String()[:8])
+
+	// Start FalkorDB container
+	req := testcontainers.ContainerRequest{
+		Image:        "falkordb/falkordb:latest",
+		ExposedPorts: []string{"6379/tcp"},
+		WaitingFor:   wait.ForListeningPort("6379/tcp").WithStartupTimeout(30 * time.Second),
+		AutoRemove:   true,
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		t.Fatalf("Failed to start FalkorDB container: %v", err)
+	}
+
+	// Get container host and port
+	host, err := container.Host(ctx)
+	if err != nil {
+		container.Terminate(ctx)
+		t.Fatalf("Failed to get container host: %v", err)
+	}
+
+	port, err := container.MappedPort(ctx, "6379")
+	if err != nil {
+		container.Terminate(ctx)
+		t.Fatalf("Failed to get container port: %v", err)
+	}
+
+	// Create and connect client
+	config := graph.DefaultClientConfig()
+	config.Host = host
+	config.Port = port.Int()
+	config.GraphName = graphName
+	config.DialTimeout = 10 * time.Second
+
+	client := graph.NewClient(config)
+	if err := client.Connect(ctx); err != nil {
+		container.Terminate(ctx)
+		t.Fatalf("Failed to connect to FalkorDB: %v", err)
+	}
+
+	// Initialize schema
+	if err := client.InitializeSchema(ctx); err != nil {
+		client.Close()
+		container.Terminate(ctx)
+		t.Fatalf("Failed to initialize schema: %v", err)
+	}
+
+	cleanup := func() {
+		client.Close()
+		container.Terminate(ctx)
+	}
+
+	return client, cleanup
+}
 
 // TestGraphPerformance_LargeClusterSimulation simulates processing 10k events
 // to verify that optimizations achieve target performance.
 // Acceptance: Process 10k events in under 60 seconds (target from IMPLEMENTATION_PLAN.md)
 func TestGraphPerformance_LargeClusterSimulation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping performance test in short mode")
-	}
-
-	// Setup test client
-	config := graph.DefaultClientConfig()
-	config.GraphName = "spectre_perf_test"
-	client := graph.NewClient(config)
+	client, cleanup := setupTestContainer(t)
+	defer cleanup()
 
 	ctx := context.Background()
-	if err := client.Connect(ctx); err != nil {
-		t.Skipf("FalkorDB not available: %v", err)
-	}
-	defer client.Close()
 
 	// Create builder with client
 	builder := NewGraphBuilderWithClient(client)
@@ -105,23 +163,13 @@ func TestGraphPerformance_LargeClusterSimulation(t *testing.T) {
 // TestGraphPerformance_BatchProcessingEfficiency tests that batch processing
 // achieves significant query reduction compared to individual event processing.
 func TestGraphPerformance_BatchProcessingEfficiency(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping performance test in short mode")
-	}
-
-	config := graph.DefaultClientConfig()
-	config.GraphName = "spectre_perf_test"
-	client := graph.NewClient(config)
+	client, cleanup := setupTestContainer(t)
+	defer cleanup()
 
 	ctx := context.Background()
-	if err := client.Connect(ctx); err != nil {
-		t.Skipf("FalkorDB not available: %v", err)
-	}
-	defer client.Close()
 
 	// Create pipeline config for batching
 	pipelineConfig := DefaultPipelineConfig()
-	pipelineConfig.BatchSize = 100
 	pipelineConfig.StateCacheSize = 10000
 
 	builder := NewGraphBuilderWithClientAndCacheSize(client, pipelineConfig.StateCacheSize)
@@ -179,20 +227,10 @@ func TestGraphPerformance_BatchProcessingEfficiency(t *testing.T) {
 // TestGraphPerformance_StateCacheWarmup tests that state cache improves
 // after processing events for the same resources.
 func TestGraphPerformance_StateCacheWarmup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping performance test in short mode")
-	}
-
-	// This test requires a graph client to exercise the state cache code path
-	config := graph.DefaultClientConfig()
-	config.GraphName = "spectre_perf_test"
-	client := graph.NewClient(config)
+	client, cleanup := setupTestContainer(t)
+	defer cleanup()
 
 	ctx := context.Background()
-	if err := client.Connect(ctx); err != nil {
-		t.Skipf("FalkorDB not available: %v", err)
-	}
-	defer client.Close()
 
 	builder := NewGraphBuilderWithClient(client)
 

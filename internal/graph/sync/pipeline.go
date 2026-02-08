@@ -206,8 +206,19 @@ func (p *pipeline) ProcessBatch(ctx context.Context, events []models.Event) erro
 	phase2Start := time.Now()
 	p.logger.Debug("Phase 2: Extracting relationships for %d events", len(events))
 
-	edgeUpdates := make([]*GraphUpdate, 0, len(events))
+	edgeUpdates := make([]*GraphUpdate, 0, len(events)*2)
 	totalEdges := 0
+
+	// Include structural edges from Phase 1 (CHANGED, EMITTED_EVENT edges)
+	// These were created by BuildResourceNodes but not applied by applyBatchedNodeUpdates
+	for _, update := range nodeUpdates {
+		if len(update.Edges) > 0 {
+			totalEdges += len(update.Edges)
+			edgeUpdates = append(edgeUpdates, update)
+		}
+	}
+
+	// Extract relationship edges (OWNS, SELECTS, etc.)
 	for _, event := range events {
 		update, err := p.builder.BuildRelationshipEdges(ctx, event)
 		if err != nil {
