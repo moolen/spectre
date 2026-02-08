@@ -294,26 +294,23 @@ func TestBatchUpsertResourceIdentitiesQuery(t *testing.T) {
 
 	query := BatchUpsertResourceIdentitiesQuery(resources)
 
-	// Check query structure
+	// Check query structure - now uses inline Cypher list literal
 	assert.Contains(t, query.Query, "UNWIND")
-	assert.Contains(t, query.Query, "$resources")
 	assert.Contains(t, query.Query, "MERGE")
 	assert.Contains(t, query.Query, "ResourceIdentity")
 	assert.Contains(t, query.Query, "ON CREATE SET")
 	assert.Contains(t, query.Query, "ON MATCH SET")
 
-	// Check parameters
-	resourceParams, ok := query.Parameters["resources"].([]map[string]interface{})
-	require.True(t, ok)
-	assert.Len(t, resourceParams, 2)
+	// Inline data should be embedded in the query
+	assert.Contains(t, query.Query, "uid: 'pod-1'")
+	assert.Contains(t, query.Query, "uid: 'pod-2'")
+	assert.Contains(t, query.Query, "kind: 'Pod'")
+	assert.Contains(t, query.Query, "namespace: 'default'")
+	assert.Contains(t, query.Query, "name: 'frontend-1'")
+	assert.Contains(t, query.Query, "name: 'frontend-2'")
 
-	assert.Equal(t, "pod-1", resourceParams[0]["uid"])
-	assert.Equal(t, "Pod", resourceParams[0]["kind"])
-	assert.Equal(t, "default", resourceParams[0]["namespace"])
-	assert.Equal(t, "frontend-1", resourceParams[0]["name"])
-
-	assert.Equal(t, "pod-2", resourceParams[1]["uid"])
-	assert.Equal(t, "frontend-2", resourceParams[1]["name"])
+	// Parameters should be nil since we use inline literals
+	assert.Nil(t, query.Parameters)
 }
 
 func TestBatchUpsertResourceIdentitiesQuery_EmptySlice(t *testing.T) {
@@ -321,11 +318,10 @@ func TestBatchUpsertResourceIdentitiesQuery_EmptySlice(t *testing.T) {
 
 	query := BatchUpsertResourceIdentitiesQuery(resources)
 
-	// Should still produce valid query
+	// Should still produce valid query with empty list
 	assert.Contains(t, query.Query, "UNWIND")
-	resourceParams, ok := query.Parameters["resources"].([]map[string]interface{})
-	require.True(t, ok)
-	assert.Len(t, resourceParams, 0)
+	assert.Contains(t, query.Query, "[]") // Empty list literal
+	assert.Nil(t, query.Parameters)
 }
 
 func TestBatchUpsertResourceIdentitiesQuery_LabelsSerializedAsJSON(t *testing.T) {
@@ -338,15 +334,14 @@ func TestBatchUpsertResourceIdentitiesQuery_LabelsSerializedAsJSON(t *testing.T)
 
 	query := BatchUpsertResourceIdentitiesQuery(resources)
 
-	resourceParams, ok := query.Parameters["resources"].([]map[string]interface{})
-	require.True(t, ok)
-	require.Len(t, resourceParams, 1)
-
-	// Labels should be JSON string, not map
-	labelsJSON, ok := resourceParams[0]["labels"].(string)
-	require.True(t, ok)
-	assert.Contains(t, labelsJSON, "app")
-	assert.Contains(t, labelsJSON, "test")
+	// Labels should be serialized as JSON string in the inline literal
+	// The query should contain the escaped JSON labels
+	assert.Contains(t, query.Query, "uid: 'pod-1'")
+	assert.Contains(t, query.Query, "labels:")
+	// JSON labels are embedded in the query
+	assert.Contains(t, query.Query, "app")
+	assert.Contains(t, query.Query, "test")
+	assert.Nil(t, query.Parameters)
 }
 
 func TestBatchCreateChangeEventsQuery(t *testing.T) {
@@ -377,27 +372,22 @@ func TestBatchCreateChangeEventsQuery(t *testing.T) {
 
 	query := BatchCreateChangeEventsQuery(events)
 
-	// Check query structure
+	// Check query structure - now uses inline Cypher list literal
 	assert.Contains(t, query.Query, "UNWIND")
-	assert.Contains(t, query.Query, "$events")
 	assert.Contains(t, query.Query, "MERGE")
 	assert.Contains(t, query.Query, "ChangeEvent")
 	assert.Contains(t, query.Query, "ON CREATE SET")
 
-	// Check parameters
-	eventParams, ok := query.Parameters["events"].([]map[string]interface{})
-	require.True(t, ok)
-	assert.Len(t, eventParams, 2)
+	// Inline data should be embedded in the query
+	assert.Contains(t, query.Query, "id: 'event-1'")
+	assert.Contains(t, query.Query, "id: 'event-2'")
+	assert.Contains(t, query.Query, "eventType: 'CREATE'")
+	assert.Contains(t, query.Query, "eventType: 'UPDATE'")
+	assert.Contains(t, query.Query, "status: 'Ready'")
+	assert.Contains(t, query.Query, "status: 'Error'")
 
-	assert.Equal(t, "event-1", eventParams[0]["id"])
-	assert.Equal(t, "CREATE", eventParams[0]["eventType"])
-	assert.Equal(t, "Ready", eventParams[0]["status"])
-	assert.Equal(t, 0.1, eventParams[0]["impactScore"])
-
-	assert.Equal(t, "event-2", eventParams[1]["id"])
-	assert.Equal(t, "UPDATE", eventParams[1]["eventType"])
-	assert.Equal(t, "Error", eventParams[1]["status"])
-	assert.Equal(t, "CrashLoopBackOff", eventParams[1]["errorMessage"])
+	// Parameters should be nil since we use inline literals
+	assert.Nil(t, query.Parameters)
 }
 
 func TestBatchCreateK8sEventsQuery(t *testing.T) {
@@ -424,25 +414,21 @@ func TestBatchCreateK8sEventsQuery(t *testing.T) {
 
 	query := BatchCreateK8sEventsQuery(events)
 
-	// Check query structure
+	// Check query structure - now uses inline Cypher list literal
 	assert.Contains(t, query.Query, "UNWIND")
-	assert.Contains(t, query.Query, "$events")
 	assert.Contains(t, query.Query, "MERGE")
 	assert.Contains(t, query.Query, "K8sEvent")
 
-	// Check parameters
-	eventParams, ok := query.Parameters["events"].([]map[string]interface{})
-	require.True(t, ok)
-	assert.Len(t, eventParams, 2)
+	// Inline data should be embedded in the query
+	assert.Contains(t, query.Query, "id: 'k8s-event-1'")
+	assert.Contains(t, query.Query, "id: 'k8s-event-2'")
+	assert.Contains(t, query.Query, "reason: 'Scheduled'")
+	assert.Contains(t, query.Query, "reason: 'FailedMount'")
+	assert.Contains(t, query.Query, "type: 'Normal'")
+	assert.Contains(t, query.Query, "type: 'Warning'")
 
-	assert.Equal(t, "k8s-event-1", eventParams[0]["id"])
-	assert.Equal(t, "Scheduled", eventParams[0]["reason"])
-	assert.Equal(t, "Normal", eventParams[0]["type"])
-	assert.Equal(t, 1, eventParams[0]["count"])
-
-	assert.Equal(t, "k8s-event-2", eventParams[1]["id"])
-	assert.Equal(t, "Warning", eventParams[1]["type"])
-	assert.Equal(t, 3, eventParams[1]["count"])
+	// Parameters should be nil since we use inline literals
+	assert.Nil(t, query.Parameters)
 }
 
 func TestBatchCreateOwnsEdgesQuery(t *testing.T) {
@@ -467,24 +453,20 @@ func TestBatchCreateOwnsEdgesQuery(t *testing.T) {
 
 	query := BatchCreateOwnsEdgesQuery(edges)
 
-	// Check query structure
+	// Check query structure - now uses inline Cypher list literal
 	assert.Contains(t, query.Query, "UNWIND")
-	assert.Contains(t, query.Query, "$edges")
 	assert.Contains(t, query.Query, "MATCH")
 	assert.Contains(t, query.Query, "MERGE")
 	assert.Contains(t, query.Query, "OWNS")
 
-	// Check parameters
-	edgeParams, ok := query.Parameters["edges"].([]map[string]interface{})
-	require.True(t, ok)
-	assert.Len(t, edgeParams, 2)
+	// Inline data should be embedded in the query
+	assert.Contains(t, query.Query, "fromUID: 'deployment-1'")
+	assert.Contains(t, query.Query, "toUID: 'replicaset-1'")
+	assert.Contains(t, query.Query, "fromUID: 'replicaset-1'")
+	assert.Contains(t, query.Query, "toUID: 'pod-1'")
 
-	assert.Equal(t, "deployment-1", edgeParams[0]["fromUID"])
-	assert.Equal(t, "replicaset-1", edgeParams[0]["toUID"])
-	assert.Equal(t, true, edgeParams[0]["controller"])
-
-	assert.Equal(t, "replicaset-1", edgeParams[1]["fromUID"])
-	assert.Equal(t, "pod-1", edgeParams[1]["toUID"])
+	// Parameters should be nil since we use inline literals
+	assert.Nil(t, query.Parameters)
 }
 
 func TestBatchCreateChangedEdgesQuery(t *testing.T) {
@@ -503,13 +485,16 @@ func TestBatchCreateChangedEdgesQuery(t *testing.T) {
 
 	query := BatchCreateChangedEdgesQuery(edges)
 
+	// Check query structure - now uses inline Cypher list literal
 	assert.Contains(t, query.Query, "UNWIND")
 	assert.Contains(t, query.Query, "CHANGED")
 	assert.Contains(t, query.Query, "sequenceNumber")
+	assert.Contains(t, query.Query, "fromUID: 'pod-1'")
+	assert.Contains(t, query.Query, "toUID: 'event-1'")
+	assert.Contains(t, query.Query, "toUID: 'event-2'")
 
-	edgeParams, ok := query.Parameters["edges"].([]map[string]interface{})
-	require.True(t, ok)
-	assert.Len(t, edgeParams, 2)
+	// Parameters should be nil since we use inline literals
+	assert.Nil(t, query.Parameters)
 }
 
 func TestBatchCreateSelectsEdgesQuery(t *testing.T) {
@@ -534,14 +519,15 @@ func TestBatchCreateSelectsEdgesQuery(t *testing.T) {
 
 	query := BatchCreateSelectsEdgesQuery(edges)
 
+	// Check query structure - now uses inline Cypher list literal
 	assert.Contains(t, query.Query, "UNWIND")
 	assert.Contains(t, query.Query, "SELECTS")
 	assert.Contains(t, query.Query, "selector")
 	assert.Contains(t, query.Query, "matchType")
+	assert.Contains(t, query.Query, "fromUID: 'service-1'")
 
-	edgeParams, ok := query.Parameters["edges"].([]map[string]interface{})
-	require.True(t, ok)
-	assert.Len(t, edgeParams, 2)
+	// Parameters should be nil since we use inline literals
+	assert.Nil(t, query.Parameters)
 }
 
 func TestBatchCreateScheduledOnEdgesQuery(t *testing.T) {

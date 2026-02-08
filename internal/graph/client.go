@@ -657,9 +657,13 @@ func buildPropertiesString(props map[string]interface{}) string {
 	return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 }
 
-// escapeCypherString escapes single quotes in Cypher strings
+// escapeCypherString escapes a string for safe inclusion in a Cypher query.
+// This prevents injection attacks when building inline literals.
 func escapeCypherString(s string) string {
-	return strings.ReplaceAll(s, "'", "\\'")
+	// Escape backslashes first, then quotes
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
+	return s
 }
 
 // replaceCypherParameters replaces $param placeholders with actual values

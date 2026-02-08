@@ -4,7 +4,56 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 )
+
+// buildCypherMapLiteral builds a Cypher map literal from a Go map.
+// Example output: {uid: 'abc', kind: 'Pod', deleted: false, count: 42}
+func buildCypherMapLiteral(m map[string]interface{}) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+
+	parts := make([]string, 0, len(m))
+	for k, v := range m {
+		var valStr string
+		switch val := v.(type) {
+		case string:
+			valStr = "'" + escapeCypherString(val) + "'"
+		case bool:
+			valStr = strconv.FormatBool(val)
+		case int:
+			valStr = strconv.Itoa(val)
+		case int64:
+			valStr = strconv.FormatInt(val, 10)
+		case float64:
+			valStr = strconv.FormatFloat(val, 'f', -1, 64)
+		case nil:
+			valStr = "null"
+		default:
+			// Fallback: serialize to JSON string
+			jsonBytes, _ := json.Marshal(val)
+			valStr = "'" + escapeCypherString(string(jsonBytes)) + "'"
+		}
+		parts = append(parts, k+": "+valStr)
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// buildCypherListLiteral builds a Cypher list literal from a slice of maps.
+// Example output: [{uid: 'a'}, {uid: 'b'}]
+func buildCypherListLiteral(items []map[string]interface{}) string {
+	if len(items) == 0 {
+		return "[]"
+	}
+
+	parts := make([]string, len(items))
+	for i, item := range items {
+		parts[i] = buildCypherMapLiteral(item)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
 
 // Schema provides utilities for graph schema management
 type Schema struct {
@@ -107,6 +156,13 @@ func UpsertResourceIdentityQuery(resource ResourceIdentity) GraphQuery {
 // Note: ON CREATE SET means data is only set when node is first created
 // If the node already exists, data won't be updated (which is correct - events are immutable)
 func CreateChangeEventQuery(event ChangeEvent) GraphQuery {
+	// Serialize containerIssues to JSON string (FalkorDB doesn't handle Go slices)
+	containerIssuesJSON := "[]"
+	if len(event.ContainerIssues) > 0 {
+		issuesBytes, _ := json.Marshal(event.ContainerIssues)
+		containerIssuesJSON = string(issuesBytes)
+	}
+
 	return GraphQuery{
 		Query: `
 			MERGE (e:ChangeEvent {id: $id})
@@ -128,7 +184,7 @@ func CreateChangeEventQuery(event ChangeEvent) GraphQuery {
 			"eventType":       event.EventType,
 			"status":          event.Status,
 			"errorMessage":    event.ErrorMessage,
-			"containerIssues": event.ContainerIssues,
+			"containerIssues": containerIssuesJSON,
 			"configChanged":   event.ConfigChanged,
 			"statusChanged":   event.StatusChanged,
 			"replicasChanged": event.ReplicasChanged,
@@ -812,12 +868,13 @@ func FindStaleInferredEdgesQuery(cutoffTimestamp int64) GraphQuery {
 // Note: This uses a simplified approach - for deletions, use the original UpsertResourceIdentityQuery
 // which has special handling to prevent un-deleting resources.
 func BatchUpsertResourceIdentitiesQuery(resources []ResourceIdentity) GraphQuery {
-	// Build parameters list for UNWIND
+	// Build parameters list for UNWIND as inline Cypher list literal.
+	// FalkorDB Go SDK doesn't support slice parameters, so we embed the data directly.
 	resourceParams := make([]map[string]interface{}, len(resources))
 	for i, r := range resources {
 		// Serialize labels to JSON
 		labelsJSON := "{}"
-		if r.Labels != nil && len(r.Labels) > 0 {
+		if len(r.Labels) > 0 {
 			labelsBytes, _ := json.Marshal(r.Labels)
 			labelsJSON = string(labelsBytes)
 		}
@@ -836,11 +893,14 @@ func BatchUpsertResourceIdentitiesQuery(resources []ResourceIdentity) GraphQuery
 		}
 	}
 
+	// Build inline Cypher list literal
+	resourcesLiteral := buildCypherListLiteral(resourceParams)
+
 	// Note: This batched version doesn't handle the special case where a resource
 	// might already be deleted. For deletions, use individual queries to ensure
 	// the deleted flag is set correctly regardless of previous state.
-	query := `
-		UNWIND $resources AS r
+	query := fmt.Sprintf(`
+		UNWIND %s AS r
 		MERGE (n:ResourceIdentity {uid: r.uid})
 		ON CREATE SET
 			n.kind = r.kind,
@@ -863,13 +923,11 @@ func BatchUpsertResourceIdentitiesQuery(resources []ResourceIdentity) GraphQuery
 			n.labels = CASE WHEN NOT n.deleted THEN r.labels ELSE n.labels END,
 			n.lastSeen = CASE WHEN NOT n.deleted THEN r.lastSeen ELSE n.lastSeen END
 		RETURN count(n) as upsertedCount
-	`
+	`, resourcesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"resources": resourceParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -877,13 +935,20 @@ func BatchUpsertResourceIdentitiesQuery(resources []ResourceIdentity) GraphQuery
 func BatchCreateChangeEventsQuery(events []ChangeEvent) GraphQuery {
 	eventParams := make([]map[string]interface{}, len(events))
 	for i, e := range events {
+		// Serialize containerIssues to JSON string (FalkorDB doesn't handle Go slices)
+		containerIssuesJSON := "[]"
+		if len(e.ContainerIssues) > 0 {
+			issuesBytes, _ := json.Marshal(e.ContainerIssues)
+			containerIssuesJSON = string(issuesBytes)
+		}
+
 		eventParams[i] = map[string]interface{}{
 			"id":              e.ID,
 			"timestamp":       e.Timestamp,
 			"eventType":       e.EventType,
 			"status":          e.Status,
 			"errorMessage":    e.ErrorMessage,
-			"containerIssues": e.ContainerIssues,
+			"containerIssues": containerIssuesJSON,
 			"configChanged":   e.ConfigChanged,
 			"statusChanged":   e.StatusChanged,
 			"replicasChanged": e.ReplicasChanged,
@@ -892,8 +957,11 @@ func BatchCreateChangeEventsQuery(events []ChangeEvent) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $events AS e
+	// Build inline Cypher list literal - FalkorDB Go SDK doesn't support slice parameters
+	eventsLiteral := buildCypherListLiteral(eventParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MERGE (n:ChangeEvent {id: e.id})
 		ON CREATE SET
 			n.timestamp = e.timestamp,
@@ -907,13 +975,11 @@ func BatchCreateChangeEventsQuery(events []ChangeEvent) GraphQuery {
 			n.impactScore = e.impactScore,
 			n.data = e.data
 		RETURN count(n) as createdCount
-	`
+	`, eventsLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"events": eventParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -932,8 +998,11 @@ func BatchCreateK8sEventsQuery(events []K8sEvent) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $events AS e
+	// Build inline Cypher list literal - FalkorDB Go SDK doesn't support slice parameters
+	eventsLiteral := buildCypherListLiteral(eventParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MERGE (n:K8sEvent {id: e.id})
 		ON CREATE SET
 			n.timestamp = e.timestamp,
@@ -943,13 +1012,11 @@ func BatchCreateK8sEventsQuery(events []K8sEvent) GraphQuery {
 			n.count = e.count,
 			n.source = e.source
 		RETURN count(n) as createdCount
-	`
+	`, eventsLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"events": eventParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -965,15 +1032,18 @@ func BatchCreateOwnsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 	edgeParams := make([]map[string]interface{}, len(edges))
 	for i, e := range edges {
 		edgeParams[i] = map[string]interface{}{
-			"fromUID":          e.FromUID,
-			"toUID":            e.ToUID,
-			"controller":       e.Properties["controller"],
+			"fromUID":            e.FromUID,
+			"toUID":              e.ToUID,
+			"controller":         e.Properties["controller"],
 			"blockOwnerDeletion": e.Properties["blockOwnerDeletion"],
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	// Build inline Cypher list literal - FalkorDB Go SDK doesn't support slice parameters
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (owner:ResourceIdentity {uid: e.fromUID})
 		MATCH (owned:ResourceIdentity {uid: e.toUID})
 		MERGE (owner)-[r:OWNS]->(owned)
@@ -984,13 +1054,11 @@ func BatchCreateOwnsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.controller = e.controller,
 			r.blockOwnerDeletion = e.blockOwnerDeletion
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1005,21 +1073,21 @@ func BatchCreateChangedEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (resource:ResourceIdentity {uid: e.fromUID})
 		MATCH (event:ChangeEvent {id: e.toUID})
 		MERGE (resource)-[r:CHANGED]->(event)
 		ON CREATE SET r.sequenceNumber = e.sequenceNumber
 		ON MATCH SET r.sequenceNumber = e.sequenceNumber
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1035,8 +1103,10 @@ func BatchCreateSelectsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (selector:ResourceIdentity {uid: e.fromUID})
 		MATCH (selected:ResourceIdentity {uid: e.toUID})
 		MERGE (selector)-[r:SELECTS]->(selected)
@@ -1047,13 +1117,11 @@ func BatchCreateSelectsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.selector = e.selector,
 			r.matchType = e.matchType
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1062,15 +1130,17 @@ func BatchCreateScheduledOnEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 	edgeParams := make([]map[string]interface{}, len(edges))
 	for i, e := range edges {
 		edgeParams[i] = map[string]interface{}{
-			"fromUID":      e.FromUID,
-			"toUID":        e.ToUID,
-			"scheduledAt":  e.Properties["scheduledAt"],
-			"hostIP":       e.Properties["hostIP"],
+			"fromUID":     e.FromUID,
+			"toUID":       e.ToUID,
+			"scheduledAt": e.Properties["scheduledAt"],
+			"hostIP":      e.Properties["hostIP"],
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (pod:ResourceIdentity {uid: e.fromUID})
 		MATCH (node:ResourceIdentity {uid: e.toUID})
 		MERGE (pod)-[r:SCHEDULED_ON]->(node)
@@ -1081,13 +1151,11 @@ func BatchCreateScheduledOnEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.scheduledAt = e.scheduledAt,
 			r.hostIP = e.hostIP
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1104,8 +1172,10 @@ func BatchCreateMountsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (pod:ResourceIdentity {uid: e.fromUID})
 		MATCH (volume:ResourceIdentity {uid: e.toUID})
 		MERGE (pod)-[r:MOUNTS]->(volume)
@@ -1118,13 +1188,11 @@ func BatchCreateMountsEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.readOnly = e.readOnly,
 			r.subPath = e.subPath
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1140,8 +1208,10 @@ func BatchCreateReferencesSpecEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (source:ResourceIdentity {uid: e.fromUID})
 		MATCH (target:ResourceIdentity {uid: e.toUID})
 		MERGE (source)-[r:REFERENCES_SPEC]->(target)
@@ -1152,13 +1222,11 @@ func BatchCreateReferencesSpecEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.referenceType = e.referenceType,
 			r.fieldPath = e.fieldPath
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1177,8 +1245,10 @@ func BatchCreateManagesEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (cr:ResourceIdentity {uid: e.fromUID})
 		MATCH (managed:ResourceIdentity {uid: e.toUID})
 		MERGE (cr)-[r:MANAGES]->(managed)
@@ -1195,13 +1265,11 @@ func BatchCreateManagesEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.validationState = e.validationState,
 			r.lastValidated = e.lastValidated
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1215,19 +1283,19 @@ func BatchCreateEmittedEventEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (resource:ResourceIdentity {uid: e.fromUID})
 		MATCH (event:K8sEvent {id: e.toUID})
 		MERGE (resource)-[r:EMITTED_EVENT]->(event)
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1241,19 +1309,19 @@ func BatchCreateUsesServiceAccountEdgesQuery(edges []BatchEdgeParams) GraphQuery
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (pod:ResourceIdentity {uid: e.fromUID})
 		MATCH (sa:ResourceIdentity {uid: e.toUID})
 		MERGE (pod)-[r:USES_SERVICE_ACCOUNT]->(sa)
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1269,8 +1337,10 @@ func BatchCreateBindsRoleEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (binding:ResourceIdentity {uid: e.fromUID})
 		MATCH (role:ResourceIdentity {uid: e.toUID})
 		MERGE (binding)-[r:BINDS_ROLE]->(role)
@@ -1281,13 +1351,11 @@ func BatchCreateBindsRoleEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.roleKind = e.roleKind,
 			r.roleName = e.roleName
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1303,8 +1371,10 @@ func BatchCreateGrantsToEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (binding:ResourceIdentity {uid: e.fromUID})
 		MATCH (subject:ResourceIdentity {uid: e.toUID})
 		MERGE (binding)-[r:GRANTS_TO]->(subject)
@@ -1315,13 +1385,11 @@ func BatchCreateGrantsToEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.subjectKind = e.subjectKind,
 			r.subjectName = e.subjectName
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1337,8 +1405,10 @@ func BatchCreateCreatesObservedEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (cr:ResourceIdentity {uid: e.fromUID})
 		MATCH (resource:ResourceIdentity {uid: e.toUID})
 		MERGE (cr)-[r:CREATES_OBSERVED]->(resource)
@@ -1349,13 +1419,11 @@ func BatchCreateCreatesObservedEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.observedAt = e.observedAt,
 			r.reason = e.reason
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
 
@@ -1372,8 +1440,10 @@ func BatchCreateTriggeredByEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 		}
 	}
 
-	query := `
-		UNWIND $edges AS e
+	edgesLiteral := buildCypherListLiteral(edgeParams)
+
+	query := fmt.Sprintf(`
+		UNWIND %s AS e
 		MATCH (effect:ChangeEvent {id: e.fromUID})
 		MATCH (cause:ChangeEvent {id: e.toUID})
 		MERGE (effect)-[r:TRIGGERED_BY]->(cause)
@@ -1386,12 +1456,10 @@ func BatchCreateTriggeredByEdgesQuery(edges []BatchEdgeParams) GraphQuery {
 			r.lagMs = e.lagMs,
 			r.reason = e.reason
 		RETURN count(r) as createdCount
-	`
+	`, edgesLiteral)
 
 	return GraphQuery{
-		Query: query,
-		Parameters: map[string]interface{}{
-			"edges": edgeParams,
-		},
+		Query:      query,
+		Parameters: nil,
 	}
 }
