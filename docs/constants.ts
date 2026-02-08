@@ -31,5 +31,4 @@ export const NAV_LINKS = [
     { name: 'Features', href: '#features' },
     { name: 'How it Works', href: '#how-it-works' },
     { name: 'Integration', href: '#integration' },
-    { name: 'Pricing', href: '#pricing' },
 ];
