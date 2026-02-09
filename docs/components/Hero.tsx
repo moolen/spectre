@@ -193,7 +193,7 @@ const Hero = () => {
                 <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
                     <button className="group relative px-8 py-4 bg-white text-brand-bg rounded-lg font-semibold text-lg hover:bg-slate-200 transition-all active:scale-95 w-full sm:w-auto overflow-hidden">
                         <span className="relative z-10 flex items-center justify-center gap-2">
-                            Get Started Free <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                            Get Started <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                         </span>
                     </button>
                     <button className="px-8 py-4 bg-brand-muted/50 border border-brand-border text-white rounded-lg font-semibold text-lg hover:bg-brand-muted transition-all active:scale-95 w-full sm:w-auto backdrop-blur-sm">
