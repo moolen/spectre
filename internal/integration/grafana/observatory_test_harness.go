@@ -135,8 +135,9 @@ func NewObservatoryTestHarness(t *testing.T) (*ObservatoryTestHarness, error) {
 
 // startSharedContainer starts the FalkorDB container (called once via sync.Once)
 func startSharedContainer(ctx context.Context) (testcontainers.Container, string, int, error) {
+	// Use a specific version to avoid instability with :latest
 	req := testcontainers.ContainerRequest{
-		Image:        "falkordb/falkordb:latest",
+		Image:        "falkordb/falkordb:v4.2.0",
 		ExposedPorts: []string{"6379/tcp"},
 		WaitingFor:   wait.ForListeningPort("6379/tcp").WithStartupTimeout(60 * time.Second),
 		AutoRemove:   true,
