@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
@@ -47,24 +48,26 @@ func (t *DetailsTool) Execute(ctx context.Context, args []byte) (interface{}, er
 		return nil, fmt.Errorf("invalid parameters: %w", err)
 	}
 
+	// Default time range to last 1 hour if not specified
+	if params.From == "" || params.To == "" {
+		now := time.Now().UTC()
+		params.To = now.Format(time.RFC3339)
+		params.From = now.Add(-1 * time.Hour).Format(time.RFC3339)
+	}
+
 	// Validate time range
 	timeRange := TimeRange{From: params.From, To: params.To}
 	if err := timeRange.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid time range: %w", err)
 	}
 
-	// Validate required scoping parameters
-	if params.Cluster == "" {
-		return nil, fmt.Errorf("cluster is required")
+	// Build scoping variables (all optional)
+	scopedVars := map[string]string{}
+	if params.Cluster != "" {
+		scopedVars["cluster"] = params.Cluster
 	}
-	if params.Region == "" {
-		return nil, fmt.Errorf("region is required")
-	}
-
-	// Build scoping variables
-	scopedVars := map[string]string{
-		"cluster": params.Cluster,
-		"region":  params.Region,
+	if params.Region != "" {
+		scopedVars["region"] = params.Region
 	}
 
 	// Find detail-level dashboards from graph
@@ -103,7 +106,7 @@ func (t *DetailsTool) Execute(ctx context.Context, args []byte) (interface{}, er
 // findDashboardsByHierarchy finds dashboards by hierarchy level from the graph.
 func (t *DetailsTool) findDashboardsByHierarchy(ctx context.Context, level string) ([]dashboardInfo, error) {
 	query := `
-		MATCH (d:Dashboard {hierarchy_level: $level})
+		MATCH (d:Dashboard {hierarchyLevel: $level})
 		RETURN d.uid AS uid, d.title AS title
 		ORDER BY d.title
 	`

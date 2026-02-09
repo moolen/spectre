@@ -203,8 +203,9 @@ func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models
 	// Filter out resources that were deleted before the time window start
 	// This prevents showing empty rows for resources that no longer exist
 	// Also filter out resources deleted outside the window end (shouldn't happen but defensive)
+	// Use COALESCE to handle NULL r.deleted (placeholder nodes created by OWNS edges)
 	whereConditions := []string{
-		"(NOT r.deleted OR (r.deletedAt >= $startNs AND r.deletedAt <= $endNs))",
+		"(NOT COALESCE(r.deleted, false) OR (r.deletedAt >= $startNs AND r.deletedAt <= $endNs))",
 	}
 
 	params := map[string]interface{}{
@@ -296,7 +297,7 @@ func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models
 		WHERE k.timestamp >= $startNs AND k.timestamp <= $endNs
 		WITH r, inRangeEvents, prev, collect(DISTINCT k) as k8sEvents
 		WHERE size(inRangeEvents) > 0
-		   OR (prev IS NOT NULL AND (NOT r.deleted OR r.deletedAt >= $startNs))
+		   OR (prev IS NOT NULL AND (NOT COALESCE(r.deleted, false) OR r.deletedAt >= $startNs))
 		RETURN r,
 		       CASE WHEN prev IS NOT NULL THEN [prev] + inRangeEvents ELSE inRangeEvents END as events,
 		       k8sEvents,
@@ -514,7 +515,7 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 	// Build query to get distinct values
 	query := `
 		MATCH (r:ResourceIdentity)
-		WHERE (NOT r.deleted OR (r.deletedAt >= $startNs AND r.deletedAt <= $endNs))
+		WHERE (NOT COALESCE(r.deleted, false) OR (r.deletedAt >= $startNs AND r.deletedAt <= $endNs))
 		OPTIONAL MATCH (r)-[:CHANGED]->(e:ChangeEvent)
 		WHERE e.timestamp >= $startNs AND e.timestamp <= $endNs
 		WITH DISTINCT r.namespace as namespace, r.kind as kind, e.timestamp as timestamp

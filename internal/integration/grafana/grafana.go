@@ -13,6 +13,7 @@ import (
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/observatory"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -35,6 +36,8 @@ type GrafanaIntegration struct {
 	syncer         *DashboardSyncer     // Dashboard sync orchestrator
 	alertSyncer     *AlertSyncer           // Alert sync orchestrator
 	stateSyncer     *AlertStateSyncer      // Alert state sync orchestrator
+	metricsSyncer   *MetricsSyncer         // Curated metrics sync orchestrator
+	baselineCollector *BaselineCollector    // Baseline collector for anomaly detection
 	analysisService *AlertAnalysisService  // Alert analysis service for historical analysis
 	graphClient     graph.Client           // Graph client for dashboard sync
 	queryService    *GrafanaQueryService   // Query service for MCP tools
@@ -42,6 +45,23 @@ type GrafanaIntegration struct {
 	logger          *logging.Logger
 	ctx            context.Context
 	cancel         context.CancelFunc
+
+	// Observatory services (Phase 26)
+	evidenceService   *ObservatoryEvidenceService // Evidence service for explain/evidence tools
+	anomalyAggregator *AnomalyAggregator          // Anomaly aggregator for scoring
+
+	// Observatory multi-provider support (Phase 26.5)
+	// Registry-based services enable multi-provider signal aggregation
+	observatoryRegistry *observatory.Registry       // Multi-provider registry
+	observatoryProvider *GrafanaObservatoryProvider // This integration's provider
+
+	// Scrape target linking (links SignalAnchors to K8s workloads)
+	prometheusClient        *PrometheusClient       // Direct Prometheus API client
+	prometheusSecretWatcher *SecretWatcher          // Optional: manages Prometheus API token
+	scrapeTargetLinker      *ScrapeTargetLinker     // Scrape target linker
+
+	// Signal validation (correlates alerts with signal behavior)
+	signalValidationJob *SignalValidationJob // Signal validation job
 
 	// Thread-safe health status
 	mu           sync.RWMutex
@@ -222,6 +242,177 @@ func (g *GrafanaIntegration) Start(ctx context.Context) error {
 			g.logger,
 		)
 		g.logger.Info("Alert analysis service created for integration %s", g.name)
+
+		// Create and start baseline collector for anomaly detection
+		g.baselineCollector = NewBaselineCollector(
+			g.client,
+			g.queryService,
+			g.graphClient,
+			g.name,
+			g.logger,
+		)
+		if err := g.baselineCollector.Start(g.ctx); err != nil {
+			g.logger.Warn("Failed to start baseline collector: %v (continuing without baseline collection)", err)
+			// Non-fatal - anomaly detection still works with existing baselines
+		} else {
+			g.logger.Info("Baseline collector started for integration %s", g.name)
+		}
+
+		// Create and start metrics syncer for curated metric ingestion
+		if g.config.IsMetricsSyncEnabled() {
+			syncConfig := MetricsSyncerConfig{
+				SyncInterval:      g.config.GetMetricsSyncInterval(),
+				RateLimitInterval: 100 * time.Millisecond, // 10 req/sec
+				DatasourceUID:     g.config.MetricsDatasourceUID,
+			}
+			g.metricsSyncer = NewMetricsSyncerWithConfig(
+				g.client,
+				g.graphClient,
+				g.name,
+				g.logger,
+				syncConfig,
+			)
+			if err := g.metricsSyncer.Start(g.ctx); err != nil {
+				g.logger.Warn("Failed to start metrics syncer: %v (continuing without curated metric sync)", err)
+				// Non-fatal - dashboard-based signals still work
+			} else {
+				g.logger.Info("Metrics syncer started for integration %s (interval: %s)", g.name, syncConfig.SyncInterval)
+			}
+		} else {
+			g.logger.Info("Metrics sync disabled for integration %s", g.name)
+		}
+
+		// Initialize Observatory services (Phase 26)
+		g.anomalyAggregator = NewAnomalyAggregator(g.graphClient, g.name, g.logger)
+		g.logger.Info("Anomaly aggregator created for integration %s", g.name)
+
+		g.evidenceService = NewObservatoryEvidenceService(
+			g.graphClient,
+			g.queryService,
+			g.name,
+			g.logger,
+		)
+		g.logger.Info("Observatory evidence service created for integration %s", g.name)
+
+		// Initialize Observatory multi-provider registry (Phase 26.5)
+		// Create provider that implements observatory.Provider interface
+		g.observatoryProvider = NewGrafanaObservatoryProvider(
+			g.graphClient,
+			g.name,
+			g.logger,
+		)
+		// Set the Grafana client for live metric queries (enables GetCurrentValue)
+		if g.client != nil {
+			g.observatoryProvider.SetGrafanaClient(g.client)
+		}
+		g.logger.Info("Observatory provider created for integration %s", g.name)
+
+		// Create registry and register this integration's provider
+		g.observatoryRegistry = observatory.NewRegistry()
+		if err := g.observatoryRegistry.Register(g.observatoryProvider); err != nil {
+			g.logger.Warn("Failed to register observatory provider: %v", err)
+		} else {
+			g.logger.Info("Observatory registry initialized with provider %s", g.name)
+		}
+
+		// Initialize Prometheus client and scrape target linker if URL configured
+		if g.config.PrometheusURL != "" {
+			g.logger.Info("Initializing Prometheus client (url: %s)", g.config.PrometheusURL)
+
+			// Create SecretWatcher for Prometheus if config uses secret ref
+			if g.config.UsesPrometheusSecretRef() {
+				g.logger.Info("Creating SecretWatcher for Prometheus secret: %s, key: %s",
+					g.config.PrometheusAPITokenRef.SecretName, g.config.PrometheusAPITokenRef.Key)
+
+				// Reuse the Kubernetes client from the main secret watcher setup
+				k8sConfig, err := rest.InClusterConfig()
+				if err != nil {
+					g.logger.Warn("Failed to get in-cluster config for Prometheus secret watcher: %v", err)
+				} else {
+					clientset, err := kubernetes.NewForConfig(k8sConfig)
+					if err != nil {
+						g.logger.Warn("Failed to create Kubernetes clientset for Prometheus: %v", err)
+					} else {
+						namespace, err := getCurrentNamespace()
+						if err != nil {
+							g.logger.Warn("Failed to determine namespace for Prometheus secret: %v", err)
+						} else {
+							prometheusSecretWatcher, err := NewSecretWatcher(
+								clientset,
+								namespace,
+								g.config.PrometheusAPITokenRef.SecretName,
+								g.config.PrometheusAPITokenRef.Key,
+								g.logger,
+							)
+							if err != nil {
+								g.logger.Warn("Failed to create Prometheus secret watcher: %v", err)
+							} else {
+								if err := prometheusSecretWatcher.Start(g.ctx); err != nil {
+									g.logger.Warn("Failed to start Prometheus secret watcher: %v", err)
+								} else {
+									g.prometheusSecretWatcher = prometheusSecretWatcher
+									g.logger.Info("Prometheus SecretWatcher started successfully")
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Create Prometheus client
+			g.prometheusClient = NewPrometheusClient(
+				g.config.PrometheusURL,
+				g.config.PrometheusAPITokenRef,
+				g.prometheusSecretWatcher,
+				g.logger,
+			)
+			g.logger.Info("Prometheus client created for integration %s", g.name)
+
+			// Create and start scrape target linker if enabled
+			if g.config.IsScrapeTargetLinkingEnabled() {
+				linkerConfig := ScrapeTargetLinkerConfig{
+					SyncInterval:      g.config.GetScrapeTargetLinkingInterval(),
+					RateLimitInterval: 100 * time.Millisecond,
+					StaleTTL:          7 * 24 * time.Hour,
+				}
+				g.scrapeTargetLinker = NewScrapeTargetLinker(
+					g.prometheusClient, g.graphClient, g.name, g.logger, linkerConfig,
+				)
+				if err := g.scrapeTargetLinker.Start(g.ctx); err != nil {
+					g.logger.Warn("Failed to start scrape target linker: %v (continuing without workload linking)", err)
+				} else {
+					g.logger.Info("Scrape target linker started for integration %s (interval: %s)", g.name, linkerConfig.SyncInterval)
+
+					// Register callback with metrics syncer for event-driven linking
+					if g.metricsSyncer != nil {
+						g.metricsSyncer.RegisterCallback(g.scrapeTargetLinker)
+						g.logger.Info("Registered scrape target linker callback with metrics syncer")
+					}
+				}
+			} else {
+				g.logger.Info("Scrape target linking disabled for integration %s", g.name)
+			}
+
+			// Create and start signal validation job if enabled
+			if g.config.IsSignalValidationEnabled() {
+				svConfig := g.config.GetSignalValidationConfig()
+				g.signalValidationJob = NewSignalValidationJob(
+					g.client,
+					g.graphClient,
+					g.name,
+					g.config.MetricsDatasourceUID,
+					svConfig,
+					g.logger,
+				)
+				if err := g.signalValidationJob.Start(g.ctx); err != nil {
+					g.logger.Warn("Failed to start signal validation job: %v (continuing without signal validation)", err)
+				} else {
+					g.logger.Info("Signal validation job started for integration %s (interval: %s)", g.name, svConfig.GetRunInterval())
+				}
+			} else {
+				g.logger.Info("Signal validation disabled for integration %s", g.name)
+			}
+		}
 	} else {
 		g.logger.Info("Graph client not available - dashboard sync and MCP tools disabled")
 	}
@@ -237,6 +428,37 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	// Cancel context
 	if g.cancel != nil {
 		g.cancel()
+	}
+
+	// Stop signal validation job first (depends on Prometheus/Grafana)
+	if g.signalValidationJob != nil {
+		g.logger.Info("Stopping signal validation job for integration %s", g.name)
+		g.signalValidationJob.Stop()
+	}
+
+	// Stop scrape target linker (depends on Prometheus client)
+	if g.scrapeTargetLinker != nil {
+		g.logger.Info("Stopping scrape target linker for integration %s", g.name)
+		g.scrapeTargetLinker.Stop()
+	}
+
+	// Stop Prometheus secret watcher if it exists
+	if g.prometheusSecretWatcher != nil {
+		if err := g.prometheusSecretWatcher.Stop(); err != nil {
+			g.logger.Error("Error stopping Prometheus secret watcher: %v", err)
+		}
+	}
+
+	// Stop metrics syncer (no dependencies on other services)
+	if g.metricsSyncer != nil {
+		g.logger.Info("Stopping metrics syncer for integration %s", g.name)
+		g.metricsSyncer.Stop()
+	}
+
+	// Stop baseline collector (depends on query service and graph client)
+	if g.baselineCollector != nil {
+		g.logger.Info("Stopping baseline collector for integration %s", g.name)
+		g.baselineCollector.Stop()
 	}
 
 	// Stop alert state syncer if it exists
@@ -275,7 +497,26 @@ func (g *GrafanaIntegration) Stop(ctx context.Context) error {
 	g.syncer = nil
 	g.alertSyncer = nil
 	g.stateSyncer = nil
+	g.metricsSyncer = nil
+	g.baselineCollector = nil
 	g.queryService = nil
+
+	// Clear observatory services (no Stop method needed - stateless)
+	g.evidenceService = nil
+	g.anomalyAggregator = nil
+
+	// Clear observatory multi-provider support
+	if g.observatoryRegistry != nil && g.observatoryProvider != nil {
+		g.observatoryRegistry.Unregister(g.observatoryProvider.Name())
+	}
+	g.observatoryRegistry = nil
+	g.observatoryProvider = nil
+
+	// Clear scrape target linking and signal validation
+	g.prometheusClient = nil
+	g.prometheusSecretWatcher = nil
+	g.scrapeTargetLinker = nil
+	g.signalValidationJob = nil
 
 	// Update health status
 	g.setHealthStatus(integration.Stopped)
@@ -528,11 +769,223 @@ func (g *GrafanaIntegration) RegisterTools(registry integration.ToolRegistry) er
 	g.logger.Info("Registered tool: %s", alertsDetailsName)
 
 	g.logger.Info("Successfully registered 6 Grafana MCP tools")
+
+	// Register Observatory tools (Phase 26)
+	// These tools enable AI-driven incident investigation with progressive disclosure
+	if g.observatoryRegistry != nil && g.evidenceService != nil {
+		if err := g.registerObservatoryTools(registry); err != nil {
+			return fmt.Errorf("failed to register observatory tools: %w", err)
+		}
+		g.logger.Info("Successfully registered 8 Observatory MCP tools")
+	} else {
+		g.logger.Warn("Observatory registry not initialized, skipping observatory tool registration")
+	}
+
+	return nil
+}
+
+// registerObservatoryTools registers the 8 observatory MCP tools for AI-driven investigation.
+// Tools follow progressive disclosure pattern: Orient -> Narrow -> Investigate -> Hypothesize -> Verify
+//
+// Tools use the registry-based Observatory services via adapters, enabling multi-provider support.
+func (g *GrafanaIntegration) registerObservatoryTools(registry integration.ToolRegistry) error {
+	// Create registry-based services via adapters
+	if g.observatoryRegistry == nil {
+		return fmt.Errorf("observatory registry not initialized")
+	}
+
+	obsService := g.NewObservatoryServiceFromRegistry()
+	invService := g.NewObservatoryInvestigateServiceFromRegistry()
+	if obsService == nil || invService == nil {
+		return fmt.Errorf("failed to create observatory services from registry")
+	}
+
+	observatorySvc := NewObservatoryServiceAdapter(obsService)
+	investigateSvc := NewObservatoryInvestigateServiceAdapter(invService)
+
+	// Create tool instances with registry-based services
+	statusTool := NewObservatoryStatusTool(observatorySvc, g.logger)
+	changesTool := NewObservatoryChangesTool(g.graphClient, g.name, g.logger)
+	scopeTool := NewObservatoryScopeTool(observatorySvc, g.logger)
+	signalsTool := NewObservatorySignalsTool(investigateSvc, g.logger)
+	signalDetailTool := NewObservatorySignalDetailTool(investigateSvc, g.logger)
+	compareTool := NewObservatoryCompareTool(investigateSvc, g.logger)
+	explainTool := NewObservatoryExplainTool(g.evidenceService, g.logger)
+	evidenceTool := NewObservatoryEvidenceTool(g.evidenceService, g.logger)
+
+	// ============================================================================
+	// Orient Stage Tools - Cluster-wide situation awareness
+	// ============================================================================
+
+	// observatory_status: Top 5 anomaly hotspots
+	if err := registry.RegisterTool(
+		"observatory_status",
+		"Get cluster-wide anomaly summary with top 5 hotspots by namespace/workload. Returns numeric scores (0.0-1.0) and empty array when nothing is anomalous.",
+		statusTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"cluster":   map[string]interface{}{"type": "string", "description": "Optional: filter to specific cluster"},
+				"namespace": map[string]interface{}{"type": "string", "description": "Optional: filter to specific namespace"},
+			},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_status: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_status")
+
+	// observatory_changes: Recent K8s deployment and config changes
+	if err := registry.RegisterTool(
+		"observatory_changes",
+		"Get recent K8s changes (deployments, config updates, Flux reconciliations) that could explain anomalies. Returns max 20 changes.",
+		changesTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace": map[string]interface{}{"type": "string", "description": "Optional: filter to specific namespace"},
+				"lookback":  map[string]interface{}{"type": "string", "description": "Lookback duration (default: 1h, max: 24h). Format: 30m, 1h, 2h, etc."},
+			},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_changes: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_changes")
+
+	// ============================================================================
+	// Narrow Stage Tools - Workload scoping
+	// ============================================================================
+
+	// observatory_scope: Namespace or workload anomaly scoping
+	if err := registry.RegisterTool(
+		"observatory_scope",
+		"Get anomalies for a namespace or specific workload, ranked by severity. Returns flat list sorted by anomaly score.",
+		scopeTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace": map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":  map[string]interface{}{"type": "string", "description": "Optional: narrow to specific workload within namespace"},
+			},
+			"required": []string{"namespace"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_scope: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_scope")
+
+	// observatory_signals: Workload signal enumeration
+	if err := registry.RegisterTool(
+		"observatory_signals",
+		"Get all signal anchors for a workload with current anomaly state. Returns metric name, role, score, confidence, and quality.",
+		signalsTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace": map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":  map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+			},
+			"required": []string{"namespace", "workload"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_signals: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_signals")
+
+	// ============================================================================
+	// Investigate Stage Tools - Deep signal inspection
+	// ============================================================================
+
+	// observatory_signal_detail: Baseline stats and source dashboard
+	if err := registry.RegisterTool(
+		"observatory_signal_detail",
+		"Get detailed signal info: baseline stats (mean, std_dev, percentiles), current value, anomaly score, confidence, and source dashboard.",
+		signalDetailTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace":   map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":    map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+				"metric_name": map[string]interface{}{"type": "string", "description": "Metric name (required)"},
+			},
+			"required": []string{"namespace", "workload", "metric_name"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_signal_detail: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_signal_detail")
+
+	// observatory_compare: Time-based signal comparison
+	if err := registry.RegisterTool(
+		"observatory_compare",
+		"Compare signal value and anomaly score between current and past time. ScoreDelta positive means worsening.",
+		compareTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace":   map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":    map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+				"metric_name": map[string]interface{}{"type": "string", "description": "Metric name (required)"},
+				"lookback":    map[string]interface{}{"type": "string", "description": "Comparison lookback (default: 24h, max: 7d). Format: 1h, 12h, 24h, etc."},
+			},
+			"required": []string{"namespace", "workload", "metric_name"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_compare: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_compare")
+
+	// ============================================================================
+	// Hypothesize Stage Tools - Root cause analysis
+	// ============================================================================
+
+	// observatory_explain: K8s graph candidates
+	if err := registry.RegisterTool(
+		"observatory_explain",
+		"Get candidate root causes: upstream K8s dependencies (2-hop traversal) and recent changes (last 1h) for an anomalous signal.",
+		explainTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace":   map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":    map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+				"metric_name": map[string]interface{}{"type": "string", "description": "Anomalous metric name (required)"},
+			},
+			"required": []string{"namespace", "workload", "metric_name"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_explain: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_explain")
+
+	// ============================================================================
+	// Verify Stage Tools - Evidence gathering
+	// ============================================================================
+
+	// observatory_evidence: Raw metric values, alerts, logs
+	if err := registry.RegisterTool(
+		"observatory_evidence",
+		"Get raw evidence for hypothesis verification: metric values, alert states, and log excerpts (ERROR level, 5-min window).",
+		evidenceTool.Execute,
+		map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"namespace":   map[string]interface{}{"type": "string", "description": "Kubernetes namespace (required)"},
+				"workload":    map[string]interface{}{"type": "string", "description": "Workload name (required)"},
+				"metric_name": map[string]interface{}{"type": "string", "description": "Metric name (required)"},
+				"lookback":    map[string]interface{}{"type": "string", "description": "Evidence lookback (default: 1h). Format: 30m, 1h, 2h, etc."},
+			},
+			"required": []string{"namespace", "workload", "metric_name"},
+		},
+	); err != nil {
+		return fmt.Errorf("failed to register observatory_evidence: %w", err)
+	}
+	g.logger.Info("Registered tool: observatory_evidence")
+
 	return nil
 }
 
 // testConnection tests connectivity to Grafana by executing minimal queries.
-// Tests both dashboard access (required) and datasource access (optional, warns on failure).
+// Tests dashboard access (required), datasource access (optional), and Prometheus (if configured).
 func (g *GrafanaIntegration) testConnection(ctx context.Context) error {
 	// Test 1: Dashboard read access (REQUIRED)
 	dashboards, err := g.client.ListDashboards(ctx)
@@ -548,6 +1001,14 @@ func (g *GrafanaIntegration) testConnection(ctx context.Context) error {
 		// Continue - datasource access is not critical for initial connectivity
 	} else {
 		g.logger.Debug("Datasource access test passed: found %d datasources", len(datasources))
+	}
+
+	// Test 3: Prometheus connectivity (if configured)
+	if g.prometheusClient != nil {
+		if err := g.prometheusClient.TestConnection(ctx); err != nil {
+			return fmt.Errorf("prometheus connection test failed: %w", err)
+		}
+		g.logger.Debug("Prometheus connection test passed")
 	}
 
 	return nil
@@ -599,6 +1060,49 @@ func (g *GrafanaIntegration) Status() integration.IntegrationStatus {
 // Returns nil if service not initialized (graph disabled or startup failed)
 func (g *GrafanaIntegration) GetAnalysisService() *AlertAnalysisService {
 	return g.analysisService
+}
+
+// GetObservatoryRegistry returns the Observatory multi-provider registry.
+// Returns nil if not initialized (graph disabled or startup failed).
+// This can be used to register additional providers or access cross-provider services.
+func (g *GrafanaIntegration) GetObservatoryRegistry() *observatory.Registry {
+	return g.observatoryRegistry
+}
+
+// GetObservatoryProvider returns this integration's Observatory provider.
+// Returns nil if not initialized (graph disabled or startup failed).
+func (g *GrafanaIntegration) GetObservatoryProvider() *GrafanaObservatoryProvider {
+	return g.observatoryProvider
+}
+
+// NewObservatoryServiceFromRegistry creates an observatory.Service using the registry.
+// This allows using the new multi-provider Observatory service instead of
+// the legacy Grafana-specific services. Returns nil if registry not initialized.
+func (g *GrafanaIntegration) NewObservatoryServiceFromRegistry() *observatory.Service {
+	if g.observatoryRegistry == nil {
+		return nil
+	}
+	return observatory.NewService(g.observatoryRegistry)
+}
+
+// NewObservatoryInvestigateServiceFromRegistry creates an observatory.InvestigateService.
+// This allows using the new multi-provider investigation service.
+// Returns nil if registry not initialized.
+func (g *GrafanaIntegration) NewObservatoryInvestigateServiceFromRegistry() *observatory.InvestigateService {
+	if g.observatoryRegistry == nil {
+		return nil
+	}
+	return observatory.NewInvestigateService(g.observatoryRegistry)
+}
+
+// SignalValidationJob returns the signal validation job for API access.
+// Returns nil if not initialized (PrometheusURL not configured or startup failed).
+// Returns interface{} to satisfy the SignalValidator interface used by API handlers.
+func (g *GrafanaIntegration) SignalValidationJob() interface{} {
+	if g.signalValidationJob == nil {
+		return nil
+	}
+	return g.signalValidationJob
 }
 
 // getCurrentNamespace reads the namespace from the ServiceAccount mount.

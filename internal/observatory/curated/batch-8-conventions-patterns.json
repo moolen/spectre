@@ -1,0 +1,870 @@
+{
+  "batch": 8,
+  "name": "Conventions & Patterns",
+  "description": "Metric naming conventions, semantic conventions, and observability methodology patterns (OpenMetrics, OpenTelemetry, RED, USE, Golden Signals)",
+  "sources": [
+    "prometheus.io/docs (OpenMetrics)",
+    "opentelemetry.io/docs/specs/semconv",
+    "grafana.com (RED Method - Tom Wilkie)",
+    "brendangregg.com (USE Method)",
+    "sre.google (Golden Signals)"
+  ],
+  "conventions": {
+    "openmetrics_naming": {
+      "description": "OpenMetrics/Prometheus naming conventions for metric names and labels",
+      "rules": [
+        "Metric names should be snake_case",
+        "Prefix with application/library name (e.g., http_, go_, mysql_)",
+        "Suffix counters with _total",
+        "Suffix histograms with _bucket, _sum, _count",
+        "Use base units (seconds, bytes, not milliseconds, kilobytes)",
+        "Unit should be suffix before _total (e.g., _bytes_total, _seconds_total)",
+        "Avoid _count or _total suffixes on gauges"
+      ],
+      "base_units": ["seconds", "bytes", "meters", "ratios", "celsius", "volts", "amperes", "joules", "grams"],
+      "reserved_suffixes": ["_total", "_count", "_sum", "_bucket", "_info", "_created"]
+    },
+    "openmetrics_types": {
+      "counter": {
+        "description": "Monotonically increasing value, resets on restart",
+        "signal_roles": ["traffic", "errors"],
+        "use_with": "rate(), increase()",
+        "suffix": "_total"
+      },
+      "gauge": {
+        "description": "Value that can go up or down",
+        "signal_roles": ["saturation", "availability"],
+        "use_with": "direct value, avg_over_time()"
+      },
+      "histogram": {
+        "description": "Samples observations into configurable buckets",
+        "signal_roles": ["latency", "traffic"],
+        "use_with": "histogram_quantile(), rate()",
+        "suffixes": ["_bucket", "_sum", "_count"]
+      },
+      "summary": {
+        "description": "Pre-calculated quantiles on client side",
+        "signal_roles": ["latency"],
+        "use_with": "direct quantile values",
+        "suffixes": ["_sum", "_count"],
+        "notes": "Prefer histogram for better aggregation"
+      },
+      "info": {
+        "description": "Metadata about the target",
+        "signal_roles": ["availability", "novelty"],
+        "suffix": "_info",
+        "notes": "Always value 1, labels carry information"
+      },
+      "stateset": {
+        "description": "Set of related boolean states",
+        "signal_roles": ["availability"],
+        "notes": "Each state is a separate time series with value 0 or 1"
+      }
+    }
+  },
+  "methodologies": {
+    "red_method": {
+      "name": "RED Method",
+      "author": "Tom Wilkie (Grafana/Weaveworks)",
+      "focus": "Service/request-centric monitoring",
+      "description": "For every service, monitor Rate, Errors, and Duration",
+      "signals": {
+        "rate": {
+          "definition": "Number of requests per second",
+          "signal_role": "traffic",
+          "metric_types": ["counter"],
+          "example_metrics": ["http_requests_total", "grpc_server_handled_total"],
+          "promql_pattern": "rate({metric}_total[5m])"
+        },
+        "errors": {
+          "definition": "Number of failed requests per second",
+          "signal_role": "errors",
+          "metric_types": ["counter"],
+          "example_metrics": ["http_requests_total{status=~'5..'}", "grpc_server_handled_total{grpc_code!='OK'}"],
+          "promql_pattern": "rate({metric}_total{status=~'5..'}[5m])"
+        },
+        "duration": {
+          "definition": "Time taken per request (use percentiles)",
+          "signal_role": "latency",
+          "metric_types": ["histogram", "summary"],
+          "example_metrics": ["http_request_duration_seconds", "grpc_server_handling_seconds"],
+          "promql_pattern": "histogram_quantile(0.99, rate({metric}_bucket[5m]))"
+        }
+      }
+    },
+    "use_method": {
+      "name": "USE Method",
+      "author": "Brendan Gregg",
+      "focus": "Resource/infrastructure monitoring",
+      "description": "For every resource, check Utilization, Saturation, and Errors",
+      "signals": {
+        "utilization": {
+          "definition": "Percentage of time resource is busy",
+          "signal_role": "saturation",
+          "metric_types": ["gauge", "counter"],
+          "example_metrics": ["node_cpu_seconds_total", "node_memory_MemAvailable_bytes"],
+          "promql_pattern": "1 - avg(rate(node_cpu_seconds_total{mode='idle'}[5m]))"
+        },
+        "saturation": {
+          "definition": "Degree to which resource has extra work queued",
+          "signal_role": "saturation",
+          "metric_types": ["gauge"],
+          "example_metrics": ["node_load1", "node_disk_io_time_weighted_seconds_total"],
+          "promql_pattern": "node_load1 / count(node_cpu_seconds_total{mode='idle'})"
+        },
+        "errors": {
+          "definition": "Count of error events",
+          "signal_role": "errors",
+          "metric_types": ["counter"],
+          "example_metrics": ["node_network_receive_errs_total", "node_disk_io_errors_total"],
+          "promql_pattern": "rate(node_network_receive_errs_total[5m])"
+        }
+      },
+      "resources": ["CPU", "Memory", "Network", "Storage/Disk", "File Descriptors", "Mutex/Locks"]
+    },
+    "golden_signals": {
+      "name": "Four Golden Signals",
+      "author": "Google SRE",
+      "focus": "User-facing service health",
+      "description": "The four most important metrics for monitoring user-facing systems",
+      "signals": {
+        "latency": {
+          "definition": "Time to service a request (distinguish success vs error latency)",
+          "signal_role": "latency",
+          "metric_types": ["histogram"],
+          "example_metrics": ["http_request_duration_seconds", "http_server_request_duration_seconds"],
+          "promql_pattern": "histogram_quantile(0.99, rate({metric}_bucket[5m]))",
+          "notes": "Track latency of successful requests separately from errors"
+        },
+        "traffic": {
+          "definition": "Demand on the system (requests/sec, transactions/sec)",
+          "signal_role": "traffic",
+          "metric_types": ["counter"],
+          "example_metrics": ["http_requests_total", "http_server_requests_total"],
+          "promql_pattern": "rate({metric}_total[5m])"
+        },
+        "errors": {
+          "definition": "Rate of failed requests (explicit, implicit, or policy)",
+          "signal_role": "errors",
+          "metric_types": ["counter"],
+          "example_metrics": ["http_requests_total{status=~'5..'}", "http_server_requests_total{http_response_status_code=~'5..'}"],
+          "promql_pattern": "rate({metric}_total{status=~'5..'}[5m]) / rate({metric}_total[5m])"
+        },
+        "saturation": {
+          "definition": "How full the service is (queue depth, memory usage, CPU)",
+          "signal_role": "saturation",
+          "metric_types": ["gauge"],
+          "example_metrics": ["container_memory_usage_bytes", "process_open_fds"],
+          "promql_pattern": "container_memory_usage_bytes / container_spec_memory_limit_bytes",
+          "notes": "Latency increase is often a leading indicator of saturation"
+        }
+      }
+    }
+  },
+  "metrics": [
+    {
+      "name": "http.server.request.duration",
+      "name_pattern": "http_server_request_duration_seconds",
+      "signal_role": "latency",
+      "confidence": 1.0,
+      "importance": 0.95,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["http.request.method", "http.response.status_code", "url.scheme", "http.route", "error.type"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le))",
+        "histogram_quantile(0.50, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le, http_route))"
+      ],
+      "notes": "OTel stable semantic convention for HTTP server request duration. Core latency signal.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "http.server.active_requests",
+      "name_pattern": "http_server_active_requests",
+      "signal_role": "saturation",
+      "confidence": 0.95,
+      "importance": 0.85,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "gauge",
+      "labels_of_interest": ["http.request.method", "url.scheme"],
+      "common_promql_patterns": [
+        "http_server_active_requests"
+      ],
+      "notes": "OTel convention for in-flight HTTP requests. Saturation indicator.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "http.server.request.body.size",
+      "name_pattern": "http_server_request_body_size_bytes",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["http.request.method", "http.route"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.95, rate(http_server_request_body_size_bytes_bucket[5m]))"
+      ],
+      "notes": "OTel convention for HTTP request payload size.",
+      "deprecated": false,
+      "disabled_by_default": true
+    },
+    {
+      "name": "http.server.response.body.size",
+      "name_pattern": "http_server_response_body_size_bytes",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["http.request.method", "http.response.status_code", "http.route"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.95, rate(http_server_response_body_size_bytes_bucket[5m]))"
+      ],
+      "notes": "OTel convention for HTTP response payload size.",
+      "deprecated": false,
+      "disabled_by_default": true
+    },
+    {
+      "name": "http.client.request.duration",
+      "name_pattern": "http_client_request_duration_seconds",
+      "signal_role": "latency",
+      "confidence": 1.0,
+      "importance": 0.9,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["http.request.method", "server.address", "http.response.status_code", "error.type"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.99, sum(rate(http_client_request_duration_seconds_bucket[5m])) by (le, server_address))"
+      ],
+      "notes": "OTel stable semantic convention for HTTP client request duration.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "http.client.open_connections",
+      "name_pattern": "http_client_open_connections",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "gauge",
+      "labels_of_interest": ["http.connection.state", "server.address", "server.port"],
+      "common_promql_patterns": [
+        "http_client_open_connections{http_connection_state='active'}",
+        "sum(http_client_open_connections) by (server_address)"
+      ],
+      "notes": "OTel convention for HTTP connection pool state (active/idle).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "db.client.operation.duration",
+      "name_pattern": "db_client_operation_duration_seconds",
+      "signal_role": "latency",
+      "confidence": 1.0,
+      "importance": 0.95,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["db.system.name", "db.collection.name", "db.namespace", "db.query.summary", "server.address"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.99, sum(rate(db_client_operation_duration_seconds_bucket[5m])) by (le, db_system_name))",
+        "histogram_quantile(0.95, sum(rate(db_client_operation_duration_seconds_bucket[5m])) by (le, db_collection_name))"
+      ],
+      "notes": "OTel stable semantic convention for database client operation duration.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "db.client.connection.count",
+      "name_pattern": "db_client_connection_count",
+      "signal_role": "saturation",
+      "confidence": 0.95,
+      "importance": 0.85,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "gauge",
+      "labels_of_interest": ["db.client.connection.pool.name", "db.client.connection.state"],
+      "common_promql_patterns": [
+        "db_client_connection_count{db_client_connection_state='used'}",
+        "db_client_connection_count / db_client_connection_max"
+      ],
+      "notes": "OTel convention for database connection pool current connections by state (idle/used).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "db.client.connection.max",
+      "name_pattern": "db_client_connection_max",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "gauge",
+      "labels_of_interest": ["db.client.connection.pool.name"],
+      "common_promql_patterns": [
+        "db_client_connection_count / db_client_connection_max"
+      ],
+      "notes": "OTel convention for maximum database connections allowed.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "db.client.connection.pending_requests",
+      "name_pattern": "db_client_connection_pending_requests",
+      "signal_role": "saturation",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "gauge",
+      "labels_of_interest": ["db.client.connection.pool.name"],
+      "common_promql_patterns": [
+        "db_client_connection_pending_requests > 0"
+      ],
+      "notes": "OTel convention for requests waiting for a database connection. Any value > 0 indicates pool exhaustion.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "db.client.connection.timeouts",
+      "name_pattern": "db_client_connection_timeouts_total",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "counter",
+      "labels_of_interest": ["db.client.connection.pool.name"],
+      "common_promql_patterns": [
+        "rate(db_client_connection_timeouts_total[5m]) > 0"
+      ],
+      "notes": "OTel convention for database connection acquisition timeouts.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "db.client.connection.wait_time",
+      "name_pattern": "db_client_connection_wait_time_seconds",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["db.client.connection.pool.name"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.99, rate(db_client_connection_wait_time_seconds_bucket[5m]))"
+      ],
+      "notes": "OTel convention for time spent waiting to acquire a database connection.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "rpc.server.call.duration",
+      "name_pattern": "rpc_server_call_duration_seconds",
+      "signal_role": "latency",
+      "confidence": 1.0,
+      "importance": 0.95,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["rpc.system.name", "rpc.method", "rpc.response.status_code", "error.type", "server.address"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.99, sum(rate(rpc_server_call_duration_seconds_bucket[5m])) by (le, rpc_method))"
+      ],
+      "notes": "OTel convention for RPC server call duration (gRPC, Dubbo, etc.).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "rpc.server.request.size",
+      "name_pattern": "rpc_server_request_size_bytes",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["rpc.system.name", "rpc.method"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.95, rate(rpc_server_request_size_bytes_bucket[5m]))"
+      ],
+      "notes": "OTel convention for RPC request message size (uncompressed).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "rpc.server.response.size",
+      "name_pattern": "rpc_server_response_size_bytes",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["rpc.system.name", "rpc.method"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.95, rate(rpc_server_response_size_bytes_bucket[5m]))"
+      ],
+      "notes": "OTel convention for RPC response message size (uncompressed).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "rpc.client.call.duration",
+      "name_pattern": "rpc_client_call_duration_seconds",
+      "signal_role": "latency",
+      "confidence": 1.0,
+      "importance": 0.9,
+      "source": "opentelemetry.io/docs/specs/semconv",
+      "metric_type": "histogram",
+      "labels_of_interest": ["rpc.system.name", "rpc.method", "rpc.response.status_code", "error.type", "server.address"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.99, sum(rate(rpc_client_call_duration_seconds_bucket[5m])) by (le, server_address))"
+      ],
+      "notes": "OTel convention for RPC client call duration.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_requests_total",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["method", "status", "handler", "code"],
+      "common_promql_patterns": [
+        "rate({metric}[5m])",
+        "sum(rate({metric}[5m])) by (method)"
+      ],
+      "notes": "Common pattern for request counters. Part of RED/Golden Signals traffic.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_errors_total",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["type", "reason", "code"],
+      "common_promql_patterns": [
+        "rate({metric}[5m])",
+        "rate({metric}[5m]) / rate({base}_total[5m])"
+      ],
+      "notes": "Common pattern for error counters.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_failures_total",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["type", "reason"],
+      "common_promql_patterns": [
+        "rate({metric}[5m])"
+      ],
+      "notes": "Common pattern for failure counters.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_duration_seconds",
+      "signal_role": "latency",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "histogram",
+      "labels_of_interest": ["le"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.99, rate({metric}_bucket[5m]))",
+        "histogram_quantile(0.50, rate({metric}_bucket[5m]))"
+      ],
+      "notes": "Common pattern for latency histograms. Part of RED duration / Golden Signals latency.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_latency_seconds",
+      "signal_role": "latency",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "histogram",
+      "labels_of_interest": ["le"],
+      "common_promql_patterns": [
+        "histogram_quantile(0.99, rate({metric}_bucket[5m]))"
+      ],
+      "notes": "Alternative pattern for latency histograms.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_bytes_total",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["direction"],
+      "common_promql_patterns": [
+        "rate({metric}[5m])"
+      ],
+      "notes": "Common pattern for byte counters (network, disk I/O).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_bytes$",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.8,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{metric} / {metric}_limit",
+        "{metric}"
+      ],
+      "notes": "Common pattern for memory/storage gauges (not _bytes_total counters).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_queue_length",
+      "signal_role": "saturation",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": ["queue"],
+      "common_promql_patterns": [
+        "{metric} > 0"
+      ],
+      "notes": "Common pattern for queue depth. Key saturation signal in USE method.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_queue_size",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": ["queue"],
+      "common_promql_patterns": [
+        "{metric}"
+      ],
+      "notes": "Alternative pattern for queue depth gauges.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_in_flight",
+      "signal_role": "saturation",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{metric}"
+      ],
+      "notes": "Common pattern for in-flight/active request gauges.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_active$",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{metric}"
+      ],
+      "notes": "Common pattern for active resource counts.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_connections$",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": ["state"],
+      "common_promql_patterns": [
+        "{metric}",
+        "{metric} / {metric}_max"
+      ],
+      "notes": "Common pattern for connection pool gauges.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_up$",
+      "signal_role": "availability",
+      "confidence": 1.0,
+      "importance": 1.0,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance", "job"],
+      "common_promql_patterns": [
+        "{metric} == 0",
+        "avg_over_time({metric}[5m])"
+      ],
+      "notes": "Universal pattern for up/down health checks. 1=up, 0=down.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_status$",
+      "signal_role": "availability",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": ["state", "status"],
+      "common_promql_patterns": [
+        "{metric} != 1"
+      ],
+      "notes": "Common pattern for status indicators.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_health$",
+      "signal_role": "availability",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{metric} != 1",
+        "{metric} == 0"
+      ],
+      "notes": "Common pattern for health status gauges.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_info$",
+      "signal_role": "novelty",
+      "confidence": 0.95,
+      "importance": 0.6,
+      "source": "prometheus.io/docs (OpenMetrics)",
+      "metric_type": "info",
+      "labels_of_interest": ["version", "revision", "branch"],
+      "common_promql_patterns": [
+        "changes({metric}[1h])"
+      ],
+      "notes": "Info metric pattern. Value always 1, labels carry metadata. Changes indicate deployments.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_created$",
+      "signal_role": "churn",
+      "confidence": 0.9,
+      "importance": 0.65,
+      "source": "prometheus.io/docs (OpenMetrics)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "time() - {metric}",
+        "changes({metric}[1h])"
+      ],
+      "notes": "OpenMetrics convention for counter creation timestamp. Resets indicate restarts.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_restarts_total",
+      "signal_role": "churn",
+      "confidence": 0.95,
+      "importance": 0.85,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["reason"],
+      "common_promql_patterns": [
+        "increase({metric}[1h])",
+        "rate({metric}[5m]) > 0"
+      ],
+      "notes": "Common pattern for restart counters. Indicates instability.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_evictions_total",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["reason"],
+      "common_promql_patterns": [
+        "rate({metric}[5m]) > 0"
+      ],
+      "notes": "Common pattern for cache/memory eviction counters. Indicates resource pressure.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_retries_total",
+      "signal_role": "errors",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["reason"],
+      "common_promql_patterns": [
+        "rate({metric}[5m])"
+      ],
+      "notes": "Common pattern for retry counters. Retries indicate transient failures.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_timeouts_total",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["type"],
+      "common_promql_patterns": [
+        "rate({metric}[5m]) > 0"
+      ],
+      "notes": "Common pattern for timeout counters.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_rejected_total",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["reason"],
+      "common_promql_patterns": [
+        "rate({metric}[5m]) > 0"
+      ],
+      "notes": "Common pattern for rejected request/task counters. Indicates overload.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_dropped_total",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "counter",
+      "labels_of_interest": ["reason"],
+      "common_promql_patterns": [
+        "rate({metric}[5m]) > 0"
+      ],
+      "notes": "Common pattern for dropped message/packet counters.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_limit$",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{base_metric} / {metric}"
+      ],
+      "notes": "Common pattern for resource limits. Used to calculate utilization ratios.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_max$",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{base_metric} / {metric}"
+      ],
+      "notes": "Common pattern for maximum resource values.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_ratio$",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{metric} > 0.8"
+      ],
+      "notes": "Common pattern for pre-calculated ratio metrics (0.0-1.0).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_percent$",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{metric} > 80"
+      ],
+      "notes": "Common pattern for percentage metrics (0-100).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_age_seconds$",
+      "signal_role": "churn",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "{metric} < 60"
+      ],
+      "notes": "Common pattern for age/staleness gauges. Low values indicate recent changes.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": ".*_last_.*_timestamp_seconds$",
+      "signal_role": "churn",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus.io/docs (convention)",
+      "metric_type": "gauge",
+      "labels_of_interest": [],
+      "common_promql_patterns": [
+        "time() - {metric}"
+      ],
+      "notes": "Common pattern for last event timestamps. Used to detect staleness.",
+      "deprecated": false,
+      "disabled_by_default": false
+    }
+  ]
+}

@@ -2,27 +2,39 @@
 
 ## What This Is
 
-A Kubernetes observability platform with an MCP server for AI assistants. Provides timeline-based event exploration, graph-based reasoning (FalkorDB), and pluggable integrations (VictoriaLogs, Logz.io, Grafana). AI assistants can explore logs progressively and use Grafana dashboards as structured operational knowledge for metrics reasoning.
+A Kubernetes observability platform with an MCP server for AI assistants. Provides timeline-based event exploration, graph-based reasoning (FalkorDB), and pluggable integrations (VictoriaLogs, Logz.io, Grafana). AI assistants can explore logs progressively, use Grafana dashboards as structured operational knowledge, and investigate incidents systematically through signal intelligence.
 
 ## Core Value
 
-Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, log exploration, and metrics analysis in one server.
+Enable AI assistants to understand what's happening in Kubernetes clusters through a unified MCP interface—timeline queries, graph traversal, log exploration, metrics analysis, and incident investigation in one server.
 
-## Current State: v1.4 Shipped
+## Current State: v1.5 Shipped
 
-**No active milestone.** All planned features through v1.4 have been shipped.
-
-**Cumulative stats:** 23 phases, 66 plans, 146 requirements, ~137k LOC (Go + TypeScript)
+**Cumulative stats:** 26 phases, 83 plans, 207 requirements, ~164k LOC (Go + TypeScript)
 
 **Available capabilities:**
 - Timeline-based Kubernetes event exploration with FalkorDB graph
 - Log exploration via VictoriaLogs and Logz.io with progressive disclosure
 - Grafana metrics integration with dashboard sync, anomaly detection, and 3 MCP tools
 - Grafana alerts integration with state tracking, flappiness analysis, and 3 MCP tools
+- Observatory signal intelligence with 8 MCP tools for incident investigation
 
-## Previous State (v1.4 Shipped)
+## Previous State: v1.5 Observatory (Shipped 2026-01-30)
 
-**Shipped 2026-01-23:**
+**Shipped 2026-01-30:**
+- Signal anchors with 7-role taxonomy (Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty)
+- 5-layer classification with confidence decay (0.95 → 0.85-0.9 → 0.7-0.8 → 0.5 → 0)
+- Dashboard quality scoring (freshness, alerting, ownership, completeness) with alert boost
+- Rolling baseline statistics using gonum/stat (median, P50/P90/P99, stddev)
+- Hybrid anomaly detection (z-score + percentile) with sigmoid normalization, alert override
+- Hierarchical MAX aggregation (signals → workloads → namespaces → clusters)
+- 8 Observatory MCP tools: status, changes, scope, signals, signal_detail, compare, explain, evidence
+
+**Total MCP tools:** 14 Grafana tools (3 metrics + 3 alerts + 8 observatory)
+
+<details>
+<summary>v1.4 Grafana Alerts Integration (Shipped 2026-01-23)</summary>
+
 - Alert rule sync via Grafana Alerting API (incremental, version-based)
 - Alert nodes in FalkorDB linked to Metrics/Services via PromQL extraction
 - STATE_TRANSITION self-edges for 7-day timeline with TTL-based retention
@@ -33,11 +45,13 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - `grafana_{name}_alerts_aggregated` — specific alerts with 1h state timelines [F F N N]
 - `grafana_{name}_alerts_details` — full 7-day state history with rule definition
 
-**Cumulative stats:** 23 phases, 66 plans, 146 requirements, ~137k LOC (Go + TypeScript)
+**Stats:** 4 phases, 10 plans, 22 requirements
 
-## Previous State (v1.3 Shipped)
+</details>
 
-**Shipped 2026-01-23:**
+<details>
+<summary>v1.3 Grafana Metrics Integration (Shipped 2026-01-23)</summary>
+
 - Grafana dashboard ingestion via API (both Cloud and self-hosted)
 - Full semantic graph storage in FalkorDB (dashboards→panels→queries→metrics→services)
 - Dashboard hierarchy (overview/drill-down/detail) via Grafana tags + config fallback
@@ -47,22 +61,26 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - Three MCP tools: metrics_overview, metrics_aggregated, metrics_details
 - UI configuration form for Grafana connection (URL, API token, hierarchy mapping)
 
-**Cumulative stats:** 19 phases, 56 plans, 124 requirements, ~132k LOC (Go + TypeScript)
+**Stats:** 5 phases, 17 plans, 51 requirements
 
-## Previous State (v1.2 Shipped)
+</details>
 
-**Shipped 2026-01-22:**
+<details>
+<summary>v1.2 Logz.io Integration + Secret Management (Shipped 2026-01-22)</summary>
+
 - Logz.io as second log backend with 3 MCP tools (overview, logs, patterns)
 - SecretWatcher with SharedInformerFactory for Kubernetes-native secret hot-reload
 - Multi-region API support (US, EU, UK, AU, CA) with X-API-TOKEN authentication
 - UI configuration form with region selector and SecretRef fields
 - Helm chart documentation for Secret mounting with rotation workflow
 
-**Cumulative stats:** 14 phases, 39 plans, 73 requirements, ~125k LOC (Go + TypeScript)
+**Stats:** 5 phases, 8 plans, 21 requirements
 
-## Previous State (v1.1 Shipped)
+</details>
 
-**Shipped 2026-01-21:**
+<details>
+<summary>v1.1 Server Consolidation (Shipped 2026-01-21)</summary>
+
 - Single-port deployment with REST API, UI, and MCP on port 8080 (/v1/mcp endpoint)
 - Service layer extracted: TimelineService, GraphService, MetadataService, SearchService
 - MCP tools call services directly in-process (no HTTP self-calls)
@@ -70,10 +88,12 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - Helm chart simplified for single-container deployment
 - E2E tests validated for consolidated architecture
 
-**Cumulative stats:** 9 phases, 31 plans, 52 requirements, ~121k LOC (Go + TypeScript)
+**Stats:** 4 phases, 12 plans, 21 requirements
+
+</details>
 
 <details>
-<summary>v1 Shipped Features (2026-01-21)</summary>
+<summary>v1.0 MCP Plugin System + VictoriaLogs (Shipped 2026-01-21)</summary>
 
 - Plugin infrastructure with factory registry, config hot-reload, lifecycle management
 - REST API + React UI for integration configuration
@@ -81,7 +101,7 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - Log template mining using Drain algorithm with namespace-scoped storage
 - Three progressive disclosure MCP tools: overview, patterns, logs
 
-**Stats:** 5 phases, 19 plans, 31 requirements, ~17,850 LOC
+**Stats:** 5 phases, 19 plans, 31 requirements
 
 </details>
 
@@ -114,30 +134,31 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - ✓ Multi-region API endpoint support (US, EU, UK, AU, CA) — v1.2
 - ✓ UI for Logz.io configuration (region selector, SecretRef fields) — v1.2
 - ✓ Helm chart updates for secret mounting (extraVolumes example) — v1.2
-
-### v1.3 (Shipped)
-
-- ✓ Grafana API client for dashboard ingestion (both Cloud and self-hosted)
-- ✓ FalkorDB graph schema for dashboards, panels, queries, metrics, services
-- ✓ Dashboard hierarchy support (overview/drill-down/detail levels)
-- ✓ PromQL parser for metric extraction (best-effort)
-- ✓ Variable classification (scoping vs entity vs detail)
-- ✓ Service inference from metric labels
-- ✓ Anomaly detection with 7-day historical baseline
-- ✓ MCP tool: metrics_overview (overview dashboards, ranked anomalies)
-- ✓ MCP tool: metrics_aggregated (service/cluster focus, correlations)
-- ✓ MCP tool: metrics_details (full dashboard, deep expansion)
-- ✓ UI form for Grafana configuration (URL, API token, hierarchy mapping)
-
-### v1.4 (Shipped)
-
-- ✓ Alert rule sync via Grafana Alerting API (incremental, version-based)
-- ✓ Alert nodes in FalkorDB linked to existing Metrics/Services via PromQL extraction
-- ✓ Alert state timeline storage (STATE_TRANSITION edges with 7-day TTL)
-- ✓ Flappiness detection with exponential scaling and historical baseline
-- ✓ MCP tool: alerts_overview (firing/pending counts by severity with flappiness indicators)
-- ✓ MCP tool: alerts_aggregated (specific alerts with 1h state timelines [F F N N])
-- ✓ MCP tool: alerts_details (full 7-day state history with rule definition)
+- ✓ Grafana API client for dashboard ingestion (both Cloud and self-hosted) — v1.3
+- ✓ FalkorDB graph schema for dashboards, panels, queries, metrics, services — v1.3
+- ✓ Dashboard hierarchy support (overview/drill-down/detail levels) — v1.3
+- ✓ PromQL parser for metric extraction (best-effort) — v1.3
+- ✓ Variable classification (scoping vs entity vs detail) — v1.3
+- ✓ Service inference from metric labels — v1.3
+- ✓ Anomaly detection with 7-day historical baseline — v1.3
+- ✓ MCP tool: metrics_overview (overview dashboards, ranked anomalies) — v1.3
+- ✓ MCP tool: metrics_aggregated (service/cluster focus, correlations) — v1.3
+- ✓ MCP tool: metrics_details (full dashboard, deep expansion) — v1.3
+- ✓ UI form for Grafana configuration (URL, API token, hierarchy mapping) — v1.3
+- ✓ Alert rule sync via Grafana Alerting API (incremental, version-based) — v1.4
+- ✓ Alert nodes in FalkorDB linked to existing Metrics/Services via PromQL extraction — v1.4
+- ✓ Alert state timeline storage (STATE_TRANSITION edges with 7-day TTL) — v1.4
+- ✓ Flappiness detection with exponential scaling and historical baseline — v1.4
+- ✓ MCP tool: alerts_overview (firing/pending counts by severity with flappiness indicators) — v1.4
+- ✓ MCP tool: alerts_aggregated (specific alerts with 1h state timelines) — v1.4
+- ✓ MCP tool: alerts_details (full 7-day state history with rule definition) — v1.4
+- ✓ Signal anchors linking metrics to roles to workloads — v1.5
+- ✓ 7-role classification taxonomy (Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty) — v1.5
+- ✓ Dashboard quality scoring (freshness, alerting, ownership, completeness) — v1.5
+- ✓ Rolling baseline statistics per signal (median, P50/P90/P99, stddev) — v1.5
+- ✓ Hybrid anomaly detection (z-score + percentile) with alert override — v1.5
+- ✓ Hierarchical anomaly aggregation (signals → workloads → namespaces → clusters) — v1.5
+- ✓ 8 Observatory MCP tools for progressive disclosure incident investigation — v1.5
 
 ### Out of Scope
 
@@ -148,6 +169,8 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - Standalone MCP server command — consolidated architecture is the deployment model
 - Metric value storage — query Grafana on-demand instead of storing time-series locally
 - Direct Prometheus/Mimir queries — use Grafana API as proxy for simpler auth
+- ML-based role classification — keyword heuristics sufficient, ML deferred to v2
+- Real-time streaming anomaly detection — polling-based for v1.5
 
 ## Context
 
@@ -158,29 +181,23 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - MCP tools at `internal/mcp/tools/` use services directly (no HTTP)
 - Plugin system at `internal/integration/` with factory registry and lifecycle manager
 - VictoriaLogs client at `internal/integration/victorialogs/`
+- Grafana integration at `internal/integration/grafana/` with dashboard, metrics, alerts, and observatory
 - Log processing at `internal/logprocessing/` (Drain algorithm, template storage)
 - Config management at `internal/config/` with hot-reload via fsnotify
 - REST API handlers at `internal/api/handlers/`
 - React UI at `ui/src/pages/`
 - Go 1.24+, TypeScript 5.8, React 19
 
-**Architecture (v1.1):**
+**Architecture (v1.5):**
 - Single `spectre server` command serves everything on port 8080
-- MCP tools call TimelineService/GraphService directly in-process
-- No standalone MCP/agent commands (removed in v1.1)
-- Helm chart deploys single container
+- MCP tools call TimelineService/GraphService/ObservatoryService directly in-process
+- Grafana integration provides 14 MCP tools (3 metrics + 3 alerts + 8 observatory)
+- Observatory uses FalkorDB for signal anchors and baselines with TTL-based cleanup
 
-**Progressive disclosure model (implemented):**
-1. **Overview** — error/warning counts by namespace (QueryAggregation with level filter)
-2. **Patterns** — log templates via Drain with novelty detection (compare to previous window)
-3. **Logs** — raw logs with limit enforcement (max 500)
-
-**Grafana integration architecture (v1.3 target):**
-- Dashboard ingestion: Grafana API → full JSON stored, structure extracted to graph
-- Graph schema: Dashboard→Panel→Query→Metric, Service inferred from labels
-- Query execution: Via Grafana /api/ds/query endpoint (not direct to Prometheus)
-- Variable handling: AI provides scoping variables (cluster, region) per MCP call
-- Anomaly detection: Compare current metrics to 7-day rolling average (time-of-day matched)
+**Progressive disclosure model:**
+1. **Overview** — cluster/namespace anomaly summary (Orient stage)
+2. **Scope** — namespace/workload focus with ranked signals (Narrow stage)
+3. **Detail** — signal baseline, anomaly score, evidence (Investigate/Verify stages)
 
 ## Constraints
 
@@ -194,6 +211,7 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 - **Grafana API token**: Requires Bearer token with dashboard read permissions
 - **PromQL parsing best-effort**: Complex expressions may not fully parse, extract what's possible
 - **Graph storage for structure only**: FalkorDB stores dashboard structure, not metric values
+- **Baseline collection rate limit**: 10 req/sec forward, 2 req/sec backfill
 
 ## Key Decisions
 
@@ -232,11 +250,23 @@ Enable AI assistants to understand what's happening in Kubernetes clusters throu
 | LOCF interpolation for timelines (v1.4) | Fills gaps realistically in state buckets | ✓ Good |
 | Optional filter parameters (v1.4) | Maximum flexibility for AI alert queries | ✓ Good |
 | 10-minute timeline buckets (v1.4) | Compact notation [F F N N], 6 buckets per hour | ✓ Good |
+| Layered classification with confidence decay (v1.5) | 5 layers from hardcoded to unknown | ✓ Good |
+| Quality scoring with alert boost (v1.5) | +0.2 for dashboards with alerts | ✓ Good |
+| Composite key for SignalAnchor (v1.5) | metric + namespace + workload + integration | ✓ Good |
+| Z-score sigmoid normalization (v1.5) | Maps unbounded to 0-1 range | ✓ Good |
+| Hybrid MAX aggregation (v1.5) | Either z-score or percentile can flag anomaly | ✓ Good |
+| Alert firing override (v1.5) | Human decision takes precedence, score=1.0 | ✓ Good |
+| Hierarchical MAX aggregation (v1.5) | Worst signal bubbles up through hierarchy | ✓ Good |
+| Progressive disclosure for incidents (v1.5) | Orient → Narrow → Investigate → Hypothesize → Verify | ✓ Good |
 
 ## Tech Debt
 
 - DateAdded field not persisted in integration config (uses time.Now() on each GET request)
 - GET /{name} endpoint available but unused by UI (uses list endpoint instead)
+- TestComputeDashboardQuality_Freshness has time-dependent failures
+- Quality scoring stubs (getAlertRuleCount, getViewsLast30Days return 0)
+- Dashboard metadata extraction TODOs (updated time, folder title, description)
+- QueryService stub methods (FetchCurrentValue, FetchHistoricalValue use baseline fallback)
 
 ---
-*Last updated: 2026-01-23 after v1.4 milestone shipped*
+*Last updated: 2026-01-30 after v1.5 Observatory milestone shipped*

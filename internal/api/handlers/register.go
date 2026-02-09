@@ -110,6 +110,13 @@ func RegisterHandlers(
 		router.HandleFunc("/v1/namespace-graph", withMethod(http.MethodGet, namespaceGraphHandler.Handle))
 	}
 
+	// Register observatory graph handler if graph service is available
+	if graphService != nil {
+		observatoryGraphHandler := NewObservatoryGraphHandler(graphService.GetObservatoryAnalyzer(), logger, tracer)
+		router.HandleFunc("/v1/observatory-graph", withMethod(http.MethodGet, observatoryGraphHandler.Handle))
+		logger.Info("Registered /v1/observatory-graph endpoint")
+	}
+
 	// Register import handler if graph pipeline is available
 	if graphPipeline != nil {
 		importHandler := NewImportHandler(graphPipeline, logger)
@@ -152,6 +159,7 @@ func RegisterHandlers(
 		// Instance-specific endpoints with path parameter
 		router.HandleFunc("/api/config/integrations/", func(w http.ResponseWriter, r *http.Request) {
 			name := strings.TrimPrefix(r.URL.Path, "/api/config/integrations/")
+			name = strings.TrimSuffix(name, "/") // Normalize trailing slash
 			logger.Debug("Integration endpoint: path=%s, name=%s, method=%s", r.URL.Path, name, r.Method)
 			if name == "" {
 				api.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Integration name required")
@@ -175,6 +183,26 @@ func RegisterHandlers(
 					return
 				}
 				configHandler.HandleSync(w, r)
+				return
+			}
+
+			// Check for /signals/validate/status suffix (GET signal validation status)
+			if strings.HasSuffix(name, "/signals/validate/status") {
+				if r.Method != http.MethodGet {
+					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
+					return
+				}
+				configHandler.HandleSignalValidationStatus(w, r)
+				return
+			}
+
+			// Check for /signals/validate suffix (POST trigger signal validation)
+			if strings.HasSuffix(name, "/signals/validate") {
+				if r.Method != http.MethodPost {
+					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+					return
+				}
+				configHandler.HandleSignalValidation(w, r)
 				return
 			}
 

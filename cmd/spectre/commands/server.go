@@ -388,38 +388,8 @@ func runServer(cmd *cobra.Command, args []string) {
 	querySource := api.TimelineQuerySourceGraph
 	logger.Info("Timeline query source: GRAPH")
 
-	// Import events from file or directory if import path is specified
-	if importPath != "" {
-		logger.Info("Importing events from path: %s", importPath)
-		importStartTime := time.Now()
-
-		eventValues, err := importexport.Import(importexport.FromPath(importPath), importexport.WithLogger(logger))
-		if err != nil {
-			logger.Error("Failed to import events from path: %v", err)
-			HandleError(err, "Import error")
-		}
-
-		logger.InfoWithFields("Parsed import path",
-			logging.Field("event_count", len(eventValues)),
-			logging.Field("parse_duration", time.Since(importStartTime)))
-
-		// Process events through graph pipeline
-		importCtx, importCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer importCancel()
-
-		processStartTime := time.Now()
-		if err := graphPipeline.ProcessBatch(importCtx, eventValues); err != nil {
-			logger.Error("Failed to process imported events: %v", err)
-			HandleError(err, "Import processing error")
-		}
-
-		processDuration := time.Since(processStartTime)
-		totalDuration := time.Since(importStartTime)
-		logger.InfoWithFields("Import completed",
-			logging.Field("event_count", len(eventValues)),
-			logging.Field("process_duration", processDuration),
-			logging.Field("total_duration", totalDuration))
-	}
+	// NOTE: CLI import is deferred until after manager.Start() to ensure
+	// the graph pipeline is fully initialized (schema, indexes, etc.)
 
 	// Create API server first (without MCP server) to initialize TimelineService
 	apiComponent := apiserver.NewWithStorageGraphAndPipeline(
@@ -514,18 +484,20 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	// Register components
-	// Only register watcher if it was initialized
+	// IMPORTANT: Register graph service BEFORE watcher so the graph schema is initialized
+	// before the watcher starts capturing events. The watcher's Start() method does an
+	// immediate LIST and processes events through the pipeline, so the graph must be ready.
+	if err := manager.Register(graphServiceComponent); err != nil {
+		logger.Error("Failed to register graph service component: %v", err)
+		HandleError(err, "Graph service registration error")
+	}
+
+	// Register watcher after graph service so events can be properly stored
 	if watcherComponent != nil {
 		if err := manager.Register(watcherComponent); err != nil {
 			logger.Error("Failed to register watcher component: %v", err)
 			HandleError(err, "Watcher registration error")
 		}
-	}
-
-	// Register graph service
-	if err := manager.Register(graphServiceComponent); err != nil {
-		logger.Error("Failed to register graph service component: %v", err)
-		HandleError(err, "Graph service registration error")
 	}
 
 	// Initialize and register reconciler if enabled
@@ -568,6 +540,41 @@ func runServer(cmd *cobra.Command, args []string) {
 	if err := manager.Start(ctx); err != nil {
 		logger.Error("Failed to start components: %v", err)
 		HandleError(err, "Startup error")
+	}
+
+	// Import events from file or directory if import path is specified
+	// This must happen AFTER manager.Start() to ensure the graph pipeline is fully
+	// initialized (schema, indexes, etc.) before processing events
+	if importPath != "" {
+		logger.Info("Importing events from path: %s", importPath)
+		importStartTime := time.Now()
+
+		eventValues, err := importexport.Import(importexport.FromPath(importPath), importexport.WithLogger(logger))
+		if err != nil {
+			logger.Error("Failed to import events from path: %v", err)
+			HandleError(err, "Import error")
+		}
+
+		logger.InfoWithFields("Parsed import path",
+			logging.Field("event_count", len(eventValues)),
+			logging.Field("parse_duration", time.Since(importStartTime)))
+
+		// Process events through graph pipeline
+		importCtx, importCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer importCancel()
+
+		processStartTime := time.Now()
+		if err := graphPipeline.ProcessBatch(importCtx, eventValues); err != nil {
+			logger.Error("Failed to process imported events: %v", err)
+			HandleError(err, "Import processing error")
+		}
+
+		processDuration := time.Since(processStartTime)
+		totalDuration := time.Since(importStartTime)
+		logger.InfoWithFields("Import completed",
+			logging.Field("event_count", len(eventValues)),
+			logging.Field("process_duration", processDuration),
+			logging.Field("total_duration", totalDuration))
 	}
 
 	// Start stdio MCP transport if requested

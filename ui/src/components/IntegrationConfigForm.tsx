@@ -110,6 +110,39 @@ export function IntegrationConfigForm({
     handleHierarchyMapChange(currentMap);
   };
 
+  const handlePrometheusUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange({
+      ...config,
+      config: { ...config.config, prometheusUrl: e.target.value },
+    });
+  };
+
+  const handlePrometheusSecretNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange({
+      ...config,
+      config: {
+        ...config.config,
+        prometheusApiTokenRef: {
+          ...config.config.prometheusApiTokenRef,
+          secretName: e.target.value,
+        },
+      },
+    });
+  };
+
+  const handlePrometheusSecretKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange({
+      ...config,
+      config: {
+        ...config.config,
+        prometheusApiTokenRef: {
+          ...config.config.prometheusApiTokenRef,
+          key: e.target.value,
+        },
+      },
+    });
+  };
+
   return (
     <div>
       {/* Name Field */}
@@ -758,6 +791,177 @@ export function IntegrationConfigForm({
             >
               + Add Mapping
             </button>
+          </div>
+
+          {/* Prometheus Configuration Section (Optional) */}
+          <div style={{
+            marginBottom: '20px',
+            padding: '16px',
+            borderRadius: '8px',
+            border: '1px solid var(--color-border-soft)',
+            backgroundColor: 'var(--color-surface-muted)',
+          }}>
+            <h4 style={{
+              margin: '0 0 8px 0',
+              fontSize: '14px',
+              fontWeight: 600,
+              color: 'var(--color-text-primary)',
+            }}>
+              Prometheus Configuration (Optional)
+            </h4>
+            <p style={{
+              margin: '0 0 16px 0',
+              fontSize: '12px',
+              color: 'var(--color-text-muted)',
+            }}>
+              Direct Prometheus API access for scrape target discovery. Enables linking metrics to K8s workloads.
+            </p>
+
+            {/* Prometheus URL */}
+            <div style={{ marginBottom: '12px' }}>
+              <label
+                htmlFor="integration-prometheus-url"
+                style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'var(--color-text-primary)',
+                  marginBottom: '8px',
+                }}
+              >
+                Prometheus URL
+              </label>
+              <input
+                id="integration-prometheus-url"
+                type="text"
+                value={config.config.prometheusUrl || ''}
+                onChange={handlePrometheusUrlChange}
+                placeholder="http://prometheus:9090"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-border-soft)',
+                  backgroundColor: 'var(--color-surface-elevated)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '14px',
+                  outline: 'none',
+                  transition: 'border-color 0.15s',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = '#3b82f6';
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--color-border-soft)';
+                }}
+              />
+              <p
+                style={{
+                  marginTop: '6px',
+                  fontSize: '12px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                Direct Prometheus API URL for scrape target discovery
+              </p>
+            </div>
+
+            {/* Prometheus Authentication (nested box) */}
+            <div style={{
+              padding: '12px',
+              borderRadius: '6px',
+              border: '1px solid var(--color-border-soft)',
+              backgroundColor: 'var(--color-surface-elevated)',
+            }}>
+              <h5 style={{
+                margin: '0 0 12px 0',
+                fontSize: '13px',
+                fontWeight: 500,
+                color: 'var(--color-text-secondary)',
+              }}>
+                Authentication (Optional)
+              </h5>
+
+              {/* Prometheus Secret Name */}
+              <div style={{ marginBottom: '12px' }}>
+                <label
+                  htmlFor="integration-prometheus-secret-name"
+                  style={{
+                    display: 'block',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    color: 'var(--color-text-primary)',
+                    marginBottom: '6px',
+                  }}
+                >
+                  Secret Name
+                </label>
+                <input
+                  id="integration-prometheus-secret-name"
+                  type="text"
+                  value={config.config.prometheusApiTokenRef?.secretName || ''}
+                  onChange={handlePrometheusSecretNameChange}
+                  placeholder="prometheus-token"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border-soft)',
+                    backgroundColor: 'var(--color-surface-muted)',
+                    color: 'var(--color-text-primary)',
+                    fontSize: '13px',
+                    outline: 'none',
+                    transition: 'border-color 0.15s',
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = '#3b82f6';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--color-border-soft)';
+                  }}
+                />
+              </div>
+
+              {/* Prometheus Secret Key */}
+              <div>
+                <label
+                  htmlFor="integration-prometheus-secret-key"
+                  style={{
+                    display: 'block',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    color: 'var(--color-text-primary)',
+                    marginBottom: '6px',
+                  }}
+                >
+                  Key
+                </label>
+                <input
+                  id="integration-prometheus-secret-key"
+                  type="text"
+                  value={config.config.prometheusApiTokenRef?.key || ''}
+                  onChange={handlePrometheusSecretKeyChange}
+                  placeholder="api-token"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border-soft)',
+                    backgroundColor: 'var(--color-surface-muted)',
+                    color: 'var(--color-text-primary)',
+                    fontSize: '13px',
+                    outline: 'none',
+                    transition: 'border-color 0.15s',
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = '#3b82f6';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--color-border-soft)';
+                  }}
+                />
+              </div>
+            </div>
           </div>
         </>
       )}

@@ -1,0 +1,20 @@
+{
+  "anomalies": [
+    {
+      "workload": "api-server",
+      "metric_name": "http_errors_total",
+      "role": "",
+      "score": 1,
+      "confidence": 0.8
+    },
+    {
+      "workload": "nginx",
+      "metric_name": "http_requests_total",
+      "role": "",
+      "score": 1,
+      "confidence": 0.7
+    }
+  ],
+  "scope": "prod",
+  "timestamp": "NORMALIZED"
+}

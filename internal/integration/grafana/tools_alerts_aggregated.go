@@ -188,41 +188,38 @@ func (t *AlertsAggregatedTool) Execute(ctx context.Context, args []byte) (interf
 }
 
 // fetchAlerts queries the graph for Alert nodes matching the provided filters
+// Note: cluster, service, namespace, severity are stored in a.labels JSON, not as separate properties
 func (t *AlertsAggregatedTool) fetchAlerts(ctx context.Context, params AlertsAggregatedParams) ([]alertInfo, error) {
 	// Build WHERE clause dynamically based on filters
+	// Labels are stored as JSON string, so we use string matching (same as overview tool)
 	whereClauses := []string{"a.integration = $integration"}
 	parameters := map[string]interface{}{
 		"integration": t.integrationName,
 	}
 
 	if params.Severity != "" {
-		whereClauses = append(whereClauses, "a.severity = $severity")
-		parameters["severity"] = params.Severity
+		whereClauses = append(whereClauses, fmt.Sprintf("toLower(a.labels) CONTAINS '\"severity\":\"%s\"'", strings.ToLower(params.Severity)))
 	}
 	if params.Cluster != "" {
-		whereClauses = append(whereClauses, "a.cluster = $cluster")
-		parameters["cluster"] = params.Cluster
+		whereClauses = append(whereClauses, fmt.Sprintf("a.labels CONTAINS '\"cluster\":\"%s\"'", params.Cluster))
 	}
 	if params.Service != "" {
-		whereClauses = append(whereClauses, "a.service = $service")
-		parameters["service"] = params.Service
+		whereClauses = append(whereClauses, fmt.Sprintf("a.labels CONTAINS '\"service\":\"%s\"'", params.Service))
 	}
 	if params.Namespace != "" {
-		whereClauses = append(whereClauses, "a.namespace = $namespace")
-		parameters["namespace"] = params.Namespace
+		whereClauses = append(whereClauses, fmt.Sprintf("a.labels CONTAINS '\"namespace\":\"%s\"'", params.Namespace))
 	}
 
 	whereClause := strings.Join(whereClauses, " AND ")
 
+	// Use a.title (not a.name) and a.labels (JSON containing cluster/service/namespace)
 	query := fmt.Sprintf(`
 MATCH (a:Alert)
 WHERE %s
 RETURN a.uid AS uid,
-       a.name AS name,
-       a.cluster AS cluster,
-       a.service AS service,
-       a.namespace AS namespace
-ORDER BY a.name
+       a.title AS name,
+       a.labels AS labels
+ORDER BY a.title
 `, whereClause)
 
 	result, err := t.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
@@ -237,25 +234,30 @@ ORDER BY a.name
 	// Parse results
 	alerts := make([]alertInfo, 0)
 	for _, row := range result.Rows {
-		if len(row) < 5 {
+		if len(row) < 3 {
 			continue
 		}
 
 		uid, _ := row[0].(string)
 		name, _ := row[1].(string)
-		cluster, _ := row[2].(string)
-		service, _ := row[3].(string)
-		namespace, _ := row[4].(string)
+		labelsJSON, _ := row[2].(string)
 
-		if uid != "" && name != "" {
-			alerts = append(alerts, alertInfo{
-				UID:       uid,
-				Name:      name,
-				Cluster:   cluster,
-				Service:   service,
-				Namespace: namespace,
-			})
+		if uid == "" || name == "" {
+			continue
 		}
+
+		// Extract cluster, service, namespace from labels JSON
+		cluster := extractLabel(labelsJSON, "cluster")
+		service := extractLabel(labelsJSON, "service")
+		namespace := extractLabel(labelsJSON, "namespace")
+
+		alerts = append(alerts, alertInfo{
+			UID:       uid,
+			Name:      name,
+			Cluster:   cluster,
+			Service:   service,
+			Namespace: namespace,
+		})
 	}
 
 	return alerts, nil

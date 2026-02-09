@@ -13,6 +13,25 @@ export const DEFAULT_KINDS = [
   'HelmRelease'
 ];
 
+// Default node types for Observatory view
+export const DEFAULT_OBSERVATORY_NODE_TYPES = [
+  'SignalAnchor',
+  'Workload'
+];
+
+// All available Observatory node types
+export const OBSERVATORY_NODE_TYPES = [
+  'SignalAnchor',
+  'SignalBaseline',
+  'Alert',
+  'Dashboard',
+  'Panel',
+  'Query',
+  'Metric',
+  'Service',
+  'Workload'
+];
+
 // Common kinds available for selection in settings
 export const COMMON_KINDS = [
   // Workloads
@@ -39,6 +58,8 @@ export interface SettingsState {
   compactMode: boolean;
   autoRefresh: AutoRefreshOption;
   defaultKinds: string[];
+  defaultObservatoryNodeTypes: string[];
+  hideInactiveReplicaSets: boolean;
 }
 
 interface SettingsContextValue extends SettingsState {
@@ -47,6 +68,8 @@ interface SettingsContextValue extends SettingsState {
   setCompactMode: (enabled: boolean) => void;
   setAutoRefresh: (value: AutoRefreshOption) => void;
   setDefaultKinds: (kinds: string[]) => void;
+  setDefaultObservatoryNodeTypes: (types: string[]) => void;
+  setHideInactiveReplicaSets: (hide: boolean) => void;
   formatTime: (date: Date) => string;
 }
 
@@ -55,7 +78,9 @@ const DEFAULT_SETTINGS: SettingsState = {
   timeFormat: '24h',
   compactMode: false,
   autoRefresh: 'off',
-  defaultKinds: DEFAULT_KINDS
+  defaultKinds: DEFAULT_KINDS,
+  defaultObservatoryNodeTypes: DEFAULT_OBSERVATORY_NODE_TYPES,
+  hideInactiveReplicaSets: true
 };
 
 const STORAGE_KEY = 'spectre-settings';
@@ -110,6 +135,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setCompactMode: (enabled) => setSettings((prev) => ({ ...prev, compactMode: enabled })),
     setAutoRefresh: (value) => setSettings((prev) => ({ ...prev, autoRefresh: value })),
     setDefaultKinds: (kinds) => setSettings((prev) => ({ ...prev, defaultKinds: kinds })),
+    setDefaultObservatoryNodeTypes: (types) => setSettings((prev) => ({ ...prev, defaultObservatoryNodeTypes: types })),
+    setHideInactiveReplicaSets: (hide) => setSettings((prev) => ({ ...prev, hideInactiveReplicaSets: hide })),
     formatTime
   };
 

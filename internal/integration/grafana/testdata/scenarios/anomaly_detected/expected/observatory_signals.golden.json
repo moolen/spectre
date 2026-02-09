@@ -1,0 +1,27 @@
+{
+  "signals": [
+    {
+      "metric_name": "http_errors_total",
+      "role": "Errors",
+      "score": 1,
+      "confidence": 0.9,
+      "quality_score": 0.9
+    },
+    {
+      "metric_name": "http_request_duration_seconds",
+      "role": "Latency",
+      "score": 1,
+      "confidence": 0.85,
+      "quality_score": 0.85
+    },
+    {
+      "metric_name": "up",
+      "role": "Availability",
+      "score": 0,
+      "confidence": 0.8,
+      "quality_score": 0.8
+    }
+  ],
+  "scope": "prod/api-server",
+  "timestamp": "NORMALIZED"
+}

@@ -150,35 +150,20 @@ func (m *mockAlertGraphClient) queryAlertsForTools(query graph.GraphQuery) (*gra
 			continue
 		}
 
-		// Apply parameter-based filters
+		// Apply parameter-based filters (for alert_uid)
 		if uid, ok := query.Parameters["uid"].(string); ok {
 			if alert.UID != uid {
 				continue
 			}
 		}
-		if severity, ok := query.Parameters["severity"].(string); ok {
-			if alert.Labels["severity"] != severity {
-				continue
-			}
-		}
-		if cluster, ok := query.Parameters["cluster"].(string); ok {
-			if alert.Labels["cluster"] != cluster {
-				continue
-			}
-		}
-		if service, ok := query.Parameters["service"].(string); ok {
-			if alert.Labels["service"] != service {
-				continue
-			}
-		}
-		if namespace, ok := query.Parameters["namespace"].(string); ok {
-			if alert.Labels["namespace"] != namespace {
-				continue
-			}
+
+		// Apply label-based filters from query string (same approach as matchesLabelFilters)
+		if !m.matchesLabelFilters(alert, query.Query) {
+			continue
 		}
 
 		if isDetails {
-			// Details query format
+			// Details query format: uid, title (as name), labels, annotations, condition
 			labelsJSON, _ := json.Marshal(alert.Labels)
 			annotationsJSON, _ := json.Marshal(alert.Annotations)
 
@@ -190,13 +175,12 @@ func (m *mockAlertGraphClient) queryAlertsForTools(query graph.GraphQuery) (*gra
 				alert.Condition,
 			})
 		} else {
-			// Aggregated query format
+			// Aggregated query format: uid, title (as name), labels
+			labelsJSON, _ := json.Marshal(alert.Labels)
 			rows = append(rows, []interface{}{
 				alert.UID,
 				alert.Name,
-				alert.Labels["cluster"],
-				alert.Labels["service"],
-				alert.Labels["namespace"],
+				string(labelsJSON),
 			})
 		}
 	}
@@ -209,7 +193,7 @@ func (m *mockAlertGraphClient) queryAlertsForTools(query graph.GraphQuery) (*gra
 	}
 
 	return &graph.QueryResult{
-		Columns: []string{"uid", "name", "cluster", "service", "namespace"},
+		Columns: []string{"uid", "name", "labels"},
 		Rows:    rows,
 	}, nil
 }

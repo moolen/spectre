@@ -19,6 +19,7 @@ import {
   transformStatusSegmentsWithErrorHandling,
 } from './dataTransformer';
 import { NamespaceGraphRequest, NamespaceGraphResponse } from '../types/namespaceGraph';
+import { ObservatoryGraphRequest, ObservatoryGraphResponse } from '../types/observatoryGraph';
 import { isHumanFriendlyExpression, parseTimeExpression } from '../utils/timeParsing';
 import { TimelineGrpcService, TimelineStreamResult as GrpcStreamResult } from './timeline-grpc';
 import { TimelineResource as GrpcTimelineResource, TimelineMetadata } from '../generated/timeline';
@@ -504,6 +505,33 @@ class ApiClient {
 
     const endpoint = `/v1/namespace-graph?${queryParams.toString()}`;
     return this.request<NamespaceGraphResponse>(endpoint);
+  }
+
+  /**
+   * Get observatory graph data for visualization
+   * Returns SignalAnchors, Alerts, Dashboards, Panels, Queries, Metrics, and their relationships
+   */
+  async getObservatoryGraph(params: ObservatoryGraphRequest): Promise<ObservatoryGraphResponse> {
+    const queryParams = new URLSearchParams();
+
+    if (params.integration) {
+      queryParams.append('integration', params.integration);
+    }
+    if (params.namespace) {
+      queryParams.append('namespace', params.namespace);
+    }
+    if (params.workload) {
+      queryParams.append('workload', params.workload);
+    }
+    if (params.includeBaselines) {
+      queryParams.append('includeBaselines', 'true');
+    }
+    if (params.limit !== undefined) {
+      queryParams.append('limit', params.limit.toString());
+    }
+
+    const endpoint = `/v1/observatory-graph?${queryParams.toString()}`;
+    return this.request<ObservatoryGraphResponse>(endpoint);
   }
 }
 

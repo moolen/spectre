@@ -164,8 +164,10 @@ func (t *AlertsDetailsTool) Execute(ctx context.Context, args []byte) (interface
 }
 
 // fetchDetailAlerts queries the graph for Alert nodes with full metadata
+// Note: cluster, service, namespace, severity are stored in a.labels JSON, not as separate properties
 func (t *AlertsDetailsTool) fetchDetailAlerts(ctx context.Context, params AlertsDetailsParams) ([]detailAlertInfo, error) {
 	// Build WHERE clause dynamically based on filters
+	// Labels are stored as JSON string, so we use string matching (same as overview tool)
 	whereClauses := []string{"a.integration = $integration"}
 	parameters := map[string]interface{}{
 		"integration": t.integrationName,
@@ -176,33 +178,30 @@ func (t *AlertsDetailsTool) fetchDetailAlerts(ctx context.Context, params Alerts
 		parameters["uid"] = params.AlertUID
 	}
 	if params.Severity != "" {
-		whereClauses = append(whereClauses, "a.severity = $severity")
-		parameters["severity"] = params.Severity
+		whereClauses = append(whereClauses, fmt.Sprintf("toLower(a.labels) CONTAINS '\"severity\":\"%s\"'", strings.ToLower(params.Severity)))
 	}
 	if params.Cluster != "" {
-		whereClauses = append(whereClauses, "a.cluster = $cluster")
-		parameters["cluster"] = params.Cluster
+		whereClauses = append(whereClauses, fmt.Sprintf("a.labels CONTAINS '\"cluster\":\"%s\"'", params.Cluster))
 	}
 	if params.Service != "" {
-		whereClauses = append(whereClauses, "a.service = $service")
-		parameters["service"] = params.Service
+		whereClauses = append(whereClauses, fmt.Sprintf("a.labels CONTAINS '\"service\":\"%s\"'", params.Service))
 	}
 	if params.Namespace != "" {
-		whereClauses = append(whereClauses, "a.namespace = $namespace")
-		parameters["namespace"] = params.Namespace
+		whereClauses = append(whereClauses, fmt.Sprintf("a.labels CONTAINS '\"namespace\":\"%s\"'", params.Namespace))
 	}
 
 	whereClause := strings.Join(whereClauses, " AND ")
 
+	// Use a.title (not a.name) - this is the property set by BuildAlertGraph
 	query := fmt.Sprintf(`
 MATCH (a:Alert)
 WHERE %s
 RETURN a.uid AS uid,
-       a.name AS name,
+       a.title AS name,
        a.labels AS labels,
        a.annotations AS annotations,
        a.condition AS condition
-ORDER BY a.name
+ORDER BY a.title
 `, whereClause)
 
 	result, err := t.graphClient.ExecuteQuery(ctx, graph.GraphQuery{

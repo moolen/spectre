@@ -490,8 +490,8 @@ func buildAndLoadTestImage(t *testing.T, clusterName, imageRef string) error {
 	builtImagesMutex.RUnlock()
 
 	if !alreadyBuilt {
-		t.Logf("Building Docker image %s", imageRef)
-		buildCmd := exec.Command("docker", "build", "-t", imageRef, root)
+		t.Logf("Building Docker image %s (--no-cache)", imageRef)
+		buildCmd := exec.Command("docker", "build", "--no-cache", "-t", imageRef, root)
 		if err := runCommand(buildCmd); err != nil {
 			return err
 		}

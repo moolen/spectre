@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/moolen/spectre/internal/graph"
@@ -55,6 +57,10 @@ type GrafanaQueryService struct {
 	grafanaClient *GrafanaClient
 	graphClient   graph.Client
 	logger        *logging.Logger
+
+	// Cached Prometheus datasource UID for fallback resolution
+	promDatasourceMu  sync.Mutex
+	promDatasourceUID string
 }
 
 // NewGrafanaQueryService creates a new query service.
@@ -101,7 +107,7 @@ func (s *GrafanaQueryService) ExecuteDashboard(
 	}
 
 	// Parse panels from dashboard JSON
-	panels, err := s.extractPanels(dashboardJSON)
+	panels, err := s.extractPanels(ctx, dashboardJSON)
 	if err != nil {
 		return nil, fmt.Errorf("extract panels from dashboard %s: %w", dashboardUID, err)
 	}
@@ -157,7 +163,8 @@ func (s *GrafanaQueryService) ExecuteDashboard(
 	return result, nil
 }
 
-// fetchDashboardFromGraph retrieves dashboard JSON and title from the graph.
+// fetchDashboardFromGraph retrieves dashboard JSON and title.
+// First tries graph cache, then falls back to Grafana API.
 func (s *GrafanaQueryService) fetchDashboardFromGraph(ctx context.Context, uid string) (map[string]interface{}, string, error) {
 	query := `MATCH (d:Dashboard {uid: $uid}) RETURN d.json AS json, d.title AS title`
 
@@ -195,26 +202,47 @@ func (s *GrafanaQueryService) fetchDashboardFromGraph(ctx context.Context, uid s
 		title, _ = row[titleIdx].(string)
 	}
 
-	// Parse JSON
-	if jsonIdx < 0 || jsonIdx >= len(row) {
-		return nil, "", fmt.Errorf("dashboard JSON not found")
-	}
-	jsonStr, ok := row[jsonIdx].(string)
-	if !ok {
-		return nil, "", fmt.Errorf("dashboard JSON not found")
+	// Try to get JSON from graph first
+	var dashboardJSON map[string]interface{}
+	if jsonIdx >= 0 && jsonIdx < len(row) {
+		if jsonStr, ok := row[jsonIdx].(string); ok && jsonStr != "" {
+			if err := json.Unmarshal([]byte(jsonStr), &dashboardJSON); err == nil {
+				return dashboardJSON, title, nil
+			}
+		}
 	}
 
-	var dashboardJSON map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &dashboardJSON); err != nil {
-		return nil, "", fmt.Errorf("parse dashboard JSON: %w", err)
+	// Fallback: fetch from Grafana API
+	s.logger.Debug("Dashboard %s JSON not in graph, fetching from Grafana API", uid)
+	dashboardData, err := s.grafanaClient.GetDashboard(ctx, uid)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch dashboard from Grafana: %w", err)
+	}
+
+	// Extract the dashboard object from the response (Grafana wraps it)
+	if dashboard, ok := dashboardData["dashboard"].(map[string]interface{}); ok {
+		dashboardJSON = dashboard
+	} else {
+		dashboardJSON = dashboardData
+	}
+
+	// Use title from API if not found in graph
+	if title == "" {
+		if apiTitle, ok := dashboardJSON["title"].(string); ok {
+			title = apiTitle
+		}
 	}
 
 	return dashboardJSON, title, nil
 }
 
 // extractPanels parses dashboard JSON and extracts panels with queries.
-func (s *GrafanaQueryService) extractPanels(dashboardJSON map[string]interface{}) ([]dashboardPanel, error) {
+// Also resolves variable-based datasources to actual UIDs.
+func (s *GrafanaQueryService) extractPanels(ctx context.Context, dashboardJSON map[string]interface{}) ([]dashboardPanel, error) {
 	panels := make([]dashboardPanel, 0)
+
+	// Extract default datasource UID from dashboard templating
+	defaultDatasourceUID := s.extractDefaultDatasource(dashboardJSON)
 
 	// Get panels array from dashboard
 	panelsRaw, ok := dashboardJSON["panels"].([]interface{})
@@ -230,7 +258,11 @@ func (s *GrafanaQueryService) extractPanels(dashboardJSON map[string]interface{}
 
 		panel := s.extractPanelInfo(panelMap)
 		if panel != nil && len(panel.Targets) > 0 {
-			panels = append(panels, *panel)
+			// Resolve variable-based datasource
+			panel.DatasourceUID = s.resolveDatasourceUID(ctx, panel.DatasourceUID, defaultDatasourceUID)
+			if panel.DatasourceUID != "" {
+				panels = append(panels, *panel)
+			}
 		}
 
 		// Handle nested panels (rows with collapsed panels)
@@ -242,13 +274,154 @@ func (s *GrafanaQueryService) extractPanels(dashboardJSON map[string]interface{}
 				}
 				nestedPanel := s.extractPanelInfo(nestedMap)
 				if nestedPanel != nil && len(nestedPanel.Targets) > 0 {
-					panels = append(panels, *nestedPanel)
+					// Resolve variable-based datasource
+					nestedPanel.DatasourceUID = s.resolveDatasourceUID(ctx, nestedPanel.DatasourceUID, defaultDatasourceUID)
+					if nestedPanel.DatasourceUID != "" {
+						panels = append(panels, *nestedPanel)
+					}
 				}
 			}
 		}
 	}
 
 	return panels, nil
+}
+
+// extractDefaultDatasource finds the default Prometheus datasource from dashboard templating.
+// Looks for datasource variables and extracts the current/default value.
+func (s *GrafanaQueryService) extractDefaultDatasource(dashboardJSON map[string]interface{}) string {
+	templating, ok := dashboardJSON["templating"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	list, ok := templating["list"].([]interface{})
+	if !ok {
+		return ""
+	}
+
+	for _, item := range list {
+		variable, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		varType, _ := variable["type"].(string)
+		if varType != "datasource" {
+			continue
+		}
+
+		// Check if it's a Prometheus datasource variable
+		query, _ := variable["query"].(string)
+		if query != "prometheus" && query != "Prometheus" {
+			// Also check regex field for "prometheus" type
+			if queryMap, ok := variable["query"].(map[string]interface{}); ok {
+				query, _ = queryMap["type"].(string)
+			}
+			if query != "prometheus" {
+				continue
+			}
+		}
+
+		// Try to get current value
+		if current, ok := variable["current"].(map[string]interface{}); ok {
+			// Try uid field first (Grafana 9+)
+			if uid, ok := current["value"].(string); ok && uid != "" && !strings.HasPrefix(uid, "$") {
+				return uid
+			}
+			// Try text as fallback
+			if text, ok := current["text"].(string); ok && text != "" && !strings.HasPrefix(text, "$") {
+				return text
+			}
+		}
+
+		// Try options array for default
+		if options, ok := variable["options"].([]interface{}); ok && len(options) > 0 {
+			if opt, ok := options[0].(map[string]interface{}); ok {
+				if uid, ok := opt["value"].(string); ok && uid != "" && !strings.HasPrefix(uid, "$") {
+					return uid
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+// resolveDatasourceUID resolves variable-based datasources to actual UIDs.
+// Returns the original UID if not a variable, or the default if it is.
+// Falls back to querying Grafana API for a Prometheus datasource if needed.
+func (s *GrafanaQueryService) resolveDatasourceUID(ctx context.Context, uid string, defaultUID string) string {
+	// Check if a UID needs resolution (is not a real datasource UID)
+	needsResolution := func(u string) bool {
+		return u == "" ||
+			u == "default" ||
+			strings.HasPrefix(u, "$") ||
+			strings.HasPrefix(u, "${") ||
+			strings.HasPrefix(u, "-- ")
+	}
+
+	if needsResolution(uid) {
+		// Check if defaultUID is a valid (non-special) UID
+		if defaultUID != "" && !needsResolution(defaultUID) {
+			return defaultUID
+		}
+		// Try to get a Prometheus datasource from Grafana API
+		if promUID := s.getPrometheusDatasourceUID(ctx); promUID != "" {
+			return promUID
+		}
+		// Log that we couldn't resolve the datasource
+		s.logger.Debug("Could not resolve datasource %q, no default or fallback available", uid)
+		return ""
+	}
+	return uid
+}
+
+// getPrometheusDatasourceUID fetches and caches a Prometheus datasource UID from Grafana.
+// It first looks for the default Prometheus datasource, then falls back to any Prometheus datasource.
+// Uses a mutex to allow retries if the initial lookup fails.
+func (s *GrafanaQueryService) getPrometheusDatasourceUID(ctx context.Context) string {
+	s.promDatasourceMu.Lock()
+	defer s.promDatasourceMu.Unlock()
+
+	// Return cached value if available
+	if s.promDatasourceUID != "" {
+		return s.promDatasourceUID
+	}
+
+	datasources, err := s.grafanaClient.ListDatasources(ctx)
+	if err != nil {
+		s.logger.Debug("Failed to list datasources for fallback resolution: %v", err)
+		return ""
+	}
+
+	// First pass: look for default Prometheus datasource
+	for _, ds := range datasources {
+		dsType, _ := ds["type"].(string)
+		isDefault, _ := ds["isDefault"].(bool)
+		if dsType == "prometheus" && isDefault {
+			if uid, ok := ds["uid"].(string); ok {
+				s.promDatasourceUID = uid
+				s.logger.Debug("Using default Prometheus datasource for variable resolution: %s", uid)
+				return uid
+			}
+		}
+	}
+
+	// Second pass: find any Prometheus datasource
+	for _, ds := range datasources {
+		dsType, _ := ds["type"].(string)
+		if dsType == "prometheus" {
+			if uid, ok := ds["uid"].(string); ok {
+				s.promDatasourceUID = uid
+				s.logger.Debug("Using Prometheus datasource for variable resolution: %s", uid)
+				return uid
+			}
+		}
+	}
+
+	s.logger.Warn("No Prometheus datasource found in Grafana for variable resolution")
+	return ""
 }
 
 // extractPanelInfo extracts panel information from a panel map.
@@ -351,4 +524,38 @@ func (s *GrafanaQueryService) executePanel(
 
 	// Format response
 	return formatTimeSeriesResponse(panel.ID, panel.Title, target.Expr, response), nil
+}
+
+// FetchCurrentValue fetches the current value of a metric for a workload.
+// This method implements the QueryService interface for ObservatoryInvestigateService.
+//
+// Note: In production, this would query Grafana for the actual current value.
+// For now, it returns an error indicating the method is not fully implemented.
+// The ObservatoryInvestigateService will fall back to using the baseline mean.
+func (s *GrafanaQueryService) FetchCurrentValue(ctx context.Context, metricName, namespace, workload string) (float64, error) {
+	// TODO: Implement actual Grafana query for current metric value
+	// This would require:
+	// 1. Finding the dashboard/panel that sources this metric
+	// 2. Executing a point-in-time query via Grafana API
+	// 3. Extracting the current value from the response
+	//
+	// For now, return an error to trigger the baseline fallback
+	return 0, fmt.Errorf("FetchCurrentValue not implemented: %s/%s/%s", namespace, workload, metricName)
+}
+
+// FetchHistoricalValue fetches a metric value from lookback duration ago.
+// This method implements the QueryService interface for ObservatoryInvestigateService.
+//
+// Note: In production, this would query Grafana for the historical value.
+// For now, it returns an error indicating the method is not fully implemented.
+// The ObservatoryInvestigateService will fall back to using the baseline mean.
+func (s *GrafanaQueryService) FetchHistoricalValue(ctx context.Context, metricName, namespace, workload string, lookback time.Duration) (float64, error) {
+	// TODO: Implement actual Grafana query for historical metric value
+	// This would require:
+	// 1. Finding the dashboard/panel that sources this metric
+	// 2. Executing a point-in-time query at (now - lookback) via Grafana API
+	// 3. Extracting the historical value from the response
+	//
+	// For now, return an error to trigger the baseline fallback
+	return 0, fmt.Errorf("FetchHistoricalValue not implemented: %s/%s/%s at -%s", namespace, workload, metricName, lookback)
 }
