@@ -75,6 +75,7 @@ export interface ChangeEventInfo {
   containerIssues?: string[]; // CrashLoopBackOff, ImagePullBackOff, OOMKilled
   impactScore?: number; // 0.0-1.0 severity score
   specChanges?: string; // Git-style unified diff of spec changes
+  specReplicas?: number; // spec.replicas for workload controllers (ReplicaSet, Deployment, etc.)
 }
 
 /**

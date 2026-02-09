@@ -132,8 +132,8 @@ export default function NamespaceGraphPage() {
     }
   }, [urlNamespace, persistedNamespace, sortedNamespaces, setSearchParams]);
 
-  // Get default kinds from settings
-  const { defaultKinds } = useSettings();
+  // Get settings
+  const { defaultKinds, hideInactiveReplicaSets } = useSettings();
 
   // Use persisted filters for kind selection
   const { kinds: selectedKinds, setKinds } = usePersistedFilters(availableKinds, [], defaultKinds);
@@ -177,10 +177,10 @@ export default function NamespaceGraphPage() {
     autoLoad: true,
   });
 
-  // Filter graph data by selected kinds (client-side)
+  // Filter graph data by selected kinds and settings (client-side)
   const filteredData = useMemo(() => {
     if (!data) return null;
-    
+
     // Get UIDs of nodes in the selected causal path (if any)
     // When a causal path is selected, we want to show all nodes in the path
     // regardless of the kind filter
@@ -191,30 +191,50 @@ export default function NamespaceGraphPage() {
         causalPathNodeUids = new Set(path.steps.map(step => step.node.resource.uid));
       }
     }
-    
+
     // Filter nodes by selected kinds, but always include nodes in the selected causal path
-    const filteredNodes = selectedKinds.length > 0
-      ? data.graph.nodes.filter(node => 
+    let filteredNodes = selectedKinds.length > 0
+      ? data.graph.nodes.filter(node =>
           selectedKinds.includes(node.kind) || causalPathNodeUids?.has(node.uid)
         )
       : [];
-    
+
     // If no kinds are selected OR selected kinds don't match any graph nodes,
     // show ALL nodes from the graph data (graceful fallback instead of empty state)
-    const nodesToShow = filteredNodes.length > 0 ? filteredNodes : data.graph.nodes;
+    let nodesToShow = filteredNodes.length > 0 ? filteredNodes : data.graph.nodes;
+
+    // Filter out inactive ReplicaSets (spec.replicas = 0) if setting is enabled
+    // Always include ReplicaSets that are part of the selected causal path
+    if (hideInactiveReplicaSets) {
+      nodesToShow = nodesToShow.filter(node => {
+        // Always show nodes in causal path
+        if (causalPathNodeUids?.has(node.uid)) return true;
+        // For ReplicaSets, check if spec.replicas > 0
+        if (node.kind === 'ReplicaSet') {
+          const replicas = node.latestEvent?.specReplicas;
+          // If specReplicas is undefined, we don't know the replica count - show the node
+          // If specReplicas is 0, hide the node
+          // If specReplicas > 0, show the node
+          return replicas === undefined || replicas > 0;
+        }
+        // Non-ReplicaSet nodes are always shown
+        return true;
+      });
+    }
+
     const nodeUids = new Set(nodesToShow.map(n => n.uid));
-    
+
     // Filter edges to only include those between visible nodes
     const filteredEdges = data.graph.edges.filter(edge =>
       nodeUids.has(edge.source) && nodeUids.has(edge.target)
     );
-    
+
     return {
       ...data,
       graph: { nodes: nodesToShow, edges: filteredEdges },
       metadata: { ...data.metadata, nodeCount: nodesToShow.length, edgeCount: filteredEdges.length }
     };
-  }, [data, selectedKinds, selectedCausalPathId]);
+  }, [data, selectedKinds, selectedCausalPathId, hideInactiveReplicaSets]);
 
   // Get anomalies for the selected node
   const selectedNodeAnomalies = useMemo(() => {

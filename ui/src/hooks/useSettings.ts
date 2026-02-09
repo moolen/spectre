@@ -59,6 +59,7 @@ export interface SettingsState {
   autoRefresh: AutoRefreshOption;
   defaultKinds: string[];
   defaultObservatoryNodeTypes: string[];
+  hideInactiveReplicaSets: boolean;
 }
 
 interface SettingsContextValue extends SettingsState {
@@ -68,6 +69,7 @@ interface SettingsContextValue extends SettingsState {
   setAutoRefresh: (value: AutoRefreshOption) => void;
   setDefaultKinds: (kinds: string[]) => void;
   setDefaultObservatoryNodeTypes: (types: string[]) => void;
+  setHideInactiveReplicaSets: (hide: boolean) => void;
   formatTime: (date: Date) => string;
 }
 
@@ -77,7 +79,8 @@ const DEFAULT_SETTINGS: SettingsState = {
   compactMode: false,
   autoRefresh: 'off',
   defaultKinds: DEFAULT_KINDS,
-  defaultObservatoryNodeTypes: DEFAULT_OBSERVATORY_NODE_TYPES
+  defaultObservatoryNodeTypes: DEFAULT_OBSERVATORY_NODE_TYPES,
+  hideInactiveReplicaSets: true
 };
 
 const STORAGE_KEY = 'spectre-settings';
@@ -133,6 +136,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAutoRefresh: (value) => setSettings((prev) => ({ ...prev, autoRefresh: value })),
     setDefaultKinds: (kinds) => setSettings((prev) => ({ ...prev, defaultKinds: kinds })),
     setDefaultObservatoryNodeTypes: (types) => setSettings((prev) => ({ ...prev, defaultObservatoryNodeTypes: types })),
+    setHideInactiveReplicaSets: (hide) => setSettings((prev) => ({ ...prev, hideInactiveReplicaSets: hide })),
     formatTime
   };
 

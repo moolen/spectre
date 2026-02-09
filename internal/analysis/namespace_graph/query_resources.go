@@ -225,7 +225,8 @@ func (f *ResourceFetcher) FetchLatestEvents(
 		       latestEvent.status as status,
 		       latestEvent.errorMessage as errorMessage,
 		       latestEvent.containerIssues as containerIssues,
-		       latestEvent.impactScore as impactScore
+		       latestEvent.impactScore as impactScore,
+		       latestEvent.data as data
 	`
 
 	query := graph.GraphQuery{
@@ -298,10 +299,49 @@ func (f *ResourceFetcher) FetchLatestEvents(
 			event.ImpactScore = score
 		}
 
+		// Parse data to extract spec.replicas (for ReplicaSet, Deployment, StatefulSet, etc.)
+		if len(row) > 7 {
+			if dataStr, ok := row[7].(string); ok && dataStr != "" {
+				event.SpecReplicas = extractSpecReplicas(dataStr)
+			}
+		}
+
 		events[resourceUID] = event
 	}
 
 	return events, nil
+}
+
+// extractSpecReplicas extracts the spec.replicas field from resource JSON data
+func extractSpecReplicas(data string) *int {
+	var resource map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &resource); err != nil {
+		return nil
+	}
+
+	spec, ok := resource["spec"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	replicas, ok := spec["replicas"]
+	if !ok {
+		return nil
+	}
+
+	// Handle both int and float64 (JSON numbers are float64)
+	switch v := replicas.(type) {
+	case float64:
+		r := int(v)
+		return &r
+	case int:
+		return &v
+	case int64:
+		r := int(v)
+		return &r
+	}
+
+	return nil
 }
 
 // specChangeResult holds spec data for diff computation

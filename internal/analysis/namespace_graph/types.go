@@ -54,6 +54,7 @@ type ChangeEventInfo struct {
 	ContainerIssues []string `json:"containerIssues,omitempty"` // CrashLoopBackOff, ImagePullBackOff, OOMKilled
 	ImpactScore     float64  `json:"impactScore,omitempty"`     // 0.0-1.0 severity score
 	SpecChanges     string   `json:"specChanges,omitempty"`     // Git-style unified diff of spec changes within lookback window
+	SpecReplicas    *int     `json:"specReplicas,omitempty"`    // spec.replicas for workload controllers (ReplicaSet, Deployment, etc.)
 }
 
 // Edge represents a relationship between resources
