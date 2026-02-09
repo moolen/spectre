@@ -101,16 +101,21 @@ func UpsertResourceIdentityQuery(resource ResourceIdentity) GraphQuery {
 			r.deletedAt = $deletedAt
 	`
 
-	// Only update if this is a deletion, or if the resource isn't already deleted
+	// Build ON MATCH SET clause
+	// Core identity properties (kind, apiGroup, version, namespace, name) are always set
+	// because they are immutable for a given UID and must be populated when upgrading
+	// a placeholder node (created by OWNS edge) to a full node.
+	// FalkorDB may not handle "property doesn't exist" the same as "property IS NULL"
+	// in CASE expressions, so we unconditionally set these immutable properties.
 	if resource.Deleted {
 		// This is a deletion - always update to mark as deleted
 		query += `
 		ON MATCH SET
-			r.kind = CASE WHEN r.kind IS NULL THEN $kind ELSE r.kind END,
-			r.apiGroup = CASE WHEN r.apiGroup IS NULL THEN $apiGroup ELSE r.apiGroup END,
-			r.version = CASE WHEN r.version IS NULL THEN $version ELSE r.version END,
-			r.namespace = CASE WHEN r.namespace IS NULL THEN $namespace ELSE r.namespace END,
-			r.name = CASE WHEN r.name IS NULL THEN $name ELSE r.name END,
+			r.kind = $kind,
+			r.apiGroup = $apiGroup,
+			r.version = $version,
+			r.namespace = $namespace,
+			r.name = $name,
 			r.firstSeen = CASE WHEN r.firstSeen IS NULL THEN $firstSeen ELSE r.firstSeen END,
 			r.labels = $labels,
 			r.lastSeen = $lastSeen,
@@ -119,17 +124,20 @@ func UpsertResourceIdentityQuery(resource ResourceIdentity) GraphQuery {
 		`
 	} else {
 		// This is not a deletion - only update if not already deleted
-		// Also populate core properties if they were not set (placeholder node from OWNS edge creation)
+		// Always set r.deleted = false for placeholder nodes (created by OWNS edge)
+		// that don't have deleted set yet. Without this, the Timeline query's
+		// WHERE (NOT r.deleted ...) filters out nodes where r.deleted is NULL.
 		query += `
 		ON MATCH SET
-			r.kind = CASE WHEN r.kind IS NULL THEN $kind ELSE r.kind END,
-			r.apiGroup = CASE WHEN r.apiGroup IS NULL THEN $apiGroup ELSE r.apiGroup END,
-			r.version = CASE WHEN r.version IS NULL THEN $version ELSE r.version END,
-			r.namespace = CASE WHEN r.namespace IS NULL THEN $namespace ELSE r.namespace END,
-			r.name = CASE WHEN r.name IS NULL THEN $name ELSE r.name END,
+			r.kind = $kind,
+			r.apiGroup = $apiGroup,
+			r.version = $version,
+			r.namespace = $namespace,
+			r.name = $name,
+			r.deleted = CASE WHEN r.deleted IS NULL THEN false ELSE r.deleted END,
 			r.firstSeen = CASE WHEN r.firstSeen IS NULL THEN $firstSeen ELSE r.firstSeen END,
-			r.labels = CASE WHEN NOT r.deleted THEN $labels ELSE r.labels END,
-			r.lastSeen = CASE WHEN NOT r.deleted THEN $lastSeen ELSE r.lastSeen END
+			r.labels = CASE WHEN NOT COALESCE(r.deleted, false) THEN $labels ELSE r.labels END,
+			r.lastSeen = CASE WHEN NOT COALESCE(r.deleted, false) THEN $lastSeen ELSE r.lastSeen END
 		`
 	}
 

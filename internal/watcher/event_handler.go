@@ -166,7 +166,10 @@ func (h *EventCaptureHandler) writeEvent(event *models.Event) error {
 			h.logger.Error("Failed to write event to graph: %v", err)
 			return err
 		}
-	} else if h.auditLog == nil {
+	} else {
+		h.logger.Warn("graphPipeline is nil, event %s not written to graph (kind=%s)", event.ID, event.Resource.Kind)
+	}
+	if h.graphPipeline == nil && h.auditLog == nil {
 		// Only error if neither graph nor audit log is configured
 		return fmt.Errorf("neither graph pipeline nor audit log is configured")
 	}
