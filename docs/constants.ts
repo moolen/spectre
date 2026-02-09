@@ -30,5 +30,5 @@ export const HEADLINES = [
 export const NAV_LINKS = [
     { name: 'Features', href: '#features' },
     { name: 'How it Works', href: '#how-it-works' },
-    { name: 'Integration', href: '#integration' },
+    { name: 'Incident Response', href: '#incident-response' },
 ];
