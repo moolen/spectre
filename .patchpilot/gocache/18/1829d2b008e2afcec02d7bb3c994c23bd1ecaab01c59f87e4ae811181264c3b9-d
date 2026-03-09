@@ -1,0 +1,4 @@
+./errors.go
+./fileloader.go
+./loader.go
+./loadrestrictions.go

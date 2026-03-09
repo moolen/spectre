@@ -1,0 +1,5 @@
+./chartfile.go
+./dependencies.go
+./deprecations.go
+./template.go
+./values.go

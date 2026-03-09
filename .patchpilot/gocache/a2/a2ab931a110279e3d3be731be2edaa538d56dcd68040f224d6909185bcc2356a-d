@@ -1,0 +1,5 @@
+./doc.go
+./getter.go
+./httpgetter.go
+./ocigetter.go
+./plugingetter.go

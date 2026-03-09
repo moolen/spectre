@@ -1,0 +1,12 @@
+./client.go
+./metrics.go
+./pipeline.go
+./query.go
+./secret_watcher.go
+./severity.go
+./tools.go
+./tools_logs.go
+./tools_overview.go
+./tools_patterns.go
+./types.go
+./victorialogs.go

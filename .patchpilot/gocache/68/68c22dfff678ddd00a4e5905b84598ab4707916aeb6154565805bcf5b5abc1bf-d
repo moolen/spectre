@@ -1,0 +1,9 @@
+./edge.go
+./falkordb.go
+./graph.go
+./graph_schema.go
+./node.go
+./path.go
+./query_result.go
+./record.go
+./utils.go

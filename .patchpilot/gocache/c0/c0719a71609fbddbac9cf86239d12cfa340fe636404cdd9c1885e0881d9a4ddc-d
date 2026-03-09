@@ -1,0 +1,14 @@
+./api.go
+./assertions.go
+./cluster.go
+./deployment.go
+./deployment_registry.go
+./flux.go
+./helm.go
+./k8s.go
+./mcp_client.go
+./playwright.go
+./portforward.go
+./shared_setup.go
+./stage_helpers.go
+./testcontext.go

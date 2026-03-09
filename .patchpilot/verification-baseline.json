@@ -1,0 +1,45 @@
+{
+  "mode": "standard",
+  "modules": [
+    {
+      "dir": ".",
+      "checks": [
+        {
+          "name": "build",
+          "status": "ok",
+          "duration_millis": 39293
+        },
+        {
+          "name": "compile-tests",
+          "status": "ok",
+          "duration_millis": 14425
+        },
+        {
+          "name": "vet",
+          "status": "ok",
+          "duration_millis": 7063
+        }
+      ]
+    },
+    {
+      "dir": "docs",
+      "checks": [
+        {
+          "name": "npm-manifest-parse",
+          "status": "ok",
+          "duration_millis": 8
+        }
+      ]
+    },
+    {
+      "dir": "ui",
+      "checks": [
+        {
+          "name": "npm-manifest-parse",
+          "status": "ok",
+          "duration_millis": 0
+        }
+      ]
+    }
+  ]
+}

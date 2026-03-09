@@ -1,0 +1,17 @@
+./drain.go
+./kubernetes.go
+./masking.go
+./normalize.go
+./persistence.go
+./rebalancer.go
+./store.go
+./template.go
+./drain_test.go
+./kubernetes_test.go
+./masking_test.go
+./normalize_test.go
+./persistence_test.go
+./rebalancer_test.go
+./store_test.go
+./template_test.go
+./victorialogs_fixture_test.go

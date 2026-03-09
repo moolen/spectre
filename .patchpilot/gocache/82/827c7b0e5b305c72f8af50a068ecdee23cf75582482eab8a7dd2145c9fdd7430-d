@@ -1,0 +1,8 @@
+./client.go
+./logzio.go
+./query.go
+./severity.go
+./tools_logs.go
+./tools_overview.go
+./tools_patterns.go
+./types.go

@@ -1,0 +1,6 @@
+./command_groups.go
+./help_flags_printer.go
+./markdown.go
+./normalizers.go
+./templater.go
+./templates.go

@@ -1,0 +1,55 @@
+name: Benchmark
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Declare default permissions as read only.
+permissions: read-all
+
+env:
+  DEFAULT_GO_VERSION: "~1.25.0"
+jobs:
+  benchmark:
+    permissions:
+      contents: write # required for pushing to gh-pages branch
+    name: Benchmarks
+    runs-on: oracle-bare-metal-64cpu-512gb-x86-64
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version: ${{ env.DEFAULT_GO_VERSION }}
+          check-latest: true
+          cache-dependency-path: "**/go.sum"
+      - name: Run benchmarks
+        run: make benchmark | tee output.txt
+      - name: Download previous benchmark data
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ./benchmarks
+          # `github.event.before` means the commit before the push (i.e. the previous commit).
+          # So we can fetch the exact benchmark data from the previous commit.
+          key: ${{ runner.os }}-benchmark-${{ github.event.before }}
+      - name: Store benchmarks result
+        uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1.20.7
+        with:
+          name: Benchmarks
+          tool: 'go'
+          output-file-path: output.txt
+          external-data-json-path: ./benchmarks/data.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: benchmarks
+          fail-on-alert: true
+          alert-threshold: "400%"
+          # Add benchmark summary to GitHub workflow run report
+          summary-always: true
+      - name: Save benchmark data
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        # The cache will be saved even if a step fails.
+        if: always()
+        with:
+          path: ./benchmarks
+          # Use the current commit SHA as the cache key.
+          key: ${{ runner.os }}-benchmark-${{ github.sha }}

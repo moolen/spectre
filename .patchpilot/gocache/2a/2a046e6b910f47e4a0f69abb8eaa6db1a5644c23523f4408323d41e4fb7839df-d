@@ -1,0 +1,13 @@
+./commonannotations.go
+./commonlabels.go
+./defaultconfig.go
+./doc.go
+./images.go
+./metadatalabels.go
+./nameprefix.go
+./namereference.go
+./namespace.go
+./namesuffix.go
+./replicas.go
+./templatelabels.go
+./varreference.go

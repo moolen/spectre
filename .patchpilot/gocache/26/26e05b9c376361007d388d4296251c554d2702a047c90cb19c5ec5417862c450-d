@@ -1,0 +1,4 @@
+./dictionary.go
+./read.go
+./types.go
+./write.go

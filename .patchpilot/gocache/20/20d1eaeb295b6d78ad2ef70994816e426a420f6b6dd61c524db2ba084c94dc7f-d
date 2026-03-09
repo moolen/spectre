@@ -1,0 +1,9 @@
+./depth_holder.go
+./full_scan_patterns.go
+./gitignore.go
+./index_scan_patterns.go
+./initial_holder.go
+./match.go
+./pattern.go
+./patterns.go
+./util.go

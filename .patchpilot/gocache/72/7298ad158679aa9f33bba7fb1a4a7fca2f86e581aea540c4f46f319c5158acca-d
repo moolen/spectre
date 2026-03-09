@@ -1,0 +1,5 @@
+./filter.go
+./kind_sorter.go
+./manifest.go
+./manifest_sorter.go
+./sorter.go

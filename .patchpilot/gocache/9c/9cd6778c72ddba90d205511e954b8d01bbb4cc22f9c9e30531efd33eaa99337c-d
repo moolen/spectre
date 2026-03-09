@@ -1,0 +1,8 @@
+./cached_client.go
+./client.go
+./models.go
+./query_cache.go
+./query_executor.go
+./resource_builder.go
+./result_parser.go
+./schema.go

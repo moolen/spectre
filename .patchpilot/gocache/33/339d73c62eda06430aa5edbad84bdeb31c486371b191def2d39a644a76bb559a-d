@@ -1,0 +1,9 @@
+./doc.go
+./fs.go
+./fs_json.go
+./fs_os.go
+./fs_zip.go
+./gettext.go
+./locale.go
+./tr.go
+./util.go

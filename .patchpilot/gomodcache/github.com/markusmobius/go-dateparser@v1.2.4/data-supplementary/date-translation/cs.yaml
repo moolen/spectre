@@ -1,0 +1,73 @@
+skip: ['přibližně', 'v']
+
+sentence_splitter_group: 1
+
+monday:
+  - Pon
+tuesday:
+  - Úte
+wednesday:
+  - Stř
+  - Středu
+thursday:
+  - Čtv
+friday:
+  - Pát
+saturday:
+  - Sob
+  - Sobotu
+sunday:
+  - Ned
+  - Neděli
+
+february:
+  - únr
+june:
+  - Čer
+july:
+  - Črc
+  - črv
+
+year:
+  - roků
+  - roky
+month:
+  - měsíců
+  - měsíce
+  - měsícem
+week:
+  - týdnů
+  - týdny
+  - týdnem
+day:
+  - dnů
+  - dny
+hour:
+  - hodin
+  - hodiny
+  - hodinou
+  - hodinu
+  - hodinami
+minute:
+  - minut
+  - minutami
+  - minuty
+second:
+  - sekundy
+  - sekund
+  - vteřina
+  - vteřin
+  - vteřiny
+
+ago:
+  - před
+in:
+  - ve
+  - v
+
+relative-type:
+  2 day ago:
+    - předevčírem
+
+simplifications:
+  - teď: 0 sekunda

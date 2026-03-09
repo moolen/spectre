@@ -1,0 +1,170 @@
+name: build
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - 'main'
+      - 'release/*'
+    tags:
+      - 'v*'
+  pull_request:
+
+env:
+  DOCKERHUB_SLUG: distribution/distribution
+  GHCR_SLUG: ghcr.io/${{ github.repository }}
+
+permissions:
+  contents: read # to fetch code (actions/checkout)
+
+jobs:
+  test:
+    env:
+      # Setting GOTOOLCHAIN to local tells go
+      # to to use the bundled Go version rather
+      # than fetching the toolchain according to
+      # toolchain directive found in go.mod.
+      GOTOOLCHAIN: local
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go:
+          - 1.23.7
+          - 1.24.1
+        target:
+          - test-coverage
+          - test-s3-storage
+          - test-azure-storage
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
+        name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      -
+        name: Test
+        run: |
+          make ${{ matrix.target }}
+      -
+        name: Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          directory: ./
+
+  build:
+    permissions:
+      contents: write # to create GitHub release (softprops/action-gh-release)
+      packages: write # so we can push the image to GHCR
+
+    runs-on: ubuntu-latest
+    needs:
+      - test
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.DOCKERHUB_SLUG }}
+            ${{ env.GHCR_SLUG }}
+          ### versioning strategy
+          ### push semver tag v3.2.1 on main (default branch)
+          # distribution/distribution:3.2.1
+          # distribution/distribution:3.2
+          # distribution/distribution:3
+          # distribution/distribution:latest
+          ### push semver prelease tag v3.0.0-beta.1 on main (default branch)
+          # distribution/distribution:3.0.0-beta.1
+          ### push on main
+          # distribution/distribution:edge
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=pr
+            type=edge
+          labels: |
+            org.opencontainers.image.title=Distribution
+            org.opencontainers.image.description=The toolkit to pack, ship, store, and distribute container content
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      -
+        name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      -
+        name: Log in to GitHub Container registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      -
+        name: Build artifacts
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          targets: artifact-all
+      -
+        name: Rename provenance
+        run: |
+          for pdir in ./bin/*/; do
+            (
+              cd "$pdir"
+              binname=$(find . -name '*.tar.gz')
+              filename=$(basename "${binname%.tar.gz}")
+              mv "provenance.json" "${filename}.provenance.json"
+            )
+          done
+      -
+        name: Move and list artifacts
+        run: |
+          mv ./bin/**/* ./bin/
+          tree -nh ./bin
+      -
+        name: Upload artifacts
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: registry
+          path: ./bin/*
+          if-no-files-found: error
+      -
+        name: Build image
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          files: |
+            ./docker-bake.hcl
+            ${{ steps.meta.outputs.bake-file }}
+          targets: image-all
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+      -
+        name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          draft: true
+          files: |
+            bin/*.tar.gz
+            bin/*.provenance.json
+            bin/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

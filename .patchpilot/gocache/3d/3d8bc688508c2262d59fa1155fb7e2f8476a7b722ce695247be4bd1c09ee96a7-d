@@ -1,0 +1,5 @@
+./chart.go
+./dependency.go
+./errors.go
+./file.go
+./metadata.go

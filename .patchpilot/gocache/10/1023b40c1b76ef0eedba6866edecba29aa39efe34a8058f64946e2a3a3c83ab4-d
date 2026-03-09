@@ -1,0 +1,8 @@
+./comment.go
+./doc.go
+./file.go
+./header.go
+./line_reader.go
+./message.go
+./re.go
+./util.go

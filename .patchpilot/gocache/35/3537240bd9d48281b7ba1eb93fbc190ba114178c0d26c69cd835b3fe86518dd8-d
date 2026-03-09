@@ -1,0 +1,9 @@
+./00-constant.go
+./applicable-check.go
+./detector.go
+./languages.go
+./loader.go
+./split.go
+./translate-search.go
+./translate.go
+./utils.go

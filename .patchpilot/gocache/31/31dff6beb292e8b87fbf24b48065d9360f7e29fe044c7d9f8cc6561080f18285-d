@@ -1,0 +1,12 @@
+./change_anomalies.go
+./config_anomalies.go
+./detector.go
+./event_anomalies.go
+./frequency_anomalies.go
+./network_anomalies.go
+./severity.go
+./state_anomalies.go
+./types.go
+./change_anomalies_test.go
+./detector_test.go
+./severity_test.go

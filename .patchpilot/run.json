@@ -1,0 +1,192 @@
+{
+  "run_id": "run-1773088015-c0c7e0ef",
+  "command": "fix",
+  "repository": "/home/moritz/dev/PatchPilot/.tmp/patchpilot-app/patchpilot-repo-1252652492/repo",
+  "status": "success",
+  "started_at": "2026-03-09T20:26:55.674128652Z",
+  "completed_at": "2026-03-09T20:28:29.119297006Z",
+  "duration_millis": 93445,
+  "stages": [
+    {
+      "name": "configure_registry",
+      "status": "success",
+      "started_at": "2026-03-09T20:26:55.674173636Z",
+      "completed_at": "2026-03-09T20:26:55.674174678Z",
+      "duration_millis": 0
+    },
+    {
+      "name": "generate_baseline_sbom",
+      "status": "success",
+      "started_at": "2026-03-09T20:26:55.674178665Z",
+      "completed_at": "2026-03-09T20:26:58.32080137Z",
+      "duration_millis": 2646
+    },
+    {
+      "name": "scan_baseline",
+      "status": "success",
+      "started_at": "2026-03-09T20:26:58.320814044Z",
+      "completed_at": "2026-03-09T20:26:59.214615925Z",
+      "duration_millis": 893,
+      "details": {
+        "findings": 7,
+        "ignored_by_policy": 0,
+        "ignored_without_fix": 0
+      }
+    },
+    {
+      "name": "write_baseline",
+      "status": "success",
+      "started_at": "2026-03-09T20:26:59.214635612Z",
+      "completed_at": "2026-03-09T20:26:59.21472617Z",
+      "duration_millis": 0
+    },
+    {
+      "name": "discover_verification_modules",
+      "status": "success",
+      "started_at": "2026-03-09T20:26:59.214730248Z",
+      "completed_at": "2026-03-09T20:26:59.216566495Z",
+      "duration_millis": 1,
+      "details": {
+        "modules": 1
+      }
+    },
+    {
+      "name": "verification_baseline",
+      "status": "success",
+      "started_at": "2026-03-09T20:26:59.216570893Z",
+      "completed_at": "2026-03-09T20:28:00.010358325Z",
+      "duration_millis": 60793,
+      "details": {
+        "modules": 3
+      }
+    },
+    {
+      "name": "apply_deterministic_fixes",
+      "status": "success",
+      "started_at": "2026-03-09T20:28:00.01037187Z",
+      "completed_at": "2026-03-09T20:28:11.920777889Z",
+      "duration_millis": 11910,
+      "details": {
+        "engines": {
+          "cargo": {
+            "patches": 0,
+            "status": "applied"
+          },
+          "composer": {
+            "patches": 0,
+            "status": "applied"
+          },
+          "docker": {
+            "patches": 0,
+            "status": "applied"
+          },
+          "go_modules": {
+            "patches": 2,
+            "status": "applied"
+          },
+          "go_runtime": {
+            "patches": 0,
+            "status": "applied"
+          },
+          "gradle": {
+            "patches": 0,
+            "status": "applied"
+          },
+          "maven": {
+            "patches": 0,
+            "status": "applied"
+          },
+          "npm": {
+            "patches": 4,
+            "status": "applied"
+          },
+          "nuget": {
+            "patches": 0,
+            "status": "applied"
+          },
+          "pip": {
+            "patches": 0,
+            "status": "applied"
+          }
+        },
+        "issues": 0,
+        "patches_total": 6
+      }
+    },
+    {
+      "name": "validate_post_fix",
+      "status": "success",
+      "started_at": "2026-03-09T20:28:11.920785594Z",
+      "completed_at": "2026-03-09T20:28:29.118945151Z",
+      "duration_millis": 17198,
+      "details": {
+        "remaining_findings": 0,
+        "verification_errors": 0
+      }
+    },
+    {
+      "name": "agent_repair_loop",
+      "status": "success",
+      "started_at": "2026-03-09T20:28:29.118948818Z",
+      "completed_at": "2026-03-09T20:28:29.118949459Z",
+      "duration_millis": 0,
+      "details": {
+        "status": "skipped"
+      }
+    },
+    {
+      "name": "build_summary",
+      "status": "success",
+      "started_at": "2026-03-09T20:28:29.11894981Z",
+      "completed_at": "2026-03-09T20:28:29.118975838Z",
+      "duration_millis": 0,
+      "details": {
+        "after": 0,
+        "before": 7,
+        "explanations": 7,
+        "fixed": 7,
+        "patches": 6,
+        "unsupported": 0,
+        "verification_ok": true
+      }
+    },
+    {
+      "name": "write_sarif",
+      "status": "success",
+      "started_at": "2026-03-09T20:28:29.11897647Z",
+      "completed_at": "2026-03-09T20:28:29.119094549Z",
+      "duration_millis": 0,
+      "details": {
+        "path": ".patchpilot/findings.sarif"
+      }
+    },
+    {
+      "name": "write_summary",
+      "status": "success",
+      "started_at": "2026-03-09T20:28:29.119097164Z",
+      "completed_at": "2026-03-09T20:28:29.119194886Z",
+      "duration_millis": 0
+    },
+    {
+      "name": "print_summary",
+      "status": "success",
+      "started_at": "2026-03-09T20:28:29.119195187Z",
+      "completed_at": "2026-03-09T20:28:29.119294381Z",
+      "duration_millis": 0
+    }
+  ],
+  "counters": [
+    {
+      "name": "findings_before",
+      "value": 7
+    },
+    {
+      "name": "findings_after",
+      "value": 0
+    },
+    {
+      "name": "findings_fixed",
+      "value": 7
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+./alias.go
+./compatibility.go
+./const.go
+./datamap.go
+./doc.go
+./filters.go
+./fns.go
+./kfns.go
+./mapnode.go
+./match.go
+./order.go
+./rnode.go
+./types.go
+./util.go

@@ -1,0 +1,9 @@
+./encode.go
+./helpers.go
+./lock.go
+./merge.go
+./paths.go
+./read.go
+./remove.go
+./types.go
+./write.go

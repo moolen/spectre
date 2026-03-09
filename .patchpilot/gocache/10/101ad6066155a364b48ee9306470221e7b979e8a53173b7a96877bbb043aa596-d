@@ -1,0 +1,4 @@
+./resize.go
+./resizeevents.go
+./term.go
+./term_writer.go

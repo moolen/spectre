@@ -1,0 +1,32 @@
+---
+name: Containers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  distro-test:
+    name: "Distro test"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        baseimage: ['debian:bullseye', 'debian:trixie', 'ubuntu:20.04', 'ubuntu:24.04', 'fedora']
+        go: [1.23, 1.24, 1.25]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run tests in container
+        run: ./scripts/ci-runner.sh run_in_ct ${{ matrix.baseimage }} ${{ matrix.go }}
+
+  all-done:
+    needs:
+    - distro-test
+    runs-on: ubuntu-latest
+    steps:
+    - run: echo "All jobs completed"

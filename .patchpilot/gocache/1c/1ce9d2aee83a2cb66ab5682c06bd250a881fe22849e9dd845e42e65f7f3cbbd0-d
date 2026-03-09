@@ -1,0 +1,7 @@
+./doc.go
+./json6902patch.go
+./kubeyaml.go
+./matchinfo.go
+./mergepatch.go
+./resource.go
+./toml.go

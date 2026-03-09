@@ -1,0 +1,4 @@
+./doc.go
+./loaddefaultconfig.go
+./namebackreferences.go
+./transformerconfig.go

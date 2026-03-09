@@ -1,0 +1,3 @@
+./home.go
+./lazypath.go
+./lazypath_unix.go

@@ -1,0 +1,17 @@
+./builder.go
+./client.go
+./crd_finder.go
+./doc.go
+./fake.go
+./fallback_query_param_verifier.go
+./helper.go
+./interfaces.go
+./kustomizevisitor.go
+./mapper.go
+./metadata_decoder.go
+./query_param_verifier.go
+./query_param_verifier_v3.go
+./result.go
+./scheme.go
+./selector.go
+./visitor.go

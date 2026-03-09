@@ -1,0 +1,5 @@
+./cache.go
+./challenge.go
+./client.go
+./credential.go
+./scope.go

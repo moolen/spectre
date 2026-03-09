@@ -1,0 +1,14 @@
+./crashloop_configmap.go
+./crashloop_pullsecret.go
+./deployment_rollout.go
+./helmrelease_upgrade.go
+./helmrelease_valuesfrom.go
+./init_container_failed.go
+./networkpolicy_blocking.go
+./node_pressure_storage.go
+./pending_taint.go
+./rbac_violation.go
+./scenario.go
+./service_endpoint_mismatch.go
+./service_selector_change.go
+./statefulset_rollout.go

@@ -1,0 +1,4 @@
+./doc.go
+./imagetag.go
+./legacy.go
+./updater.go

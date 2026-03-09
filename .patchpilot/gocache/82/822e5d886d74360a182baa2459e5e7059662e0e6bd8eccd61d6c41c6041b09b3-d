@@ -1,0 +1,12 @@
+./anomaly_aggregator.go
+./curated_metrics.go
+./interfaces.go
+./investigate_service.go
+./registry.go
+./service.go
+./signal_classifier.go
+./test_provider.go
+./types.go
+./curated_metrics_test.go
+./observatory_test.go
+./service_test.go

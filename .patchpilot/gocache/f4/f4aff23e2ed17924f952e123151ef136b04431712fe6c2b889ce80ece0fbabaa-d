@@ -1,0 +1,3 @@
+./audit_log.go
+./harness.go
+./golden_test.go

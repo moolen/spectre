@@ -1,0 +1,6 @@
+./factory.go
+./manager.go
+./registry.go
+./types.go
+./manager_test.go
+./registry_test.go

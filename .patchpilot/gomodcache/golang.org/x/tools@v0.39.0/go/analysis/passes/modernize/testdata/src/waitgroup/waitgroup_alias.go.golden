@@ -1,0 +1,17 @@
+package waitgroup
+
+import (
+	"fmt"
+	sync1 "sync"
+)
+
+func _() {
+	var wg sync1.WaitGroup
+	wg.Go(func() {
+		fmt.Println()
+	})
+
+	wg.Go(func() {
+		fmt.Println()
+	})
+}

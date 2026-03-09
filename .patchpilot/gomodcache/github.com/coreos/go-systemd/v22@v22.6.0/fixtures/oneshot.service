@@ -1,0 +1,6 @@
+[Unit]
+Description=list jobs test
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sleep 30

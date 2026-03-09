@@ -1,0 +1,8 @@
+./byteio_reader.go
+./byteio_writer.go
+./doc.go
+./ignorefilesmatcher.go
+./kio.go
+./pkgio_reader.go
+./pkgio_writer.go
+./tree.go

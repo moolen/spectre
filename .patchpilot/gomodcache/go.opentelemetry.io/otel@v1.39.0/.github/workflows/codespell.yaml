@@ -1,0 +1,17 @@
+name: codespell
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+# Declare default permissions as read only.
+permissions: read-all
+jobs:
+  codespell:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Codespell
+        run: make codespell
+      - run: make check-clean-work-tree

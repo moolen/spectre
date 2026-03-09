@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: Copyright (c) 2015-2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+package internal
+
+import (
+	"net/url"
+	"testing"
+
+	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
+)
+
+func TestUrlnorm(t *testing.T) {
+	testCases := []struct {
+		url      string
+		expected string
+	}{
+		{
+			url:      "HTTPs://xYz.cOm:443/folder//file",
+			expected: "https://xyz.com/folder/file",
+		},
+		{
+			url:      "HTTP://xYz.cOm:80/folder//file",
+			expected: "http://xyz.com/folder/file",
+		},
+		{
+			url:      "postGRES://xYz.cOm:5432/folder//file",
+			expected: "postgres://xyz.com:5432/folder/file",
+		},
+	}
+
+	for _, toPin := range testCases {
+		testCase := toPin
+
+		u, err := url.Parse(testCase.url)
+		require.NoError(t, err)
+
+		NormalizeURL(u)
+		assert.Equal(t, testCase.expected, u.String())
+	}
+}

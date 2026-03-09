@@ -1,0 +1,13 @@
+./doc.go
+./errorstream.go
+./fallback.go
+./reader.go
+./remotecommand.go
+./resize.go
+./spdy.go
+./v1.go
+./v2.go
+./v3.go
+./v4.go
+./v5.go
+./websocket.go

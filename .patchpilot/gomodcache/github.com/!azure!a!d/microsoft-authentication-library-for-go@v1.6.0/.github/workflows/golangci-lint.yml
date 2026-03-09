@@ -1,0 +1,28 @@
+name: golangci-lint
+on:
+  push:
+    tags:
+      - v*
+    branches:      
+      - main      
+  pull_request:
+    # This guards against unknown PR until a community member vet it and label it.
+      types: [ labeled ]
+
+jobs:
+  golangci:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "1.20"
+      - uses: actions/checkout@v3
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          # Required: the version of golangci-lint is required and must be specified without patch version: we always use the latest patch version.
+          version: v1.51
+
+          # Optional: golangci-lint command line arguments.
+          # args: --issues-exit-code=0

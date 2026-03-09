@@ -1,0 +1,57 @@
+name: e2e
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - 'main'
+      - 'release/*'
+  pull_request:
+
+permissions:
+  contents: read # to fetch code (actions/checkout)
+
+jobs:
+  run-e2e-test:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      -
+        name: Build image
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          targets: image-local
+      -
+        name: Start distribution server
+        run: |
+          docker run --rm -p 5000:5000 -p 5001:5001 -idt "registry:local"
+      -
+        name: Tests
+        run: |
+          bash ./tests/push.sh 127.0.0.0
+
+  run-e2e-test-s3-storage:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      -
+        name: Start E2E environment
+        run: |
+          make start-e2e-s3-env
+
+      - name: Tests
+        run: |
+          bash ./tests/push.sh 127.0.0.0
+          make stop-e2e-s3-env

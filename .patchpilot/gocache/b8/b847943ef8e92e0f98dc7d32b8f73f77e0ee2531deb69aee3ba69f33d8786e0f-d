@@ -1,0 +1,7 @@
+./shared_cluster_test.go
+./ui_detail_panel_test.go
+./ui_filters_test.go
+./ui_root_cause_test.go
+./ui_stage_test.go
+./ui_timeline_highlighting_test.go
+./ui_timeline_test.go

@@ -1,0 +1,6 @@
+./bind.go
+./doc.go
+./named.go
+./named_context.go
+./sqlx.go
+./sqlx_context.go

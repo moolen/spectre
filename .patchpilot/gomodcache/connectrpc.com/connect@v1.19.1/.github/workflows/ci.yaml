@@ -1,0 +1,76 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '15 22 * * *'
+  workflow_dispatch: {} # support manual runs
+permissions:
+  contents: read
+jobs:
+  ci:
+    name: ci (go:${{ matrix.go-version.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version:
+        - name: latest
+          version: 1.25.x
+        - name: previous
+          version: 1.24.x
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version.version }}
+      - name: Unit Test
+        run: make shorttest
+      - name: Lint
+        # Often, lint & gofmt guidelines depend on the Go version. To prevent
+        # conflicting guidance, run only on the most recent supported version.
+        # For the same reason, only check generated code on the most recent
+        # supported version.
+        if: matrix.go-version.name == 'latest'
+        run: make checkgenerate && make lint
+  conformance:
+    name: conformance (go:${{ matrix.go-version.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version:
+        - name: latest
+          version: 1.25.x
+        - name: previous
+          version: 1.24.x
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go-version.version }}
+      - name: Run Conformance Tests
+        run: make runconformance
+  slowtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          # only the latest
+          go-version: 1.25.x
+      - name: Run Slow Tests
+        run: make slowtest

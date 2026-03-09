@@ -1,0 +1,51 @@
+name: Go
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Build"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ['1.23.x', '1.24.x', '1.25.x']
+    steps:
+      - run: sudo apt-get -qq update
+      - name: Install libsystemd-dev
+        run: sudo apt-get install libsystemd-dev
+      - uses: actions/checkout@v5
+      - name: Setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Go build (source)
+        run: ./scripts/ci-runner.sh build_source
+      - name: Go build (tests)
+        run: ./scripts/ci-runner.sh build_tests
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install libsystemd-dev
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.3
+
+  all-done:
+    needs:
+    - build
+    runs-on: ubuntu-latest
+    steps:
+    - run: echo "All jobs completed"

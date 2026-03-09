@@ -1,0 +1,4 @@
+./loadconfigfromcrds.go
+./namereferencetransformer.go
+./refvartransformer.go
+./resaccumulator.go

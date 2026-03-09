@@ -1,0 +1,13 @@
+./capabilities.go
+./chartfile.go
+./coalesce.go
+./compatible.go
+./create.go
+./dependencies.go
+./doc.go
+./errors.go
+./expand.go
+./jsonschema.go
+./save.go
+./validate_name.go
+./values.go

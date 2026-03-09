@@ -1,0 +1,7 @@
+use (
+	.
+	./_codegen
+	./enable/yaml
+)
+
+go 1.24.0

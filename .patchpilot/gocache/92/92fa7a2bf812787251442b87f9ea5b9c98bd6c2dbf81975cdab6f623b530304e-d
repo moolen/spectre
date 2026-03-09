@@ -1,0 +1,10 @@
+./confirmeddir.go
+./doc.go
+./file.go
+./fileinfo.go
+./fileondisk.go
+./filesystem.go
+./fsnode.go
+./fsondisk.go
+./fsondisk_unix.go
+./util.go

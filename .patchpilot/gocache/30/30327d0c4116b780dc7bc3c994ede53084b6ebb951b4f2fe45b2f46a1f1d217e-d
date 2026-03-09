@@ -1,0 +1,5 @@
+./aggregate.go
+./aggregate_forked.go
+./concurrent.go
+./doc.go
+./errors.go

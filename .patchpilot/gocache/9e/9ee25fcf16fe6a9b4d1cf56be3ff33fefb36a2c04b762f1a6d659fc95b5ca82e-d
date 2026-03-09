@@ -1,0 +1,12 @@
+./buffer.go
+./errors.go
+./fanout.go
+./generic.go
+./interface.go
+./interface_append.go
+./lazy.go
+./memoized_iterator.go
+./merge.go
+./noop.go
+./secondary.go
+./series.go

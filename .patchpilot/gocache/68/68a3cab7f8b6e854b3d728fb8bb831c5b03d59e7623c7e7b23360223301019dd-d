@@ -1,0 +1,4 @@
+./errmissingkustomization.go
+./kusttarget.go
+./kusttarget_configplugin.go
+./multitransformer.go

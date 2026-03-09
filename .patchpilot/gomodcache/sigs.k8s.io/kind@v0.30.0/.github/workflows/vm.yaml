@@ -1,0 +1,120 @@
+name: VM
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - 'site/**'
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    # Fedora is different from Ubuntu in LSM (SELinux), filesystem (btrfs), kernel version, etc.
+    name: "CGroupv2 (Fedora)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [docker, podman]
+        rootless: ["rootful", "rootless"]
+    env:
+      KIND_EXPERIMENTAL_PROVIDER: "${{ matrix.provider }}"
+      ROOTLESS: "${{ matrix.rootless }}"
+      HELPER: "./hack/ci/lima-helper.sh"
+      JOB_NAME: "cgroup2-${{ matrix.provider }}-${{ matrix.rootless }}"
+    steps:
+      - name: Check out code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Get go version
+        id: golangversion
+        run: |
+          echo "go_version=$(cat .go-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: ${{ steps.golangversion.outputs.go_version }}
+          check-latest: true
+
+      - name: "Install Lima"
+        uses: lima-vm/lima-actions/setup@03b96d61959e83b2c737e44162c3088e81de0886 # v1
+        id: lima-actions-setup
+
+      - name: "Cache ~/.cache/lima"
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ~/.cache/lima
+          key: lima-${{ steps.lima-actions-setup.outputs.version }}
+
+      - name: "Start Fedora"
+        # --plain is set to disable file sharing, port forwarding, built-in containerd, etc.
+        run: limactl start --name=default --plain template://fedora
+
+      - name: "Initialize Fedora"
+        run: |
+          set -eux -o pipefail
+          # Sync the current directory to /tmp/kind in the guest
+          limactl cp -r . default:/tmp/kind
+          # Install packages
+          lima sudo /tmp/kind/hack/ci/init-fedora.sh
+          # Enable systemd lingering for rootless
+          lima sudo loginctl enable-linger "$USER"
+          # Install kind
+          lima sudo git config --global --add safe.directory /tmp/kind
+          lima sudo make -C /tmp/kind install INSTALL_DIR=/usr/local/bin
+
+      - name: Set up Rootless Docker
+        if: ${{ matrix.provider == 'docker' && matrix.rootless == 'rootless' }}
+        run: |
+          # Disable the rootful daemon
+          "$HELPER" sudo systemctl disable --now docker
+          # Install the systemd unit
+          "$HELPER" dockerd-rootless-setuptool.sh install
+          # Modify the client config to use the rootless daemon by default
+          "$HELPER" docker context use rootless
+
+      - name: Set up Rootless Podman
+        if: ${{ matrix.provider == 'podman' && matrix.rootless == 'rootless' }}
+        run: |
+          # Restart the user session to ensure the cgroup delegation
+          # ref: https://github.com/kubernetes-sigs/kind/pull/2754#issuecomment-1124027063
+          "$HELPER" sudo loginctl terminate-user vagrant || true
+          # We have modprobe ip6_tables in Vagrantfile, but it seems we have to modprobe it once again
+          "$HELPER" sudo modprobe ip6_tables
+
+      - name: Show provider info
+        run: |
+          "$HELPER" "$KIND_EXPERIMENTAL_PROVIDER" info
+          "$HELPER" "$KIND_EXPERIMENTAL_PROVIDER" version
+
+      - name: Create a cluster
+        run: |
+          "$HELPER" kind create cluster -v7 --wait 10m --retain
+
+      - name: Get Cluster status
+        run: |
+          "$HELPER" kubectl wait --for=condition=ready pods --namespace=kube-system -l k8s-app=kube-dns
+          "$HELPER" kubectl get nodes -o wide
+          "$HELPER" kubectl get pods -A
+
+      - name: Export logs
+        if: always()
+        run: |
+          "$HELPER" kind export logs /tmp/kind/logs
+          mkdir -p /tmp/kind/logs/lima
+          cp -a ~/.lima/default/*.log /tmp/kind/logs/lima || true
+          "$HELPER" tar cC /tmp/kind/logs . | tar xC /tmp/kind/logs
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
+          path: /tmp/kind/logs

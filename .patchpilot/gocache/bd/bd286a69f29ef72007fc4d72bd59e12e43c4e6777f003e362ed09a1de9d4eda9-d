@@ -1,0 +1,7 @@
+./manifest.go
+./referrers.go
+./registry.go
+./repository.go
+./url.go
+./utils.go
+./warning.go

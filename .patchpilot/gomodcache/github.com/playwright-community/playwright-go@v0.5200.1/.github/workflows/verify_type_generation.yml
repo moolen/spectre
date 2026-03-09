@@ -1,0 +1,30 @@
+name: Verify Types
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: oldstable
+      - name: Install gofumpt
+        run: go install mvdan.cc/gofumpt@latest
+      - name: Install Browsers
+        run: |
+          go install ./...
+          playwright install --with-deps
+      - name: Regenerate APIs
+        run: |
+          git config --global user.email "no-reply@github.com"
+          git config --global user.name "Github Actions"
+          go generate
+      - name: Verify API is up to date
+        run: git diff --exit-code --ignore-submodules --ignore-cr-at-eol --ignore-space-at-eol 

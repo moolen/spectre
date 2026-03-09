@@ -1,0 +1,12 @@
+./extractor.go
+./flux_gitrepository.go
+./flux_helmrelease.go
+./flux_kustomization.go
+./flux_managed_resource.go
+./helpers.go
+./lookup.go
+./management_scorer.go
+./rbac.go
+./registry.go
+./secret_relationship_scorer.go
+./test_helpers.go

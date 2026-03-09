@@ -1,0 +1,16 @@
+./discard.go
+./doc.go
+./interface.go
+./json.go
+./jsonpath.go
+./kyaml.go
+./managedfields.go
+./name.go
+./sourcechecker.go
+./tableprinter.go
+./tabwriter.go
+./template.go
+./terminal.go
+./typesetter.go
+./warningprinter.go
+./yaml.go

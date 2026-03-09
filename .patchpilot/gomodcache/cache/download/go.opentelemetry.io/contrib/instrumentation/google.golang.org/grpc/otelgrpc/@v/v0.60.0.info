@@ -1,0 +1,1 @@
+{"Version":"v0.60.0","Time":"2025-03-06T01:43:27Z","Origin":{"VCS":"git","URL":"https://github.com/open-telemetry/opentelemetry-go-contrib","Subdir":"instrumentation/google.golang.org/grpc/otelgrpc","Hash":"bc53d2b4eb4de79471bc54f64a5c3dcefa8720d7","Ref":"refs/tags/instrumentation/google.golang.org/grpc/otelgrpc/v0.60.0"}}

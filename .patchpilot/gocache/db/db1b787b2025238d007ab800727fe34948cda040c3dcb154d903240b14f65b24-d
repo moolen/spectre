@@ -1,0 +1,7 @@
+./annotations.go
+./diffid.go
+./handlers.go
+./image.go
+./importexport.go
+./labels.go
+./mediatypes.go

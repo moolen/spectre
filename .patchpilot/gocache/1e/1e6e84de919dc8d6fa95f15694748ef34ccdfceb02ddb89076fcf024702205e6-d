@@ -1,0 +1,3 @@
+./cloner.go
+./gitrunner.go
+./repospec.go

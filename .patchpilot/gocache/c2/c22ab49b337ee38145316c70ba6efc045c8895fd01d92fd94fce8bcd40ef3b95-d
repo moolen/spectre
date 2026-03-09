@@ -1,0 +1,13 @@
+./api_types.go
+./errors.go
+./event.go
+./event_adapter.go
+./file_metadata.go
+./pagination.go
+./query_filters.go
+./query_request.go
+./query_result.go
+./resource_metadata.go
+./segment_metadata.go
+./sparse_index.go
+./storage_segment.go
