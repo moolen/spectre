@@ -1,19 +1,4 @@
 {
-  "name": "spectre",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "build:watch": "vite build --watch",
-    "preview": "vite preview",
-    "test": "vitest --run",
-    "test:watch": "vitest",
-    "test:ct": "playwright test -c playwright-ct.config.ts",
-    "test:ct:ui": "playwright test -c playwright-ct.config.ts --ui",
-    "lint": "eslint src --ext .ts,.tsx"
-  },
   "dependencies": {
     "@bufbuild/protobuf": "^2.10.2",
     "@google/genai": "^1.30.0",
@@ -53,5 +38,25 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "vitest": "^4.0.16"
-  }
+  },
+  "name": "spectre",
+  "overrides": {
+    "@remix-run/router": "1.23.2",
+    "lodash": "4.17.23",
+    "minimatch": "9.0.7"
+  },
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "build:watch": "vite build --watch",
+    "dev": "vite",
+    "lint": "eslint src --ext .ts,.tsx",
+    "preview": "vite preview",
+    "test": "vitest --run",
+    "test:ct": "playwright test -c playwright-ct.config.ts",
+    "test:ct:ui": "playwright test -c playwright-ct.config.ts --ui",
+    "test:watch": "vitest"
+  },
+  "type": "module",
+  "version": "0.0.0"
 }
