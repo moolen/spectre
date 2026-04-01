@@ -165,18 +165,29 @@ func (pf *PortForwarder) WaitForReady(timeout time.Duration) error {
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	client := &http.Client{Timeout: 2 * time.Second}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for service at %s", pf.GetURL())
 		case <-ticker.C:
-			resp, err := http.Get(pf.GetURL() + "/health")
+			readyResp, err := client.Get(pf.GetURL() + "/ready")
 			if err == nil {
-				resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
+				readyResp.Body.Close()
+				switch readyResp.StatusCode {
+				case http.StatusOK:
 					pf.t.Logf("✓ Service is ready (took %v)", time.Since(startTime))
 					return nil
+				case http.StatusNotFound, http.StatusMethodNotAllowed:
+					healthResp, healthErr := client.Get(pf.GetURL() + "/health")
+					if healthErr == nil {
+						healthResp.Body.Close()
+						if healthResp.StatusCode == http.StatusOK {
+							pf.t.Logf("✓ Service is healthy (no /ready endpoint, took %v)", time.Since(startTime))
+							return nil
+						}
+					}
 				}
 			}
 		}
