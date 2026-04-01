@@ -7,18 +7,24 @@ import (
 )
 
 // ResourceWithDistance represents one node in an ownership chain.
+// Resource intentionally uses graph.ResourceIdentity as the canonical resource
+// identity type shared at the store boundary.
 type ResourceWithDistance struct {
 	Resource graph.ResourceIdentity
 	Distance int
 }
 
 // ManagerData contains manager relationship data for a resource.
+// Manager intentionally uses graph.ResourceIdentity as the canonical resource
+// identity type shared at the store boundary.
 type ManagerData struct {
 	Manager     graph.ResourceIdentity
 	ManagesEdge graph.ManagesEdge
 }
 
 // RelatedResourceData contains related resource metadata and timeline context.
+// Resource intentionally uses graph.ResourceIdentity as the canonical resource
+// identity type shared at the store boundary.
 type RelatedResourceData struct {
 	Resource           graph.ResourceIdentity
 	RelationshipType   string
@@ -43,6 +49,7 @@ type EventDiff struct {
 // ChangeEventInfo represents a resource lifecycle change event.
 type ChangeEventInfo struct {
 	EventID       string
+	// Timestamp is normalized to time.Time by store implementations.
 	Timestamp     time.Time
 	EventType     string
 	Status        string
@@ -58,6 +65,7 @@ type ChangeEventInfo struct {
 // K8sEventInfo represents a Kubernetes Event associated with a resource.
 type K8sEventInfo struct {
 	EventID      string
+	// Timestamp is normalized to time.Time by store implementations.
 	Timestamp    time.Time
 	Reason       string
 	Message      string
@@ -69,47 +77,21 @@ type K8sEventInfo struct {
 
 // NamespaceGraphQuery captures inputs for namespace graph retrieval.
 type NamespaceGraphQuery struct {
-	Namespace          string
-	Timestamp          int64
-	IncludeAnomalies   bool
-	IncludeCausalPaths bool
-	Lookback           time.Duration
-	MaxDepth           int
-	Limit              int
-	Cursor             string
+	Namespace string
+	// TimestampNs is the point-in-time graph view in Unix nanoseconds.
+	TimestampNs int64
+	// LookbackNs is the temporal query window in nanoseconds.
+	LookbackNs int64
+	MaxDepth   int
+	Limit      int
+	Cursor     string
 }
 
-// NamespaceGraphData contains graph topology and metadata at a point in time.
+// NamespaceGraphData contains raw namespace graph topology and metadata.
+// It is store-level read-model data without analyzer/service enrichments.
 type NamespaceGraphData struct {
-	Graph       NamespaceGraph
-	Anomalies   []AnomalyData
-	CausalPaths []CausalPathData
-	Metadata    NamespaceGraphMetadata
-}
-
-// AnomalyData represents an anomaly identified during graph analysis.
-type AnomalyData struct {
-	ID          string
-	Type        string
-	Severity    string
-	ResourceUID string
-	Score       float64
-	Description string
-	Timestamp   int64
-	Details     map[string]any
-}
-
-// CausalPathData represents a ranked causal path through the graph.
-type CausalPathData struct {
-	ID          string
-	SourceUID   string
-	TargetUID   string
-	Score       float64
-	Confidence  float64
-	Explanation string
-	NodeUIDs    []string
-	EdgeIDs     []string
-	Metadata    map[string]any
+	Graph    NamespaceGraph
+	Metadata NamespaceGraphMetadata
 }
 
 // NamespaceGraph groups resources and relationships.
@@ -132,7 +114,8 @@ type NamespaceGraphNode struct {
 
 // NamespaceGraphChangeEvent represents the latest event for a graph node.
 type NamespaceGraphChangeEvent struct {
-	Timestamp       int64
+	// TimestampNs is the event timestamp in Unix nanoseconds.
+	TimestampNs     int64
 	EventType       string
 	Status          string
 	ErrorMessage    string
@@ -153,7 +136,8 @@ type NamespaceGraphEdge struct {
 // NamespaceGraphMetadata carries response and pagination metadata.
 type NamespaceGraphMetadata struct {
 	Namespace        string
-	Timestamp        int64
+	// TimestampNs is the graph evaluation point in Unix nanoseconds.
+	TimestampNs      int64
 	NodeCount        int
 	EdgeCount        int
 	QueryExecutionMs int64

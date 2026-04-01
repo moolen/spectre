@@ -8,25 +8,36 @@ import (
 	"github.com/moolen/spectre/internal/graph"
 )
 
+// compile-time contract assertion for the backend-neutral store interface.
+var _ store.AnalysisStore = (*contractProbe)(nil)
+
 func TestAnalysisStoreContract(t *testing.T) {
 	t.Parallel()
-
-	var candidate store.AnalysisStore = (*contractProbe)(nil)
-	if candidate == nil {
-		t.Fatal("expected contract probe to satisfy analysis store interface")
-	}
 }
 
 func TestResourceWindow(t *testing.T) {
 	t.Parallel()
 
 	window := store.ResourceWindow{
-		FailureTimestamp: 1_000,
+		FailureTimestampNs: 1_000,
 		LookbackNs:       150,
 	}
 
 	if got, want := window.Start(), int64(850); got != want {
 		t.Fatalf("unexpected window start: got %d want %d", got, want)
+	}
+}
+
+func TestResourceWindowStartClampsToZero(t *testing.T) {
+	t.Parallel()
+
+	window := store.ResourceWindow{
+		FailureTimestampNs: 5,
+		LookbackNs:         10,
+	}
+
+	if got, want := window.Start(), int64(0); got != want {
+		t.Fatalf("expected clamped zero start: got %d want %d", got, want)
 	}
 }
 

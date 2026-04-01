@@ -7,9 +7,12 @@ import (
 )
 
 // AnalysisStore defines backend-neutral domain queries used by analysis pipelines.
+// graph.ResourceIdentity is intentionally reused at this boundary as the
+// canonical domain type for Kubernetes resource identity.
 type AnalysisStore interface {
 	GetResource(ctx context.Context, uid string) (*graph.ResourceIdentity, error)
-	GetOwnershipChain(ctx context.Context, uid string, atNs int64, maxDepth int) ([]ResourceWithDistance, error)
+	// atTimestampNs is the evaluation point in Unix nanoseconds.
+	GetOwnershipChain(ctx context.Context, uid string, atTimestampNs int64, maxDepth int) ([]ResourceWithDistance, error)
 	GetManagers(ctx context.Context, resourceUIDs []string, minConfidence float64) (map[string]*ManagerData, error)
 	GetRelatedResources(ctx context.Context, resourceUIDs []string, window ResourceWindow) (map[string][]RelatedResourceData, error)
 	GetChangeEvents(ctx context.Context, resourceUIDs []string, window ResourceWindow) (map[string][]ChangeEventInfo, error)
@@ -19,11 +22,18 @@ type AnalysisStore interface {
 
 // ResourceWindow defines an incident-relative time window.
 type ResourceWindow struct {
-	FailureTimestamp int64
-	LookbackNs       int64
+	// FailureTimestampNs is the incident timestamp in Unix nanoseconds.
+	FailureTimestampNs int64
+	// LookbackNs is the lookback duration in nanoseconds.
+	LookbackNs int64
 }
 
-// Start returns the inclusive start timestamp for the window.
+// Start returns the inclusive start timestamp for the window in Unix nanoseconds.
+// If FailureTimestampNs-LookbackNs is negative, Start clamps the value to 0.
 func (w ResourceWindow) Start() int64 {
-	return w.FailureTimestamp - w.LookbackNs
+	start := w.FailureTimestampNs - w.LookbackNs
+	if start < 0 {
+		return 0
+	}
+	return start
 }
