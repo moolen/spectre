@@ -156,6 +156,44 @@ func TestImportInChunksValidationAndEnrichment(t *testing.T) {
 	}
 }
 
+func TestImportInChunksStreamsBeforeLaterParseError(t *testing.T) {
+	input := `{
+		"events": [
+			{
+				"id": "event-1",
+				"timestamp": 1,
+				"type": "CREATE",
+				"resource": {"kind": "Deployment", "name": "a"}
+			},
+			{
+				"id": "event-2",
+				"timestamp": 2,
+				"type": "CREATE",
+				"resource": {"kind": "Deployment", "name": "b"}
+			},
+			{
+				"id": "broken-event",
+				"timestamp":
+			}
+		]
+	}`
+
+	var gotChunks [][]models.Event
+	err := ImportInChunks(FromReader(strings.NewReader(input)), 2, func(chunk []models.Event) error {
+		gotChunks = append(gotChunks, append([]models.Event(nil), chunk...))
+		return nil
+	})
+	if err == nil {
+		t.Fatalf("expected parse error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to parse JSON") {
+		t.Fatalf("error = %v, want failed-to-parse message", err)
+	}
+	if len(gotChunks) != 1 || len(gotChunks[0]) != 2 {
+		t.Fatalf("got chunks = %#v, want one emitted chunk of size 2 before parse failure", gotChunks)
+	}
+}
+
 func TestImportUsesStreamingWhenAvailable(t *testing.T) {
 	source := &streamPreferredSource{}
 

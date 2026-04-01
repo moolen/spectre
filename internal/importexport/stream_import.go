@@ -91,7 +91,7 @@ func (s *fileSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk C
 		}
 	}()
 
-	events, err := parseJSONEvents(file, logger)
+	err = parseJSONEventsInChunks(file, chunkSize, logger, onChunk)
 	if err != nil {
 		logger.ErrorWithFields("Failed to parse JSON events",
 			logging.Field("path", s.path),
@@ -99,13 +99,8 @@ func (s *fileSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk C
 		return err
 	}
 
-	if err := emitChunks(events, chunkSize, onChunk); err != nil {
-		return err
-	}
-
 	logger.InfoWithFields("Successfully loaded events from file",
-		logging.Field("path", s.path),
-		logging.Field("event_count", len(events)))
+		logging.Field("path", s.path))
 
 	return nil
 }
@@ -113,19 +108,13 @@ func (s *fileSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk C
 func (s *readerSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk ChunkCallback) error {
 	logger.Debug("Loading events from reader")
 
-	events, err := parseJSONEvents(s.reader, logger)
+	err := parseJSONEventsInChunks(s.reader, chunkSize, logger, onChunk)
 	if err != nil {
 		logger.ErrorWithFields("Failed to parse JSON events from reader",
 			logging.Field("error", err))
 		return err
 	}
-
-	if err := emitChunks(events, chunkSize, onChunk); err != nil {
-		return err
-	}
-
-	logger.InfoWithFields("Successfully loaded events from reader",
-		logging.Field("event_count", len(events)))
+	logger.InfoWithFields("Successfully loaded events from reader")
 	return nil
 }
 
@@ -171,18 +160,17 @@ func (s *directorySource) streamLoad(logger *logging.Logger, chunkSize int, onCh
 			logging.Field("path", file.FilePath),
 			logging.Field("size_bytes", file.Size))
 
-		events, loadErr := collectAllFromStream(FromFile(file.FilePath).(streamImportSource), logger)
+		fileSource := fileSource{path: file.FilePath}
+		loadErr := fileSource.streamLoad(logger, chunkSize, func(chunk []models.Event) error {
+			buffer = append(buffer, chunk...)
+			return flushBuffer(false)
+		})
 		if loadErr != nil {
 			failureCount++
 			logger.WarnWithFields("Failed to import file, skipping",
 				logging.Field("path", file.FilePath),
 				logging.Field("error", loadErr))
 			continue
-		}
-
-		buffer = append(buffer, events...)
-		if err := flushBuffer(false); err != nil {
-			return err
 		}
 		successCount++
 	}
@@ -223,10 +211,12 @@ func (s *pathSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk C
 	switch pathType {
 	case fileio.PathTypeDirectory:
 		logger.Debug("Path is a directory, using directory import")
-		return FromDirectory(s.path).(streamImportSource).streamLoad(logger, chunkSize, onChunk)
+		directorySource := directorySource{path: s.path}
+		return directorySource.streamLoad(logger, chunkSize, onChunk)
 	case fileio.PathTypeFile:
 		logger.Debug("Path is a file, using file import")
-		return FromFile(s.path).(streamImportSource).streamLoad(logger, chunkSize, onChunk)
+		fileSource := fileSource{path: s.path}
+		return fileSource.streamLoad(logger, chunkSize, onChunk)
 	case fileio.PathTypeUnknown:
 		return fmt.Errorf("unknown path type for %s", s.path)
 	default:
