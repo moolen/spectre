@@ -11,10 +11,6 @@ import (
 // compile-time contract assertion for the backend-neutral store interface.
 var _ store.AnalysisStore = (*contractProbe)(nil)
 
-func TestAnalysisStoreContract(t *testing.T) {
-	t.Parallel()
-}
-
 func TestResourceWindow(t *testing.T) {
 	t.Parallel()
 

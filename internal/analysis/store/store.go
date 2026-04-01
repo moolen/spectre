@@ -9,6 +9,9 @@ import (
 // AnalysisStore defines backend-neutral domain queries used by analysis pipelines.
 // graph.ResourceIdentity is intentionally reused at this boundary as the
 // canonical domain type for Kubernetes resource identity.
+//
+// For map-returning methods, implementations may omit keys for requested UIDs
+// that have no matching data.
 type AnalysisStore interface {
 	GetResource(ctx context.Context, uid string) (*graph.ResourceIdentity, error)
 	// atTimestampNs is the evaluation point in Unix nanoseconds.

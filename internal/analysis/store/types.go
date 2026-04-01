@@ -11,6 +11,8 @@ import (
 // identity type shared at the store boundary.
 type ResourceWithDistance struct {
 	Resource graph.ResourceIdentity
+	// Distance is ownership-chain distance from the symptom resource:
+	// symptom is 0, direct owner is 1, and distances increase upstream.
 	Distance int
 }
 
@@ -84,11 +86,12 @@ type NamespaceGraphQuery struct {
 	LookbackNs int64
 	MaxDepth   int
 	Limit      int
-	Cursor     string
+	// Cursor is an opaque pagination token returned by a previous result page.
+	Cursor string
 }
 
-// NamespaceGraphData contains raw namespace graph topology and metadata.
-// It is store-level read-model data without analyzer/service enrichments.
+// NamespaceGraphData contains store-level read-model data used to assemble the
+// namespace graph view and related metadata.
 type NamespaceGraphData struct {
 	Graph    NamespaceGraph
 	Metadata NamespaceGraphMetadata
@@ -112,7 +115,9 @@ type NamespaceGraphNode struct {
 	Labels      map[string]string
 }
 
-// NamespaceGraphChangeEvent represents the latest event for a graph node.
+// NamespaceGraphChangeEvent represents latest persisted/derived event fields
+// needed by namespace-graph consumers. Analyzer/service-level enrichments
+// (for example anomalies and causal paths) are out of scope for store results.
 type NamespaceGraphChangeEvent struct {
 	// TimestampNs is the event timestamp in Unix nanoseconds.
 	TimestampNs     int64
