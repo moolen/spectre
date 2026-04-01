@@ -54,6 +54,9 @@ func GenerateDataset(outputDir string, config Config) (Summary, error) {
 	}
 
 	eventsDir := filepath.Join(outputDir, "events")
+	if err := os.RemoveAll(eventsDir); err != nil {
+		return Summary{}, fmt.Errorf("clean events directory: %w", err)
+	}
 	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
 		return Summary{}, fmt.Errorf("create events directory: %w", err)
 	}

@@ -125,3 +125,49 @@ func TestGenerateDatasetSummaryHasNonZeroTotalsAndStableTopKindOrdering(t *testi
 		t.Fatalf("unexpected top kind ordering, got %v want %v", summary.TopKindsByEvents[:3], expectedTop)
 	}
 }
+
+func TestGenerateDatasetRerunInSameOutputDirDoesNotLeaveStaleEventFiles(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	firstConfig := Config{
+		Seed:           42,
+		KindCount:      6,
+		ResourceCount:  20,
+		NamespaceCount: 2,
+	}
+	secondConfig := Config{
+		Seed:           42,
+		KindCount:      3,
+		ResourceCount:  4,
+		NamespaceCount: 1,
+	}
+
+	_, err := GenerateDataset(outputDir, firstConfig)
+	if err != nil {
+		t.Fatalf("first GenerateDataset() returned error: %v", err)
+	}
+
+	secondSummary, err := GenerateDataset(outputDir, secondConfig)
+	if err != nil {
+		t.Fatalf("second GenerateDataset() returned error: %v", err)
+	}
+
+	var fileCount int
+	err = filepath.WalkDir(filepath.Join(outputDir, "events"), func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() && filepath.Ext(path) == ".json" {
+			fileCount++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to walk generated json files: %v", err)
+	}
+
+	if fileCount != secondSummary.TotalResources {
+		t.Fatalf("stale event files detected after rerun: file_count=%d summary_total_resources=%d", fileCount, secondSummary.TotalResources)
+	}
+}
