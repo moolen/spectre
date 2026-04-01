@@ -1,4 +1,4 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/App-CrLVUZD2.js","assets/SettingsPage-Bo0M5phn.js"])))=>i.map(i=>d[i]);
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/App-Dlhj9hOm.js","assets/SettingsPage-DWvx44PO.js"])))=>i.map(i=>d[i]);
 function _mergeNamespaces(n, m) {
   for (var i = 0; i < m.length; i++) {
     const e = m[i];
@@ -8437,6 +8437,21 @@ const DEFAULT_KINDS = [
   "StatefulSet",
   "HelmRelease"
 ];
+const DEFAULT_OBSERVATORY_NODE_TYPES = [
+  "SignalAnchor",
+  "Workload"
+];
+const OBSERVATORY_NODE_TYPES = [
+  "SignalAnchor",
+  "SignalBaseline",
+  "Alert",
+  "Dashboard",
+  "Panel",
+  "Query",
+  "Metric",
+  "Service",
+  "Workload"
+];
 const COMMON_KINDS = [
   // Workloads
   "Pod",
@@ -8478,7 +8493,9 @@ const DEFAULT_SETTINGS = {
   timeFormat: "24h",
   compactMode: false,
   autoRefresh: "off",
-  defaultKinds: DEFAULT_KINDS
+  defaultKinds: DEFAULT_KINDS,
+  defaultObservatoryNodeTypes: DEFAULT_OBSERVATORY_NODE_TYPES,
+  hideInactiveReplicaSets: true
 };
 const STORAGE_KEY = "spectre-settings";
 const SettingsContext = reactExports.createContext(void 0);
@@ -8523,6 +8540,8 @@ const SettingsProvider = ({ children }) => {
     setCompactMode: (enabled) => setSettings((prev) => ({ ...prev, compactMode: enabled })),
     setAutoRefresh: (value2) => setSettings((prev) => ({ ...prev, autoRefresh: value2 })),
     setDefaultKinds: (kinds) => setSettings((prev) => ({ ...prev, defaultKinds: kinds })),
+    setDefaultObservatoryNodeTypes: (types) => setSettings((prev) => ({ ...prev, defaultObservatoryNodeTypes: types })),
+    setHideInactiveReplicaSets: (hide) => setSettings((prev) => ({ ...prev, hideInactiveReplicaSets: hide })),
     formatTime
   };
   return React.createElement(SettingsContext.Provider, { value }, children);
@@ -25196,10 +25215,10 @@ window.playwrightUpdate = async (rootElement, component) => {
   entry.setRenderer(() => __pwRender(component));
 };
 
-const _home_moritz_dev_spectre_via_ssh_ui_src_App = () => __vitePreload(() => import('./App-CrLVUZD2.js'),true              ?__vite__mapDeps([0,1]):void 0).then((mod) => mod.default);
-const _home_moritz_dev_spectre_via_ssh_ui_src_pages_SettingsPage = () => __vitePreload(() => import('./SettingsPage-Bo0M5phn.js').then(n => n.d),true              ?[]:void 0).then((mod) => mod.default);
+const _home_moritz_dev_spectre_via_ssh_ui_src_App = () => __vitePreload(() => import('./App-Dlhj9hOm.js'),true              ?__vite__mapDeps([0,1]):void 0).then((mod) => mod.default);
+const _home_moritz_dev_spectre_via_ssh_ui_src_pages_SettingsPage = () => __vitePreload(() => import('./SettingsPage-DWvx44PO.js').then(n => n.d),true              ?[]:void 0).then((mod) => mod.default);
 __pwRegistry.initialize({ _home_moritz_dev_spectre_via_ssh_ui_src_App,
   _home_moritz_dev_spectre_via_ssh_ui_src_pages_SettingsPage });
 
-export { COMMON_KINDS as C, DEFAULT_KINDS as D, NavLink as N, React as R, useSearchParams as a, Routes as b, Route as c, ReactDOM as d, jsxRuntimeExports as j, reactExports as r, useSettings as u };
-//# sourceMappingURL=index-CPSjW-or.js.map
+export { COMMON_KINDS as C, DEFAULT_KINDS as D, NavLink as N, OBSERVATORY_NODE_TYPES as O, React as R, useSearchParams as a, reactDomExports as b, Navigate as c, Routes as d, Route as e, ReactDOM as f, DEFAULT_OBSERVATORY_NODE_TYPES as g, jsxRuntimeExports as j, reactExports as r, useSettings as u };
+//# sourceMappingURL=index-LJiuibDt.js.map

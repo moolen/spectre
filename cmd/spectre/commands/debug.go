@@ -11,6 +11,5 @@ var debugCmd = &cobra.Command{
 }
 
 func init() {
-	// Storage debug command removed - storage package no longer exists
-	// Future debug commands for graph can be added here
+	debugCmd.AddCommand(debugGenerateImportDataCmd)
 }

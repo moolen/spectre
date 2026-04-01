@@ -71,7 +71,6 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/importexport/enrichment"
-	"github.com/moolen/spectre/internal/importexport/fileio"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
@@ -120,15 +119,15 @@ func WithLogger(logger *logging.Logger) ImportOption {
 //
 //	events, err := Import(FromFile("events.json"), WithLogger(logger))
 func Import(source ImportSource, opts ...ImportOption) ([]models.Event, error) {
-	options := &ImportOptions{
-		logger: logging.GetLogger("importexport"),
+	var allEvents []models.Event
+	if err := ImportInChunks(source, defaultImportChunkSize, func(chunk []models.Event) error {
+		allEvents = append(allEvents, chunk...)
+		return nil
+	}, opts...); err != nil {
+		return nil, err
 	}
 
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	return source.Load(options.logger)
+	return allEvents, nil
 }
 
 // fileSource imports events from a single JSON file
@@ -142,36 +141,7 @@ func FromFile(path string) ImportSource {
 }
 
 func (s *fileSource) Load(logger *logging.Logger) ([]models.Event, error) {
-	logger.InfoWithFields("Loading events from file",
-		logging.Field("path", s.path))
-
-	reader := fileio.NewFileReader(logger)
-	file, err := reader.ReadFile(s.path)
-	if err != nil {
-		logger.ErrorWithFields("Failed to read file",
-			logging.Field("path", s.path),
-			logging.Field("error", err))
-		return nil, err
-	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			logger.Warn("Failed to close file %s: %v", s.path, closeErr)
-		}
-	}()
-
-	events, err := parseJSONEvents(file, logger)
-	if err != nil {
-		logger.ErrorWithFields("Failed to parse JSON events",
-			logging.Field("path", s.path),
-			logging.Field("error", err))
-		return nil, err
-	}
-
-	logger.InfoWithFields("Successfully loaded events from file",
-		logging.Field("path", s.path),
-		logging.Field("event_count", len(events)))
-
-	return events, nil
+	return collectAllFromStream(s, logger)
 }
 
 // readerSource imports events from an io.Reader
@@ -185,19 +155,7 @@ func FromReader(reader io.Reader) ImportSource {
 }
 
 func (s *readerSource) Load(logger *logging.Logger) ([]models.Event, error) {
-	logger.Debug("Loading events from reader")
-
-	events, err := parseJSONEvents(s.reader, logger)
-	if err != nil {
-		logger.ErrorWithFields("Failed to parse JSON events from reader",
-			logging.Field("error", err))
-		return nil, err
-	}
-
-	logger.InfoWithFields("Successfully loaded events from reader",
-		logging.Field("event_count", len(events)))
-
-	return events, nil
+	return collectAllFromStream(s, logger)
 }
 
 // directorySource imports events from all JSON files in a directory (recursive)
@@ -212,61 +170,7 @@ func FromDirectory(path string) ImportSource {
 }
 
 func (s *directorySource) Load(logger *logging.Logger) ([]models.Event, error) {
-	logger.InfoWithFields("Loading events from directory",
-		logging.Field("path", s.path))
-
-	// Use the fileio walker to find JSON files
-	walker := fileio.NewDirectoryWalker(logger)
-	files, err := walker.WalkJSON(s.path)
-	if err != nil {
-		logger.ErrorWithFields("Failed to walk directory",
-			logging.Field("path", s.path),
-			logging.Field("error", err))
-		return nil, err
-	}
-
-	logger.InfoWithFields("Found JSON files in directory",
-		logging.Field("path", s.path),
-		logging.Field("file_count", len(files)))
-
-	var allEvents []models.Event
-	successCount := 0
-	failureCount := 0
-
-	// Import each file
-	for _, file := range files {
-		logger.DebugWithFields("Importing file",
-			logging.Field("path", file.FilePath),
-			logging.Field("size_bytes", file.Size))
-
-		events, err := FromFile(file.FilePath).Load(logger)
-		if err != nil {
-			failureCount++
-			logger.WarnWithFields("Failed to import file, skipping",
-				logging.Field("path", file.FilePath),
-				logging.Field("error", err))
-			continue
-		}
-
-		allEvents = append(allEvents, events...)
-		successCount++
-	}
-
-	if len(allEvents) == 0 {
-		logger.ErrorWithFields("No events imported from directory",
-			logging.Field("path", s.path),
-			logging.Field("files_found", len(files)),
-			logging.Field("failures", failureCount))
-		return nil, fmt.Errorf("no events found in directory %s (processed %d files, %d failures)", s.path, len(files), failureCount)
-	}
-
-	logger.InfoWithFields("Successfully loaded events from directory",
-		logging.Field("path", s.path),
-		logging.Field("event_count", len(allEvents)),
-		logging.Field("files_processed", successCount),
-		logging.Field("files_failed", failureCount))
-
-	return allEvents, nil
+	return collectAllFromStream(s, logger)
 }
 
 // pathSource automatically detects whether the path is a file or directory
@@ -281,73 +185,143 @@ func FromPath(path string) ImportSource {
 }
 
 func (s *pathSource) Load(logger *logging.Logger) ([]models.Event, error) {
-	logger.DebugWithFields("Detecting path type",
-		logging.Field("path", s.path))
-
-	pathType, err := fileio.DetectPathType(s.path)
-	if err != nil {
-		logger.ErrorWithFields("Failed to detect path type",
-			logging.Field("path", s.path),
-			logging.Field("error", err))
-		return nil, err
-	}
-
-	switch pathType {
-	case fileio.PathTypeDirectory:
-		logger.Debug("Path is a directory, using directory import")
-		return FromDirectory(s.path).Load(logger)
-	case fileio.PathTypeFile:
-		logger.Debug("Path is a file, using file import")
-		return FromFile(s.path).Load(logger)
-	case fileio.PathTypeUnknown:
-		return nil, fmt.Errorf("unknown path type for %s", s.path)
-	default:
-		return nil, fmt.Errorf("unknown path type for %s", s.path)
-	}
+	return collectAllFromStream(s, logger)
 }
 
 // parseJSONEvents parses a JSON events array from a reader
 func parseJSONEvents(r io.Reader, logger *logging.Logger) ([]models.Event, error) {
+	var allEvents []models.Event
+	if err := parseJSONEventsInChunks(r, defaultImportChunkSize, logger, func(chunk []models.Event) error {
+		allEvents = append(allEvents, chunk...)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return allEvents, nil
+}
+
+func parseJSONEventsInChunks(r io.Reader, chunkSize int, logger *logging.Logger, onChunk ChunkCallback) error {
 	logger.Debug("Parsing JSON events")
 
-	var req BatchEventImportRequest
 	decoder := json.NewDecoder(r)
-
-	if err := decoder.Decode(&req); err != nil {
+	firstToken, err := decoder.Token()
+	if err != nil {
 		if err == io.EOF {
-			return nil, fmt.Errorf("empty file or reader")
+			return fmt.Errorf("empty file or reader")
 		}
-		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
-	if len(req.Events) == 0 {
-		return nil, fmt.Errorf("events array is empty")
+	rootDelim, ok := firstToken.(json.Delim)
+	if !ok || rootDelim != '{' {
+		return fmt.Errorf("failed to parse JSON: expected object with events field")
 	}
 
-	logger.DebugWithFields("Parsed JSON structure",
-		logging.Field("raw_event_count", len(req.Events)))
+	eventsFieldFound := false
+	rawCount := 0
+	validCount := 0
+	invalidCount := 0
+	chunk := make([]models.Event, 0, chunkSize)
+	enricher := enrichment.Default()
 
-	// Validate events
-	validEvents, invalidCount := validateEvents(req.Events, logger)
-	if len(validEvents) == 0 {
-		return nil, fmt.Errorf("all %d events failed validation", invalidCount)
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		validEvents, invalid := validateEvents(chunk, logger)
+		invalidCount += invalid
+		chunk = chunk[:0]
+		if len(validEvents) == 0 {
+			return nil
+		}
+		enricher.Enrich(validEvents, logger)
+		validCount += len(validEvents)
+		return wrapChunkCallbackError(onChunk(validEvents))
+	}
+
+	for decoder.More() {
+		keyToken, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return fmt.Errorf("failed to parse JSON: %w", tokenErr)
+		}
+
+		key, ok := keyToken.(string)
+		if !ok {
+			return fmt.Errorf("failed to parse JSON: invalid object key type")
+		}
+
+		if key != "events" {
+			if err := skipJSONValue(decoder); err != nil {
+				return fmt.Errorf("failed to parse JSON: %w", err)
+			}
+			continue
+		}
+
+		eventsFieldFound = true
+		eventsToken, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return fmt.Errorf("failed to parse JSON: %w", tokenErr)
+		}
+		eventsArray, ok := eventsToken.(json.Delim)
+		if !ok || eventsArray != '[' {
+			return fmt.Errorf("failed to parse JSON: events field must be an array")
+		}
+
+		for decoder.More() {
+			var event models.Event
+			if decodeErr := decoder.Decode(&event); decodeErr != nil {
+				return fmt.Errorf("failed to parse JSON: %w", decodeErr)
+			}
+			rawCount++
+			chunk = append(chunk, event)
+			if len(chunk) >= chunkSize {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		}
+
+		endArrayToken, tokenErr := decoder.Token()
+		if tokenErr != nil {
+			return fmt.Errorf("failed to parse JSON: %w", tokenErr)
+		}
+		endArray, ok := endArrayToken.(json.Delim)
+		if !ok || endArray != ']' {
+			return fmt.Errorf("failed to parse JSON: malformed events array")
+		}
+	}
+
+	if _, err := decoder.Token(); err != nil {
+		return fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	if !eventsFieldFound || rawCount == 0 {
+		return fmt.Errorf("events array is empty")
+	}
+
+	if err := flush(); err != nil {
+		return err
+	}
+
+	if validCount == 0 {
+		return fmt.Errorf("all %d events failed validation", invalidCount)
 	}
 
 	if invalidCount > 0 {
 		logger.WarnWithFields("Some events failed validation",
-			logging.Field("valid_count", len(validEvents)),
+			logging.Field("valid_count", validCount),
 			logging.Field("invalid_count", invalidCount))
 	}
 
-	// Apply enrichment strategies
-	enricher := enrichment.Default()
-	enricher.Enrich(validEvents, logger)
-
 	logger.InfoWithFields("JSON parsing completed",
-		logging.Field("valid_events", len(validEvents)),
+		logging.Field("valid_events", validCount),
 		logging.Field("invalid_events", invalidCount))
+	return nil
+}
 
-	return validEvents, nil
+func skipJSONValue(decoder *json.Decoder) error {
+	var value json.RawMessage
+	return decoder.Decode(&value)
 }
 
 // validateEvents validates event data and filters out invalid events

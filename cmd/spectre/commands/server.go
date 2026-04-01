@@ -20,7 +20,6 @@ import (
 	"github.com/moolen/spectre/internal/graph/reconciler"
 	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/graphservice"
-	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/integration"
 
 	// Import integration implementations to register their factories
@@ -35,20 +34,25 @@ import (
 )
 
 var (
-	apiPort               int
-	watcherConfigPath     string
-	watcherEnabled        bool
-	maxConcurrentRequests int
-	importPath            string
-	pprofEnabled          bool
-	pprofPort             int
-	pprofReadTimeout      time.Duration
-	pprofWriteTimeout     time.Duration
-	pprofIdleTimeout      time.Duration
-	tracingEnabled        bool
-	tracingEndpoint       string
-	tracingTLSCAPath      string
-	tracingTLSInsecure    bool
+	apiPort                       int
+	watcherConfigPath             string
+	watcherEnabled                bool
+	maxConcurrentRequests         int
+	importPath                    string
+	importChunkSize               int
+	importBenchmarkLog            string
+	importMode                    bool
+	startupImportDisableCausality bool
+	startupImportTimelineOnly     bool
+	pprofEnabled                  bool
+	pprofPort                     int
+	pprofReadTimeout              time.Duration
+	pprofWriteTimeout             time.Duration
+	pprofIdleTimeout              time.Duration
+	tracingEnabled                bool
+	tracingEndpoint               string
+	tracingTLSCAPath              string
+	tracingTLSInsecure            bool
 	// Graph reasoning layer flags
 	graphEnabled        bool
 	graphHost           string
@@ -88,6 +92,11 @@ func init() {
 	serverCmd.Flags().BoolVar(&watcherEnabled, "watcher-enabled", true, "Enable Kubernetes watcher (default: true)")
 	serverCmd.Flags().IntVar(&maxConcurrentRequests, "max-concurrent-requests", 100, "Maximum number of concurrent API requests")
 	serverCmd.Flags().StringVar(&importPath, "import-path", "", "Path to the binary file containing events to import on startup")
+	serverCmd.Flags().IntVar(&importChunkSize, "import-chunk-size", defaultStartupImportChunkSize, "Chunk size used for startup imports")
+	serverCmd.Flags().StringVar(&importBenchmarkLog, "import-benchmark-log", "", "Path to write startup import benchmark report as JSON")
+	serverCmd.Flags().BoolVar(&importMode, "import-mode", false, "Enable startup import opt-in mode (reserved for future tuning)")
+	serverCmd.Flags().BoolVar(&startupImportDisableCausality, "startup-import-disable-causality", false, "Disable causality inference during startup import only")
+	serverCmd.Flags().BoolVar(&startupImportTimelineOnly, "startup-import-timeline-only", false, "Import only timeline-critical graph data during startup import")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
 	serverCmd.Flags().DurationVar(&pprofReadTimeout, "pprof-read-timeout", 15*time.Second, "Read timeout for pprof server (default: 15s)")
@@ -542,39 +551,35 @@ func runServer(cmd *cobra.Command, args []string) {
 		HandleError(err, "Startup error")
 	}
 
-	// Import events from file or directory if import path is specified
+	// Import events from file or directory if import path is specified.
 	// This must happen AFTER manager.Start() to ensure the graph pipeline is fully
-	// initialized (schema, indexes, etc.) before processing events
+	// initialized (schema, indexes, etc.) before processing events.
 	if importPath != "" {
-		logger.Info("Importing events from path: %s", importPath)
-		importStartTime := time.Now()
-
-		eventValues, err := importexport.Import(importexport.FromPath(importPath), importexport.WithLogger(logger))
-		if err != nil {
-			logger.Error("Failed to import events from path: %v", err)
+		importCtx, importCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer importCancel()
+		if startupImportTimelineOnly || startupImportDisableCausality {
+			opts := sync.BatchProcessingOptions{
+				DisableCausality: startupImportDisableCausality,
+				TimelineOnly:     startupImportTimelineOnly,
+			}
+			importCtx = sync.WithBatchProcessingOptions(importCtx, opts)
+			if startupImportTimelineOnly {
+				logger.Info("Startup import configured for timeline-only mode")
+			} else {
+				logger.Info("Startup import configured to skip causality inference")
+			}
+		}
+		if err := runStartupImport(importCtx, startupImportOptions{
+			Path:             importPath,
+			ChunkSize:        importChunkSize,
+			BenchmarkLogPath: importBenchmarkLog,
+			ImportMode:       importMode,
+			Logger:           logger,
+			Pipeline:         graphPipeline,
+		}); err != nil {
+			logger.Error("Failed to run startup import: %v", err)
 			HandleError(err, "Import error")
 		}
-
-		logger.InfoWithFields("Parsed import path",
-			logging.Field("event_count", len(eventValues)),
-			logging.Field("parse_duration", time.Since(importStartTime)))
-
-		// Process events through graph pipeline
-		importCtx, importCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer importCancel()
-
-		processStartTime := time.Now()
-		if err := graphPipeline.ProcessBatch(importCtx, eventValues); err != nil {
-			logger.Error("Failed to process imported events: %v", err)
-			HandleError(err, "Import processing error")
-		}
-
-		processDuration := time.Since(processStartTime)
-		totalDuration := time.Since(importStartTime)
-		logger.InfoWithFields("Import completed",
-			logging.Field("event_count", len(eventValues)),
-			logging.Field("process_duration", processDuration),
-			logging.Field("total_duration", totalDuration))
 	}
 
 	// Start stdio MCP transport if requested

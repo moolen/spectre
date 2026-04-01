@@ -216,6 +216,7 @@ func (p *pipeline) ProcessBatch(ctx context.Context, events []models.Event) erro
 	// PHASE 2: Extract all relationship edges
 	phase2Start := time.Now()
 	p.logger.Debug("Phase 2: Extracting relationships for %d events", len(events))
+	batchOptions := batchProcessingOptionsFromContext(ctx)
 
 	edgeUpdates := make([]*GraphUpdate, 0, len(events)*2)
 	totalEdges := 0
@@ -229,16 +230,20 @@ func (p *pipeline) ProcessBatch(ctx context.Context, events []models.Event) erro
 		}
 	}
 
-	// Extract relationship edges (OWNS, SELECTS, etc.)
-	for _, event := range events {
-		update, err := p.builder.BuildRelationshipEdges(ctx, event)
-		if err != nil {
-			p.logger.Warn("Failed to extract relationships for event %s: %v", event.ID, err)
-			atomic.AddInt64(&p.stats.Errors, 1)
-			continue
+	// Extract relationship edges (OWNS, SELECTS, etc.) unless timeline-only startup import defers them.
+	if batchOptions.TimelineOnly {
+		p.logger.Info("Skipping semantic relationship extraction for batch due to timeline-only processing override")
+	} else {
+		for _, event := range events {
+			update, err := p.builder.BuildRelationshipEdges(ctx, event)
+			if err != nil {
+				p.logger.Warn("Failed to extract relationships for event %s: %v", event.ID, err)
+				atomic.AddInt64(&p.stats.Errors, 1)
+				continue
+			}
+			totalEdges += len(update.Edges)
+			edgeUpdates = append(edgeUpdates, update)
 		}
-		totalEdges += len(update.Edges)
-		edgeUpdates = append(edgeUpdates, update)
 	}
 
 	// Apply all edge updates using batch queries
@@ -265,13 +270,18 @@ func (p *pipeline) ProcessBatch(ctx context.Context, events []models.Event) erro
 	}
 
 	// PHASE 3: Infer causality (existing logic)
-	if p.config.EnableCausality && len(events) > 1 {
+	enableCausality := p.config.EnableCausality && !batchOptions.DisableCausality && !batchOptions.TimelineOnly
+	if enableCausality && len(events) > 1 {
 		causalityStart := time.Now()
 		if err := p.inferCausality(ctx, events); err != nil {
 			p.logger.Warn("Failed to infer causality: %v", err)
 		} else {
 			p.logger.Debug("Causality inference complete in %v", time.Since(causalityStart))
 		}
+	} else if p.config.EnableCausality && batchOptions.TimelineOnly {
+		p.logger.Info("Skipping causality inference for batch due to timeline-only processing override")
+	} else if p.config.EnableCausality && batchOptions.DisableCausality {
+		p.logger.Info("Skipping causality inference for batch due to processing override")
 	}
 
 	// Update stats

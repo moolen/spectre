@@ -1,4 +1,4 @@
-import { R as React, d as ReactDOM, r as reactExports, j as jsxRuntimeExports, u as useSettings, C as COMMON_KINDS, D as DEFAULT_KINDS } from './index-CPSjW-or.js';
+import { R as React, f as ReactDOM, r as reactExports, j as jsxRuntimeExports, u as useSettings, C as COMMON_KINDS, D as DEFAULT_KINDS, O as OBSERVATORY_NODE_TYPES, g as DEFAULT_OBSERVATORY_NODE_TYPES } from './index-LJiuibDt.js';
 
 'use client';
 function __insertCSS(code) {
@@ -11807,6 +11807,30 @@ class ApiClient {
     const endpoint = `/v1/namespace-graph?${queryParams.toString()}`;
     return this.request(endpoint);
   }
+  /**
+   * Get observatory graph data for visualization
+   * Returns SignalAnchors, Alerts, Dashboards, Panels, Queries, Metrics, and their relationships
+   */
+  async getObservatoryGraph(params) {
+    const queryParams = new URLSearchParams();
+    if (params.integration) {
+      queryParams.append("integration", params.integration);
+    }
+    if (params.namespace) {
+      queryParams.append("namespace", params.namespace);
+    }
+    if (params.workload) {
+      queryParams.append("workload", params.workload);
+    }
+    if (params.includeBaselines) {
+      queryParams.append("includeBaselines", "true");
+    }
+    if (params.limit !== void 0) {
+      queryParams.append("limit", params.limit.toString());
+    }
+    const endpoint = `/v1/observatory-graph?${queryParams.toString()}`;
+    return this.request(endpoint);
+  }
 }
 const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
 const apiClient = new ApiClient({
@@ -11930,7 +11954,11 @@ const SettingsPage = () => {
     compactMode,
     setCompactMode,
     defaultKinds,
-    setDefaultKinds
+    setDefaultKinds,
+    defaultObservatoryNodeTypes,
+    setDefaultObservatoryNodeTypes,
+    hideInactiveReplicaSets,
+    setHideInactiveReplicaSets
   } = useSettings();
   const [isExporting, setIsExporting] = reactExports.useState(false);
   const [exportError, setExportError] = reactExports.useState(null);
@@ -12110,7 +12138,7 @@ const SettingsPage = () => {
                           setDefaultKinds(defaultKinds.filter((k) => k !== kind));
                         }
                       },
-                      className: "w-4 h-4 rounded border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] \n                                   text-brand-500 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
+                      className: "w-4 h-4 rounded border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]\n                                   text-brand-500 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
                     }
                   ),
                   /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-[var(--color-text-primary)] group-hover:text-brand-400 transition-colors", children: kind })
@@ -12123,7 +12151,7 @@ const SettingsPage = () => {
                 "button",
                 {
                   onClick: () => setDefaultKinds(DEFAULT_KINDS),
-                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)] \n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
+                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]\n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
                   children: "Reset to Defaults"
                 }
               ),
@@ -12131,7 +12159,7 @@ const SettingsPage = () => {
                 "button",
                 {
                   onClick: () => setDefaultKinds(COMMON_KINDS),
-                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)] \n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
+                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]\n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
                   children: "Select All"
                 }
               ),
@@ -12139,7 +12167,7 @@ const SettingsPage = () => {
                 "button",
                 {
                   onClick: () => setDefaultKinds([]),
-                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)] \n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
+                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]\n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
                   children: "Clear All"
                 }
               ),
@@ -12147,6 +12175,97 @@ const SettingsPage = () => {
                 defaultKinds.length,
                 " of ",
                 COMMON_KINDS.length,
+                " selected"
+              ] })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-6 space-y-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-base font-medium text-[var(--color-text-primary)]", children: "Hide Inactive ReplicaSets" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-[var(--color-text-muted)]", children: "Hide ReplicaSets with spec.replicas = 0 in the Graph view. These are typically old ReplicaSets kept for rollback purposes but are no longer actively running pods." })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                onClick: () => setHideInactiveReplicaSets(!hideInactiveReplicaSets),
+                className: `w-full max-w-md flex items-center justify-between px-4 py-3 rounded-lg border transition-all ${hideInactiveReplicaSets ? "border-brand-500 bg-brand-500/20 text-[var(--color-text-primary)]" : "border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]"}`,
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-medium", children: hideInactiveReplicaSets ? "Enabled" : "Disabled" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "span",
+                    {
+                      className: `inline-flex h-6 w-11 items-center rounded-full p-0.5 transition-colors ${hideInactiveReplicaSets ? "bg-brand-500 justify-end" : "bg-[var(--color-border-soft)] justify-start"}`,
+                      children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "h-5 w-5 rounded-full bg-white shadow transition-transform" })
+                    }
+                  )
+                ]
+              }
+            )
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "bg-[var(--color-surface-elevated)] rounded-xl border border-[var(--color-border-soft)] p-6", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-6", children: "Observatory" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-base font-medium text-[var(--color-text-primary)]", children: "Default Node Types" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-[var(--color-text-muted)] mb-4", children: "Select which node types are shown by default in the Observatory view." })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-[var(--color-surface-muted)] rounded-lg border border-[var(--color-border-soft)] p-4", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3", children: OBSERVATORY_NODE_TYPES.map((nodeType) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "label",
+              {
+                className: "flex items-center gap-2 cursor-pointer group",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "input",
+                    {
+                      type: "checkbox",
+                      checked: defaultObservatoryNodeTypes.includes(nodeType),
+                      onChange: (e) => {
+                        if (e.target.checked) {
+                          setDefaultObservatoryNodeTypes([...defaultObservatoryNodeTypes, nodeType]);
+                        } else {
+                          setDefaultObservatoryNodeTypes(defaultObservatoryNodeTypes.filter((t) => t !== nodeType));
+                        }
+                      },
+                      className: "w-4 h-4 rounded border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]\n                                   text-brand-500 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-[var(--color-text-primary)] group-hover:text-brand-400 transition-colors", children: nodeType })
+                ]
+              },
+              nodeType
+            )) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 pt-4 border-t border-[var(--color-border-soft)] flex items-center gap-4", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  onClick: () => setDefaultObservatoryNodeTypes(DEFAULT_OBSERVATORY_NODE_TYPES),
+                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]\n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
+                  children: "Reset to Defaults"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  onClick: () => setDefaultObservatoryNodeTypes(OBSERVATORY_NODE_TYPES),
+                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]\n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
+                  children: "Select All"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  onClick: () => setDefaultObservatoryNodeTypes([]),
+                  className: "px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]\n                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors",
+                  children: "Clear All"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ml-auto text-xs text-[var(--color-text-muted)]", children: [
+                defaultObservatoryNodeTypes.length,
+                " of ",
+                OBSERVATORY_NODE_TYPES.length,
                 " selected"
               ] })
             ] })
@@ -12304,4 +12423,4 @@ const SettingsPage$1 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProp
 }, Symbol.toStringTag, { value: 'Module' }));
 
 export { SettingsPage as S, TimeInputWithCalendar as T, apiClient as a, formatDateTimeForDisplay as b, Toaster as c, SettingsPage$1 as d, formatDateTimeForInput as f, isHumanFriendlyExpression as i, parseTimeExpression as p, toast as t, validateTimeRange as v };
-//# sourceMappingURL=SettingsPage-Bo0M5phn.js.map
+//# sourceMappingURL=SettingsPage-DWvx44PO.js.map

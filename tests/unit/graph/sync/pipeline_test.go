@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,8 +16,8 @@ import (
 
 // mockGraphClient implements graph.Client for testing
 type mockGraphClient struct {
-	mu              sync.RWMutex
-	nodes           map[string]*graph.Node // UID -> Node
+	mu           sync.RWMutex
+	nodes        map[string]*graph.Node // UID -> Node
 	edges        []mockEdge
 	queries      []graph.GraphQuery
 	queryResults map[string]*graph.QueryResult // query string -> result
@@ -411,6 +412,146 @@ func TestRaceConditionFix(t *testing.T) {
 	if stats.NodesCreated < 2 {
 		t.Errorf("Expected at least 2 nodes created, got %d", stats.NodesCreated)
 	}
+}
+
+func TestProcessBatch_ContextDisableCausalityOverride(t *testing.T) {
+	client := newMockGraphClient()
+	config := graphsync.DefaultPipelineConfig()
+	config.EnableCausality = true
+
+	pipeline := graphsync.NewPipeline(config, client)
+	ctx := graphsync.WithBatchProcessingOptions(context.Background(), graphsync.BatchProcessingOptions{
+		DisableCausality: true,
+	})
+
+	if err := pipeline.Start(context.Background()); err != nil {
+		t.Fatalf("Failed to start pipeline: %v", err)
+	}
+	defer pipeline.Stop(context.Background())
+
+	now := time.Now().UnixNano()
+	events := []models.Event{
+		{
+			ID:        "deploy-update",
+			Type:      models.EventTypeUpdate,
+			Timestamp: now,
+			Resource: models.ResourceMetadata{
+				UID:       "deployment-123",
+				Group:     "apps",
+				Version:   "v1",
+				Kind:      "Deployment",
+				Namespace: "default",
+				Name:      "demo",
+			},
+		},
+		{
+			ID:        "rs-update",
+			Type:      models.EventTypeUpdate,
+			Timestamp: now + int64(5*time.Second),
+			Resource: models.ResourceMetadata{
+				UID:       "replicaset-456",
+				Group:     "apps",
+				Version:   "v1",
+				Kind:      "ReplicaSet",
+				Namespace: "default",
+				Name:      "demo-rs",
+			},
+		},
+	}
+
+	if err := pipeline.ProcessBatch(ctx, events); err != nil {
+		t.Fatalf("ProcessBatch failed: %v", err)
+	}
+
+	if hasTriggeredByQuery(client.queries) {
+		t.Fatal("expected causality queries to be skipped when context override disables causality")
+	}
+}
+
+func TestProcessBatch_TimelineOnlyOverrideSkipsSemanticRelationships(t *testing.T) {
+	client := newMockGraphClient()
+	config := graphsync.DefaultPipelineConfig()
+	config.EnableCausality = true
+
+	pipeline := graphsync.NewPipeline(config, client)
+	ctx := graphsync.WithBatchProcessingOptions(context.Background(), graphsync.BatchProcessingOptions{
+		TimelineOnly: true,
+	})
+
+	if err := pipeline.Start(context.Background()); err != nil {
+		t.Fatalf("Failed to start pipeline: %v", err)
+	}
+	defer pipeline.Stop(context.Background())
+
+	now := time.Now().UnixNano()
+	podData := []byte(`{
+		"metadata": {
+			"name": "demo-pod",
+			"namespace": "default",
+			"uid": "pod-123"
+		},
+		"spec": {
+			"serviceAccountName": "builder"
+		}
+	}`)
+
+	events := []models.Event{
+		{
+			ID:        "pod-update-1",
+			Type:      models.EventTypeUpdate,
+			Timestamp: now,
+			Resource: models.ResourceMetadata{
+				UID:       "pod-123",
+				Group:     "",
+				Version:   "v1",
+				Kind:      "Pod",
+				Namespace: "default",
+				Name:      "demo-pod",
+			},
+			Data: podData,
+		},
+		{
+			ID:        "pod-update-2",
+			Type:      models.EventTypeUpdate,
+			Timestamp: now + int64(5*time.Second),
+			Resource: models.ResourceMetadata{
+				UID:       "pod-123",
+				Group:     "",
+				Version:   "v1",
+				Kind:      "Pod",
+				Namespace: "default",
+				Name:      "demo-pod",
+			},
+			Data: podData,
+		},
+	}
+
+	if err := pipeline.ProcessBatch(ctx, events); err != nil {
+		t.Fatalf("ProcessBatch failed: %v", err)
+	}
+
+	if !hasQueryContaining(client.queries, "CHANGED") {
+		t.Fatal("expected structural CHANGED edges to still be written in timeline-only mode")
+	}
+	if hasQueryContaining(client.queries, "USES_SERVICE_ACCOUNT") {
+		t.Fatal("expected semantic USES_SERVICE_ACCOUNT edges to be skipped in timeline-only mode")
+	}
+	if hasTriggeredByQuery(client.queries) {
+		t.Fatal("expected causality queries to be skipped in timeline-only mode")
+	}
+}
+
+func hasTriggeredByQuery(queries []graph.GraphQuery) bool {
+	return hasQueryContaining(queries, "TRIGGERED_BY")
+}
+
+func hasQueryContaining(queries []graph.GraphQuery, needle string) bool {
+	for _, query := range queries {
+		if strings.Contains(query.Query, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestEmptyBatch tests that empty batches are handled gracefully
