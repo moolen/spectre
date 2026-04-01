@@ -11,9 +11,14 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analysis"
+	graphpkg "github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/models"
 	"github.com/stretchr/testify/require"
 )
+
+func newRootCauseAnalyzer(client graphpkg.Client) *analysis.RootCauseAnalyzer {
+	return analysis.NewRootCauseAnalyzerFromGraphClient(client)
+}
 
 // extractTimestampAndPodUID extracts the timestamp from the last event and pod UID from the JSONL file
 // The pod UID should be the pod that relates to the resource under test (prefers ReplicaSet/StatefulSet owned pods)
@@ -134,6 +139,21 @@ func findNodeByKind(rca *analysis.RootCauseAnalysisV2, kind string) *analysis.Gr
 	for i := range rca.Incident.Graph.Nodes {
 		if rca.Incident.Graph.Nodes[i].Resource.Kind == kind {
 			return &rca.Incident.Graph.Nodes[i]
+		}
+	}
+	return nil
+}
+
+// findNodeByKindAndName finds a node in the graph by resource kind and name.
+func findNodeByKindAndName(rca *analysis.RootCauseAnalysisV2, kind, name string) *analysis.GraphNode {
+	if rca == nil || rca.Incident.Graph.Nodes == nil {
+		return nil
+	}
+
+	for i := range rca.Incident.Graph.Nodes {
+		node := &rca.Incident.Graph.Nodes[i]
+		if node.Resource.Kind == kind && node.Resource.Name == name {
+			return node
 		}
 	}
 	return nil

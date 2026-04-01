@@ -76,7 +76,7 @@
 //
 // # Usage Example
 //
-//	analyzer := analysis.NewRootCauseAnalyzer(graphClient)
+//	analyzer := analysis.NewRootCauseAnalyzerFromGraphClient(graphClient)
 //	result, err := analyzer.Analyze(ctx, analysis.AnalyzeInput{
 //		ResourceUID:      "pod-uid-123",
 //		FailureTimestamp: time.Now().UnixNano(),
@@ -93,7 +93,7 @@
 //
 // # Performance Considerations
 //
-// The analyzer batches graph queries to minimize round trips:
+// The analyzer batches store reads to minimize round trips:
 //
 //   - Ownership chain query (1 query)
 //   - Manager relationships (1 batched query)
@@ -101,7 +101,7 @@
 //   - Change events (1 batched query)
 //   - K8s events (1 batched query)
 //
-// Total: 5 graph queries per analysis, regardless of chain size.
+// Total: 5 store reads per analysis, regardless of chain size.
 //
 // # Testing
 //

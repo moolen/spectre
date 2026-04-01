@@ -5,21 +5,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/moolen/spectre/internal/graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/logging"
 )
 
 // RootCauseAnalyzer performs graph-based root cause analysis
 type RootCauseAnalyzer struct {
-	graphClient graph.Client
-	logger      *logging.Logger
+	store  analysisstore.AnalysisStore
+	logger *logging.Logger
 }
 
 // NewRootCauseAnalyzer creates a new analyzer instance
-func NewRootCauseAnalyzer(graphClient graph.Client) *RootCauseAnalyzer {
+func NewRootCauseAnalyzer(store analysisstore.AnalysisStore) *RootCauseAnalyzer {
 	return &RootCauseAnalyzer{
-		graphClient: graphClient,
-		logger:      logging.GetLogger("analysis.root_cause"),
+		store:  store,
+		logger: logging.GetLogger("analysis.root_cause"),
 	}
 }
 

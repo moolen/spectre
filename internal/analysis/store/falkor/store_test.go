@@ -10,13 +10,12 @@ import (
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/graph"
-	itgraph "github.com/moolen/spectre/tests/integration/graph"
 	"github.com/stretchr/testify/require"
 )
 
 func TestStore_GetOwnershipChainAndManagers(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	fixturePath := fixturePath(t, "testrootcause-fluxhelmreleasevaluesfrom-.jsonl")
@@ -57,7 +56,7 @@ func TestStore_GetOwnershipChainAndManagers(t *testing.T) {
 
 func TestStore_GetRelatedResources_IncludesDeletedWithinWindow(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	client := harness.GetClient()
@@ -87,7 +86,7 @@ func TestStore_GetRelatedResources_IncludesDeletedWithinWindow(t *testing.T) {
 
 func TestStore_GetRelatedResources_UsesRawStartWithoutClamp(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	client := harness.GetClient()
@@ -110,7 +109,7 @@ func TestStore_GetRelatedResources_UsesRawStartWithoutClamp(t *testing.T) {
 
 func TestStore_GetNamespaceGraph_Pagination(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	store := New(harness.GetClient())
@@ -153,7 +152,7 @@ func TestStore_GetNamespaceGraph_Pagination(t *testing.T) {
 
 func TestStore_GetNamespaceGraph_CapsLookbackAt24Hours(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	require.NoError(t, createNamespaceLookbackCapScenario(ctx, harness.GetClient()))
@@ -189,7 +188,7 @@ func TestStore_GetNamespaceGraph_CapsLookbackAt24Hours(t *testing.T) {
 
 func TestStore_GetResource(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	require.NoError(t, createGetResourceScenario(ctx, harness.GetClient()))
@@ -208,7 +207,7 @@ func TestStore_GetResource(t *testing.T) {
 
 func TestStore_GetChangeEvents(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	require.NoError(t, createGetEventsScenario(ctx, harness.GetClient()))
@@ -241,7 +240,7 @@ func TestStore_GetChangeEvents(t *testing.T) {
 
 func TestStore_GetK8sEvents(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	require.NoError(t, createGetEventsScenario(ctx, harness.GetClient()))
@@ -264,7 +263,7 @@ func TestStore_GetK8sEvents(t *testing.T) {
 
 func TestStore_GetManagers_DeterministicHighestConfidenceThenUID(t *testing.T) {
 	ctx := context.Background()
-	harness, err := itgraph.NewTestHarness(t)
+	harness, err := newTestHarness(t)
 	require.NoError(t, err)
 
 	require.NoError(t, createManagersDeterministicScenario(ctx, harness.GetClient()))
@@ -287,7 +286,7 @@ func fixturePath(t *testing.T, baseName string) string {
 func extractFixtureContext(t *testing.T, jsonlPath string) (int64, string, string) {
 	t.Helper()
 
-	events, err := itgraph.LoadAuditLog(jsonlPath)
+	events, err := loadAuditLog(jsonlPath)
 	require.NoError(t, err)
 	require.NotEmpty(t, events)
 

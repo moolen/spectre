@@ -39,7 +39,7 @@ func TestRootCauseEndpoint_NetworkPolicy_SameNamespace(t *testing.T) {
 	t.Logf("Using pod UID: %s, timestamp: %d", podUID, timestamp)
 
 	// Create RootCauseAnalyzer
-	analyzer := analysis.NewRootCauseAnalyzer(harness.GetClient())
+	analyzer := newRootCauseAnalyzer(harness.GetClient())
 
 	// Perform root cause analysis
 	lookback := 10 * time.Minute
@@ -84,7 +84,7 @@ func TestRootCauseEndpoint_NetworkPolicy_CrossNamespace(t *testing.T) {
 	t.Logf("Using pod UID: %s, timestamp: %d", podUID, timestamp)
 
 	// Create RootCauseAnalyzer
-	analyzer := analysis.NewRootCauseAnalyzer(harness.GetClient())
+	analyzer := newRootCauseAnalyzer(harness.GetClient())
 
 	// Perform root cause analysis
 	lookback := 10 * time.Minute

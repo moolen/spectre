@@ -35,7 +35,7 @@ type PathDiscoverer struct {
 func NewPathDiscoverer(graphClient graph.Client) *PathDiscoverer {
 	return &PathDiscoverer{
 		graphClient:        graphClient,
-		analyzer:           analysis.NewRootCauseAnalyzer(graphClient),
+		analyzer:           analysis.NewRootCauseAnalyzerFromGraphClient(graphClient),
 		anomalyDetector:    anomaly.NewDetector(graphClient),
 		ranker:             NewPathRanker(),
 		explanationBuilder: NewExplanationBuilder(),

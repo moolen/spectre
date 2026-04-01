@@ -25,7 +25,7 @@ type CausalGraphHandler struct {
 // NewCausalGraphHandler creates a new handler
 func NewCausalGraphHandler(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *CausalGraphHandler {
 	return &CausalGraphHandler{
-		analyzer:  analysis.NewRootCauseAnalyzer(graphClient),
+		analyzer:  analysis.NewRootCauseAnalyzerFromGraphClient(graphClient),
 		logger:    logger,
 		validator: api.NewValidator(),
 		tracer:    tracer,
@@ -118,7 +118,7 @@ func (h *CausalGraphHandler) parseInput(r *http.Request) (analysis.AnalyzeInput,
 	// Try parsing as RFC3339/RFC3339Nano format first (e.g., "2026-01-01T20:51:36.708229799+01:00")
 	var parseErr error
 	var parsedTime time.Time
-	
+
 	parsedTime, parseErr = time.Parse(time.RFC3339Nano, failureTimestampStr)
 	if parseErr == nil {
 		failureTimestamp = parsedTime.UnixNano()

@@ -31,7 +31,7 @@ type AnomalyDetector struct {
 func NewDetector(graphClient graph.Client) *AnomalyDetector {
 	return &AnomalyDetector{
 		graphClient:       graphClient,
-		analyzer:          analysis.NewRootCauseAnalyzer(graphClient),
+		analyzer:          analysis.NewRootCauseAnalyzerFromGraphClient(graphClient),
 		logger:            logging.GetLogger("anomaly.detector"),
 		eventDetector:     NewEventAnomalyDetector(),
 		stateDetector:     NewStateAnomalyDetector(),

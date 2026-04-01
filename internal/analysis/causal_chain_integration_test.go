@@ -74,7 +74,7 @@ func TestCausalChainIntegration(t *testing.T) {
 		createOwnsEdge(t, client, rs.UID, pod.UID)
 
 		// Create analyzer and test
-		analyzer := NewRootCauseAnalyzer(client)
+		analyzer := NewRootCauseAnalyzerFromGraphClient(client)
 
 		chain, err := analyzer.getOwnershipChain(ctx, pod.UID)
 		require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestCausalChainIntegration(t *testing.T) {
 		createResource(t, client, hr)
 		createManagesEdge(t, client, hr.UID, deploy.UID, 0.85)
 
-		analyzer := NewRootCauseAnalyzer(client)
+		analyzer := NewRootCauseAnalyzerFromGraphClient(client)
 
 		managers, err := analyzer.getManagers(ctx, []string{deploy.UID})
 		require.NoError(t, err)
@@ -170,7 +170,7 @@ func TestCausalChainIntegration(t *testing.T) {
 		createScheduledOnEdge(t, client, pod.UID, node.UID)
 		createUsesServiceAccountEdge(t, client, pod.UID, sa.UID)
 
-		analyzer := NewRootCauseAnalyzer(client)
+		analyzer := NewRootCauseAnalyzerFromGraphClient(client)
 
 		related, err := analyzer.getRelatedResources(ctx, []string{pod.UID}, failureTimestamp, lookbackNs)
 		require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestCausalChainIntegration(t *testing.T) {
 		createChangeEvent(t, client, pod.UID, event2)
 		createChangeEvent(t, client, pod.UID, event3)
 
-		analyzer := NewRootCauseAnalyzer(client)
+		analyzer := NewRootCauseAnalyzerFromGraphClient(client)
 
 		events, err := analyzer.getChangeEvents(ctx, []string{pod.UID}, failureTime.UnixNano(), lookback.Nanoseconds())
 		require.NoError(t, err)
@@ -288,7 +288,7 @@ func TestCausalChainIntegration(t *testing.T) {
 		createK8sEvent(t, client, pod.UID, k8sEvent1)
 		createK8sEvent(t, client, pod.UID, k8sEvent2)
 
-		analyzer := NewRootCauseAnalyzer(client)
+		analyzer := NewRootCauseAnalyzerFromGraphClient(client)
 
 		k8sEvents, err := analyzer.getK8sEvents(ctx, []string{pod.UID}, failureTime.UnixNano(), lookback.Nanoseconds())
 		require.NoError(t, err)
@@ -399,7 +399,7 @@ func TestCausalChainIntegration(t *testing.T) {
 		createK8sEvent(t, client, pod.UID, k8sEvent)
 
 		// Build causal graph
-		analyzer := NewRootCauseAnalyzer(client)
+		analyzer := NewRootCauseAnalyzerFromGraphClient(client)
 
 		symptom := &ObservedSymptom{
 			Resource: SymptomResource{
@@ -482,7 +482,7 @@ func TestCausalChainIntegration(t *testing.T) {
 		}
 		createResource(t, client, pod)
 
-		analyzer := NewRootCauseAnalyzer(client)
+		analyzer := NewRootCauseAnalyzerFromGraphClient(client)
 
 		symptom := &ObservedSymptom{
 			Resource: SymptomResource{

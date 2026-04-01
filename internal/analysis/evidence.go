@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
+	"time"
 
-	"github.com/moolen/spectre/internal/graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 )
 
 const edgeTypeManages = "MANAGES"
@@ -18,10 +20,8 @@ func (a *RootCauseAnalyzer) collectSupportingEvidence(
 	evidence := []EvidenceItem{}
 	seenTypes := make(map[string]bool)
 
-	// RELATIONSHIP evidence (MANAGES edges)
 	for _, edge := range graph.Edges {
 		if edge.RelationshipType == edgeTypeManages && !seenTypes["MANAGES"] {
-			// Find the nodes
 			var fromNode, toNode *GraphNode
 			for i := range graph.Nodes {
 				if graph.Nodes[i].ID == edge.From {
@@ -31,7 +31,7 @@ func (a *RootCauseAnalyzer) collectSupportingEvidence(
 					toNode = &graph.Nodes[i]
 				}
 			}
-			
+
 			if fromNode != nil && toNode != nil {
 				evidence = append(evidence, EvidenceItem{
 					Type:        "RELATIONSHIP",
@@ -48,7 +48,6 @@ func (a *RootCauseAnalyzer) collectSupportingEvidence(
 		}
 	}
 
-	// TEMPORAL evidence
 	if rootCause.TimeLagMs > 0 && !seenTypes["TEMPORAL"] {
 		evidence = append(evidence, EvidenceItem{
 			Type:        "TEMPORAL",
@@ -61,24 +60,21 @@ func (a *RootCauseAnalyzer) collectSupportingEvidence(
 		seenTypes["TEMPORAL"] = true
 	}
 
-	// STRUCTURAL evidence (ownership chain)
 	spineNodeCount := 0
 	for _, node := range graph.Nodes {
-		if node.NodeType == "SPINE" {
+		if node.NodeType == nodeTypeSpine {
 			spineNodeCount++
 		}
 	}
-	
+
 	if spineNodeCount > 1 && !seenTypes["STRUCTURAL"] {
-		// Build chain description
 		spineNodes := []GraphNode{}
 		for _, node := range graph.Nodes {
-			if node.NodeType == "SPINE" {
+			if node.NodeType == nodeTypeSpine {
 				spineNodes = append(spineNodes, node)
 			}
 		}
-		
-		// Sort by step number (descending)
+
 		for i := 0; i < len(spineNodes); i++ {
 			for j := i + 1; j < len(spineNodes); j++ {
 				if spineNodes[j].StepNumber > spineNodes[i].StepNumber {
@@ -86,7 +82,7 @@ func (a *RootCauseAnalyzer) collectSupportingEvidence(
 				}
 			}
 		}
-		
+
 		chainDesc := ""
 		for i, node := range spineNodes {
 			chainDesc += node.Resource.Kind
@@ -94,7 +90,7 @@ func (a *RootCauseAnalyzer) collectSupportingEvidence(
 				chainDesc += " → "
 			}
 		}
-		
+
 		evidence = append(evidence, EvidenceItem{
 			Type:        "STRUCTURAL",
 			Description: fmt.Sprintf("Ownership chain: %s", chainDesc),
@@ -106,7 +102,6 @@ func (a *RootCauseAnalyzer) collectSupportingEvidence(
 		seenTypes["STRUCTURAL"] = true
 	}
 
-	// Limit to 5 most relevant items
 	if len(evidence) > 5 {
 		evidence = evidence[:5]
 	}
@@ -121,66 +116,91 @@ func (a *RootCauseAnalyzer) detectExcludedAlternatives(
 	rootCause *RootCauseHypothesis,
 	failureTimestamp int64,
 ) []ExcludedHypothesis {
-	// Query for other changes in the time window
-	query := graph.GraphQuery{
-		Query: `
-			MATCH (r:ResourceIdentity)-[:CHANGED]->(e:ChangeEvent)
-			WHERE e.timestamp <= $failureTimestamp
-			  AND e.timestamp >= $failureTimestamp - $lookback
-			  AND r.uid <> $rootCauseUID
-			  AND r.namespace = $namespace
-			RETURN r, e
-			ORDER BY e.timestamp DESC
-			LIMIT 5
-		`,
-		Parameters: map[string]interface{}{
-			"failureTimestamp": failureTimestamp,
-			"lookback":         int64(600_000_000_000),
-			"rootCauseUID":     rootCause.Resource.UID,
-			"namespace":        symptom.Resource.Namespace,
-		},
+	if symptom.Resource.Namespace == "" {
+		return nil
 	}
 
-	result, err := a.graphClient.ExecuteQuery(ctx, query)
+	const lookback = int64(10 * time.Minute)
+
+	graphData, err := a.store.GetNamespaceGraph(ctx, analysisstore.NamespaceGraphQuery{
+		Namespace:   symptom.Resource.Namespace,
+		TimestampNs: failureTimestamp,
+		LookbackNs:  lookback,
+		Limit:       500,
+	})
+	if err != nil || graphData == nil {
+		a.logger.Debug("Failed to query excluded alternatives: %v", err)
+		return nil
+	}
+
+	resourceByUID := make(map[string]analysisstore.NamespaceGraphNode, len(graphData.Graph.Nodes))
+	resourceUIDs := make([]string, 0, len(graphData.Graph.Nodes))
+	for _, node := range graphData.Graph.Nodes {
+		if node.UID == rootCause.Resource.UID {
+			continue
+		}
+		resourceByUID[node.UID] = node
+		resourceUIDs = append(resourceUIDs, node.UID)
+	}
+
+	if len(resourceUIDs) == 0 {
+		return nil
+	}
+
+	eventData, err := a.store.GetChangeEvents(ctx, resourceUIDs, analysisstore.ResourceWindow{
+		FailureTimestampNs: failureTimestamp,
+		LookbackNs:         lookback,
+	})
 	if err != nil {
 		a.logger.Debug("Failed to query excluded alternatives: %v", err)
 		return nil
 	}
 
+	type excludedCandidate struct {
+		resource analysisstore.NamespaceGraphNode
+		event    ChangeEventInfo
+	}
+
+	candidates := []excludedCandidate{}
+	for uid, events := range eventData {
+		resource, ok := resourceByUID[uid]
+		if !ok {
+			continue
+		}
+		for _, event := range convertStoreChangeEventList(events) {
+			candidates = append(candidates, excludedCandidate{
+				resource: resource,
+				event:    event,
+			})
+		}
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].event.Timestamp.After(candidates[j].event.Timestamp)
+	})
+
 	excluded := []ExcludedHypothesis{}
-	for _, row := range result.Rows {
-		if len(row) < 2 {
+	seenUIDs := make(map[string]bool)
+	for _, candidate := range candidates {
+		if seenUIDs[candidate.resource.UID] {
 			continue
 		}
+		seenUIDs[candidate.resource.UID] = true
 
-		resourceProps, err := graph.ParseNodeFromResult(row[0])
-		if err != nil {
-			continue
-		}
-		resource := graph.ParseResourceIdentityFromNode(resourceProps)
-
-		eventProps, err := graph.ParseNodeFromResult(row[1])
-		if err != nil {
-			continue
-		}
-		_ = graph.ParseChangeEventFromNode(eventProps) // Parse but not used directly
-
-		// Generate hypothesis and reason for exclusion
-		hypothesis := fmt.Sprintf("%s '%s' changed at similar time", resource.Kind, resource.Name)
+		hypothesis := fmt.Sprintf("%s '%s' changed at similar time", candidate.resource.Kind, candidate.resource.Name)
 		reason := "No ownership or management relationship to failed resource"
 
 		excluded = append(excluded, ExcludedHypothesis{
 			Resource: SymptomResource{
-				UID:       resource.UID,
-				Kind:      resource.Kind,
-				Namespace: resource.Namespace,
-				Name:      resource.Name,
+				UID:       candidate.resource.UID,
+				Kind:      candidate.resource.Kind,
+				Namespace: candidate.resource.Namespace,
+				Name:      candidate.resource.Name,
 			},
 			Hypothesis:     hypothesis,
 			ReasonExcluded: reason,
 		})
 
-		// Limit to 3 alternatives
 		if len(excluded) >= 3 {
 			break
 		}

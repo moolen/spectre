@@ -40,7 +40,7 @@ func TestRootCauseEndpoint_StatefulSetImageChange(t *testing.T) {
 	t.Logf("Using pod UID: %s, timestamp: %d", podUID, timestamp)
 
 	// Create RootCauseAnalyzer
-	analyzer := analysis.NewRootCauseAnalyzer(harness.GetClient())
+	analyzer := newRootCauseAnalyzer(harness.GetClient())
 
 	// Perform root cause analysis
 	lookback := 10 * time.Minute

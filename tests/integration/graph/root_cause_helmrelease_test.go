@@ -39,7 +39,7 @@ func TestRootCauseEndpoint_FluxHelmRelease(t *testing.T) {
 	t.Logf("Using pod UID: %s, timestamp: %d", podUID, timestamp)
 
 	// Create RootCauseAnalyzer
-	analyzer := analysis.NewRootCauseAnalyzer(harness.GetClient())
+	analyzer := newRootCauseAnalyzer(harness.GetClient())
 
 	// Perform root cause analysis
 	lookback := 10 * time.Minute
@@ -85,7 +85,7 @@ func TestRootCauseEndpoint_FluxHelmRelease_LongLookback(t *testing.T) {
 	t.Logf("Using pod UID: %s, timestamp: %d", podUID, timestamp)
 
 	// Create RootCauseAnalyzer
-	analyzer := analysis.NewRootCauseAnalyzer(harness.GetClient())
+	analyzer := newRootCauseAnalyzer(harness.GetClient())
 
 	// Perform root cause analysis with longer lookback (30 minutes)
 	lookback := 30 * time.Minute
@@ -138,7 +138,7 @@ func TestRootCauseEndpoint_FluxHelmReleaseValuesFrom(t *testing.T) {
 	t.Logf("Using pod UID: %s, timestamp: %d", podUID, timestamp)
 
 	// Create RootCauseAnalyzer
-	analyzer := analysis.NewRootCauseAnalyzer(harness.GetClient())
+	analyzer := newRootCauseAnalyzer(harness.GetClient())
 
 	// Perform root cause analysis
 	lookback := 10 * time.Minute
@@ -216,13 +216,24 @@ func assertGraphHasConfigMapReference(t *testing.T, rca *analysis.RootCauseAnaly
 	require.Greater(t, len(rca.Incident.Graph.Nodes), 0, "Graph should have at least one node")
 	require.Greater(t, len(rca.Incident.Graph.Edges), 0, "Graph should have at least one edge")
 
-	// Check that ConfigMap node exists
-	configMapNode := findNodeByKind(rca, "ConfigMap")
-	require.NotNil(t, configMapNode, "Graph should contain ConfigMap node")
+	// This fixture includes multiple ConfigMaps (for example kube-root-ca.crt),
+	// so assert against the valuesFrom target explicitly.
+	configMapNode := findNodeByKindAndName(rca, "ConfigMap", "podinfo-values")
+	require.NotNil(t, configMapNode, "Graph should contain referenced ConfigMap node")
 	t.Logf("✓ Found ConfigMap node: %s", configMapNode.Resource.Name)
 
-	// Check that REFERENCES_SPEC edge exists from HelmRelease to ConfigMap
-	assertGraphHasEdgeBetweenKinds(t, rca, "HelmRelease", "REFERENCES_SPEC", "ConfigMap")
+	helmReleaseNode := findNodeByKind(rca, "HelmRelease")
+	require.NotNil(t, helmReleaseNode, "Graph should contain HelmRelease node")
+
+	found := false
+	for _, edge := range rca.Incident.Graph.Edges {
+		if edge.From == helmReleaseNode.ID && edge.To == configMapNode.ID && edge.RelationshipType == "REFERENCES_SPEC" {
+			found = true
+			break
+		}
+	}
+
+	require.True(t, found, "Graph should contain edge HelmRelease -[REFERENCES_SPEC]-> ConfigMap podinfo-values")
 	t.Logf("✓ Found REFERENCES_SPEC edge from HelmRelease to ConfigMap")
 }
 

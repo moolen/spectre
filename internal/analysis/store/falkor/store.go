@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	analysispkg "github.com/moolen/spectre/internal/analysis"
 	"github.com/moolen/spectre/internal/analysis/store"
 	analyzerpkg "github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/graph"
@@ -583,13 +582,13 @@ func (s *Store) GetNamespaceGraph(ctx context.Context, input store.NamespaceGrap
 			if !ok {
 				continue
 			}
-			diffs, diffErr := analysispkg.ComputeJSONDiff(sc.EarliestData, sc.LatestData)
+			diffs, diffErr := computeJSONDiff(sc.EarliestData, sc.LatestData)
 			if diffErr != nil {
 				continue
 			}
-			diffs = analysispkg.FilterSpecOnly(diffs)
+			diffs = filterSpecOnly(diffs)
 			if len(diffs) > 0 {
-				event.SpecChanges = analysispkg.FormatUnifiedDiff(diffs)
+				event.SpecChanges = formatUnifiedDiff(diffs)
 			}
 		}
 	}

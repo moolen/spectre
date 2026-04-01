@@ -2,20 +2,14 @@ package analysis
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
-	"github.com/moolen/spectre/internal/analyzer"
-	"github.com/moolen/spectre/internal/graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 )
 
 // getChangeEvents retrieves change events for resources within the time window.
-// The query ensures ALL configChanged events are included (important for root cause)
-// plus the most recent events for context, avoiding truncation of important config changes.
-//
-// This two-phase approach ensures we never miss critical configuration changes that
-// triggered a failure, even if there are many subsequent status-only events.
+// The store preserves the current analyzer semantics: all config changes in-range
+// plus a bounded recent context set.
 func (a *RootCauseAnalyzer) getChangeEvents(
 	ctx context.Context,
 	resourceUIDs []string,
@@ -26,126 +20,30 @@ func (a *RootCauseAnalyzer) getChangeEvents(
 		return make(map[string][]ChangeEventInfo), nil
 	}
 
-	// Query that combines:
-	// 1. ALL events with configChanged=true (critical for root cause analysis)
-	// 2. Up to MaxRecentEvents most recent events (for status context)
-	// This ensures we never miss the important config change that triggered a failure,
-	// even if there are many subsequent status-only events.
-	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
-	query := graph.GraphQuery{
-		Timeout: DefaultQueryTimeoutMs,
-		Query: `
-			MATCH (resource:ResourceIdentity)
-			WHERE resource.uid IN $resourceUIDs
-			OPTIONAL MATCH (resource)-[:CHANGED]->(event:ChangeEvent)
-			WHERE event.timestamp <= $failureTimestamp
-			  AND event.timestamp >= $failureTimestamp - $lookback
-			WITH resource.uid as resourceUID, event
-			ORDER BY event.timestamp DESC
-			WITH resourceUID, collect(event) as allEvents
-			WITH resourceUID,
-			     [e IN allEvents WHERE e.configChanged = true] as configEvents,
-			     allEvents[0..$maxEvents] as recentEvents
-			WITH resourceUID,
-			     configEvents + [e IN recentEvents WHERE NOT e.id IN [ce IN configEvents | ce.id]] as combinedEvents
-			UNWIND CASE WHEN size(combinedEvents) > 0 THEN combinedEvents ELSE [null] END as event
-			WITH resourceUID, event
-			WHERE event IS NOT NULL
-			WITH resourceUID, event
-			ORDER BY event.timestamp DESC
-			RETURN resourceUID, collect(DISTINCT event) as events
-		`,
-		Parameters: map[string]interface{}{
-			"resourceUIDs":     resourceUIDs,
-			"failureTimestamp": failureTimestamp,
-			"lookback":         lookbackNs,
-			"maxEvents":        MaxRecentEvents,
-		},
+	window := analysisstore.ResourceWindow{
+		FailureTimestampNs: failureTimestamp,
+		LookbackNs:         lookbackNs,
 	}
 
-	a.logger.Debug("getChangeEvents: executing query for %d resources with lookback %d ns (%.1f minutes)",
-		len(resourceUIDs), lookbackNs, float64(lookbackNs)/float64(time.Minute.Nanoseconds()))
-	result, err := a.graphClient.ExecuteQuery(ctx, query)
+	a.logger.Debug("getChangeEvents: querying events for %d resources", len(resourceUIDs))
+	events, err := a.store.GetChangeEvents(ctx, resourceUIDs, window)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query change events: %w", err)
+		return nil, fmt.Errorf("failed to get change events: %w", err)
 	}
 
-	events := make(map[string][]ChangeEventInfo)
-
-	for _, row := range result.Rows {
-		if len(row) < 2 {
-			continue
-		}
-
-		resourceUID, ok := row[0].(string)
-		if !ok {
-			continue
-		}
-
-		events[resourceUID] = []ChangeEventInfo{}
-
-		// Parse events array
-		if row[1] == nil {
-			continue
-		}
-
-		eventList, ok := row[1].([]interface{})
-		if !ok {
-			continue
-		}
-
-		// Track seen event IDs to deduplicate (safety check)
-		seenEventIDs := make(map[string]bool)
-
-		for _, eventNode := range eventList {
-			if eventNode == nil {
-				continue
-			}
-
-			eventProps, err := graph.ParseNodeFromResult(eventNode)
-			if err != nil || eventProps == nil || len(eventProps) == 0 {
-				continue
-			}
-
-			event := graph.ParseChangeEventFromNode(eventProps)
-
-			// Deduplicate by event ID (safety check)
-			if seenEventIDs[event.ID] {
-				a.logger.Debug("getChangeEvents: skipping duplicate event %s for resource %s", event.ID, resourceUID)
-				continue
-			}
-			seenEventIDs[event.ID] = true
-
-			// Get kind for status inference (we don't have it here, use empty)
-			status := analyzer.InferStatusFromResource("", json.RawMessage(event.Data), event.EventType)
-
-			changeEvent := ChangeEventInfo{
-				EventID:       event.ID,
-				Timestamp:     time.Unix(0, event.Timestamp),
-				EventType:     event.EventType,
-				Status:        status,
-				ConfigChanged: event.ConfigChanged,
-				StatusChanged: event.StatusChanged,
-				Description:   fmt.Sprintf("%s event", event.EventType),
-				Data:          []byte(event.Data),
-			}
-
-			events[resourceUID] = append(events[resourceUID], changeEvent)
-		}
-	}
-
-	// Log event counts for debugging
-	for uid, evts := range events {
+	converted := convertStoreChangeEventMap(events)
+	for uid, evts := range converted {
 		configCount := 0
-		for _, e := range evts {
-			if e.ConfigChanged {
+		for _, event := range evts {
+			if event.ConfigChanged {
 				configCount++
 			}
 		}
 		a.logger.Debug("getChangeEvents: resource %s has %d events (%d with configChanged=true)", uid, len(evts), configCount)
 	}
-	a.logger.Debug("getChangeEvents: found events for %d resources", len(events))
-	return events, nil
+
+	a.logger.Debug("getChangeEvents: found events for %d resources", len(converted))
+	return converted, nil
 }
 
 // getK8sEvents retrieves Kubernetes events (kind: Event) for resources within the time window.
@@ -161,86 +59,20 @@ func (a *RootCauseAnalyzer) getK8sEvents(
 		return make(map[string][]K8sEventInfo), nil
 	}
 
-	// Optimized: Use direct IN clause instead of UNWIND to avoid O(n²) complexity
-	query := graph.GraphQuery{
-		Timeout: DefaultQueryTimeoutMs,
-		Query: `
-			MATCH (resource:ResourceIdentity)
-			WHERE resource.uid IN $resourceUIDs
-			OPTIONAL MATCH (resource)-[:EMITTED_EVENT]->(k8sEvent:K8sEvent)
-			WHERE k8sEvent.timestamp <= $failureTimestamp
-			  AND k8sEvent.timestamp >= $failureTimestamp - $lookback
-			WITH resource.uid as resourceUID, k8sEvent
-			ORDER BY k8sEvent.timestamp DESC
-			WITH resourceUID, collect(k8sEvent)[0..$maxEvents] as events
-			RETURN resourceUID, events
-		`,
-		Parameters: map[string]interface{}{
-			"resourceUIDs":     resourceUIDs,
-			"failureTimestamp": failureTimestamp,
-			"lookback":         lookbackNs,
-			"maxEvents":        MaxK8sEvents,
-		},
+	window := analysisstore.ResourceWindow{
+		FailureTimestampNs: failureTimestamp,
+		LookbackNs:         lookbackNs,
 	}
 
-	a.logger.Debug("getK8sEvents: executing query for %d resources", len(resourceUIDs))
-	result, err := a.graphClient.ExecuteQuery(ctx, query)
+	a.logger.Debug("getK8sEvents: querying events for %d resources", len(resourceUIDs))
+	events, err := a.store.GetK8sEvents(ctx, resourceUIDs, window)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query K8s events: %w", err)
+		return nil, fmt.Errorf("failed to get K8s events: %w", err)
 	}
 
-	events := make(map[string][]K8sEventInfo)
-
-	for _, row := range result.Rows {
-		if len(row) < 2 {
-			continue
-		}
-
-		resourceUID, ok := row[0].(string)
-		if !ok {
-			continue
-		}
-
-		events[resourceUID] = []K8sEventInfo{}
-
-		// Parse events array
-		if row[1] == nil {
-			continue
-		}
-
-		eventList, ok := row[1].([]interface{})
-		if !ok {
-			continue
-		}
-
-		for _, eventNode := range eventList {
-			if eventNode == nil {
-				continue
-			}
-
-			eventProps, err := graph.ParseNodeFromResult(eventNode)
-			if err != nil || eventProps == nil || len(eventProps) == 0 {
-				continue
-			}
-
-			event := graph.ParseK8sEventFromNode(eventProps)
-
-			k8sEventInfo := K8sEventInfo{
-				EventID:   event.ID,
-				Timestamp: time.Unix(0, event.Timestamp),
-				Reason:    event.Reason,
-				Message:   event.Message,
-				Type:      event.Type,
-				Count:     event.Count,
-				Source:    event.Source,
-			}
-
-			events[resourceUID] = append(events[resourceUID], k8sEventInfo)
-		}
-	}
-
-	a.logger.Debug("getK8sEvents: found events for %d resources", len(events))
-	return events, nil
+	converted := convertStoreK8sEventMap(events)
+	a.logger.Debug("getK8sEvents: found events for %d resources", len(converted))
+	return converted, nil
 }
 
 // getChangeEventsForRelated retrieves change events for related resources and populates
@@ -254,7 +86,6 @@ func (a *RootCauseAnalyzer) getChangeEventsForRelated(
 	failureTimestamp int64,
 	lookbackNs int64,
 ) error {
-	// Collect all related resource UIDs
 	relatedUIDs := []string{}
 	uidToParent := make(map[string][]struct {
 		parentUID string
@@ -275,13 +106,11 @@ func (a *RootCauseAnalyzer) getChangeEventsForRelated(
 		return nil
 	}
 
-	// Get events for all related resources
 	events, err := a.getChangeEvents(ctx, relatedUIDs, failureTimestamp, lookbackNs)
 	if err != nil {
 		return err
 	}
 
-	// Distribute events back to related resources
 	for uid, eventList := range events {
 		for _, parent := range uidToParent[uid] {
 			if parent.index < len(relatedByResource[parent.parentUID]) {

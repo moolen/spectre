@@ -3,9 +3,12 @@ package analysis
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
+	analyzerpkg "github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/graph"
 )
 
@@ -67,72 +70,52 @@ func (a *RootCauseAnalyzer) extractObservedSymptom(
 	resourceUID string,
 	failureTimestamp int64,
 ) (*ObservedSymptom, error) {
-	// Query for the ChangeEvent at the failure timestamp
-	query := graph.GraphQuery{
-		Query: `
-			MATCH (r:ResourceIdentity {uid: $resourceUID})-[:CHANGED]->(e:ChangeEvent)
-			WHERE e.timestamp <= $failureTimestamp + $tolerance
-			  AND e.timestamp >= $failureTimestamp - $tolerance
-			RETURN e
-			ORDER BY abs(e.timestamp - $failureTimestamp) ASC
-			LIMIT 1
-		`,
-		Parameters: map[string]interface{}{
-			"resourceUID":      resourceUID,
-			"failureTimestamp": failureTimestamp,
-			"tolerance":        int64(300_000_000_000), // 5 minutes
-		},
+	resource, err := a.store.GetResource(ctx, resourceUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query resource: %w", err)
+	}
+	if resource == nil {
+		return nil, fmt.Errorf("resource %s not found", resourceUID)
 	}
 
-	result, err := a.graphClient.ExecuteQuery(ctx, query)
+	const tolerance = int64(300_000_000_000) // 5 minutes
+	window := analysisstore.ResourceWindow{
+		FailureTimestampNs: failureTimestamp + tolerance,
+		LookbackNs:         tolerance * 2,
+	}
+
+	eventsByUID, err := a.store.GetChangeEvents(ctx, []string{resourceUID}, window)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query failure event: %w", err)
 	}
 
-	if len(result.Rows) == 0 {
-		// No event found in the tolerance window - provide helpful diagnostics
-		// Query for any events for this resource
-		diagnosticQuery := graph.GraphQuery{
-			Query: `
-				MATCH (r:ResourceIdentity {uid: $resourceUID})-[:CHANGED]->(e:ChangeEvent)
-				RETURN e.timestamp
-				ORDER BY e.timestamp ASC
-				LIMIT 5
-			`,
-			Parameters: map[string]interface{}{
-				"resourceUID": resourceUID,
-			},
-		}
+	event, found := closestEventInTolerance(convertStoreChangeEventList(eventsByUID[resourceUID]), failureTimestamp, tolerance)
+	if !found {
+		if resource.FirstSeen != 0 {
+			firstEventTS := resource.FirstSeen
+			firstEventTime := time.Unix(0, firstEventTS)
+			providedTime := time.Unix(0, failureTimestamp)
+			diffSeconds := (firstEventTS - failureTimestamp) / 1_000_000_000
 
-		diagnosticResult, diagErr := a.graphClient.ExecuteQuery(ctx, diagnosticQuery)
-		if diagErr == nil && len(diagnosticResult.Rows) > 0 {
-			// Get first event timestamp
-			if firstEventTS, ok := diagnosticResult.Rows[0][0].(int64); ok {
-				firstEventTime := time.Unix(0, firstEventTS)
-				providedTime := time.Unix(0, failureTimestamp)
-				diffSeconds := (firstEventTS - failureTimestamp) / 1_000_000_000
-
-				if diffSeconds > 300 {
-					// Timestamp is too early - return structured error with hint
-					return nil, &ErrNoChangeEventInRange{
-						RequestedTimestamp:  failureTimestamp,
-						RequestedTime:       providedTime,
-						FirstEventTimestamp: firstEventTS,
-						FirstEventTime:      firstEventTime,
-						DiffSeconds:         diffSeconds,
-						SuggestedTimestamp:  firstEventTS,
-						TimestampTooEarly:   true,
-					}
-				} else if diffSeconds < -300 {
-					// Timestamp is too late - return structured error with hint
-					return nil, &ErrNoChangeEventInRange{
-						RequestedTimestamp:  failureTimestamp,
-						RequestedTime:       providedTime,
-						FirstEventTimestamp: firstEventTS,
-						FirstEventTime:      firstEventTime,
-						DiffSeconds:         -diffSeconds,
-						TimestampTooEarly:   false,
-					}
+			if diffSeconds > 300 {
+				return nil, &ErrNoChangeEventInRange{
+					RequestedTimestamp:  failureTimestamp,
+					RequestedTime:       providedTime,
+					FirstEventTimestamp: firstEventTS,
+					FirstEventTime:      firstEventTime,
+					DiffSeconds:         diffSeconds,
+					SuggestedTimestamp:  firstEventTS,
+					TimestampTooEarly:   true,
+				}
+			}
+			if diffSeconds < -300 {
+				return nil, &ErrNoChangeEventInRange{
+					RequestedTimestamp:  failureTimestamp,
+					RequestedTime:       providedTime,
+					FirstEventTimestamp: firstEventTS,
+					FirstEventTime:      firstEventTime,
+					DiffSeconds:         -diffSeconds,
+					TimestampTooEarly:   false,
 				}
 			}
 		}
@@ -140,41 +123,18 @@ func (a *RootCauseAnalyzer) extractObservedSymptom(
 		return nil, fmt.Errorf("no ChangeEvent found for resource %s at timestamp %d", resourceUID, failureTimestamp)
 	}
 
-	// Parse the event node
-	eventProps, err := graph.ParseNodeFromResult(result.Rows[0][0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse event node: %w", err)
+	errorMessage, containerIssues := a.getObservedErrorDetails(ctx, resource, event.Timestamp.UnixNano(), tolerance)
+	if errorMessage == "" && len(event.Data) > 0 {
+		errors := analyzerpkg.InferErrorMessages(resource.Kind, event.Data, event.Status)
+		if len(errors) > 0 {
+			errorMessage = strings.Join(errors, "; ")
+		}
 	}
-	event := graph.ParseChangeEventFromNode(eventProps)
-
-	// Get resource identity
-	resourceQuery := graph.GraphQuery{
-		Query: `
-			MATCH (r:ResourceIdentity {uid: $resourceUID})
-			RETURN r
-		`,
-		Parameters: map[string]interface{}{
-			"resourceUID": resourceUID,
-		},
+	if len(containerIssues) == 0 {
+		containerIssues = inferContainerIssues(errorMessage)
 	}
 
-	resourceResult, err := a.graphClient.ExecuteQuery(ctx, resourceQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query resource: %w", err)
-	}
-
-	if len(resourceResult.Rows) == 0 {
-		return nil, fmt.Errorf("resource %s not found", resourceUID)
-	}
-
-	resourceProps, err := graph.ParseNodeFromResult(resourceResult.Rows[0][0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse resource node: %w", err)
-	}
-	resource := graph.ParseResourceIdentityFromNode(resourceProps)
-
-	// Classify symptom type based on error message and container issues
-	symptomType := classifySymptomType(event.Status, event.ErrorMessage, event.ContainerIssues)
+	symptomType := classifySymptomType(event.Status, errorMessage, containerIssues)
 
 	return &ObservedSymptom{
 		Resource: SymptomResource{
@@ -184,10 +144,92 @@ func (a *RootCauseAnalyzer) extractObservedSymptom(
 			Name:      resource.Name,
 		},
 		Status:       event.Status,
-		ErrorMessage: event.ErrorMessage,
-		ObservedAt:   time.Unix(0, event.Timestamp),
+		ErrorMessage: errorMessage,
+		ObservedAt:   event.Timestamp,
 		SymptomType:  symptomType,
 	}, nil
+}
+
+func closestEventInTolerance(events []ChangeEventInfo, failureTimestamp, tolerance int64) (ChangeEventInfo, bool) {
+	var (
+		best     ChangeEventInfo
+		bestDiff int64 = math.MaxInt64
+		found    bool
+	)
+
+	lowerBound := failureTimestamp - tolerance
+	upperBound := failureTimestamp + tolerance
+	for _, event := range events {
+		timestamp := event.Timestamp.UnixNano()
+		if timestamp < lowerBound || timestamp > upperBound {
+			continue
+		}
+
+		diff := timestamp - failureTimestamp
+		if diff < 0 {
+			diff = -diff
+		}
+		if !found || diff < bestDiff {
+			best = event
+			bestDiff = diff
+			found = true
+		}
+	}
+
+	return best, found
+}
+
+func (a *RootCauseAnalyzer) getObservedErrorDetails(
+	ctx context.Context,
+	resource *graph.ResourceIdentity,
+	timestampNs int64,
+	lookbackNs int64,
+) (string, []string) {
+	if resource.Namespace == "" {
+		return "", nil
+	}
+
+	graphData, err := a.store.GetNamespaceGraph(ctx, analysisstore.NamespaceGraphQuery{
+		Namespace:   resource.Namespace,
+		TimestampNs: timestampNs,
+		LookbackNs:  lookbackNs,
+		Limit:       500,
+	})
+	if err != nil || graphData == nil {
+		return "", nil
+	}
+
+	for _, node := range graphData.Graph.Nodes {
+		if node.UID == resource.UID && node.LatestEvent != nil {
+			return node.LatestEvent.ErrorMessage, append([]string(nil), node.LatestEvent.ContainerIssues...)
+		}
+	}
+
+	return "", nil
+}
+
+func inferContainerIssues(errorMessage string) []string {
+	lower := strings.ToLower(errorMessage)
+	issues := []string{}
+
+	switch {
+	case strings.Contains(lower, "imagepullbackoff"):
+		issues = append(issues, "ImagePullBackOff")
+	case strings.Contains(lower, "errimagepull"):
+		issues = append(issues, "ErrImagePull")
+	}
+
+	if strings.Contains(lower, "crashloopbackoff") || strings.Contains(lower, "back-off restarting failed container") {
+		issues = append(issues, "CrashLoopBackOff")
+	}
+	if strings.Contains(lower, "oomkilled") || strings.Contains(lower, "out of memory") {
+		issues = append(issues, reasonOOMKilled)
+	}
+	if strings.Contains(lower, "containercreating") {
+		issues = append(issues, "ContainerCreating")
+	}
+
+	return issues
 }
 
 // classifySymptomType determines the symptom category from observed facts
@@ -224,7 +266,6 @@ func classifySymptomType(status, errorMessage string, containerIssues []string) 
 		return "SchedulingFailure"
 	}
 
-	// Fallback to status
 	switch status {
 	case "Error":
 		return "Error"
@@ -233,7 +274,6 @@ func classifySymptomType(status, errorMessage string, containerIssues []string) 
 	case "Terminating":
 		return "Terminating"
 	case "Pending":
-		// Check if it's a scheduling issue
 		if strings.Contains(errorLower, "node") || strings.Contains(errorLower, "pending") {
 			return "SchedulingFailure"
 		}
