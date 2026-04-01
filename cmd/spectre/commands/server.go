@@ -392,6 +392,11 @@ func runServer(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	if !mode.StartGraph {
+		logger.Info("Graph runtime disabled - skipping graph-only startup")
+		return
+	}
+
 	// Use graph as the query source
 	querySource := api.TimelineQuerySourceGraph
 	logger.Info("Timeline query source: GRAPH")
@@ -495,9 +500,11 @@ func runServer(cmd *cobra.Command, args []string) {
 	// IMPORTANT: Register graph service BEFORE watcher so the graph schema is initialized
 	// before the watcher starts capturing events. The watcher's Start() method does an
 	// immediate LIST and processes events through the pipeline, so the graph must be ready.
-	if err := manager.Register(graphServiceComponent); err != nil {
-		logger.Error("Failed to register graph service component: %v", err)
-		HandleError(err, "Graph service registration error")
+	if graphServiceComponent != nil {
+		if err := manager.Register(graphServiceComponent); err != nil {
+			logger.Error("Failed to register graph service component: %v", err)
+			HandleError(err, "Graph service registration error")
+		}
 	}
 
 	// Register watcher after graph service so events can be properly stored
