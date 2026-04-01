@@ -71,7 +71,6 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/importexport/enrichment"
-	"github.com/moolen/spectre/internal/importexport/fileio"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
@@ -120,15 +119,15 @@ func WithLogger(logger *logging.Logger) ImportOption {
 //
 //	events, err := Import(FromFile("events.json"), WithLogger(logger))
 func Import(source ImportSource, opts ...ImportOption) ([]models.Event, error) {
-	options := &ImportOptions{
-		logger: logging.GetLogger("importexport"),
+	var allEvents []models.Event
+	if err := ImportInChunks(source, defaultImportChunkSize, func(chunk []models.Event) error {
+		allEvents = append(allEvents, chunk...)
+		return nil
+	}, opts...); err != nil {
+		return nil, err
 	}
 
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	return source.Load(options.logger)
+	return allEvents, nil
 }
 
 // fileSource imports events from a single JSON file
@@ -142,36 +141,7 @@ func FromFile(path string) ImportSource {
 }
 
 func (s *fileSource) Load(logger *logging.Logger) ([]models.Event, error) {
-	logger.InfoWithFields("Loading events from file",
-		logging.Field("path", s.path))
-
-	reader := fileio.NewFileReader(logger)
-	file, err := reader.ReadFile(s.path)
-	if err != nil {
-		logger.ErrorWithFields("Failed to read file",
-			logging.Field("path", s.path),
-			logging.Field("error", err))
-		return nil, err
-	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			logger.Warn("Failed to close file %s: %v", s.path, closeErr)
-		}
-	}()
-
-	events, err := parseJSONEvents(file, logger)
-	if err != nil {
-		logger.ErrorWithFields("Failed to parse JSON events",
-			logging.Field("path", s.path),
-			logging.Field("error", err))
-		return nil, err
-	}
-
-	logger.InfoWithFields("Successfully loaded events from file",
-		logging.Field("path", s.path),
-		logging.Field("event_count", len(events)))
-
-	return events, nil
+	return collectAllFromStream(s, logger)
 }
 
 // readerSource imports events from an io.Reader
@@ -185,19 +155,7 @@ func FromReader(reader io.Reader) ImportSource {
 }
 
 func (s *readerSource) Load(logger *logging.Logger) ([]models.Event, error) {
-	logger.Debug("Loading events from reader")
-
-	events, err := parseJSONEvents(s.reader, logger)
-	if err != nil {
-		logger.ErrorWithFields("Failed to parse JSON events from reader",
-			logging.Field("error", err))
-		return nil, err
-	}
-
-	logger.InfoWithFields("Successfully loaded events from reader",
-		logging.Field("event_count", len(events)))
-
-	return events, nil
+	return collectAllFromStream(s, logger)
 }
 
 // directorySource imports events from all JSON files in a directory (recursive)
@@ -212,61 +170,7 @@ func FromDirectory(path string) ImportSource {
 }
 
 func (s *directorySource) Load(logger *logging.Logger) ([]models.Event, error) {
-	logger.InfoWithFields("Loading events from directory",
-		logging.Field("path", s.path))
-
-	// Use the fileio walker to find JSON files
-	walker := fileio.NewDirectoryWalker(logger)
-	files, err := walker.WalkJSON(s.path)
-	if err != nil {
-		logger.ErrorWithFields("Failed to walk directory",
-			logging.Field("path", s.path),
-			logging.Field("error", err))
-		return nil, err
-	}
-
-	logger.InfoWithFields("Found JSON files in directory",
-		logging.Field("path", s.path),
-		logging.Field("file_count", len(files)))
-
-	var allEvents []models.Event
-	successCount := 0
-	failureCount := 0
-
-	// Import each file
-	for _, file := range files {
-		logger.DebugWithFields("Importing file",
-			logging.Field("path", file.FilePath),
-			logging.Field("size_bytes", file.Size))
-
-		events, err := FromFile(file.FilePath).Load(logger)
-		if err != nil {
-			failureCount++
-			logger.WarnWithFields("Failed to import file, skipping",
-				logging.Field("path", file.FilePath),
-				logging.Field("error", err))
-			continue
-		}
-
-		allEvents = append(allEvents, events...)
-		successCount++
-	}
-
-	if len(allEvents) == 0 {
-		logger.ErrorWithFields("No events imported from directory",
-			logging.Field("path", s.path),
-			logging.Field("files_found", len(files)),
-			logging.Field("failures", failureCount))
-		return nil, fmt.Errorf("no events found in directory %s (processed %d files, %d failures)", s.path, len(files), failureCount)
-	}
-
-	logger.InfoWithFields("Successfully loaded events from directory",
-		logging.Field("path", s.path),
-		logging.Field("event_count", len(allEvents)),
-		logging.Field("files_processed", successCount),
-		logging.Field("files_failed", failureCount))
-
-	return allEvents, nil
+	return collectAllFromStream(s, logger)
 }
 
 // pathSource automatically detects whether the path is a file or directory
@@ -281,29 +185,7 @@ func FromPath(path string) ImportSource {
 }
 
 func (s *pathSource) Load(logger *logging.Logger) ([]models.Event, error) {
-	logger.DebugWithFields("Detecting path type",
-		logging.Field("path", s.path))
-
-	pathType, err := fileio.DetectPathType(s.path)
-	if err != nil {
-		logger.ErrorWithFields("Failed to detect path type",
-			logging.Field("path", s.path),
-			logging.Field("error", err))
-		return nil, err
-	}
-
-	switch pathType {
-	case fileio.PathTypeDirectory:
-		logger.Debug("Path is a directory, using directory import")
-		return FromDirectory(s.path).Load(logger)
-	case fileio.PathTypeFile:
-		logger.Debug("Path is a file, using file import")
-		return FromFile(s.path).Load(logger)
-	case fileio.PathTypeUnknown:
-		return nil, fmt.Errorf("unknown path type for %s", s.path)
-	default:
-		return nil, fmt.Errorf("unknown path type for %s", s.path)
-	}
+	return collectAllFromStream(s, logger)
 }
 
 // parseJSONEvents parses a JSON events array from a reader

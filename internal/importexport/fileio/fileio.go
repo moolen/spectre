@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/moolen/spectre/internal/logging"
@@ -142,6 +143,10 @@ func (w *DirectoryWalker) WalkJSON(dirPath string) ([]WalkResult, error) {
 		}
 		return nil, fmt.Errorf("no JSON files found in directory: %s", dirPath)
 	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].FilePath < results[j].FilePath
+	})
 
 	w.logger.InfoWithFields("Directory walk completed",
 		logging.Field("directory", dirPath),
