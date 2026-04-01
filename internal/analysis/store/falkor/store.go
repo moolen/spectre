@@ -33,6 +33,8 @@ type Store struct {
 	graphClient graph.Client
 }
 
+var _ store.AnalysisStore = (*Store)(nil)
+
 func New(graphClient graph.Client) *Store {
 	return &Store{graphClient: graphClient}
 }
@@ -61,6 +63,8 @@ func (s *Store) GetOwnershipChain(
 	atTimestampNs int64,
 	maxDepth int,
 ) ([]store.ResourceWithDistance, error) {
+	// atTimestampNs is intentionally unused to preserve current analyzer behavior:
+	// ownership traversal is not point-in-time filtered today.
 	_ = atTimestampNs
 
 	if maxDepth <= 0 {
@@ -218,7 +222,6 @@ func (s *Store) GetRelatedResources(
 	if len(resourceUIDs) == 0 {
 		return map[string][]store.RelatedResourceData{}, nil
 	}
-	startNs := window.FailureTimestampNs - window.LookbackNs
 
 	result, err := s.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
 		Timeout: queryTimeoutMs,
@@ -261,7 +264,7 @@ func (s *Store) GetRelatedResources(
 		`,
 		Parameters: map[string]interface{}{
 			"resourceUIDs": resourceUIDs,
-			"startNs":      startNs,
+			"startNs":      window.Start(),
 			"endNs":        window.FailureTimestampNs,
 		},
 	})

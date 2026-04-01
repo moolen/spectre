@@ -32,11 +32,7 @@ type ResourceWindow struct {
 }
 
 // Start returns the inclusive start timestamp for the window in Unix nanoseconds.
-// If FailureTimestampNs-LookbackNs is negative, Start clamps the value to 0.
+// It intentionally uses raw subtraction to preserve existing analyzer semantics.
 func (w ResourceWindow) Start() int64 {
-	start := w.FailureTimestampNs - w.LookbackNs
-	if start < 0 {
-		return 0
-	}
-	return start
+	return w.FailureTimestampNs - w.LookbackNs
 }
