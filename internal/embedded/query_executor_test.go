@@ -238,3 +238,38 @@ func TestQueryExecutor_ExecutePaginatedDuplicateCursorKey(t *testing.T) {
 		t.Fatalf("unexpected page2 resource: kind=%s name=%s", page2.Events[0].Resource.Kind, page2.Events[0].Resource.Name)
 	}
 }
+
+func TestQueryExecutor_ExecuteIncludesK8sEventsByResource(t *testing.T) {
+	events := []models.Event{
+		makeEvent(10*1e9, "Pod", "ns-a", "pod-a", "uid-a", models.EventTypeCreate),
+		makeK8sEvent(11*1e9, "ns-a", "evt-a", "uid-e", "uid-a"),
+	}
+
+	executor, err := NewQueryExecutor(events)
+	if err != nil {
+		t.Fatalf("NewQueryExecutor error: %v", err)
+	}
+
+	query := &models.QueryRequest{
+		StartTimestamp: 9,
+		EndTimestamp:   12,
+		Filters:        models.QueryFilters{},
+	}
+
+	result, err := executor.Execute(context.Background(), query)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if result.K8sEventsByResource == nil {
+		t.Fatalf("expected K8sEventsByResource to be populated")
+	}
+
+	resourceEvents, ok := result.K8sEventsByResource["uid-a"]
+	if !ok || len(resourceEvents) != 1 {
+		t.Fatalf("expected 1 k8s event for uid-a, got %v", resourceEvents)
+	}
+	if resourceEvents[0].Reason != "Test" || resourceEvents[0].Message != "msg" {
+		t.Fatalf("unexpected k8s event data: %#v", resourceEvents[0])
+	}
+}

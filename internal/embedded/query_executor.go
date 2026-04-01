@@ -2,6 +2,7 @@ package embedded
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -139,6 +140,7 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(filteredResources, startIdx, pageSize)
 
 	var resultEvents []models.Event
+	k8sEventsByResource := qe.collectK8sEventsForResources(filteredResources[startIdx:endIdx], startTimeNs, endTimeNs)
 	for _, resource := range filteredResources[startIdx:endIdx] {
 		resultEvents = append(resultEvents, resource.events...)
 	}
@@ -151,7 +153,7 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 		ExecutionTimeMs:     int32(executionTime.Milliseconds()), // #nosec G115 -- bounded by duration
 		QueryStartTime:      startTimeNs,
 		QueryEndTime:        endTimeNs,
-		K8sEventsByResource: nil,
+		K8sEventsByResource: k8sEventsByResource,
 	}
 
 	paginationResp := &models.PaginationResponse{
@@ -359,6 +361,79 @@ func compareCursorKey(resource filteredResource, cursor *models.ResourceCursor) 
 func (qe *QueryExecutor) isEventQuery(filters models.QueryFilters) bool {
 	kinds := filters.GetKinds()
 	return len(kinds) == 1 && kinds[0] == "Event"
+}
+
+func (qe *QueryExecutor) collectK8sEventsForResources(resources []filteredResource, startTimeNs, endTimeNs int64) map[string][]models.K8sEvent {
+	if len(resources) == 0 {
+		return nil
+	}
+
+	k8sEventsByResource := make(map[string][]models.K8sEvent)
+	for _, resource := range resources {
+		events := qe.k8sEventsByInvolvedUID[resource.uid]
+		if len(events) == 0 {
+			continue
+		}
+		for _, event := range events {
+			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+				continue
+			}
+			k8sEvent, ok := convertToK8sEvent(event)
+			if !ok {
+				continue
+			}
+			k8sEventsByResource[resource.uid] = append(k8sEventsByResource[resource.uid], k8sEvent)
+		}
+	}
+
+	if len(k8sEventsByResource) == 0 {
+		return nil
+	}
+
+	return k8sEventsByResource
+}
+
+func convertToK8sEvent(event models.Event) (models.K8sEvent, bool) {
+	if event.Resource.Kind != "Event" {
+		return models.K8sEvent{}, false
+	}
+
+	var eventData map[string]interface{}
+	if len(event.Data) > 0 {
+		if err := json.Unmarshal(event.Data, &eventData); err != nil {
+			return models.K8sEvent{}, false
+		}
+	}
+
+	k8sEvent := models.K8sEvent{
+		ID:        event.ID,
+		Timestamp: event.Timestamp,
+		Reason:    getString(eventData, "reason", ""),
+		Message:   getString(eventData, "message", ""),
+		Type:      getString(eventData, "type", "Normal"),
+		Count:     1,
+	}
+
+	if count, ok := eventData["count"].(float64); ok {
+		k8sEvent.Count = int32(count)
+	}
+	if source, ok := eventData["source"].(map[string]interface{}); ok {
+		if component, ok := source["component"].(string); ok {
+			k8sEvent.Source = component
+		}
+	}
+
+	return k8sEvent, true
+}
+
+func getString(data map[string]interface{}, key, fallback string) string {
+	if data == nil {
+		return fallback
+	}
+	if value, ok := data[key].(string); ok {
+		return value
+	}
+	return fallback
 }
 
 func (qe *QueryExecutor) executeEventQuery(startTimeNs, endTimeNs int64, filters models.QueryFilters, pagination *models.PaginationRequest, pageSize int, start time.Time) (*models.QueryResult, *models.PaginationResponse, error) {
