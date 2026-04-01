@@ -166,7 +166,6 @@ func TestQueryExecutor_QueryDistinctMetadata(t *testing.T) {
 	events := []models.Event{
 		makeEvent(1*1e9, "Pod", "ns-a", "pod-a", "uid-a", models.EventTypeCreate),
 		makeEvent(2*1e9, "Deployment", "ns-b", "dep-b", "uid-b", models.EventTypeCreate),
-		makeEvent(3*1e9, "Event", "ns-a", "evt-a", "uid-e", models.EventTypeCreate),
 		makeK8sEvent(3*1e9, "ns-a", "evt-b", "uid-f", "uid-a"),
 	}
 
