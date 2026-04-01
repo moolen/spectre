@@ -104,6 +104,20 @@ graph:
       accessModes:
         - ReadWriteOnce
 
+      # AOF (Append Only File) persistence - more durable than RDB snapshots
+      # AOF logs every write operation, making it recoverable even after crashes
+      # NOTE: Disabled due to FalkorDB crash during AOF replay - using RDB only
+      aof:
+        enabled: false
+        # Sync policy: always (safest, slowest), everysec (recommended), no (fastest, riskiest)
+        fsync: "everysec"
+
+      # RDB snapshot configuration
+      rdb:
+        # Save RDB snapshot: "seconds changes" (e.g., save after 60s if 100+ changes)
+        # More frequent saves since AOF is disabled
+        save: "60 100 300 10"
+
     # Health check configuration
     # Note: FalkorDB can take time to initialize, especially with persistence enabled
     livenessProbe:
@@ -277,20 +291,20 @@ readinessProbe:
   successThreshold: 1
 
 startupProbe:
-  enabled: false
+  enabled: true
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 0
-  periodSeconds: 10
-  timeoutSeconds: 3
-  failureThreshold: 30
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 60
   successThreshold: 1
 
 podAnnotations: {}
 podLabels: {}
 priorityClassName: ""
-terminationGracePeriodSeconds: 15
+terminationGracePeriodSeconds: 60
 dnsPolicy: ClusterFirst
 dnsConfig: {}
 hostAliases: []

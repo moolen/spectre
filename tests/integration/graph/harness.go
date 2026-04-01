@@ -33,8 +33,9 @@ func NewTestHarness(t *testing.T) (*TestHarness, error) {
 	graphName := fmt.Sprintf("test-%s", uuid.New().String()[:8])
 
 	// Start FalkorDB container
+	// Use a specific version to avoid instability with :latest
 	req := testcontainers.ContainerRequest{
-		Image:        "falkordb/falkordb:latest",
+		Image:        "falkordb/falkordb:v4.2.0",
 		ExposedPorts: []string{"6379/tcp"},
 		WaitingFor:   wait.ForListeningPort("6379/tcp").WithStartupTimeout(30 * time.Second),
 		AutoRemove:   true,

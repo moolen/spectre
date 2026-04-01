@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useBetaFeatures } from '../contexts/BetaFeaturesContext';
 
 // Sidebar navigation component with auto-collapse behavior
 
@@ -11,6 +12,7 @@ interface NavItem {
   path: string;
   label: string;
   icon: React.ReactNode;
+  beta?: boolean; // If true, only shown when ?beta=true is in URL
 }
 
 const navItems: NavItem[] = [
@@ -31,8 +33,32 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    path: '/observatory',
+    label: 'Observatory',
+    beta: true, // Only visible with ?beta=true
+    icon: (
+      // Telescope icon for Observatory - simple refractor telescope
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        {/* Telescope tube */}
+        <line x1="4" y1="10" x2="18" y2="4" />
+        <line x1="4" y1="13" x2="18" y2="7" />
+        {/* Front lens */}
+        <line x1="18" y1="3" x2="19" y2="8" />
+        {/* Eyepiece */}
+        <line x1="3" y1="9" x2="4" y2="14" />
+        {/* Tripod mount */}
+        <circle cx="11" cy="12" r="1.5" fill="currentColor" />
+        {/* Tripod legs */}
+        <line x1="11" y1="13.5" x2="7" y2="21" />
+        <line x1="11" y1="13.5" x2="15" y2="21" />
+        <line x1="11" y1="13.5" x2="11" y2="18" />
+      </svg>
+    ),
+  },
+  {
     path: '/integrations',
     label: 'Integrations',
+    beta: true, // Only visible with ?beta=true
     icon: (
       // Puzzle piece / plug icon for integrations
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -210,6 +236,13 @@ const sidebarCSS = `
 `;
 
 export function Sidebar({ onHoverChange }: SidebarProps) {
+  const isBetaEnabled = useBetaFeatures();
+
+  // Filter nav items based on beta flag
+  const visibleNavItems = useMemo(() => {
+    return navItems.filter(item => !item.beta || isBetaEnabled);
+  }, [isBetaEnabled]);
+
   return (
     <aside
       className="sidebar-container"
@@ -239,7 +272,7 @@ export function Sidebar({ onHoverChange }: SidebarProps) {
 
       {/* Main Navigation */}
       <nav className="sidebar-nav">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}

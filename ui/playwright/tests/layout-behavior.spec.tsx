@@ -49,17 +49,25 @@ test.describe('Layout Behavior', () => {
       // Mount the full App component
       await mount(<App />);
 
-      // Get the main content element
+      // The layout uses a two-layer approach:
+      // - Outer wrapper div has a fixed marginLeft of 64px (collapsed sidebar width)
+      // - Inner <main> uses transform: translateX() to shift when sidebar expands
       const main = page.locator('main');
       await expect(main).toBeVisible();
 
+      // The outer wrapper is the parent div of <main>
+      const outerWrapper = main.locator('..');
+
       // Move mouse away from sidebar to ensure collapsed state
-      // The sidebar is on the left (0-64px), so move to the right side
       await page.mouse.move(600, 300);
       await page.waitForTimeout(400); // Wait for collapse transition
 
-      // Verify initial margin is 64px (collapsed sidebar width)
-      await expect(main).toHaveCSS('margin-left', '64px');
+      // Verify outer wrapper has fixed margin-left of 64px
+      await expect(outerWrapper).toHaveCSS('margin-left', '64px');
+
+      // Verify main has no transform offset when sidebar is collapsed
+      // translateX(0) computes to matrix(1, 0, 0, 1, 0, 0)
+      await expect(main).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
 
       // Get the sidebar element and hover over it
       const sidebar = page.locator('.sidebar-container');
@@ -68,16 +76,19 @@ test.describe('Layout Behavior', () => {
       // Wait for the CSS transition to complete (250ms + buffer)
       await page.waitForTimeout(350);
 
-      // Verify margin changed to 220px (expanded sidebar width)
-      // This proves content is pushed, not overlapped
-      await expect(main).toHaveCSS('margin-left', '220px');
+      // Verify main is translated by 156px (220 - 64) when sidebar expands
+      // transform: translateX(156px) is represented as matrix(1, 0, 0, 1, 156, 0)
+      await expect(main).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 156, 0)');
+
+      // Outer wrapper margin stays fixed at 64px (no layout change)
+      await expect(outerWrapper).toHaveCSS('margin-left', '64px');
 
       // Move mouse away from sidebar
       await page.mouse.move(500, 500);
       await page.waitForTimeout(350);
 
-      // Verify margin returns to 64px
-      await expect(main).toHaveCSS('margin-left', '64px');
+      // Verify transform returns to translateX(0)
+      await expect(main).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
     });
   });
 

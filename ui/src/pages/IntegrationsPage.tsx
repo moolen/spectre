@@ -136,6 +136,7 @@ export default function IntegrationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncingIntegrations, setSyncingIntegrations] = useState<Set<string>>(new Set());
+  const [validatingIntegrations, setValidatingIntegrations] = useState<Set<string>>(new Set());
 
   // Fetch integrations on mount
   useEffect(() => {
@@ -275,6 +276,45 @@ export default function IntegrationsPage() {
     }
   };
 
+  const validateSignals = async (name: string) => {
+    setValidatingIntegrations(prev => new Set(prev).add(name));
+
+    try {
+      const response = await fetch(`/api/config/integrations/${name}/signals/validate`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          console.error('Signal validation already in progress');
+          alert('Signal validation already in progress');
+        } else if (response.status === 400) {
+          const error = await response.json();
+          console.error('Signal validation not configured:', error.message);
+          alert(`Signal validation not configured: ${error.message}`);
+        } else {
+          const errorText = await response.text();
+          console.error('Signal validation failed:', errorText);
+          alert(`Signal validation failed: ${errorText}`);
+        }
+        return;
+      }
+
+      const result = await response.json();
+      console.log('Signal validation completed:', result.message);
+      alert(result.message);
+    } catch (error) {
+      console.error('Error validating signals:', error);
+      alert(`Error validating signals: ${error}`);
+    } finally {
+      setValidatingIntegrations(prev => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto bg-[var(--color-app-bg)]">
       <div className="max-w-6xl mx-auto p-8">
@@ -330,6 +370,8 @@ export default function IntegrationsPage() {
                 onEdit={handleEdit}
                 onSync={syncIntegration}
                 syncingIntegrations={syncingIntegrations}
+                onValidateSignals={validateSignals}
+                validatingIntegrations={validatingIntegrations}
               />
             ) : (
               // Empty state with tiles

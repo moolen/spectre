@@ -75,7 +75,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     );
   }, [options, searchQuery, sortOptions, formatOption]);
 
-  // Handle click outside
+  // Handle click outside - use capture phase to catch events before D3/SVG handlers
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -84,8 +84,8 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         setSearchQuery('');
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, []);
 
   // Focus search input when dropdown opens
@@ -124,7 +124,9 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
         : [...currentSelected, option];
       onChange(newSelected);
     } else {
-      onChange(option);
+      // Single-select: toggle off if clicking the already-selected option
+      const newValue = selectedArray.includes(option) ? null : option;
+      onChange(newValue);
     }
 
     if (closeAfter) {
@@ -277,7 +279,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       {isOpen && (
         <div className="absolute top-full left-0 mt-2 w-56 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl z-[60] overflow-hidden animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10">
           {/* Search Input and Clear Button */}
-          {(searchable || (multiple && hasSelection)) && (
+          {(searchable || hasSelection) && (
             <div className="p-2 border-b border-[var(--color-border-soft)] space-y-2">
               {searchable && (
                 <div className="relative">
@@ -300,7 +302,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
                   />
                 </div>
               )}
-              {multiple && hasSelection && (
+              {hasSelection && (
                 <button
                   onClick={(e) => {
                     e.preventDefault();
@@ -312,7 +314,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                   </svg>
-                  Clear filter ({selectedArray.length})
+                  Clear{multiple ? ` filter (${selectedArray.length})` : ''}
                 </button>
               )}
             </div>

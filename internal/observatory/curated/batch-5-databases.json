@@ -1,0 +1,1816 @@
+{
+  "batch": 5,
+  "name": "Databases",
+  "description": "Prometheus metrics from database exporters: PostgreSQL, MySQL, Redis, MongoDB, Elasticsearch",
+  "sources": [
+    "prometheus-community/postgres_exporter",
+    "prometheus/mysqld_exporter",
+    "oliver006/redis_exporter",
+    "percona/mongodb_exporter",
+    "prometheus-community/elasticsearch_exporter"
+  ],
+  "metrics": [
+    {
+      "name": "pg_up",
+      "signal_role": "availability",
+      "confidence": 1.0,
+      "importance": 1.0,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["server"],
+      "common_promql_patterns": [
+        "pg_up == 0",
+        "avg_over_time(pg_up[5m])"
+      ],
+      "notes": "PostgreSQL connectivity check. 1=up, 0=down.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_numbackends",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "pg_stat_database_numbackends / pg_settings_max_connections",
+        "sum(pg_stat_database_numbackends) by (server)"
+      ],
+      "notes": "Number of active connections per database. Compare against max_connections for saturation.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_xact_commit",
+      "signal_role": "traffic",
+      "confidence": 0.95,
+      "importance": 0.8,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_xact_commit[5m])",
+        "sum(rate(pg_stat_database_xact_commit[5m])) by (server)"
+      ],
+      "notes": "Total committed transactions per database.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_xact_rollback",
+      "signal_role": "errors",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_xact_rollback[5m])",
+        "rate(pg_stat_database_xact_rollback[5m]) / (rate(pg_stat_database_xact_commit[5m]) + rate(pg_stat_database_xact_rollback[5m]))"
+      ],
+      "notes": "Total rolled back transactions. High rollback rate indicates application errors.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_blks_read",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_blks_read[5m])",
+        "rate(pg_stat_database_blks_read[5m]) / (rate(pg_stat_database_blks_read[5m]) + rate(pg_stat_database_blks_hit[5m]))"
+      ],
+      "notes": "Disk blocks read from storage. High values may indicate cache misses.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_blks_hit",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_blks_hit[5m])",
+        "rate(pg_stat_database_blks_hit[5m]) / (rate(pg_stat_database_blks_read[5m]) + rate(pg_stat_database_blks_hit[5m]))"
+      ],
+      "notes": "Buffer cache hits. Cache hit ratio should be >99% for well-tuned databases.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_tup_fetched",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.75,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_tup_fetched[5m])"
+      ],
+      "notes": "Number of rows fetched by queries.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_tup_inserted",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.75,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_tup_inserted[5m])"
+      ],
+      "notes": "Number of rows inserted.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_tup_updated",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.75,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_tup_updated[5m])"
+      ],
+      "notes": "Number of rows updated.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_tup_deleted",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.75,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_tup_deleted[5m])"
+      ],
+      "notes": "Number of rows deleted.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_deadlocks",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_deadlocks[5m])",
+        "increase(pg_stat_database_deadlocks[1h])"
+      ],
+      "notes": "Number of deadlocks detected. Any deadlocks warrant investigation.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_database_temp_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_database_temp_bytes[5m])"
+      ],
+      "notes": "Bytes written to temp files. High values indicate work_mem needs tuning.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_activity_max_tx_duration",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["datname", "state", "server"],
+      "common_promql_patterns": [
+        "pg_stat_activity_max_tx_duration > 300"
+      ],
+      "notes": "Maximum duration of active transactions in seconds. Long-running transactions can cause bloat.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": "pg_stat_activity_count",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["datname", "state", "server"],
+      "common_promql_patterns": [
+        "sum(pg_stat_activity_count) by (state)",
+        "pg_stat_activity_count{state='active'}"
+      ],
+      "notes": "Count of connections by state (active, idle, idle in transaction).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_replication_lag",
+      "signal_role": "latency",
+      "confidence": 0.95,
+      "importance": 0.95,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["server"],
+      "common_promql_patterns": [
+        "pg_replication_lag > 10",
+        "max(pg_replication_lag) by (server)"
+      ],
+      "notes": "Replication lag in seconds. Critical for HA setups.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_replication_pg_wal_lsn_diff",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["application_name", "client_addr", "server"],
+      "common_promql_patterns": [
+        "pg_stat_replication_pg_wal_lsn_diff"
+      ],
+      "notes": "WAL position difference between primary and replica in bytes.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_locks_count",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["datname", "mode", "server"],
+      "common_promql_patterns": [
+        "sum(pg_locks_count) by (mode)",
+        "pg_locks_count{mode='ExclusiveLock'}"
+      ],
+      "notes": "Number of locks by mode. Watch for exclusive locks causing contention.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_bgwriter_checkpoints_timed",
+      "signal_role": "traffic",
+      "confidence": 0.8,
+      "importance": 0.65,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_bgwriter_checkpoints_timed[5m])"
+      ],
+      "notes": "Scheduled checkpoints completed.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_stat_bgwriter_checkpoints_req",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["server"],
+      "common_promql_patterns": [
+        "rate(pg_stat_bgwriter_checkpoints_req[5m])",
+        "rate(pg_stat_bgwriter_checkpoints_req[5m]) / (rate(pg_stat_bgwriter_checkpoints_timed[5m]) + rate(pg_stat_bgwriter_checkpoints_req[5m]))"
+      ],
+      "notes": "Requested (forced) checkpoints. High ratio indicates checkpoint_segments too low.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_settings_max_connections",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["server"],
+      "common_promql_patterns": [
+        "pg_stat_database_numbackends / pg_settings_max_connections"
+      ],
+      "notes": "Maximum allowed connections. Used to calculate connection saturation.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "pg_database_size_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "prometheus-community/postgres_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["datname", "server"],
+      "common_promql_patterns": [
+        "pg_database_size_bytes",
+        "rate(pg_database_size_bytes[1d])"
+      ],
+      "notes": "Database size in bytes. Track growth over time.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_up",
+      "signal_role": "availability",
+      "confidence": 1.0,
+      "importance": 1.0,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mysql_up == 0",
+        "avg_over_time(mysql_up[5m])"
+      ],
+      "notes": "MySQL connectivity check. 1=up, 0=down.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_threads_connected",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mysql_global_status_threads_connected / mysql_global_variables_max_connections",
+        "mysql_global_status_threads_connected"
+      ],
+      "notes": "Current number of open connections.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_threads_running",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mysql_global_status_threads_running"
+      ],
+      "notes": "Number of threads actively executing queries.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_variables_max_connections",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mysql_global_status_threads_connected / mysql_global_variables_max_connections"
+      ],
+      "notes": "Maximum permitted simultaneous connections.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_queries",
+      "signal_role": "traffic",
+      "confidence": 0.95,
+      "importance": 0.85,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_queries[5m])"
+      ],
+      "notes": "Total number of queries executed.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_questions",
+      "signal_role": "traffic",
+      "confidence": 0.95,
+      "importance": 0.85,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_questions[5m])"
+      ],
+      "notes": "Number of statements executed by clients (excludes internal queries).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_slow_queries",
+      "signal_role": "latency",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_slow_queries[5m])",
+        "increase(mysql_global_status_slow_queries[1h])"
+      ],
+      "notes": "Number of queries exceeding long_query_time threshold.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": "mysql_global_status_commands_total",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["command", "instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_commands_total{command=~'select|insert|update|delete'}[5m])",
+        "sum(rate(mysql_global_status_commands_total[5m])) by (command)"
+      ],
+      "notes": "Command execution counts by type (select, insert, update, delete, etc.).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_aborted_connects",
+      "signal_role": "errors",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_aborted_connects[5m])"
+      ],
+      "notes": "Failed connection attempts (authentication failures, timeouts).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_aborted_clients",
+      "signal_role": "errors",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_aborted_clients[5m])"
+      ],
+      "notes": "Connections aborted due to client dying without closing properly.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_innodb_buffer_pool_reads",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_innodb_buffer_pool_reads[5m])",
+        "rate(mysql_global_status_innodb_buffer_pool_reads[5m]) / (rate(mysql_global_status_innodb_buffer_pool_reads[5m]) + rate(mysql_global_status_innodb_buffer_pool_read_requests[5m]))"
+      ],
+      "notes": "Disk reads when data not found in buffer pool.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_innodb_buffer_pool_read_requests",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_innodb_buffer_pool_read_requests[5m])"
+      ],
+      "notes": "Logical read requests from buffer pool. Used to calculate cache hit ratio.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_innodb_buffer_pool_pages_total",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mysql_global_status_innodb_buffer_pool_pages_data / mysql_global_status_innodb_buffer_pool_pages_total"
+      ],
+      "notes": "Total pages in InnoDB buffer pool.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_innodb_buffer_pool_pages_free",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mysql_global_status_innodb_buffer_pool_pages_free / mysql_global_status_innodb_buffer_pool_pages_total"
+      ],
+      "notes": "Free pages in buffer pool. Low values indicate memory pressure.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_innodb_row_lock_waits",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_innodb_row_lock_waits[5m])"
+      ],
+      "notes": "Number of times operations waited for row locks.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_innodb_row_lock_time",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_innodb_row_lock_time[5m])",
+        "rate(mysql_global_status_innodb_row_lock_time[5m]) / rate(mysql_global_status_innodb_row_lock_waits[5m])"
+      ],
+      "notes": "Total time spent waiting for row locks (milliseconds).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_global_status_innodb_deadlocks",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mysql_global_status_innodb_deadlocks[5m])",
+        "increase(mysql_global_status_innodb_deadlocks[1h])"
+      ],
+      "notes": "Number of InnoDB deadlocks detected.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_slave_status_seconds_behind_master",
+      "signal_role": "latency",
+      "confidence": 0.95,
+      "importance": 0.95,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["master_host", "instance"],
+      "common_promql_patterns": [
+        "mysql_slave_status_seconds_behind_master > 30",
+        "max(mysql_slave_status_seconds_behind_master) by (instance)"
+      ],
+      "notes": "Replication lag in seconds. Critical for read replicas.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_slave_status_slave_io_running",
+      "signal_role": "availability",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["master_host", "instance"],
+      "common_promql_patterns": [
+        "mysql_slave_status_slave_io_running == 0"
+      ],
+      "notes": "Whether the I/O thread for reading the master's binary log is running.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_slave_status_slave_sql_running",
+      "signal_role": "availability",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["master_host", "instance"],
+      "common_promql_patterns": [
+        "mysql_slave_status_slave_sql_running == 0"
+      ],
+      "notes": "Whether the SQL thread for executing events in the relay log is running.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mysql_info_schema_table_size",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "prometheus/mysqld_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["schema", "table", "instance"],
+      "common_promql_patterns": [
+        "topk(10, mysql_info_schema_table_size)",
+        "rate(mysql_info_schema_table_size[1d])"
+      ],
+      "notes": "Size of individual tables including data and indexes.",
+      "deprecated": false,
+      "disabled_by_default": true
+    },
+    {
+      "name": "redis_up",
+      "signal_role": "availability",
+      "confidence": 1.0,
+      "importance": 1.0,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_up == 0",
+        "avg_over_time(redis_up[5m])"
+      ],
+      "notes": "Redis connectivity check. 1=up, 0=down.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_connected_clients",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_connected_clients",
+        "redis_connected_clients / redis_config_maxclients"
+      ],
+      "notes": "Number of client connections (excluding replicas).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_blocked_clients",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_blocked_clients > 0"
+      ],
+      "notes": "Number of clients blocked on BLPOP, BRPOP, or BLMOVE.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_memory_used_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_memory_used_bytes / redis_memory_max_bytes",
+        "redis_memory_used_bytes"
+      ],
+      "notes": "Total memory allocated by Redis (including overhead).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_memory_max_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.75,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_memory_used_bytes / redis_memory_max_bytes"
+      ],
+      "notes": "Maximum memory Redis can use. 0 means no limit.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_memory_used_rss_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_memory_used_rss_bytes",
+        "redis_memory_used_rss_bytes / redis_memory_used_bytes"
+      ],
+      "notes": "Resident set size (actual memory from OS perspective).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_mem_fragmentation_ratio",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_mem_fragmentation_ratio > 1.5",
+        "redis_memory_used_rss_bytes / redis_memory_used_bytes"
+      ],
+      "notes": "Memory fragmentation ratio. >1.5 indicates fragmentation issues.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_commands_processed_total",
+      "signal_role": "traffic",
+      "confidence": 0.95,
+      "importance": 0.85,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "rate(redis_commands_processed_total[5m])"
+      ],
+      "notes": "Total commands processed by server.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_commands_duration_seconds_total",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr", "cmd"],
+      "common_promql_patterns": [
+        "rate(redis_commands_duration_seconds_total[5m]) / rate(redis_commands_total[5m])",
+        "rate(redis_commands_duration_seconds_total[5m])"
+      ],
+      "notes": "Total time spent on commands by type.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": "redis_commands_total",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr", "cmd"],
+      "common_promql_patterns": [
+        "rate(redis_commands_total[5m])",
+        "topk(10, rate(redis_commands_total[5m]))"
+      ],
+      "notes": "Command calls by command type (get, set, hget, etc.).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_net_input_bytes_total",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "rate(redis_net_input_bytes_total[5m])"
+      ],
+      "notes": "Total bytes received by the server.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_net_output_bytes_total",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "rate(redis_net_output_bytes_total[5m])"
+      ],
+      "notes": "Total bytes sent by the server.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_keyspace_hits_total",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))"
+      ],
+      "notes": "Number of successful key lookups. Used to calculate cache hit ratio.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_keyspace_misses_total",
+      "signal_role": "errors",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "rate(redis_keyspace_misses_total[5m])",
+        "rate(redis_keyspace_misses_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))"
+      ],
+      "notes": "Number of failed key lookups (cache misses).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_evicted_keys_total",
+      "signal_role": "saturation",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "rate(redis_evicted_keys_total[5m]) > 0",
+        "increase(redis_evicted_keys_total[1h])"
+      ],
+      "notes": "Keys evicted due to maxmemory limit. Any eviction indicates memory pressure.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_expired_keys_total",
+      "signal_role": "churn",
+      "confidence": 0.8,
+      "importance": 0.65,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "rate(redis_expired_keys_total[5m])"
+      ],
+      "notes": "Total keys expired. Normal operation for TTL-based caches.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_db_keys",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr", "db"],
+      "common_promql_patterns": [
+        "sum(redis_db_keys) by (addr)",
+        "redis_db_keys"
+      ],
+      "notes": "Number of keys per database.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_db_keys_expiring",
+      "signal_role": "churn",
+      "confidence": 0.75,
+      "importance": 0.6,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr", "db"],
+      "common_promql_patterns": [
+        "redis_db_keys_expiring / redis_db_keys"
+      ],
+      "notes": "Number of keys with TTL set.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_connected_slaves",
+      "signal_role": "availability",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_connected_slaves",
+        "changes(redis_connected_slaves[5m])"
+      ],
+      "notes": "Number of connected replicas.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_master_link_up",
+      "signal_role": "availability",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_master_link_up == 0"
+      ],
+      "notes": "Whether link to master is up (on replicas). 1=up, 0=down.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_master_repl_offset",
+      "signal_role": "latency",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_master_repl_offset - redis_slave_repl_offset"
+      ],
+      "notes": "Replication offset on master. Compare with slave offset for lag.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_slowlog_length",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_slowlog_length",
+        "changes(redis_slowlog_length[5m])"
+      ],
+      "notes": "Number of entries in the slow log. Growing indicates slow queries.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_cluster_enabled",
+      "signal_role": "availability",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_cluster_enabled"
+      ],
+      "notes": "Whether cluster mode is enabled.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_cluster_slots_ok",
+      "signal_role": "availability",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_cluster_slots_ok < 16384"
+      ],
+      "notes": "Number of healthy cluster slots (16384 total).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "redis_cluster_slots_fail",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.95,
+      "source": "oliver006/redis_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["addr"],
+      "common_promql_patterns": [
+        "redis_cluster_slots_fail > 0"
+      ],
+      "notes": "Number of failed cluster slots. Any >0 indicates data unavailability.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_up",
+      "signal_role": "availability",
+      "confidence": 1.0,
+      "importance": 1.0,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mongodb_up == 0",
+        "avg_over_time(mongodb_up[5m])"
+      ],
+      "notes": "MongoDB connectivity check. 1=up, 0=down.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_connections",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["conn_type", "instance"],
+      "common_promql_patterns": [
+        "mongodb_ss_connections{conn_type='current'}",
+        "mongodb_ss_connections{conn_type='current'} / mongodb_ss_connections{conn_type='available'}"
+      ],
+      "notes": "Connection counts by type (current, available, totalCreated).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": "mongodb_ss_opcounters",
+      "signal_role": "traffic",
+      "confidence": 0.95,
+      "importance": 0.85,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["legacy_op_type", "instance"],
+      "common_promql_patterns": [
+        "rate(mongodb_ss_opcounters[5m])",
+        "sum(rate(mongodb_ss_opcounters[5m])) by (legacy_op_type)"
+      ],
+      "notes": "Operation counters by type (insert, query, update, delete, getmore, command).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": "mongodb_ss_opcountersRepl",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["legacy_op_type", "instance"],
+      "common_promql_patterns": [
+        "rate(mongodb_ss_opcountersRepl[5m])"
+      ],
+      "notes": "Replication operation counters by type.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_network_bytesIn",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mongodb_ss_network_bytesIn[5m])"
+      ],
+      "notes": "Total bytes received by the server.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_network_bytesOut",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mongodb_ss_network_bytesOut[5m])"
+      ],
+      "notes": "Total bytes sent by the server.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_network_numRequests",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mongodb_ss_network_numRequests[5m])"
+      ],
+      "notes": "Total number of requests received.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_mem_resident",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mongodb_ss_mem_resident"
+      ],
+      "notes": "Resident memory in MB.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_mem_virtual",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mongodb_ss_mem_virtual"
+      ],
+      "notes": "Virtual memory in MB.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_globalLock_currentQueue_total",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mongodb_ss_globalLock_currentQueue_total > 0"
+      ],
+      "notes": "Total operations queued waiting for the lock.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_globalLock_currentQueue_readers",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mongodb_ss_globalLock_currentQueue_readers"
+      ],
+      "notes": "Read operations queued waiting for the lock.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_globalLock_currentQueue_writers",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mongodb_ss_globalLock_currentQueue_writers"
+      ],
+      "notes": "Write operations queued waiting for the lock.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_globalLock_activeClients_total",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mongodb_ss_globalLock_activeClients_total"
+      ],
+      "notes": "Total active client connections performing operations.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": "mongodb_ss_wt_cache",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "mongodb_ss_wt_cache_bytes_currently_in_the_cache / mongodb_ss_wt_cache_maximum_bytes_configured"
+      ],
+      "notes": "WiredTiger cache metrics (bytes in cache, maximum configured).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_wt_cache_pages_evicted_by_application_threads",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["instance"],
+      "common_promql_patterns": [
+        "rate(mongodb_ss_wt_cache_pages_evicted_by_application_threads[5m]) > 0"
+      ],
+      "notes": "Page evictions by app threads indicates cache pressure.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_ss_asserts_total",
+      "signal_role": "errors",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["assert_type", "instance"],
+      "common_promql_patterns": [
+        "rate(mongodb_ss_asserts_total[5m])",
+        "rate(mongodb_ss_asserts_total{assert_type!='regular'}[5m])"
+      ],
+      "notes": "Assertion counts by type (regular, warning, msg, user, rollovers).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_rs_members_state",
+      "signal_role": "availability",
+      "confidence": 0.95,
+      "importance": 0.95,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["member_idx", "name", "instance"],
+      "common_promql_patterns": [
+        "mongodb_rs_members_state",
+        "count(mongodb_rs_members_state == 1) by (set)"
+      ],
+      "notes": "Replica set member state (1=PRIMARY, 2=SECONDARY, etc.).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_rs_members_optimeDate",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["member_idx", "name", "instance"],
+      "common_promql_patterns": [
+        "time() - mongodb_rs_members_optimeDate"
+      ],
+      "notes": "Timestamp of last oplog entry applied. Used to calculate replication lag.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "mongodb_rs_members_health",
+      "signal_role": "availability",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["member_idx", "name", "instance"],
+      "common_promql_patterns": [
+        "mongodb_rs_members_health == 0"
+      ],
+      "notes": "Health of replica set member. 1=healthy, 0=unhealthy.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": "mongodb_ss_opLatencies",
+      "signal_role": "latency",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["op_type", "instance"],
+      "common_promql_patterns": [
+        "rate(mongodb_ss_opLatencies_latency[5m]) / rate(mongodb_ss_opLatencies_ops[5m])"
+      ],
+      "notes": "Operation latencies by type (reads, writes, commands).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name_pattern": "mongodb_collstats_storageStats",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.7,
+      "source": "percona/mongodb_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["database", "collection", "instance"],
+      "common_promql_patterns": [
+        "topk(10, mongodb_collstats_storageStats_size)"
+      ],
+      "notes": "Collection storage statistics (size, count, avgObjSize).",
+      "deprecated": false,
+      "disabled_by_default": true
+    },
+    {
+      "name": "elasticsearch_cluster_health_status",
+      "signal_role": "availability",
+      "confidence": 1.0,
+      "importance": 1.0,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "color"],
+      "common_promql_patterns": [
+        "elasticsearch_cluster_health_status{color='red'} == 1",
+        "elasticsearch_cluster_health_status{color='green'} == 0"
+      ],
+      "notes": "Cluster health status. green=0, yellow=1, red=2. Red indicates data unavailability.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_cluster_health_number_of_nodes",
+      "signal_role": "availability",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster"],
+      "common_promql_patterns": [
+        "elasticsearch_cluster_health_number_of_nodes",
+        "changes(elasticsearch_cluster_health_number_of_nodes[5m])"
+      ],
+      "notes": "Number of nodes in the cluster.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_cluster_health_number_of_data_nodes",
+      "signal_role": "availability",
+      "confidence": 0.9,
+      "importance": 0.9,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster"],
+      "common_promql_patterns": [
+        "elasticsearch_cluster_health_number_of_data_nodes < 3"
+      ],
+      "notes": "Number of data nodes in the cluster.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_cluster_health_active_shards",
+      "signal_role": "availability",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster"],
+      "common_promql_patterns": [
+        "elasticsearch_cluster_health_active_shards"
+      ],
+      "notes": "Number of active primary and replica shards.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_cluster_health_relocating_shards",
+      "signal_role": "churn",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster"],
+      "common_promql_patterns": [
+        "elasticsearch_cluster_health_relocating_shards > 0"
+      ],
+      "notes": "Number of shards being relocated.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_cluster_health_initializing_shards",
+      "signal_role": "churn",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster"],
+      "common_promql_patterns": [
+        "elasticsearch_cluster_health_initializing_shards > 0"
+      ],
+      "notes": "Number of shards being initialized.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_cluster_health_unassigned_shards",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.95,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster"],
+      "common_promql_patterns": [
+        "elasticsearch_cluster_health_unassigned_shards > 0"
+      ],
+      "notes": "Number of unassigned shards. Any >0 indicates allocation issues.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_indices_docs",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "index"],
+      "common_promql_patterns": [
+        "sum(elasticsearch_indices_docs) by (cluster)",
+        "rate(elasticsearch_indices_docs[5m])"
+      ],
+      "notes": "Total number of documents.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_indices_store_size_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "index"],
+      "common_promql_patterns": [
+        "sum(elasticsearch_indices_store_size_bytes) by (cluster)",
+        "rate(elasticsearch_indices_store_size_bytes[1d])"
+      ],
+      "notes": "Total size of all indices in bytes.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_indices_indexing_index_total",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "index"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_indices_indexing_index_total[5m])"
+      ],
+      "notes": "Total number of indexing operations.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_indices_indexing_index_time_seconds_total",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "index"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_indices_indexing_index_time_seconds_total[5m]) / rate(elasticsearch_indices_indexing_index_total[5m])"
+      ],
+      "notes": "Total time spent indexing.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_indices_search_query_total",
+      "signal_role": "traffic",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "index"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_indices_search_query_total[5m])"
+      ],
+      "notes": "Total number of search queries.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_indices_search_query_time_seconds_total",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "index"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_indices_search_query_time_seconds_total[5m]) / rate(elasticsearch_indices_search_query_total[5m])"
+      ],
+      "notes": "Total time spent on search queries.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_indices_search_fetch_total",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "index"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_indices_search_fetch_total[5m])"
+      ],
+      "notes": "Total number of fetch operations.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_indices_search_fetch_time_seconds_total",
+      "signal_role": "latency",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "index"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_indices_search_fetch_time_seconds_total[5m]) / rate(elasticsearch_indices_search_fetch_total[5m])"
+      ],
+      "notes": "Total time spent fetching documents.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_jvm_memory_used_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "node", "area"],
+      "common_promql_patterns": [
+        "elasticsearch_jvm_memory_used_bytes{area='heap'} / elasticsearch_jvm_memory_max_bytes{area='heap'}"
+      ],
+      "notes": "JVM memory used (heap and non-heap areas).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_jvm_memory_max_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "node", "area"],
+      "common_promql_patterns": [
+        "elasticsearch_jvm_memory_used_bytes{area='heap'} / elasticsearch_jvm_memory_max_bytes{area='heap'}"
+      ],
+      "notes": "Maximum JVM memory configured.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_jvm_gc_collection_seconds_count",
+      "signal_role": "traffic",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "node", "gc"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_jvm_gc_collection_seconds_count[5m])"
+      ],
+      "notes": "Number of GC collection runs.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_jvm_gc_collection_seconds_sum",
+      "signal_role": "latency",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "node", "gc"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_jvm_gc_collection_seconds_sum[5m])",
+        "rate(elasticsearch_jvm_gc_collection_seconds_sum{gc='old'}[5m]) > 0.5"
+      ],
+      "notes": "Total time spent in GC. High old gen GC indicates memory pressure.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_os_cpu_percent",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.8,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "node"],
+      "common_promql_patterns": [
+        "elasticsearch_os_cpu_percent > 90"
+      ],
+      "notes": "CPU usage percentage.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_os_load1",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.75,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "node"],
+      "common_promql_patterns": [
+        "elasticsearch_os_load1"
+      ],
+      "notes": "1-minute load average.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_transport_rx_size_bytes_total",
+      "signal_role": "traffic",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "node"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_transport_rx_size_bytes_total[5m])"
+      ],
+      "notes": "Total bytes received via transport layer (inter-node communication).",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_transport_tx_size_bytes_total",
+      "signal_role": "traffic",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "node"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_transport_tx_size_bytes_total[5m])"
+      ],
+      "notes": "Total bytes sent via transport layer.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_breakers_tripped",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "node", "breaker"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_breakers_tripped[5m]) > 0",
+        "increase(elasticsearch_breakers_tripped[1h])"
+      ],
+      "notes": "Number of times circuit breaker tripped. Indicates queries too large for memory.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_breakers_estimated_size_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.85,
+      "importance": 0.8,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "node", "breaker"],
+      "common_promql_patterns": [
+        "elasticsearch_breakers_estimated_size_bytes / elasticsearch_breakers_limit_size_bytes"
+      ],
+      "notes": "Estimated memory used by circuit breaker.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_thread_pool_queue_count",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "node", "name"],
+      "common_promql_patterns": [
+        "elasticsearch_thread_pool_queue_count{name='search'} > 100",
+        "elasticsearch_thread_pool_queue_count{name='write'} > 100"
+      ],
+      "notes": "Number of tasks queued in thread pool.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_thread_pool_rejected_count",
+      "signal_role": "errors",
+      "confidence": 0.95,
+      "importance": 0.9,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "counter",
+      "labels_of_interest": ["cluster", "node", "name"],
+      "common_promql_patterns": [
+        "rate(elasticsearch_thread_pool_rejected_count[5m]) > 0",
+        "rate(elasticsearch_thread_pool_rejected_count{name='search'}[5m])"
+      ],
+      "notes": "Number of tasks rejected by thread pool. Indicates overload.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_filesystem_data_available_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.9,
+      "importance": 0.85,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "node"],
+      "common_promql_patterns": [
+        "elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes",
+        "elasticsearch_filesystem_data_available_bytes < 10737418240"
+      ],
+      "notes": "Available disk space on data path.",
+      "deprecated": false,
+      "disabled_by_default": false
+    },
+    {
+      "name": "elasticsearch_filesystem_data_size_bytes",
+      "signal_role": "saturation",
+      "confidence": 0.8,
+      "importance": 0.7,
+      "source": "prometheus-community/elasticsearch_exporter",
+      "metric_type": "gauge",
+      "labels_of_interest": ["cluster", "node"],
+      "common_promql_patterns": [
+        "elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes"
+      ],
+      "notes": "Total disk space on data path.",
+      "deprecated": false,
+      "disabled_by_default": false
+    }
+  ]
+}

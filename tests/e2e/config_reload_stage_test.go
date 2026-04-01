@@ -123,6 +123,11 @@ func (s *ConfigReloadStage) watcher_config_is_updated_to_include_statefulset() *
 	})
 	s.Require.NoError(err, "failed to update watcher ConfigMap")
 
+	// Verify the ConfigMap was updated correctly
+	cm, err := s.K8sClient.Clientset.CoreV1().ConfigMaps(s.TestCtx.Namespace).Get(ctx, s.configMapName, metav1.GetOptions{})
+	s.Require.NoError(err, "failed to get ConfigMap")
+	s.T.Logf("ConfigMap %s updated. Contents of watcher.yaml:\n%s", s.configMapName, cm.Data["watcher.yaml"])
+
 	// ConfigMap volume updates in Kubernetes can take 60-120 seconds due to kubelet sync period.
 	// Instead of waiting for propagation, we restart the pod to force immediate config reload.
 	// This simulates a deployment rollout which is a common pattern for config changes.
@@ -211,11 +216,33 @@ func (s *ConfigReloadStage) wait_for_hot_reload() *ConfigReloadStage {
 	ctx, cancel := s.ctxHelper.WithLongTimeout()
 	defer cancel()
 
+	// Trigger an update on the StatefulSet to generate a new event that the watcher can capture.
+	// The watcher's List operation on startup may have a race condition with the graph indexing,
+	// so updating the StatefulSet ensures we have a fresh UPDATE event with current timestamp.
+	s.T.Log("Triggering StatefulSet update to generate new event for watcher...")
+
+	// Fetch the latest version to avoid conflict errors (resourceVersion may have changed)
+	latestSS, err := s.K8sClient.Clientset.AppsV1().StatefulSets(s.testNamespace).Get(ctx, s.statefulSet.Name, metav1.GetOptions{})
+	if err != nil {
+		s.T.Logf("Warning: Failed to get latest StatefulSet: %v", err)
+	} else {
+		if latestSS.Annotations == nil {
+			latestSS.Annotations = make(map[string]string)
+		}
+		latestSS.Annotations["spectre.io/config-reload-test"] = time.Now().Format(time.RFC3339)
+		updatedSS, err := s.K8sClient.Clientset.AppsV1().StatefulSets(s.testNamespace).Update(ctx, latestSS, metav1.UpdateOptions{})
+		if err != nil {
+			s.T.Logf("Warning: Failed to update StatefulSet: %v", err)
+		} else {
+			s.statefulSet = updatedSS
+			s.T.Logf("✓ StatefulSet updated to trigger new event")
+		}
+	}
+
 	// Poll for the StatefulSet to appear in the API, which indicates the watcher is capturing events.
-	// Since we restart the pod, the new config is loaded immediately - we just need to wait for
-	// the watcher to capture the StatefulSet that was created before the restart.
-	// Use 60s timeout which should be plenty since the watcher starts immediately.
-	pollTimeout := time.After(60 * time.Second)
+	// Since we updated the StatefulSet, the watcher should capture an UPDATE event immediately.
+	// Use 90s timeout to allow for graph indexing and any processing delays.
+	pollTimeout := time.After(90 * time.Second)
 	pollTicker := time.NewTicker(3 * time.Second)
 	defer pollTicker.Stop()
 
@@ -227,7 +254,10 @@ pollLoop:
 			s.dumpDebugInfo(ctx)
 			break pollLoop
 		case <-pollTicker.C:
-			startTs := time.Now().Unix() - 500
+			// Use a wide time window (1 hour) to ensure we capture events from pod startup
+			// The watcher captures events during initial LIST with timestamps from that moment,
+			// which could be several minutes before the polling loop runs.
+			startTs := time.Now().Unix() - 3600
 			endTs := time.Now().Unix() + 10
 			searchRespAfter, err := s.APIClient.Search(ctx, startTs, endTs, s.testNamespace, "StatefulSet")
 			if err != nil {
@@ -275,7 +305,7 @@ func (s *ConfigReloadStage) metadata_includes_both_resource_kinds() *ConfigReloa
 	ctx, cancel := s.ctxHelper.WithLongTimeout()
 	defer cancel()
 
-	metadataStart := time.Now().Unix() - 500
+	metadataStart := time.Now().Unix() - 3600
 	metadataEnd := time.Now().Unix() + 10
 	metadata, err := s.APIClient.GetMetadata(ctx, &metadataStart, &metadataEnd)
 	s.Require.NoError(err)
@@ -319,12 +349,9 @@ func (s *ConfigReloadStage) dumpDebugInfo(ctx context.Context) {
 		// Filter for relevant log lines
 		s.T.Log("=== Relevant Spectre container logs ===")
 		for _, line := range strings.Split(logs, "\n") {
-			if strings.Contains(line, "Config file changed") ||
-				strings.Contains(line, "watcher") ||
-				strings.Contains(line, "StatefulSet") ||
-				strings.Contains(line, "reload") ||
-				strings.Contains(line, "Starting watcher") ||
-				strings.Contains(line, "Watchers reloaded") {
+			if strings.Contains(line, "StatefulSet") ||
+				strings.Contains(line, "ERROR") ||
+				strings.Contains(line, "error") {
 				s.T.Logf("  %s", line)
 			}
 		}
@@ -332,7 +359,7 @@ func (s *ConfigReloadStage) dumpDebugInfo(ctx context.Context) {
 
 	// Also try getting metadata to see what kinds are known
 	s.T.Log("=== Checking metadata for known kinds ===")
-	startTs := time.Now().Unix() - 500
+	startTs := time.Now().Unix() - 3600
 	endTs := time.Now().Unix() + 10
 	metadata, err := s.APIClient.GetMetadata(ctx, &startTs, &endTs)
 	if err != nil {

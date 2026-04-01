@@ -13,6 +13,14 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
+// maxBatchSize is the maximum number of items to process in a single FalkorDB query.
+// FalkorDB performs better with smaller batches; large batches can cause timeouts or partial writes.
+// Using 1000 instead of 5000 for better reliability with large imports.
+const maxBatchSize = 1000
+
+// batchQueryTimeout is the timeout for batch queries in milliseconds.
+const batchQueryTimeout = 60000 // 60 seconds
+
 // pipeline implements the Pipeline interface
 type pipeline struct {
 	config    PipelineConfig
@@ -39,7 +47,7 @@ func NewPipeline(config PipelineConfig, client graph.Client) Pipeline {
 		config:    config,
 		client:    client,
 		schema:    graph.NewSchema(client),
-		builder:   NewGraphBuilderWithClient(client), // Pass client to builder for Node lookups
+		builder:   NewGraphBuilderWithClientAndCacheSize(client, config.StateCacheSize),
 		causality: NewCausalityEngine(config.CausalityMaxLag, config.CausalityMinConfidence),
 		retention: NewRetentionManager(client, config.RetentionWindow),
 		logger:    logging.GetLogger("graph.sync.pipeline"),
@@ -58,6 +66,11 @@ func (p *pipeline) Start(ctx context.Context) error {
 	// Initialize graph schema
 	if err := p.schema.Initialize(p.ctx); err != nil {
 		return fmt.Errorf("failed to initialize schema: %w", err)
+	}
+
+	// Bootstrap label index from existing graph data
+	if err := p.bootstrapLabelIndex(p.ctx); err != nil {
+		p.logger.Warn("Failed to bootstrap label index: %v (selector lookups will use graph queries initially)", err)
 	}
 
 	// Start periodic retention cleanup
@@ -178,26 +191,45 @@ func (p *pipeline) ProcessBatch(ctx context.Context, events []models.Event) erro
 		nodeUpdates = append(nodeUpdates, update)
 	}
 
-	// Apply all node updates
-	nodesCreated := 0
-	for _, update := range nodeUpdates {
-		if err := p.applyGraphUpdate(ctx, update); err != nil {
-			p.logger.Warn("Failed to apply node update for event %s: %v", update.SourceEventID, err)
-			atomic.AddInt64(&p.stats.Errors, 1)
-			continue
+	// Apply all node updates using batch queries
+	nodesCreated, err := p.applyBatchedNodeUpdates(ctx, nodeUpdates)
+	if err != nil {
+		p.logger.Warn("Batch node update failed, falling back to individual: %v", err)
+		// Fallback to individual updates
+		nodesCreated = 0
+		for _, update := range nodeUpdates {
+			if err := p.applyGraphUpdate(ctx, update); err != nil {
+				p.logger.Warn("Failed to apply node update for event %s: %v", update.SourceEventID, err)
+				atomic.AddInt64(&p.stats.Errors, 1)
+				continue
+			}
+			nodesCreated++
 		}
-		nodesCreated++
 	}
 
 	phase1Duration := time.Since(phase1Start)
-	p.logger.Info("Phase 1 complete: Created %d/%d resource nodes in %v", nodesCreated, len(events), phase1Duration)
+	p.logger.InfoWithFields("Phase 1 complete",
+		logging.Field("nodes_created", nodesCreated),
+		logging.Field("events_processed", len(events)),
+		logging.Field("duration_ms", phase1Duration.Milliseconds()))
 
 	// PHASE 2: Extract all relationship edges
 	phase2Start := time.Now()
 	p.logger.Debug("Phase 2: Extracting relationships for %d events", len(events))
 
-	edgeUpdates := make([]*GraphUpdate, 0, len(events))
+	edgeUpdates := make([]*GraphUpdate, 0, len(events)*2)
 	totalEdges := 0
+
+	// Include structural edges from Phase 1 (CHANGED, EMITTED_EVENT edges)
+	// These were created by BuildResourceNodes but not applied by applyBatchedNodeUpdates
+	for _, update := range nodeUpdates {
+		if len(update.Edges) > 0 {
+			totalEdges += len(update.Edges)
+			edgeUpdates = append(edgeUpdates, update)
+		}
+	}
+
+	// Extract relationship edges (OWNS, SELECTS, etc.)
 	for _, event := range events {
 		update, err := p.builder.BuildRelationshipEdges(ctx, event)
 		if err != nil {
@@ -209,19 +241,28 @@ func (p *pipeline) ProcessBatch(ctx context.Context, events []models.Event) erro
 		edgeUpdates = append(edgeUpdates, update)
 	}
 
-	// Apply all edge updates
-	edgesCreated := 0
-	for _, update := range edgeUpdates {
-		if err := p.applyGraphUpdate(ctx, update); err != nil {
-			p.logger.Warn("Failed to apply edge update for event %s: %v", update.SourceEventID, err)
-			atomic.AddInt64(&p.stats.Errors, 1)
-			continue
-		}
-		edgesCreated += len(update.Edges)
+	// Apply all edge updates using batch queries
+	edgesCreated, err := p.applyBatchedEdgeUpdates(ctx, edgeUpdates)
+	if err != nil {
+		p.logger.Warn("Batch edge update failed: %v", err)
 	}
 
 	phase2Duration := time.Since(phase2Start)
-	p.logger.Info("Phase 2 complete: Created %d/%d edges in %v", edgesCreated, totalEdges, phase2Duration)
+	edgesMissing := totalEdges - edgesCreated
+	p.logger.InfoWithFields("Phase 2 complete",
+		logging.Field("total_edges_attempted", totalEdges),
+		logging.Field("edges_created", edgesCreated),
+		logging.Field("edges_missing", edgesMissing),
+		logging.Field("duration_ms", phase2Duration.Milliseconds()))
+
+	// Warn if significant edge creation failure
+	if edgesMissing > 0 && totalEdges > 0 {
+		failureRate := float64(edgesMissing) / float64(totalEdges) * 100
+		if failureRate > 5 { // More than 5% failure rate
+			p.logger.Warn("Significant edge creation failure: %d/%d edges missing (%.1f%%) - nodes may not exist for MATCH queries",
+				edgesMissing, totalEdges, failureRate)
+		}
+	}
 
 	// PHASE 3: Infer causality (existing logic)
 	if p.config.EnableCausality && len(events) > 1 {
@@ -402,8 +443,18 @@ func (p *pipeline) createEdge(ctx context.Context, edge graph.Edge) error {
 		return fmt.Errorf("unsupported edge type: %s", edge.Type)
 	}
 
-	_, err := p.client.ExecuteQuery(ctx, query)
-	return err
+	result, err := p.client.ExecuteQuery(ctx, query)
+	if err != nil {
+		return err
+	}
+
+	// Log warning if edge wasn't created (MATCH failed to find nodes)
+	if result.Stats.RelationshipsCreated == 0 {
+		p.logger.Warn("Edge %s not created (%s -> %s): MATCH may have failed to find nodes (stats: rels=%d, nodes=%d)",
+			edge.Type, edge.FromUID, edge.ToUID, result.Stats.RelationshipsCreated, result.Stats.NodesCreated)
+	}
+
+	return nil
 }
 
 // inferCausality infers causal relationships between events
@@ -456,4 +507,295 @@ func (p *pipeline) updateProcessingRate() {
 	if duration > 0 {
 		p.stats.ProcessingRate = float64(p.stats.EventsProcessed) / duration.Seconds()
 	}
+}
+
+// applyBatchedNodeUpdates applies multiple graph updates using batch queries.
+// This reduces N individual MERGE queries to a small number of batched operations.
+func (p *pipeline) applyBatchedNodeUpdates(ctx context.Context, updates []*GraphUpdate) (nodesCreated int, err error) {
+	// Collect all nodes across updates, separating deletions for special handling
+	var nonDeletedResources []graph.ResourceIdentity
+	var deletedResources []graph.ResourceIdentity
+	var allChangeEvents []graph.ChangeEvent
+	var allK8sEvents []graph.K8sEvent
+
+	for _, update := range updates {
+		for _, resource := range update.ResourceNodes {
+			if resource.Deleted {
+				deletedResources = append(deletedResources, resource)
+			} else {
+				nonDeletedResources = append(nonDeletedResources, resource)
+			}
+		}
+		allChangeEvents = append(allChangeEvents, update.EventNodes...)
+		allK8sEvents = append(allK8sEvents, update.K8sEventNodes...)
+	}
+
+	// Batch upsert non-deleted ResourceIdentity nodes (split into sub-batches if needed)
+	for i := 0; i < len(nonDeletedResources); i += maxBatchSize {
+		end := i + maxBatchSize
+		if end > len(nonDeletedResources) {
+			end = len(nonDeletedResources)
+		}
+		batch := nonDeletedResources[i:end]
+
+		query := graph.BatchUpsertResourceIdentitiesQuery(batch)
+		query.Timeout = batchQueryTimeout
+		result, err := p.client.ExecuteQuery(ctx, query)
+		if err != nil {
+			return nodesCreated, fmt.Errorf("failed to batch upsert resources (batch %d-%d): %w", i, end, err)
+		}
+
+		// Verify batch upsert success: NodesCreated + nodes matched should account for batch size
+		// For MERGE, NodesCreated is new nodes, PropertiesSet > 0 indicates existing nodes were updated
+		if result.Stats.NodesCreated == 0 && result.Stats.PropertiesSet == 0 && len(batch) > 0 {
+			p.logger.Warn("Batch upsert may have failed: expected %d resources, stats show 0 created and 0 props set (batch %d-%d)",
+				len(batch), i, end)
+		}
+
+		nodesCreated += len(batch)
+		atomic.AddInt64(&p.stats.NodesCreated, int64(len(batch)))
+		p.logger.Debug("Batch upserted %d ResourceIdentity nodes (batch %d-%d, stats: %d nodes created, %d props set)",
+			len(batch), i, end, result.Stats.NodesCreated, result.Stats.PropertiesSet)
+	}
+
+	// Handle deletions individually (they have special logic to prevent un-deletion)
+	for _, resource := range deletedResources {
+		query := graph.UpsertResourceIdentityQuery(resource)
+		result, err := p.client.ExecuteQuery(ctx, query)
+		if err != nil {
+			p.logger.Warn("Failed to upsert deleted resource %s: %v", resource.UID, err)
+			continue
+		}
+		nodesCreated++
+		atomic.AddInt64(&p.stats.NodesCreated, 1)
+		p.logger.Debug("Wrote ResourceIdentity node (DELETED): %s/%s deleted=%v deletedAt=%d (stats: %d nodes created, %d props set)",
+			resource.Kind, resource.Name, resource.Deleted, resource.DeletedAt, result.Stats.NodesCreated, result.Stats.PropertiesSet)
+	}
+
+	// Batch create ChangeEvent nodes (split into sub-batches if needed)
+	for i := 0; i < len(allChangeEvents); i += maxBatchSize {
+		end := i + maxBatchSize
+		if end > len(allChangeEvents) {
+			end = len(allChangeEvents)
+		}
+		batch := allChangeEvents[i:end]
+
+		query := graph.BatchCreateChangeEventsQuery(batch)
+		query.Timeout = batchQueryTimeout
+		result, err := p.client.ExecuteQuery(ctx, query)
+		if err != nil {
+			return nodesCreated, fmt.Errorf("failed to batch create change events (batch %d-%d): %w", i, end, err)
+		}
+
+		// Verify batch create success: for CREATE/MERGE, we expect NodesCreated or PropertiesSet > 0
+		if result.Stats.NodesCreated == 0 && result.Stats.PropertiesSet == 0 && len(batch) > 0 {
+			p.logger.Warn("Batch create ChangeEvents may have failed: expected %d events, stats show 0 created and 0 props set (batch %d-%d)",
+				len(batch), i, end)
+		}
+
+		nodesCreated += len(batch)
+		atomic.AddInt64(&p.stats.NodesCreated, int64(len(batch)))
+		p.logger.Debug("Batch created %d ChangeEvent nodes (batch %d-%d, stats: %d nodes created, %d props set)",
+			len(batch), i, end, result.Stats.NodesCreated, result.Stats.PropertiesSet)
+	}
+
+	// Batch create K8sEvent nodes (split into sub-batches if needed)
+	for i := 0; i < len(allK8sEvents); i += maxBatchSize {
+		end := i + maxBatchSize
+		if end > len(allK8sEvents) {
+			end = len(allK8sEvents)
+		}
+		batch := allK8sEvents[i:end]
+
+		query := graph.BatchCreateK8sEventsQuery(batch)
+		query.Timeout = batchQueryTimeout
+		result, err := p.client.ExecuteQuery(ctx, query)
+		if err != nil {
+			return nodesCreated, fmt.Errorf("failed to batch create K8s events (batch %d-%d): %w", i, end, err)
+		}
+		nodesCreated += len(batch)
+		atomic.AddInt64(&p.stats.NodesCreated, int64(len(batch)))
+		p.logger.Debug("Batch created %d K8sEvent nodes (batch %d-%d, stats: %d nodes created, %d props set)",
+			len(batch), i, end, result.Stats.NodesCreated, result.Stats.PropertiesSet)
+	}
+
+	return nodesCreated, nil
+}
+
+// applyBatchedEdgeUpdates applies multiple edge updates using batch queries.
+// Edges are grouped by type and then batched together, with sub-batching for large batches.
+func (p *pipeline) applyBatchedEdgeUpdates(ctx context.Context, updates []*GraphUpdate) (edgesCreated int, err error) {
+	// Group edges by type
+	edgesByType := make(map[graph.EdgeType][]graph.Edge)
+	for _, update := range updates {
+		for _, edge := range update.Edges {
+			edgesByType[edge.Type] = append(edgesByType[edge.Type], edge)
+		}
+	}
+
+	// Apply batched edges for each type
+	for edgeType, edges := range edgesByType {
+		if len(edges) == 0 {
+			continue
+		}
+
+		// Process in sub-batches to avoid overwhelming FalkorDB
+		for batchStart := 0; batchStart < len(edges); batchStart += maxBatchSize {
+			batchEnd := batchStart + maxBatchSize
+			if batchEnd > len(edges) {
+				batchEnd = len(edges)
+			}
+			edgeBatch := edges[batchStart:batchEnd]
+
+			batchParams := make([]graph.BatchEdgeParams, len(edgeBatch))
+			for i, edge := range edgeBatch {
+				var props map[string]any
+				if edge.Properties != nil {
+					json.Unmarshal(edge.Properties, &props)
+				}
+				if props == nil {
+					props = make(map[string]any)
+				}
+				batchParams[i] = graph.BatchEdgeParams{
+					FromUID:    edge.FromUID,
+					ToUID:      edge.ToUID,
+					Properties: props,
+				}
+			}
+
+			var query graph.GraphQuery
+			switch edgeType {
+			case graph.EdgeTypeOwns:
+				query = graph.BatchCreateOwnsEdgesQuery(batchParams)
+			case graph.EdgeTypeChanged:
+				query = graph.BatchCreateChangedEdgesQuery(batchParams)
+			case graph.EdgeTypeSelects:
+				query = graph.BatchCreateSelectsEdgesQuery(batchParams)
+			case graph.EdgeTypeScheduledOn:
+				query = graph.BatchCreateScheduledOnEdgesQuery(batchParams)
+			case graph.EdgeTypeMounts:
+				query = graph.BatchCreateMountsEdgesQuery(batchParams)
+			case graph.EdgeTypeReferencesSpec:
+				query = graph.BatchCreateReferencesSpecEdgesQuery(batchParams)
+			case graph.EdgeTypeManages:
+				query = graph.BatchCreateManagesEdgesQuery(batchParams)
+			case graph.EdgeTypeEmittedEvent:
+				query = graph.BatchCreateEmittedEventEdgesQuery(batchParams)
+			case graph.EdgeTypeUsesServiceAccount:
+				query = graph.BatchCreateUsesServiceAccountEdgesQuery(batchParams)
+			case graph.EdgeTypeBindsRole:
+				query = graph.BatchCreateBindsRoleEdgesQuery(batchParams)
+			case graph.EdgeTypeGrantsTo:
+				query = graph.BatchCreateGrantsToEdgesQuery(batchParams)
+			case graph.EdgeTypeCreatesObserved:
+				query = graph.BatchCreateCreatesObservedEdgesQuery(batchParams)
+			default:
+				// Fall back to individual queries for unsupported edge types
+				for _, edge := range edgeBatch {
+					if err := p.createEdge(ctx, edge); err != nil {
+						p.logger.Warn("Failed to create edge %s (%s -> %s): %v",
+							edge.Type, edge.FromUID, edge.ToUID, err)
+						continue
+					}
+					edgesCreated++
+					atomic.AddInt64(&p.stats.EdgesCreated, 1)
+				}
+				continue
+			}
+
+			// Add timeout to batch query
+			query.Timeout = batchQueryTimeout
+
+			result, err := p.client.ExecuteQuery(ctx, query)
+			if err != nil {
+				p.logger.Warn("Failed to batch create %s edges (batch %d-%d): %v", edgeType, batchStart, batchEnd, err)
+				// Fall back to individual queries on batch failure
+				for _, edge := range edgeBatch {
+					if err := p.createEdge(ctx, edge); err != nil {
+						p.logger.Warn("Failed to create edge %s (%s -> %s): %v",
+							edge.Type, edge.FromUID, edge.ToUID, err)
+						continue
+					}
+					edgesCreated++
+					atomic.AddInt64(&p.stats.EdgesCreated, 1)
+				}
+				continue
+			}
+
+			// Use actual FalkorDB stats for edge counts instead of len(edgeBatch)
+			// MATCH-based queries silently fail if source/target nodes don't exist
+			actualEdgesCreated := result.Stats.RelationshipsCreated
+			if actualEdgesCreated < len(edgeBatch) {
+				p.logger.Warn("Batch edge creation partial: expected %d %s edges, created %d (missing %d, batch %d-%d)",
+					len(edgeBatch), edgeType, actualEdgesCreated, len(edgeBatch)-actualEdgesCreated, batchStart, batchEnd)
+			}
+
+			edgesCreated += actualEdgesCreated
+			atomic.AddInt64(&p.stats.EdgesCreated, int64(actualEdgesCreated))
+			p.logger.Debug("Batch created %d %s edges (attempted: %d, batch %d-%d)",
+				actualEdgesCreated, edgeType, len(edgeBatch), batchStart, batchEnd)
+		}
+	}
+
+	return edgesCreated, nil
+}
+
+// bootstrapLabelIndex populates the label index from existing Pod data in the graph.
+// This is called during pipeline startup to enable fast selector lookups immediately.
+func (p *pipeline) bootstrapLabelIndex(ctx context.Context) error {
+	labelIndex := p.builder.GetLabelIndex()
+	if labelIndex == nil {
+		p.logger.Debug("Label index not enabled, skipping bootstrap")
+		return nil
+	}
+
+	p.logger.Info("Bootstrapping label index from graph...")
+
+	// Query all non-deleted Pods from the graph
+	query := graph.GraphQuery{
+		Query: `
+			MATCH (p:ResourceIdentity {kind: 'Pod'})
+			WHERE NOT p.deleted
+			RETURN p.namespace, p.uid, p.labels
+			LIMIT 50000
+		`,
+		Timeout: 30000, // 30 second timeout
+	}
+
+	result, err := p.client.ExecuteQuery(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to query pods for label index: %w", err)
+	}
+
+	count := 0
+	for _, row := range result.Rows {
+		if len(row) < 3 {
+			continue
+		}
+
+		namespace, _ := row[0].(string)
+		uid, _ := row[1].(string)
+		labelsJSON, _ := row[2].(string)
+
+		if namespace == "" || uid == "" {
+			continue
+		}
+
+		var labels map[string]string
+		if labelsJSON != "" && labelsJSON != "{}" {
+			if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
+				p.logger.Debug("Failed to parse labels for Pod %s: %v", uid, err)
+				continue
+			}
+		}
+
+		labelIndex.Update(namespace, "Pod", uid, labels)
+		count++
+	}
+
+	hits, misses, namespaces, resources := labelIndex.GetStats()
+	p.logger.Info("Label index bootstrapped: %d Pods indexed across %d namespaces (hits=%d, misses=%d, total=%d)",
+		count, namespaces, hits, misses, resources)
+
+	return nil
 }

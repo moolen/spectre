@@ -496,6 +496,18 @@ func (c *falkorClient) InitializeSchema(ctx context.Context) error {
 		"CREATE INDEX FOR (n:K8sEvent) ON (n.timestamp)",
 		// Dashboard indexes
 		"CREATE INDEX FOR (n:Dashboard) ON (n.uid)",
+		// SignalAnchor indexes (Observatory)
+		// Primary index on uid for MERGE - format: metric_name:workload_namespace:workload_name
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.uid)",
+		// Additional indexes for query performance
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.metric_name)",
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.workload_namespace)",
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.workload_name)",
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.expires_at)",
+		"CREATE INDEX FOR (n:SignalAnchor) ON (n.source_provider)",
+		// SignalBaseline indexes (Observatory)
+		"CREATE INDEX FOR (n:SignalBaseline) ON (n.metric_name)",
+		"CREATE INDEX FOR (n:SignalBaseline) ON (n.expires_at)",
 	}
 
 	for _, indexQuery := range indexes {
@@ -645,9 +657,13 @@ func buildPropertiesString(props map[string]interface{}) string {
 	return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 }
 
-// escapeCypherString escapes single quotes in Cypher strings
+// escapeCypherString escapes a string for safe inclusion in a Cypher query.
+// This prevents injection attacks when building inline literals.
 func escapeCypherString(s string) string {
-	return strings.ReplaceAll(s, "'", "\\'")
+	// Escape backslashes first, then quotes
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
+	return s
 }
 
 // replaceCypherParameters replaces $param placeholders with actual values

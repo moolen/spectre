@@ -1,0 +1,12 @@
+{
+  "top_hotspots": [
+    {
+      "namespace": "prod",
+      "score": 1,
+      "confidence": 0.7,
+      "signal_count": 5
+    }
+  ],
+  "total_anomalous_signals": 5,
+  "timestamp": "NORMALIZED"
+}

@@ -1,0 +1,149 @@
+{
+  "signal_anchors": [
+    {
+      "metric_name": "http_requests_total",
+      "role": "Traffic",
+      "confidence": 0.9,
+      "quality_score": 0.85,
+      "workload_namespace": "prod",
+      "workload_name": "nginx",
+      "dashboard_uid": "nginx-dashboard",
+      "panel_id": 1
+    },
+    {
+      "metric_name": "http_errors_total",
+      "role": "Errors",
+      "confidence": 0.85,
+      "quality_score": 0.9,
+      "workload_namespace": "prod",
+      "workload_name": "api-server",
+      "dashboard_uid": "api-dashboard",
+      "panel_id": 2
+    },
+    {
+      "metric_name": "http_request_duration_seconds",
+      "role": "Latency",
+      "confidence": 0.8,
+      "quality_score": 0.85,
+      "workload_namespace": "prod",
+      "workload_name": "api-server",
+      "dashboard_uid": "api-dashboard",
+      "panel_id": 3
+    },
+    {
+      "metric_name": "container_cpu_usage_seconds_total",
+      "role": "Saturation",
+      "confidence": 0.75,
+      "quality_score": 0.7,
+      "workload_namespace": "prod",
+      "workload_name": "nginx",
+      "dashboard_uid": "infra-dashboard",
+      "panel_id": 4
+    },
+    {
+      "metric_name": "up",
+      "role": "Availability",
+      "confidence": 0.95,
+      "quality_score": 0.8,
+      "workload_namespace": "prod",
+      "workload_name": "api-server",
+      "dashboard_uid": "api-dashboard",
+      "panel_id": 5
+    }
+  ],
+  "signal_baselines": [
+    {
+      "metric_name": "http_requests_total",
+      "workload_namespace": "prod",
+      "workload_name": "nginx",
+      "mean": 1000,
+      "std_dev": 100,
+      "min": 800,
+      "max": 1200,
+      "p50": 1000,
+      "p90": 1100,
+      "p99": 1150,
+      "sample_count": 168
+    },
+    {
+      "metric_name": "http_errors_total",
+      "workload_namespace": "prod",
+      "workload_name": "api-server",
+      "mean": 5,
+      "std_dev": 2,
+      "min": 1,
+      "max": 15,
+      "p50": 5,
+      "p90": 8,
+      "p99": 12,
+      "sample_count": 168
+    },
+    {
+      "metric_name": "http_request_duration_seconds",
+      "workload_namespace": "prod",
+      "workload_name": "api-server",
+      "mean": 0.05,
+      "std_dev": 0.02,
+      "min": 0.01,
+      "max": 0.15,
+      "p50": 0.05,
+      "p90": 0.08,
+      "p99": 0.12,
+      "sample_count": 168
+    },
+    {
+      "metric_name": "container_cpu_usage_seconds_total",
+      "workload_namespace": "prod",
+      "workload_name": "nginx",
+      "mean": 0.3,
+      "std_dev": 0.1,
+      "min": 0.1,
+      "max": 0.6,
+      "p50": 0.3,
+      "p90": 0.45,
+      "p99": 0.55,
+      "sample_count": 168
+    },
+    {
+      "metric_name": "up",
+      "workload_namespace": "prod",
+      "workload_name": "api-server",
+      "mean": 1.0,
+      "std_dev": 0.0,
+      "min": 1.0,
+      "max": 1.0,
+      "p50": 1.0,
+      "p90": 1.0,
+      "p99": 1.0,
+      "sample_count": 168
+    }
+  ],
+  "dashboards": [
+    {
+      "uid": "nginx-dashboard",
+      "title": "Nginx Overview",
+      "quality_score": 0.85,
+      "folder_title": "Infrastructure"
+    },
+    {
+      "uid": "api-dashboard",
+      "title": "API Server Metrics",
+      "quality_score": 0.9,
+      "folder_title": "Services"
+    },
+    {
+      "uid": "infra-dashboard",
+      "title": "Infrastructure Resources",
+      "quality_score": 0.7,
+      "folder_title": "Infrastructure"
+    }
+  ],
+  "current_values": {
+    "http_requests_total|prod|nginx": 1500,
+    "http_errors_total|prod|api-server": 50,
+    "http_request_duration_seconds|prod|api-server": 0.25,
+    "container_cpu_usage_seconds_total|prod|nginx": 0.35,
+    "up|prod|api-server": 1.0
+  },
+  "alert_states": {}
+}

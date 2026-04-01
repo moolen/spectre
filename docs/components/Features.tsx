@@ -93,7 +93,7 @@ const Features = () => {
                 </div>
 
                 {/* HOW IT WORKS */}
-                <div className="mb-32">
+                <div id="how-it-works" className="mb-32">
                     <div className="flex items-center gap-3 mb-6">
                         <Settings className="w-8 h-8 text-brand-primary" />
                         <span className="text-sm font-semibold text-brand-primary uppercase tracking-wider">How It Works</span>
@@ -125,7 +125,7 @@ const Features = () => {
                 </div>
 
                 {/* INCIDENT RESPONSE */}
-                <div>
+                <div id="incident-response">
                     <div className="flex items-center gap-3 mb-6">
                         <Ambulance className="w-8 h-8 text-brand-primary" />
                         <span className="text-sm font-semibold text-brand-primary uppercase tracking-wider">Incident Response</span>

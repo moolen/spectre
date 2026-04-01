@@ -35,18 +35,34 @@ type graphBuilder struct {
 	// batchCache stores events from the current batch for change detection
 	// Key: resource UID, Value: list of events for that resource (ordered by timestamp)
 	batchCache map[string][]models.Event
+	// stateCache provides LRU caching of recent resource states to avoid
+	// database queries during change detection for UPDATE events
+	stateCache *StateCache
+	// labelIndex provides fast in-memory lookup of Pods by label selector
+	// This eliminates graph queries when processing Service/Deployment selector edges
+	labelIndex *LabelIndex
 }
 
 // NewGraphBuilder creates a new graph builder
 func NewGraphBuilder() GraphBuilder {
+	// Create state cache for change detection optimization
+	stateCache, _ := NewStateCache(DefaultStateCacheSize)
+
 	return &graphBuilder{
 		logger:     logging.GetLogger("graph.sync.builder"),
 		batchCache: make(map[string][]models.Event),
+		stateCache: stateCache,
+		labelIndex: NewLabelIndex(),
 	}
 }
 
 // NewGraphBuilderWithClient creates a new graph builder with client access
 func NewGraphBuilderWithClient(client graph.Client) GraphBuilder {
+	return NewGraphBuilderWithClientAndCacheSize(client, DefaultStateCacheSize)
+}
+
+// NewGraphBuilderWithClientAndCacheSize creates a new graph builder with custom cache size
+func NewGraphBuilderWithClientAndCacheSize(client graph.Client, stateCacheSize int) GraphBuilder {
 	// Create resource lookup adapter
 	lookup := extractors.NewGraphClientLookup(client)
 
@@ -79,11 +95,23 @@ func NewGraphBuilderWithClient(client graph.Client) GraphBuilder {
 	registry.Register(certmanager.NewCertificateExtractor())        // Certificate→Issuer/ClusterIssuer, Certificate→Secret
 	registry.Register(externalsecrets.NewExternalSecretExtractor()) // ExternalSecret→SecretStore/ClusterSecretStore, ExternalSecret→Secret
 
+	// Create state cache for change detection optimization
+	cacheSize := stateCacheSize
+	if cacheSize <= 0 {
+		cacheSize = DefaultStateCacheSize
+	}
+	stateCache, err := NewStateCache(cacheSize)
+	if err != nil {
+		logging.GetLogger("graph.sync.builder").Warn("Failed to create state cache: %v (change detection will use database queries)", err)
+	}
+
 	return &graphBuilder{
 		logger:            logging.GetLogger("graph.sync.builder"),
 		client:            client,
 		extractorRegistry: registry,
 		batchCache:        make(map[string][]models.Event),
+		stateCache:        stateCache,
+		labelIndex:        NewLabelIndex(),
 	}
 }
 
@@ -100,6 +128,30 @@ func (b *graphBuilder) SetBatchCache(events []models.Event) {
 // ClearBatchCache clears the batch cache after processing is complete
 func (b *graphBuilder) ClearBatchCache() {
 	b.batchCache = make(map[string][]models.Event)
+}
+
+// GetStateCacheStats returns state cache statistics (hits, misses, size)
+// Returns (0, 0, 0) if state cache is not enabled
+func (b *graphBuilder) GetStateCacheStats() (hits, misses int64, size int) {
+	if b.stateCache == nil {
+		return 0, 0, 0
+	}
+	return b.stateCache.GetStats()
+}
+
+// GetLabelIndex returns the label index for Pod selector lookups
+// Returns nil if label index is not enabled
+func (b *graphBuilder) GetLabelIndex() *LabelIndex {
+	return b.labelIndex
+}
+
+// GetLabelIndexStats returns label index statistics (hits, misses, namespaces, resources)
+// Returns (0, 0, 0, 0) if label index is not enabled
+func (b *graphBuilder) GetLabelIndexStats() (hits, misses int64, namespaces, resources int) {
+	if b.labelIndex == nil {
+		return 0, 0, 0, 0
+	}
+	return b.labelIndex.GetStats()
 }
 
 // BuildResourceNodes creates just the resource and event nodes (Phase 1 of two-phase processing)
@@ -297,6 +349,18 @@ func (b *graphBuilder) buildResourceIdentityNode(event models.Event) graph.Resou
 		}(),
 	}
 
+	// Update label index for Pod resources (enables fast selector lookups)
+	if b.labelIndex != nil && event.Resource.Kind == kindPod {
+		if deleted {
+			b.labelIndex.Remove(event.Resource.Namespace, kindPod, event.Resource.UID)
+			b.logger.Debug("Removed Pod from label index: %s/%s", event.Resource.Namespace, event.Resource.Name)
+		} else {
+			b.labelIndex.Update(event.Resource.Namespace, kindPod, event.Resource.UID, labels)
+			b.logger.Debug("Updated label index for Pod: %s/%s with %d labels",
+				event.Resource.Namespace, event.Resource.Name, len(labels))
+		}
+	}
+
 	if deleted {
 		b.logger.Debug("Building ResourceIdentity for DELETE event: %s/%s uid=%s",
 			resource.Kind, resource.Name, resource.UID)
@@ -449,6 +513,16 @@ func (b *graphBuilder) buildChangeEventNode(event models.Event) graph.ChangeEven
 		// Unknown event type, keep defaults
 	}
 
+	// Update state cache for future change detection
+	// Only cache CREATE and UPDATE events (DELETE events remove state)
+	if b.stateCache != nil {
+		if event.Type == models.EventTypeDelete {
+			b.stateCache.Remove(event.Resource.UID)
+		} else if len(event.Data) > 0 {
+			b.stateCache.Put(event.Resource.UID, event.Data, event.Timestamp, string(event.Type))
+		}
+	}
+
 	return graph.ChangeEvent{
 		ID:              event.ID,
 		Timestamp:       event.Timestamp,
@@ -474,22 +548,37 @@ func (b *graphBuilder) detectChanges(event models.Event, currentData *analyzer.R
 		return configChanged, statusChanged, replicasChanged
 	}
 
-	// First, check the batch cache for previous events from the same batch
 	var previousEventData []byte
-	if cachedEvents, exists := b.batchCache[event.Resource.UID]; exists && len(cachedEvents) > 0 {
-		// Find the most recent event before the current one
-		for i := len(cachedEvents) - 1; i >= 0; i-- {
-			cached := cachedEvents[i]
-			if cached.Timestamp < event.Timestamp && (cached.Type == models.EventTypeCreate || cached.Type == models.EventTypeUpdate) {
+
+	// PRIORITY 1: Check state cache (fastest - no query needed)
+	if b.stateCache != nil {
+		if cached := b.stateCache.Get(event.Resource.UID); cached != nil {
+			// Only use cache if it's older than current event
+			if cached.Timestamp < event.Timestamp && (cached.EventType == "CREATE" || cached.EventType == "UPDATE") {
 				previousEventData = cached.Data
-				b.logger.Debug("Found previous event in batch cache: resourceUID=%s, cachedTimestamp=%d, currentTimestamp=%d",
+				b.logger.Debug("State cache hit for resource %s (cached timestamp=%d, event timestamp=%d)",
 					event.Resource.UID, cached.Timestamp, event.Timestamp)
-				break
 			}
 		}
 	}
 
-	// If not found in cache, query the database
+	// PRIORITY 2: Check the batch cache for previous events from the same batch
+	if previousEventData == nil {
+		if cachedEvents, exists := b.batchCache[event.Resource.UID]; exists && len(cachedEvents) > 0 {
+			// Find the most recent event before the current one
+			for i := len(cachedEvents) - 1; i >= 0; i-- {
+				cached := cachedEvents[i]
+				if cached.Timestamp < event.Timestamp && (cached.Type == models.EventTypeCreate || cached.Type == models.EventTypeUpdate) {
+					previousEventData = cached.Data
+					b.logger.Debug("Found previous event in batch cache: resourceUID=%s, cachedTimestamp=%d, currentTimestamp=%d",
+						event.Resource.UID, cached.Timestamp, event.Timestamp)
+					break
+				}
+			}
+		}
+	}
+
+	// PRIORITY 3: Query the database (fallback when cache misses)
 	if previousEventData == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -943,11 +1032,46 @@ func (b *graphBuilder) extractSelectorRelationships(selectorUID, kind string, re
 	return edges
 }
 
-// findPodsMatchingLabels queries the graph for Pods with labels matching the selector.
-// It queries all Pods in the namespace and filters by label selector in-memory.
-// In-memory filtering is used because Cypher JSON substring matching is unreliable
-// with special characters in label keys (e.g., 'app.kubernetes.io/name').
+// findPodsMatchingLabels finds Pods with labels matching the selector.
+// It first checks the in-memory label index (O(1)), falling back to graph queries
+// only if the index doesn't have data for the namespace (e.g., during bootstrap).
 func (b *graphBuilder) findPodsMatchingLabels(ctx context.Context, selector map[string]string, namespace string) ([]string, error) {
+	// PRIORITY 1: Use label index if available (fastest - no query needed)
+	if b.labelIndex != nil && namespace != "" {
+		// Check if we have any data for this namespace in the index
+		// Even an empty result is valid - it means no matching pods
+		uids := b.labelIndex.FindBySelector(namespace, kindPod, selector)
+		if uids != nil {
+			b.logger.Debug("Label index hit: found %d Pods matching selector in namespace %s", len(uids), namespace)
+			return uids, nil
+		}
+		// If FindBySelector returns nil, it could mean:
+		// 1. No pods with those labels exist (valid)
+		// 2. Index is empty for this namespace (need fallback)
+		// Check if we have any pods indexed for this namespace
+		if b.labelIndex.Contains(namespace, kindPod, "") == false {
+			// No pods in index for this namespace - need to check if index is populated
+			// If we have data for other namespaces, the index is working but this ns is empty
+			hits, _, _, totalResources := b.labelIndex.GetStats()
+			if totalResources > 0 || hits > 0 {
+				// Index is populated, this namespace just has no matching pods
+				b.logger.Debug("Label index: no matching Pods in namespace %s for selector %v", namespace, selector)
+				return []string{}, nil
+			}
+			// Index is empty - fall through to graph query
+			b.logger.Debug("Label index empty, falling back to graph query for namespace %s", namespace)
+		} else {
+			// We have pods in this namespace but none match - return empty
+			b.logger.Debug("Label index: no matching Pods in namespace %s for selector %v", namespace, selector)
+			return []string{}, nil
+		}
+	}
+
+	// PRIORITY 2: Query the graph database (fallback for bootstrap or cluster-scoped queries)
+	if b.client == nil {
+		return nil, fmt.Errorf("no graph client available for Pod lookup")
+	}
+
 	var query graph.GraphQuery
 
 	if namespace != "" {
@@ -959,7 +1083,7 @@ func (b *graphBuilder) findPodsMatchingLabels(ctx context.Context, selector map[
 				LIMIT 100
 			`,
 			Parameters: map[string]interface{}{
-				"kind":      "Pod",
+				"kind":      kindPod,
 				"namespace": namespace,
 			},
 		}
@@ -972,7 +1096,7 @@ func (b *graphBuilder) findPodsMatchingLabels(ctx context.Context, selector map[
 				LIMIT 100
 			`,
 			Parameters: map[string]interface{}{
-				"kind": "Pod",
+				"kind": kindPod,
 			},
 		}
 	}
@@ -1006,7 +1130,7 @@ func (b *graphBuilder) findPodsMatchingLabels(ctx context.Context, selector map[
 		}
 	}
 
-	b.logger.Debug("Found %d Pod matches in namespace %s for selector %v", len(podUIDs), namespace, selector)
+	b.logger.Debug("Graph query found %d Pod matches in namespace %s for selector %v", len(podUIDs), namespace, selector)
 
 	return podUIDs, nil
 }

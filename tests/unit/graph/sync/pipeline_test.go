@@ -3,6 +3,7 @@ package graphsync_test
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -62,28 +63,60 @@ func (m *mockGraphClient) ExecuteQuery(ctx context.Context, query graph.GraphQue
 	}
 
 	// Track nodes from UPSERT/CREATE queries
-	// Extract UID from query parameters
+	// First try query parameters (non-batch mode)
 	if uid, ok := query.Parameters["uid"].(string); ok {
 		propsJSON, _ := json.Marshal(query.Parameters)
 		m.nodes[uid] = &graph.Node{
-			Type:       graph.NodeTypeResourceIdentity, // Default type
+			Type:       graph.NodeTypeResourceIdentity,
 			Properties: propsJSON,
 		}
 	}
-	// Extract ID from ChangeEvent/K8sEvent queries
 	if id, ok := query.Parameters["id"].(string); ok {
 		propsJSON, _ := json.Marshal(query.Parameters)
 		m.nodes[id] = &graph.Node{
-			Type:       graph.NodeTypeChangeEvent, // Default type
+			Type:       graph.NodeTypeChangeEvent,
 			Properties: propsJSON,
+		}
+	}
+
+	// For batch queries with inline Cypher literals, extract UIDs from query string
+	// Match patterns like: uid: 'abc-123' or id: 'event-1'
+	if query.Parameters == nil || len(query.Parameters) == 0 {
+		// Extract ResourceIdentity UIDs from batch queries
+		uidPattern := regexp.MustCompile(`uid:\s*'([^']+)'`)
+		uidMatches := uidPattern.FindAllStringSubmatch(queryStr, -1)
+		for _, match := range uidMatches {
+			if len(match) > 1 {
+				uid := match[1]
+				if _, exists := m.nodes[uid]; !exists {
+					m.nodes[uid] = &graph.Node{
+						Type:       graph.NodeTypeResourceIdentity,
+						Properties: []byte(`{}`),
+					}
+				}
+			}
+		}
+
+		// Extract ChangeEvent IDs from batch queries
+		idPattern := regexp.MustCompile(`id:\s*'([^']+)'`)
+		idMatches := idPattern.FindAllStringSubmatch(queryStr, -1)
+		for _, match := range idMatches {
+			if len(match) > 1 {
+				id := match[1]
+				if _, exists := m.nodes[id]; !exists {
+					m.nodes[id] = &graph.Node{
+						Type:       graph.NodeTypeChangeEvent,
+						Properties: []byte(`{}`),
+					}
+				}
+			}
 		}
 	}
 
 	// Track edges from CREATE queries with fromUID and toUID
 	if fromUID, okFrom := query.Parameters["fromUID"].(string); okFrom {
 		if toUID, okTo := query.Parameters["toUID"].(string); okTo {
-			// Determine edge type from query
-			edgeType := graph.EdgeTypeOwns // Default
+			edgeType := graph.EdgeTypeOwns
 			if query.Parameters["subjectKind"] != nil {
 				edgeType = graph.EdgeTypeGrantsTo
 			}

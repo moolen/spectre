@@ -49,7 +49,7 @@ func TestAnomalyHandler_FluxHelmRelease(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewAnomalyHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewAnomalyHandler(harness.GetGraphService(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/anomalies", nil)
@@ -118,7 +118,7 @@ func TestAnomalyHandler_FluxKustomization(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewAnomalyHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewAnomalyHandler(harness.GetGraphService(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/anomalies", nil)
@@ -187,7 +187,7 @@ func TestAnomalyHandler_StatefulSet(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewAnomalyHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewAnomalyHandler(harness.GetGraphService(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/anomalies", nil)
@@ -256,7 +256,7 @@ func TestAnomalyHandler_NetworkPolicy(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewAnomalyHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewAnomalyHandler(harness.GetGraphService(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/anomalies", nil)
@@ -325,7 +325,7 @@ func TestAnomalyHandler_Ingress(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewAnomalyHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewAnomalyHandler(harness.GetGraphService(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/anomalies", nil)

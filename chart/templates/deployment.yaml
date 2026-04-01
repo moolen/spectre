@@ -167,6 +167,27 @@ spec:
         securityContext:
           {{- toYaml . | nindent 12 }}
         {{- end }}
+        {{- if .Values.graph.falkordb.persistence.enabled }}
+        command:
+        - redis-server
+        args:
+        - --dir
+        - {{ .Values.graph.falkordb.persistence.mountPath }}
+        - --dbfilename
+        - dump.rdb
+        - --loadmodule
+        - /var/lib/falkordb/bin/falkordb.so
+        {{- if .Values.graph.falkordb.persistence.aof.enabled }}
+        - --appendonly
+        - "yes"
+        - --appendfsync
+        - {{ .Values.graph.falkordb.persistence.aof.fsync | quote }}
+        {{- end }}
+        {{- if .Values.graph.falkordb.persistence.rdb.save }}
+        - --save
+        - {{ .Values.graph.falkordb.persistence.rdb.save | quote }}
+        {{- end }}
+        {{- end }}
         ports:
         - name: redis
           containerPort: {{ .Values.graph.falkordb.port }}
@@ -187,6 +208,11 @@ spec:
         readinessProbe:
           {{- omit .Values.graph.falkordb.readinessProbe "enabled" | toYaml | nindent 10 }}
         {{- end }}
+        # Graceful shutdown: SHUTDOWN SAVE persists data before exit
+        lifecycle:
+          preStop:
+            exec:
+              command: ["redis-cli", "SHUTDOWN", "SAVE"]
         resources:
           {{- toYaml .Values.graph.falkordb.resources | nindent 12 }}
       {{- end }}

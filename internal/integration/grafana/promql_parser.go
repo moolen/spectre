@@ -9,6 +9,7 @@ import (
 
 // QueryExtraction holds semantic components extracted from a PromQL query.
 // Used for building Dashboard→Query→Metric relationships in the graph.
+// Implements observatory.QueryContext interface for signal classification.
 type QueryExtraction struct {
 	// MetricNames contains all metric names extracted from VectorSelector nodes.
 	// Multiple metrics may appear in complex queries (e.g., binary operations).
@@ -25,6 +26,16 @@ type QueryExtraction struct {
 	// HasVariables indicates if the query contains Grafana template variable syntax.
 	// Examples: $var, ${var}, ${var:csv}, [[var]]
 	HasVariables bool
+}
+
+// GetMetricNames implements observatory.QueryContext.
+func (q *QueryExtraction) GetMetricNames() []string {
+	return q.MetricNames
+}
+
+// GetAggregations implements observatory.QueryContext.
+func (q *QueryExtraction) GetAggregations() []string {
+	return q.Aggregations
 }
 
 // variablePatterns define Grafana template variable syntax patterns.

@@ -365,6 +365,9 @@ func (w *Watcher) resolveGVR(gvk schema.GroupVersionKind) (schema.GroupVersionRe
 
 // watchLoop performs a raw List/Watch loop for a resource without caching
 func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource, namespace, kind string, namespaced bool) error {
+	w.logger.Debug("Starting watchLoop for kind=%s gvr=%s namespace=%q namespaced=%v",
+		kind, gvr.String(), namespace, namespaced)
+
 	// Get the resource interface
 	// For namespaced resources watching all namespaces, use empty namespace
 	// For cluster-scoped resources, namespace is already empty
@@ -443,6 +446,9 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 			// Set GVK on the unstructured object (required for extractors to match resources)
 			items[i].SetGroupVersionKind(gvk)
 
+			w.logger.Debug("Processing initial List item: kind=%s name=%s namespace=%s",
+				gvk.Kind, items[i].GetName(), items[i].GetNamespace())
+
 			if err := w.eventHandler.OnAdd(&items[i]); err != nil {
 				w.logger.Error("Error handling Add event: %v", err)
 			}
@@ -478,6 +484,9 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 
 				// Set GVK on the unstructured object (required for extractors to match resources)
 				items[i].SetGroupVersionKind(gvk)
+
+				w.logger.Debug("Processing paginated List item: kind=%s name=%s namespace=%s",
+					gvk.Kind, items[i].GetName(), items[i].GetNamespace())
 
 				if err := w.eventHandler.OnAdd(&items[i]); err != nil {
 					w.logger.Error("Error handling Add event: %v", err)

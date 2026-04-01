@@ -1,5 +1,33 @@
 # Project Milestones: Spectre MCP Plugin System
 
+## v1.5 Observatory (Shipped: 2026-01-30)
+
+**Delivered:** Signal intelligence layer that extracts "what matters" from dashboards—role classification, quality scoring, rolling baselines, anomaly detection, and 8 MCP tools for AI-driven incident investigation through progressive disclosure (Orient → Narrow → Investigate → Hypothesize → Verify).
+
+**Phases completed:** 24-26 (17 plans total)
+
+**Key accomplishments:**
+
+- Signal anchors with 7-role taxonomy (Availability, Latency, Errors, Traffic, Saturation, Churn, Novelty) and 5-layer confidence classification (0.95 → 0)
+- Dashboard quality scoring (freshness, alerting, ownership, completeness) with alert boost incentive
+- Rolling baseline statistics using gonum/stat (median, P50/P90/P99, stddev) with Welford's online algorithm
+- Hybrid anomaly detection (z-score + percentile) with sigmoid normalization, alert override, hierarchical MAX aggregation
+- 8 Observatory MCP tools: status, changes, scope, signals, signal_detail, compare, explain, evidence
+- K8s graph integration for root cause analysis with 2-hop upstream dependency traversal
+
+**Stats:**
+
+- 95 files changed, ~26.7k lines added
+- 3 phases, 17 plans, 61 requirements
+- 1 day from start to ship (2026-01-29 → 2026-01-30)
+- Total: 14 Grafana MCP tools (3 metrics + 3 alerts + 8 observatory)
+
+**Git range:** `0420177` → `0673412`
+
+**What's next:** Cross-signal correlation (alert↔log, alert↔metric anomaly), advanced classification (ML-based), or additional integrations (Datadog, PagerDuty)
+
+---
+
 ## v1.4 Grafana Alerts Integration (Shipped: 2026-01-23)
 
 **Delivered:** Alert rule ingestion from Grafana with state tracking, historical analysis, and progressive disclosure MCP tools—overview with flappiness indicators, aggregated with 1h state timelines, details with full 7-day history.

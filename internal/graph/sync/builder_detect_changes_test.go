@@ -282,6 +282,306 @@ func Test_DetectChanges_NoPreviousEvent(t *testing.T) {
 	assert.False(t, replicasChanged)
 }
 
+// =============================================================================
+// REGRESSION TESTS: Change Detection with Caching
+// These tests verify that the state cache and batch cache optimizations
+// correctly detect changes without breaking existing functionality.
+// =============================================================================
+
+// Test_DetectChanges_StateCacheHit tests change detection using state cache
+func Test_DetectChanges_StateCacheHit(t *testing.T) {
+	// Previous resource in cache
+	previousResource := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"generation": float64(1),
+			"uid":        "test-uid",
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(2),
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"image": "nginx:1.19",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Current resource with changed spec
+	currentResource := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"generation": float64(2),
+			"uid":        "test-uid",
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(3), // Changed!
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"image": "nginx:1.20", // Changed!
+						},
+					},
+				},
+			},
+		},
+		"status": map[string]interface{}{
+			"readyReplicas": float64(2),
+		},
+	}
+
+	previousJSON, _ := json.Marshal(previousResource)
+	currentJSON, _ := json.Marshal(currentResource)
+	currentData, err := analyzer.ParseResourceData(currentJSON)
+	assert.NoError(t, err)
+
+	// Create builder with mock client that returns empty result (forcing cache use)
+	mockClient := &mockGraphClientForDetectChanges{
+		queryResult: &graph.QueryResult{Rows: [][]interface{}{}},
+	}
+	builder := NewGraphBuilderWithClient(mockClient).(*graphBuilder)
+
+	// Pre-populate state cache with previous state
+	builder.stateCache.Put("test-uid", previousJSON, 1000, "CREATE")
+
+	event := models.Event{
+		Resource:  models.ResourceMetadata{UID: "test-uid"},
+		Data:      currentJSON,
+		Timestamp: 2000, // Later than cached timestamp
+	}
+
+	configChanged, statusChanged, replicasChanged := builder.detectChanges(event, currentData)
+
+	// Verify cache was used
+	hits, misses, _ := builder.stateCache.GetStats()
+	assert.Equal(t, int64(1), hits, "State cache should have 1 hit")
+	assert.Equal(t, int64(0), misses, "State cache should have 0 misses")
+
+	// Verify change detection works correctly
+	assert.True(t, configChanged, "configChanged should be true (spec changed)")
+	assert.True(t, statusChanged, "statusChanged should be true (status exists)")
+	// Note: replicasChanged detection is not fully implemented in detectChanges
+	// (see builder.go line ~813), so we just verify it doesn't error
+	_ = replicasChanged
+}
+
+// Test_DetectChanges_BatchCacheHit tests change detection using batch cache
+func Test_DetectChanges_BatchCacheHit(t *testing.T) {
+	// Previous and current events in same batch
+	previousResource := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"generation": float64(1),
+			"uid":        "batch-test-uid",
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(1),
+		},
+	}
+
+	currentResource := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"generation": float64(2),
+			"uid":        "batch-test-uid",
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(5), // Changed!
+		},
+	}
+
+	previousJSON, _ := json.Marshal(previousResource)
+	currentJSON, _ := json.Marshal(currentResource)
+	currentData, err := analyzer.ParseResourceData(currentJSON)
+	assert.NoError(t, err)
+
+	// Create builder with mock client
+	mockClient := &mockGraphClientForDetectChanges{
+		queryResult: &graph.QueryResult{Rows: [][]interface{}{}},
+	}
+	builder := NewGraphBuilderWithClient(mockClient).(*graphBuilder)
+
+	// Set up batch cache with previous event
+	previousEvent := models.Event{
+		Resource:  models.ResourceMetadata{UID: "batch-test-uid"},
+		Data:      previousJSON,
+		Timestamp: 1000,
+		Type:      models.EventTypeCreate,
+	}
+	builder.SetBatchCache([]models.Event{previousEvent})
+
+	// Current event should find previous in batch cache
+	currentEvent := models.Event{
+		Resource:  models.ResourceMetadata{UID: "batch-test-uid"},
+		Data:      currentJSON,
+		Timestamp: 2000,
+	}
+
+	configChanged, statusChanged, replicasChanged := builder.detectChanges(currentEvent, currentData)
+
+	assert.True(t, configChanged, "configChanged should be true (spec.replicas changed)")
+	assert.False(t, statusChanged, "statusChanged should be false (no status)")
+	// Note: replicasChanged detection is not fully implemented
+	_ = replicasChanged
+
+	builder.ClearBatchCache()
+}
+
+// Test_DetectChanges_CacheMissQueryFallback tests that detection falls back to DB query
+func Test_DetectChanges_CacheMissQueryFallback(t *testing.T) {
+	// Previous resource from database
+	previousResource := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"generation": float64(5),
+			"uid":        "fallback-test-uid",
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(3),
+		},
+	}
+
+	// Current resource (same spec, different generation for some reason)
+	currentResource := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"generation": float64(5),
+			"uid":        "fallback-test-uid",
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(3),
+		},
+	}
+
+	currentJSON, _ := json.Marshal(currentResource)
+	currentData, err := analyzer.ParseResourceData(currentJSON)
+	assert.NoError(t, err)
+
+	// Mock client returns previous resource from "database"
+	mockClient := &mockGraphClientForDetectChanges{
+		queryResult: createQueryResultFromResource(previousResource),
+	}
+	builder := NewGraphBuilderWithClient(mockClient).(*graphBuilder)
+
+	// Don't populate any cache - force database query
+	event := models.Event{
+		Resource:  models.ResourceMetadata{UID: "fallback-test-uid"},
+		Data:      currentJSON,
+		Timestamp: 5000,
+	}
+
+	configChanged, statusChanged, replicasChanged := builder.detectChanges(event, currentData)
+
+	// Same generation, same spec - no changes
+	assert.False(t, configChanged, "configChanged should be false (identical)")
+	assert.False(t, statusChanged, "statusChanged should be false (no status)")
+	assert.False(t, replicasChanged, "replicasChanged should be false")
+}
+
+// Test_DetectChanges_StateCacheUpdatedAfterProcess verifies cache is updated
+func Test_DetectChanges_StateCacheUpdatedAfterProcess(t *testing.T) {
+	resource := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"generation": float64(1),
+			"uid":        "cache-update-uid",
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(2),
+		},
+		"status": map[string]interface{}{
+			"phase": "Running",
+		},
+	}
+
+	resourceJSON, _ := json.Marshal(resource)
+
+	// Create builder with mock client
+	mockClient := &mockGraphClientForDetectChanges{
+		queryResult: &graph.QueryResult{Rows: [][]interface{}{}},
+	}
+	builder := NewGraphBuilderWithClient(mockClient).(*graphBuilder)
+
+	// Initial state - cache is empty
+	_, _, sizeBefore := builder.stateCache.GetStats()
+	assert.Equal(t, 0, sizeBefore, "Cache should be empty initially")
+
+	// Process event (this should populate the cache)
+	event := models.Event{
+		ID:        "event-1",
+		Resource:  models.ResourceMetadata{UID: "cache-update-uid", Kind: "Pod", Version: "v1", Namespace: "default", Name: "test-pod"},
+		Data:      resourceJSON,
+		Timestamp: 1000,
+		Type:      models.EventTypeCreate,
+	}
+
+	ctx := context.Background()
+	_, err := builder.BuildFromEvent(ctx, event)
+	assert.NoError(t, err)
+
+	// Cache should now contain the resource
+	cached := builder.stateCache.Get("cache-update-uid")
+	assert.NotNil(t, cached, "Cache should contain processed resource")
+	assert.Equal(t, int64(1000), cached.Timestamp)
+	assert.Equal(t, "CREATE", cached.EventType)
+}
+
+// Test_DetectChanges_MultipleUpdatesInBatch tests sequential updates in same batch
+func Test_DetectChanges_MultipleUpdatesInBatch(t *testing.T) {
+	// Three events for same resource in one batch
+	events := []models.Event{
+		{
+			Resource:  models.ResourceMetadata{UID: "multi-update-uid", Kind: "Pod", Version: "v1"},
+			Data:      createTestResourceJSON(1, 1),
+			Timestamp: 1000,
+			Type:      models.EventTypeCreate,
+		},
+		{
+			Resource:  models.ResourceMetadata{UID: "multi-update-uid", Kind: "Pod", Version: "v1"},
+			Data:      createTestResourceJSON(2, 3), // Gen 2, replicas changed to 3
+			Timestamp: 2000,
+			Type:      models.EventTypeUpdate,
+		},
+		{
+			Resource:  models.ResourceMetadata{UID: "multi-update-uid", Kind: "Pod", Version: "v1"},
+			Data:      createTestResourceJSON(3, 5), // Gen 3, replicas changed to 5
+			Timestamp: 3000,
+			Type:      models.EventTypeUpdate,
+		},
+	}
+
+	mockClient := &mockGraphClientForDetectChanges{
+		queryResult: &graph.QueryResult{Rows: [][]interface{}{}},
+	}
+	builder := NewGraphBuilderWithClient(mockClient).(*graphBuilder)
+
+	// Set batch cache
+	builder.SetBatchCache(events)
+
+	// Process second event - should detect changes from first event
+	currentData2, _ := analyzer.ParseResourceData(events[1].Data)
+	config2, _, _ := builder.detectChanges(events[1], currentData2)
+	assert.True(t, config2, "Second event should detect config change")
+
+	// Process third event - should detect changes from second event
+	currentData3, _ := analyzer.ParseResourceData(events[2].Data)
+	config3, _, _ := builder.detectChanges(events[2], currentData3)
+	assert.True(t, config3, "Third event should detect config change")
+
+	builder.ClearBatchCache()
+}
+
+func createTestResourceJSON(generation, replicas int) json.RawMessage {
+	resource := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"generation": float64(generation),
+		},
+		"spec": map[string]interface{}{
+			"replicas": float64(replicas),
+		},
+	}
+	data, _ := json.Marshal(resource)
+	return data
+}
+
 func Test_DeepEqual(t *testing.T) {
 	tests := []struct {
 		name     string

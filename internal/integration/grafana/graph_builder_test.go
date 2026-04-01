@@ -3,6 +3,7 @@ package grafana
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/moolen/spectre/internal/graph"
@@ -1289,5 +1290,332 @@ func TestCreateDashboardGraph_VariableHAS_VARIABLEEdge(t *testing.T) {
 
 	if !foundEdgeQuery {
 		t.Error("HAS_VARIABLE edge query not found")
+	}
+}
+
+func TestBuildSignalGraph_SingleSignal(t *testing.T) {
+	mockClient := newMockGraphClient()
+	logger := logging.GetLogger("test")
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
+
+	ctx := context.Background()
+	now := int64(1234567890000000000)
+	expiresAt := now + (7 * 24 * 60 * 60 * 1_000_000_000) // 7 days
+
+	signals := []SignalAnchor{
+		{
+			MetricName:        "container_cpu_usage_seconds_total",
+			Role:              SignalSaturation,
+			Confidence:        0.95,
+			QualityScore:      0.8,
+			WorkloadNamespace: "production",
+			WorkloadName:      "frontend",
+			DashboardUID:      "test-dashboard",
+			PanelID:           1,
+			QueryID:           "test-dashboard-1-A",
+			SourceGrafana:     "test-integration",
+			FirstSeen:         now,
+			LastSeen:          now,
+			ExpiresAt:         expiresAt,
+		},
+	}
+
+	err := builder.BuildSignalGraph(ctx, signals)
+	if err != nil {
+		t.Fatalf("BuildSignalGraph failed: %v", err)
+	}
+
+	// Verify SignalAnchor node was created
+	foundSignal := false
+	foundSourcedFrom := false
+	foundRepresents := false
+	foundMonitors := false
+
+	for _, query := range mockClient.queries {
+		if metricName, ok := query.Parameters["metric_name"].(string); ok && metricName == "container_cpu_usage_seconds_total" {
+			if query.Parameters["workload_namespace"] == "production" && query.Parameters["workload_name"] == "frontend" {
+				// Check composite key fields exist
+				if query.Parameters["integration"] == "test-integration" {
+					foundSignal = true
+				}
+				// Verify role, confidence, quality_score if present in this query
+				if role, ok := query.Parameters["role"].(string); ok && role != "Saturation" {
+					t.Errorf("Expected role 'Saturation', got %v", role)
+				}
+				if conf, ok := query.Parameters["confidence"].(float64); ok && conf != 0.95 {
+					t.Errorf("Expected confidence 0.95, got %v", conf)
+				}
+				if qual, ok := query.Parameters["quality_score"].(float64); ok && qual != 0.8 {
+					t.Errorf("Expected quality_score 0.8, got %v", qual)
+				}
+			}
+		}
+
+		// Check for SOURCED_FROM relationship
+		if query.Parameters["dashboard_uid"] == "test-dashboard" && strings.Contains(query.Query, "SOURCED_FROM") {
+			foundSourcedFrom = true
+		}
+
+		// Check for REPRESENTS relationship
+		if strings.Contains(query.Query, "REPRESENTS") && query.Parameters["metric_name"] == "container_cpu_usage_seconds_total" {
+			foundRepresents = true
+		}
+
+		// Check for MONITORS relationship
+		if strings.Contains(query.Query, "MONITORS") && query.Parameters["workload_name"] == "frontend" {
+			foundMonitors = true
+		}
+	}
+
+	if !foundSignal {
+		t.Error("SignalAnchor node not created")
+	}
+	if !foundSourcedFrom {
+		t.Error("SOURCED_FROM relationship not created")
+	}
+	if !foundRepresents {
+		t.Error("REPRESENTS relationship not created")
+	}
+	if !foundMonitors {
+		t.Error("MONITORS relationship not created")
+	}
+}
+
+func TestBuildSignalGraph_MERGEIdempotency(t *testing.T) {
+	mockClient := newMockGraphClient()
+	logger := logging.GetLogger("test")
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
+
+	ctx := context.Background()
+	now := int64(1234567890000000000)
+	later := now + 3600000000000 // 1 hour later
+	expiresAt := now + (7 * 24 * 60 * 60 * 1_000_000_000)
+	expiresAtLater := later + (7 * 24 * 60 * 60 * 1_000_000_000)
+
+	// First insert
+	signals1 := []SignalAnchor{
+		{
+			MetricName:        "http_requests_total",
+			Role:              SignalTraffic,
+			Confidence:        0.7,
+			QualityScore:      0.6,
+			WorkloadNamespace: "default",
+			WorkloadName:      "api",
+			DashboardUID:      "dash-1",
+			PanelID:           1,
+			QueryID:           "dash-1-1-A",
+			SourceGrafana:     "test-integration",
+			FirstSeen:         now,
+			LastSeen:          now,
+			ExpiresAt:         expiresAt,
+		},
+	}
+
+	err := builder.BuildSignalGraph(ctx, signals1)
+	if err != nil {
+		t.Fatalf("First BuildSignalGraph failed: %v", err)
+	}
+
+	firstQueryCount := len(mockClient.queries)
+
+	// Second insert - same composite key, updated quality and timestamps
+	signals2 := []SignalAnchor{
+		{
+			MetricName:        "http_requests_total",
+			Role:              SignalTraffic,
+			Confidence:        0.85, // Updated confidence
+			QualityScore:      0.9,  // Updated quality
+			WorkloadNamespace: "default",
+			WorkloadName:      "api",
+			DashboardUID:      "dash-2", // Different dashboard
+			PanelID:           2,
+			QueryID:           "dash-2-2-B",
+			SourceGrafana:     "test-integration",
+			FirstSeen:         now,   // Should be preserved by ON MATCH
+			LastSeen:          later, // Updated
+			ExpiresAt:         expiresAtLater,
+		},
+	}
+
+	err = builder.BuildSignalGraph(ctx, signals2)
+	if err != nil {
+		t.Fatalf("Second BuildSignalGraph failed: %v", err)
+	}
+
+	// Verify MERGE was used (should have queries for both inserts)
+	if len(mockClient.queries) <= firstQueryCount {
+		t.Error("Expected queries from second insert")
+	}
+
+	// Verify updated fields in second insert
+	foundUpdatedSignal := false
+	for i := firstQueryCount; i < len(mockClient.queries); i++ {
+		query := mockClient.queries[i]
+		if query.Parameters["metric_name"] == "http_requests_total" {
+			if query.Parameters["confidence"] == 0.85 && query.Parameters["quality_score"] == 0.9 {
+				foundUpdatedSignal = true
+			}
+		}
+	}
+
+	if !foundUpdatedSignal {
+		t.Error("Updated signal fields not found in second insert")
+	}
+}
+
+func TestBuildSignalGraph_MultipleSignals(t *testing.T) {
+	mockClient := newMockGraphClient()
+	logger := logging.GetLogger("test")
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
+
+	ctx := context.Background()
+	now := int64(1234567890000000000)
+	expiresAt := now + (7 * 24 * 60 * 60 * 1_000_000_000)
+
+	signals := []SignalAnchor{
+		{
+			MetricName:        "container_cpu_usage_seconds_total",
+			Role:              SignalSaturation,
+			Confidence:        0.95,
+			QualityScore:      0.8,
+			WorkloadNamespace: "production",
+			WorkloadName:      "frontend",
+			DashboardUID:      "dash-1",
+			PanelID:           1,
+			QueryID:           "dash-1-1-A",
+			SourceGrafana:     "test-integration",
+			FirstSeen:         now,
+			LastSeen:          now,
+			ExpiresAt:         expiresAt,
+		},
+		{
+			MetricName:        "http_requests_total",
+			Role:              SignalTraffic,
+			Confidence:        0.85,
+			QualityScore:      0.75,
+			WorkloadNamespace: "production",
+			WorkloadName:      "api",
+			DashboardUID:      "dash-1",
+			PanelID:           2,
+			QueryID:           "dash-1-2-A",
+			SourceGrafana:     "test-integration",
+			FirstSeen:         now,
+			LastSeen:          now,
+			ExpiresAt:         expiresAt,
+		},
+		{
+			MetricName:        "http_request_errors_total",
+			Role:              SignalErrors,
+			Confidence:        0.95,
+			QualityScore:      0.75,
+			WorkloadNamespace: "production",
+			WorkloadName:      "api",
+			DashboardUID:      "dash-1",
+			PanelID:           3,
+			QueryID:           "dash-1-3-A",
+			SourceGrafana:     "test-integration",
+			FirstSeen:         now,
+			LastSeen:          now,
+			ExpiresAt:         expiresAt,
+		},
+	}
+
+	err := builder.BuildSignalGraph(ctx, signals)
+	if err != nil {
+		t.Fatalf("BuildSignalGraph failed: %v", err)
+	}
+
+	// Verify all three signals were created
+	signalMetrics := make(map[string]bool)
+	for _, query := range mockClient.queries {
+		if metricName, ok := query.Parameters["metric_name"].(string); ok {
+			signalMetrics[metricName] = true
+		}
+	}
+
+	expectedMetrics := []string{
+		"container_cpu_usage_seconds_total",
+		"http_requests_total",
+		"http_request_errors_total",
+	}
+
+	for _, metric := range expectedMetrics {
+		if !signalMetrics[metric] {
+			t.Errorf("Signal for metric %s not created", metric)
+		}
+	}
+}
+
+func TestBuildSignalGraph_NoWorkloadName(t *testing.T) {
+	mockClient := newMockGraphClient()
+	logger := logging.GetLogger("test")
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
+
+	ctx := context.Background()
+	now := int64(1234567890000000000)
+	expiresAt := now + (7 * 24 * 60 * 60 * 1_000_000_000)
+
+	// Signal with namespace but no workload name
+	signals := []SignalAnchor{
+		{
+			MetricName:        "cluster_cpu_usage",
+			Role:              SignalSaturation,
+			Confidence:        0.7,
+			QualityScore:      0.6,
+			WorkloadNamespace: "production",
+			WorkloadName:      "", // No workload
+			DashboardUID:      "dash-1",
+			PanelID:           1,
+			QueryID:           "dash-1-1-A",
+			SourceGrafana:     "test-integration",
+			FirstSeen:         now,
+			LastSeen:          now,
+			ExpiresAt:         expiresAt,
+		},
+	}
+
+	err := builder.BuildSignalGraph(ctx, signals)
+	if err != nil {
+		t.Fatalf("BuildSignalGraph failed: %v", err)
+	}
+
+	// Verify SignalAnchor was created
+	foundSignal := false
+	foundMonitorsQuery := false
+
+	for _, query := range mockClient.queries {
+		if query.Parameters["metric_name"] == "cluster_cpu_usage" {
+			foundSignal = true
+		}
+		// MONITORS relationship should not be created when workload_name is empty
+		if strings.Contains(query.Query, "MONITORS") && query.Parameters["workload_name"] == "" {
+			foundMonitorsQuery = true
+		}
+	}
+
+	if !foundSignal {
+		t.Error("SignalAnchor node not created for namespace-only signal")
+	}
+	if foundMonitorsQuery {
+		t.Error("MONITORS relationship should not be created when workload_name is empty")
+	}
+}
+
+func TestBuildSignalGraph_EmptySignals(t *testing.T) {
+	mockClient := newMockGraphClient()
+	logger := logging.GetLogger("test")
+	builder := NewGraphBuilder(mockClient, nil, "test-integration", logger)
+
+	ctx := context.Background()
+	signals := []SignalAnchor{}
+
+	err := builder.BuildSignalGraph(ctx, signals)
+	if err != nil {
+		t.Fatalf("BuildSignalGraph with empty signals should not fail: %v", err)
+	}
+
+	// No queries should be executed
+	if len(mockClient.queries) != 0 {
+		t.Errorf("Expected no queries for empty signals, got %d", len(mockClient.queries))
 	}
 }
