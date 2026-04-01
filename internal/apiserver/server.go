@@ -310,6 +310,15 @@ func (s *Server) GetPort() int {
 	return s.port
 }
 
+// Handler returns the configured HTTP handler (router + middleware).
+// This is primarily intended for tests that need direct access to the handler.
+func (s *Server) Handler() http.Handler {
+	if s.server != nil && s.server.Handler != nil {
+		return s.server.Handler
+	}
+	return s.router
+}
+
 // IsRunning checks if the server is running
 func (s *Server) IsRunning() bool {
 	return s.server != nil
