@@ -89,6 +89,31 @@ func TestStore_GetRelatedResources_IncludesDeletedWithinWindow(t *testing.T) {
 	require.True(t, hasRelatedUID(longRelated["pod-test"], "cm-deleted-old", "REFERENCES_SPEC"))
 }
 
+func TestStore_GetRelatedResources_UsesRawStartWithoutClamp(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	harness, err := itgraph.NewTestHarness(t)
+	require.NoError(t, err)
+
+	client := harness.GetClient()
+	require.NoError(t, createRelatedResourcesNegativeDeletedAtScenario(ctx, client))
+
+	store := New(client)
+	window := analysisstore.ResourceWindow{
+		FailureTimestampNs: 50,
+		LookbackNs:         100, // raw start = -50; clamped start would be 0
+	}
+
+	related, err := store.GetRelatedResources(ctx, []string{"pod-negative"}, window)
+	require.NoError(t, err)
+	require.True(
+		t,
+		hasRelatedUID(related["pod-negative"], "cm-deleted-negative", "REFERENCES_SPEC"),
+		"deleted resource within raw negative lookback should be included",
+	)
+}
+
 func TestStore_GetNamespaceGraph_Pagination(t *testing.T) {
 	t.Parallel()
 
@@ -132,6 +157,44 @@ func TestStore_GetNamespaceGraph_Pagination(t *testing.T) {
 		_, seen := firstUIDs[node.UID]
 		require.False(t, seen, "expected pagination cursor to avoid duplicates across pages")
 	}
+}
+
+func TestStore_GetNamespaceGraph_CapsLookbackAt24Hours(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	harness, err := itgraph.NewTestHarness(t)
+	require.NoError(t, err)
+
+	require.NoError(t, createNamespaceLookbackCapScenario(ctx, harness.GetClient()))
+	store := New(harness.GetClient())
+
+	// far larger than 24h; adapter should cap to 24h and exclude the older event from diff window
+	result, err := store.GetNamespaceGraph(ctx, analysisstore.NamespaceGraphQuery{
+		Namespace:   "team-cap",
+		TimestampNs: int64(30 * time.Hour),
+		LookbackNs:  int64(7 * 24 * time.Hour),
+		MaxDepth:    1,
+		Limit:       10,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.Graph.Nodes)
+
+	var workloadNode *analysisstore.NamespaceGraphNode
+	for i := range result.Graph.Nodes {
+		if result.Graph.Nodes[i].UID == "uid-cap-deploy" {
+			workloadNode = &result.Graph.Nodes[i]
+			break
+		}
+	}
+	require.NotNil(t, workloadNode)
+	require.NotNil(t, workloadNode.LatestEvent)
+	require.Empty(
+		t,
+		workloadNode.LatestEvent.SpecChanges,
+		"spec diff should be empty when lookback is capped to 24h and older event is out of window",
+	)
 }
 
 func fixturePath(t *testing.T, baseName string) string {
@@ -333,6 +396,98 @@ func createNamespacePaginationScenario(ctx context.Context, client graph.Client)
 	}
 	if _, err := client.ExecuteQuery(ctx, query); err != nil {
 		return fmt.Errorf("seed namespace pagination scenario failed: %w", err)
+	}
+	return nil
+}
+
+func createRelatedResourcesNegativeDeletedAtScenario(ctx context.Context, client graph.Client) error {
+	queries := []graph.GraphQuery{
+		{
+			Query: `
+				CREATE (pod:ResourceIdentity {
+					uid: 'pod-negative',
+					kind: 'Pod',
+					apiGroup: '',
+					version: 'v1',
+					namespace: 'default',
+					name: 'pod-negative',
+					firstSeen: 1,
+					lastSeen: 1,
+					deleted: false
+				})
+			`,
+		},
+		{
+			Query: `
+				CREATE (cm:ResourceIdentity {
+					uid: 'cm-deleted-negative',
+					kind: 'ConfigMap',
+					apiGroup: '',
+					version: 'v1',
+					namespace: 'default',
+					name: 'cm-deleted-negative',
+					firstSeen: 1,
+					lastSeen: 1,
+					deleted: true,
+					deletedAt: -10
+				})
+			`,
+		},
+		{
+			Query: `
+				MATCH (pod:ResourceIdentity {uid: 'pod-negative'})
+				MATCH (cm:ResourceIdentity {uid: 'cm-deleted-negative'})
+				MERGE (pod)-[:REFERENCES_SPEC]->(cm)
+			`,
+		},
+	}
+
+	for _, query := range queries {
+		if _, err := client.ExecuteQuery(ctx, query); err != nil {
+			return fmt.Errorf("seed query failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func createNamespaceLookbackCapScenario(ctx context.Context, client graph.Client) error {
+	query := graph.GraphQuery{
+		Query: `
+			CREATE (r:ResourceIdentity {
+				uid: 'uid-cap-deploy',
+				kind: 'Deployment',
+				apiGroup: 'apps',
+				version: 'v1',
+				namespace: 'team-cap',
+				name: 'cap-deploy',
+				firstSeen: 0,
+				lastSeen: 108000000000000,
+				deleted: false
+			})
+			CREATE (old:ChangeEvent {
+				id: 'cap-old',
+				timestamp: 0,
+				eventType: 'UPDATE',
+				status: 'Ready',
+				data: '{"apiVersion":"apps/v1","kind":"Deployment","spec":{"replicas":1}}',
+				configChanged: true,
+				statusChanged: false
+			})
+			CREATE (latest:ChangeEvent {
+				id: 'cap-latest',
+				timestamp: 108000000000000,
+				eventType: 'UPDATE',
+				status: 'Ready',
+				data: '{"apiVersion":"apps/v1","kind":"Deployment","spec":{"replicas":3}}',
+				configChanged: true,
+				statusChanged: false
+			})
+			CREATE (r)-[:CHANGED]->(old)
+			CREATE (r)-[:CHANGED]->(latest)
+		`,
+	}
+	if _, err := client.ExecuteQuery(ctx, query); err != nil {
+		return fmt.Errorf("seed lookback-cap scenario failed: %w", err)
 	}
 	return nil
 }

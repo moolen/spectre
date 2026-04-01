@@ -22,6 +22,7 @@ const (
 	defaultMaxDepth     = 1
 	maxMaxDepth         = 10
 	defaultLookbackNs   = int64(30 * time.Minute)
+	maxLookbackNs       = int64(24 * time.Hour)
 	statusUnknown       = "Unknown"
 	edgeTypeIngressRef  = "INGRESS_REF"
 	edgeTypeReferences  = "REFERENCES_SPEC"
@@ -217,6 +218,7 @@ func (s *Store) GetRelatedResources(
 	if len(resourceUIDs) == 0 {
 		return map[string][]store.RelatedResourceData{}, nil
 	}
+	startNs := window.FailureTimestampNs - window.LookbackNs
 
 	result, err := s.graphClient.ExecuteQuery(ctx, graph.GraphQuery{
 		Timeout: queryTimeoutMs,
@@ -259,7 +261,7 @@ func (s *Store) GetRelatedResources(
 		`,
 		Parameters: map[string]interface{}{
 			"resourceUIDs": resourceUIDs,
-			"startNs":      window.Start(),
+			"startNs":      startNs,
 			"endNs":        window.FailureTimestampNs,
 		},
 	})
@@ -531,6 +533,9 @@ func (s *Store) GetNamespaceGraph(ctx context.Context, input store.NamespaceGrap
 	}
 	if normalized.LookbackNs <= 0 {
 		normalized.LookbackNs = defaultLookbackNs
+	}
+	if normalized.LookbackNs > maxLookbackNs {
+		normalized.LookbackNs = maxLookbackNs
 	}
 
 	namespacedResources, hasMore, nextCursor, err := s.fetchNamespacedResources(
