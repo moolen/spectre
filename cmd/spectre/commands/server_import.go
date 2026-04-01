@@ -98,7 +98,7 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 		parseDuration = 0
 	}
 
-	logger.InfoWithFields("Startup import completed",
+	logger.InfoWithFields("Import completed",
 		logging.Field("path", opts.Path),
 		logging.Field("chunk_size", chunkSize),
 		logging.Field("event_count", totalEvents),

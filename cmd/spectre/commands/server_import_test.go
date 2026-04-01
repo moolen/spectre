@@ -1,12 +1,16 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/moolen/spectre/internal/importexport"
@@ -17,6 +21,37 @@ import (
 type fakeStartupImportPipeline struct {
 	batches [][]models.Event
 	err     error
+}
+
+func captureStartupImportOutput(t *testing.T, fn func()) string {
+	t.Helper()
+
+	oldLogWriter := log.Writer()
+	defer log.SetOutput(oldLogWriter)
+
+	var stdoutBuf bytes.Buffer
+	log.SetOutput(&stdoutBuf)
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create stderr pipe: %v", err)
+	}
+	os.Stderr = w
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stderr writer: %v", err)
+	}
+	os.Stderr = oldStderr
+
+	var stderrBuf bytes.Buffer
+	if _, err := io.Copy(&stderrBuf, r); err != nil {
+		t.Fatalf("failed to read stderr buffer: %v", err)
+	}
+
+	return stdoutBuf.String() + stderrBuf.String()
 }
 
 func (f *fakeStartupImportPipeline) ProcessBatch(ctx context.Context, events []models.Event) error {
@@ -170,6 +205,35 @@ func TestRunStartupImportEmptyBenchmarkPathDoesNotWriteFile(t *testing.T) {
 	_, statErr := os.Stat(reportPath)
 	if !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("expected no report file to be written, stat error: %v", statErr)
+	}
+}
+
+func TestRunStartupImportLogsImportCompletedMessage(t *testing.T) {
+	os.Setenv("LOG_TIMESTAMP", "2024-01-01T12:00:00Z")
+	defer os.Unsetenv("LOG_TIMESTAMP")
+
+	logger := logging.GetLogger("test_startup_import_logs")
+	pipeline := &fakeStartupImportPipeline{}
+	streamFn := func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error {
+		return onChunk([]models.Event{{ID: "a"}})
+	}
+
+	output := captureStartupImportOutput(t, func() {
+		err := runStartupImport(context.Background(), startupImportOptions{
+			Path:       "fixtures/import.json",
+			ChunkSize:  10,
+			Logger:     logger,
+			Pipeline:   pipeline,
+			Stream:     streamFn,
+			ImportMode: false,
+		})
+		if err != nil {
+			t.Fatalf("runStartupImport returned error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "Import completed") {
+		t.Fatalf("expected startup import logs to contain %q, got %q", "Import completed", output)
 	}
 }
 
