@@ -4,7 +4,6 @@ set -euo pipefail
 
 OUT_DIR="${OUT_DIR:-/tmp/spectre-startup-import-$(date +%Y%m%d-%H%M%S)}"
 SEED="${SEED:-42}"
-IMPORT_CHUNK_SIZE="${IMPORT_CHUNK_SIZE:-1000}"
 KINDS="${KINDS:-55}"
 RESOURCES="${RESOURCES:-5000}"
 NAMESPACES="${NAMESPACES:-20}"
@@ -42,7 +41,6 @@ echo "Starting spectre server with startup import..."
   --reconciler-enabled=false \
   --integrations-config "$INTEGRATIONS_CONFIG_PATH" \
   --import-path "$DATA_DIR" \
-  --import-chunk-size "$IMPORT_CHUNK_SIZE" \
   --import-benchmark-log "$REPORT_PATH" >"$SERVER_LOG_PATH" 2>&1 &
 SERVER_PID=$!
 

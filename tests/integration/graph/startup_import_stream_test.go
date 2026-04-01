@@ -3,9 +3,11 @@ package graph
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/moolen/spectre/internal/importexport"
@@ -84,4 +86,20 @@ func repoRootFromTestFile(t *testing.T) string {
 		t.Fatal("failed to resolve test file path")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
+}
+
+func TestStartupImportBenchmarkScript_DoesNotExposeChunkSizeTuningKnob(t *testing.T) {
+	scriptPath := filepath.Join(repoRootFromTestFile(t), "hack", "benchmark-startup-import.sh")
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("failed to read benchmark script: %v", err)
+	}
+
+	script := string(content)
+	if strings.Contains(script, "IMPORT_CHUNK_SIZE") {
+		t.Fatalf("benchmark script must not expose IMPORT_CHUNK_SIZE env var")
+	}
+	if strings.Contains(script, "--import-chunk-size") {
+		t.Fatalf("benchmark script must not pass --import-chunk-size")
+	}
 }
