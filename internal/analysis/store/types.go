@@ -82,9 +82,34 @@ type NamespaceGraphQuery struct {
 // NamespaceGraphData contains graph topology and metadata at a point in time.
 type NamespaceGraphData struct {
 	Graph       NamespaceGraph
-	Anomalies   []map[string]any
-	CausalPaths []map[string]any
+	Anomalies   []AnomalyData
+	CausalPaths []CausalPathData
 	Metadata    NamespaceGraphMetadata
+}
+
+// AnomalyData represents an anomaly identified during graph analysis.
+type AnomalyData struct {
+	ID          string
+	Type        string
+	Severity    string
+	ResourceUID string
+	Score       float64
+	Description string
+	Timestamp   int64
+	Details     map[string]any
+}
+
+// CausalPathData represents a ranked causal path through the graph.
+type CausalPathData struct {
+	ID          string
+	SourceUID   string
+	TargetUID   string
+	Score       float64
+	Confidence  float64
+	Explanation string
+	NodeUIDs    []string
+	EdgeIDs     []string
+	Metadata    map[string]any
 }
 
 // NamespaceGraph groups resources and relationships.
