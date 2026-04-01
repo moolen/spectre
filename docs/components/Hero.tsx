@@ -147,15 +147,6 @@ const Hero = () => {
             </div>
 
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative text-center z-10">
-                {/* Badge */}
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-surface border border-brand-border/50 backdrop-blur-sm text-sm text-slate-300 mb-8 hover:bg-brand-muted transition-colors cursor-default shadow-sm shadow-brand-primary/10">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-primary opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-primary"></span>
-                    </span>
-                    Spectre v1.0 Public Beta
-                </div>
-
                 {/* Main Headline */}
                 <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight text-white mb-4 leading-tight max-w-6xl mx-auto">
                     <div className="mb-2 md:mb-0">80% of incidents are caused</div>
