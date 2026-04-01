@@ -15,8 +15,6 @@ import (
 )
 
 func TestStore_GetOwnershipChainAndManagers(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	harness, err := itgraph.NewTestHarness(t)
 	require.NoError(t, err)
@@ -58,8 +56,6 @@ func TestStore_GetOwnershipChainAndManagers(t *testing.T) {
 }
 
 func TestStore_GetRelatedResources_IncludesDeletedWithinWindow(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	harness, err := itgraph.NewTestHarness(t)
 	require.NoError(t, err)
@@ -90,8 +86,6 @@ func TestStore_GetRelatedResources_IncludesDeletedWithinWindow(t *testing.T) {
 }
 
 func TestStore_GetRelatedResources_UsesRawStartWithoutClamp(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	harness, err := itgraph.NewTestHarness(t)
 	require.NoError(t, err)
@@ -115,8 +109,6 @@ func TestStore_GetRelatedResources_UsesRawStartWithoutClamp(t *testing.T) {
 }
 
 func TestStore_GetNamespaceGraph_Pagination(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	harness, err := itgraph.NewTestHarness(t)
 	require.NoError(t, err)
@@ -160,8 +152,6 @@ func TestStore_GetNamespaceGraph_Pagination(t *testing.T) {
 }
 
 func TestStore_GetNamespaceGraph_CapsLookbackAt24Hours(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
 	harness, err := itgraph.NewTestHarness(t)
 	require.NoError(t, err)
@@ -195,6 +185,96 @@ func TestStore_GetNamespaceGraph_CapsLookbackAt24Hours(t *testing.T) {
 		workloadNode.LatestEvent.SpecChanges,
 		"spec diff should be empty when lookback is capped to 24h and older event is out of window",
 	)
+}
+
+func TestStore_GetResource(t *testing.T) {
+	ctx := context.Background()
+	harness, err := itgraph.NewTestHarness(t)
+	require.NoError(t, err)
+
+	require.NoError(t, createGetResourceScenario(ctx, harness.GetClient()))
+	s := New(harness.GetClient())
+
+	resource, err := s.GetResource(ctx, "uid-resource-test")
+	require.NoError(t, err)
+	require.NotNil(t, resource)
+	require.Equal(t, "uid-resource-test", resource.UID)
+	require.Equal(t, "Pod", resource.Kind)
+
+	missing, err := s.GetResource(ctx, "uid-does-not-exist")
+	require.NoError(t, err)
+	require.Nil(t, missing)
+}
+
+func TestStore_GetChangeEvents(t *testing.T) {
+	ctx := context.Background()
+	harness, err := itgraph.NewTestHarness(t)
+	require.NoError(t, err)
+
+	require.NoError(t, createGetEventsScenario(ctx, harness.GetClient()))
+	s := New(harness.GetClient())
+
+	window := analysisstore.ResourceWindow{
+		FailureTimestampNs: 1000,
+		LookbackNs:         200,
+	}
+	events, err := s.GetChangeEvents(ctx, []string{"uid-events-resource"}, window)
+	require.NoError(t, err)
+
+	resourceEvents, ok := events["uid-events-resource"]
+	require.True(t, ok)
+	require.Len(t, resourceEvents, 2)
+	ids := map[string]bool{}
+	var configEvent *analysisstore.ChangeEventInfo
+	for i := range resourceEvents {
+		ids[resourceEvents[i].EventID] = true
+		if resourceEvents[i].ConfigChanged {
+			configEvent = &resourceEvents[i]
+		}
+	}
+	require.True(t, ids["evt-inside-config"])
+	require.True(t, ids["evt-inside-status"])
+	require.False(t, ids["evt-outside"])
+	require.NotNil(t, configEvent)
+	require.Equal(t, time.Unix(0, 900), configEvent.Timestamp)
+}
+
+func TestStore_GetK8sEvents(t *testing.T) {
+	ctx := context.Background()
+	harness, err := itgraph.NewTestHarness(t)
+	require.NoError(t, err)
+
+	require.NoError(t, createGetEventsScenario(ctx, harness.GetClient()))
+	s := New(harness.GetClient())
+
+	window := analysisstore.ResourceWindow{
+		FailureTimestampNs: 1000,
+		LookbackNs:         200,
+	}
+	events, err := s.GetK8sEvents(ctx, []string{"uid-events-resource"}, window)
+	require.NoError(t, err)
+
+	resourceEvents, ok := events["uid-events-resource"]
+	require.True(t, ok)
+	require.Len(t, resourceEvents, 1)
+	require.Equal(t, "kevt-inside", resourceEvents[0].EventID)
+	require.Equal(t, "BackOff", resourceEvents[0].Reason)
+	require.Equal(t, time.Unix(0, 920), resourceEvents[0].Timestamp)
+}
+
+func TestStore_GetManagers_DeterministicHighestConfidenceThenUID(t *testing.T) {
+	ctx := context.Background()
+	harness, err := itgraph.NewTestHarness(t)
+	require.NoError(t, err)
+
+	require.NoError(t, createManagersDeterministicScenario(ctx, harness.GetClient()))
+	s := New(harness.GetClient())
+
+	managers, err := s.GetManagers(ctx, []string{"uid-managed"}, 0.5)
+	require.NoError(t, err)
+	require.Contains(t, managers, "uid-managed")
+	require.Equal(t, "uid-manager-a", managers["uid-managed"].Manager.UID)
+	require.Equal(t, 0.9, managers["uid-managed"].ManagesEdge.Confidence)
 }
 
 func fixturePath(t *testing.T, baseName string) string {
@@ -488,6 +568,161 @@ func createNamespaceLookbackCapScenario(ctx context.Context, client graph.Client
 	}
 	if _, err := client.ExecuteQuery(ctx, query); err != nil {
 		return fmt.Errorf("seed lookback-cap scenario failed: %w", err)
+	}
+	return nil
+}
+
+func createGetResourceScenario(ctx context.Context, client graph.Client) error {
+	return runQueries(ctx, client, []graph.GraphQuery{
+		{
+			Query: `
+				CREATE (:ResourceIdentity {
+					uid: 'uid-resource-test',
+					kind: 'Pod',
+					apiGroup: '',
+					version: 'v1',
+					namespace: 'default',
+					name: 'pod-test',
+					firstSeen: 1,
+					lastSeen: 1,
+					deleted: false
+				})
+			`,
+		},
+	})
+}
+
+func createGetEventsScenario(ctx context.Context, client graph.Client) error {
+	return runQueries(ctx, client, []graph.GraphQuery{
+		{
+			Query: `
+				CREATE (r:ResourceIdentity {
+					uid: 'uid-events-resource',
+					kind: 'Pod',
+					apiGroup: '',
+					version: 'v1',
+					namespace: 'default',
+					name: 'events-pod',
+					firstSeen: 1,
+					lastSeen: 1,
+					deleted: false
+				})
+				CREATE (evtOld:ChangeEvent {
+					id: 'evt-outside',
+					timestamp: 600,
+					eventType: 'UPDATE',
+					status: 'Ready',
+					data: '{"spec":{"replicas":1}}',
+					configChanged: true,
+					statusChanged: false
+				})
+				CREATE (evtConfig:ChangeEvent {
+					id: 'evt-inside-config',
+					timestamp: 900,
+					eventType: 'UPDATE',
+					status: 'Ready',
+					data: '{"spec":{"replicas":2}}',
+					configChanged: true,
+					statusChanged: false
+				})
+				CREATE (evtStatus:ChangeEvent {
+					id: 'evt-inside-status',
+					timestamp: 950,
+					eventType: 'UPDATE',
+					status: 'Warning',
+					data: '{"status":{"phase":"Pending"}}',
+					configChanged: false,
+					statusChanged: true
+				})
+				CREATE (kOld:K8sEvent {
+					id: 'kevt-outside',
+					timestamp: 500,
+					reason: 'FailedScheduling',
+					message: 'old',
+					type: 'Warning',
+					count: 1,
+					source: 'scheduler'
+				})
+				CREATE (kIn:K8sEvent {
+					id: 'kevt-inside',
+					timestamp: 920,
+					reason: 'BackOff',
+					message: 'inside',
+					type: 'Warning',
+					count: 2,
+					source: 'kubelet'
+				})
+				CREATE (r)-[:CHANGED]->(evtOld)
+				CREATE (r)-[:CHANGED]->(evtConfig)
+				CREATE (r)-[:CHANGED]->(evtStatus)
+				CREATE (r)-[:EMITTED_EVENT]->(kOld)
+				CREATE (r)-[:EMITTED_EVENT]->(kIn)
+			`,
+		},
+	})
+}
+
+func createManagersDeterministicScenario(ctx context.Context, client graph.Client) error {
+	return runQueries(ctx, client, []graph.GraphQuery{
+		{
+			Query: `
+				CREATE (res:ResourceIdentity {
+					uid: 'uid-managed',
+					kind: 'Deployment',
+					apiGroup: 'apps',
+					version: 'v1',
+					namespace: 'default',
+					name: 'managed',
+					firstSeen: 1,
+					lastSeen: 1,
+					deleted: false
+				})
+				CREATE (mgrA:ResourceIdentity {
+					uid: 'uid-manager-a',
+					kind: 'HelmRelease',
+					apiGroup: 'helm.toolkit.fluxcd.io',
+					version: 'v2beta1',
+					namespace: 'default',
+					name: 'a',
+					firstSeen: 1,
+					lastSeen: 1,
+					deleted: false
+				})
+				CREATE (mgrZ:ResourceIdentity {
+					uid: 'uid-manager-z',
+					kind: 'HelmRelease',
+					apiGroup: 'helm.toolkit.fluxcd.io',
+					version: 'v2beta1',
+					namespace: 'default',
+					name: 'z',
+					firstSeen: 1,
+					lastSeen: 1,
+					deleted: false
+				})
+				CREATE (mgrLow:ResourceIdentity {
+					uid: 'uid-manager-low',
+					kind: 'HelmRelease',
+					apiGroup: 'helm.toolkit.fluxcd.io',
+					version: 'v2beta1',
+					namespace: 'default',
+					name: 'low',
+					firstSeen: 1,
+					lastSeen: 1,
+					deleted: false
+				})
+				CREATE (mgrA)-[:MANAGES {confidence: 0.9, firstObserved: 1, lastValidated: 1, validationState: 'confirmed'}]->(res)
+				CREATE (mgrZ)-[:MANAGES {confidence: 0.9, firstObserved: 1, lastValidated: 1, validationState: 'confirmed'}]->(res)
+				CREATE (mgrLow)-[:MANAGES {confidence: 0.8, firstObserved: 1, lastValidated: 1, validationState: 'confirmed'}]->(res)
+			`,
+		},
+	})
+}
+
+func runQueries(ctx context.Context, client graph.Client, queries []graph.GraphQuery) error {
+	for _, query := range queries {
+		if _, err := client.ExecuteQuery(ctx, query); err != nil {
+			return fmt.Errorf("seed query failed: %w", err)
+		}
 	}
 	return nil
 }

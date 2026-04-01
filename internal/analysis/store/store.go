@@ -15,11 +15,15 @@ import (
 type AnalysisStore interface {
 	GetResource(ctx context.Context, uid string) (*graph.ResourceIdentity, error)
 	// atTimestampNs is the evaluation point in Unix nanoseconds.
+	// Implementations may return best-effort topology (without strict point-in-time filtering)
+	// to preserve existing analyzer behavior.
 	GetOwnershipChain(ctx context.Context, uid string, atTimestampNs int64, maxDepth int) ([]ResourceWithDistance, error)
 	GetManagers(ctx context.Context, resourceUIDs []string, minConfidence float64) (map[string]*ManagerData, error)
 	GetRelatedResources(ctx context.Context, resourceUIDs []string, window ResourceWindow) (map[string][]RelatedResourceData, error)
 	GetChangeEvents(ctx context.Context, resourceUIDs []string, window ResourceWindow) (map[string][]ChangeEventInfo, error)
 	GetK8sEvents(ctx context.Context, resourceUIDs []string, window ResourceWindow) (map[string][]K8sEventInfo, error)
+	// Namespace graph retrieval is best-effort: implementations may degrade gracefully
+	// (for example, partial enrichment) while preserving current analyzer semantics.
 	GetNamespaceGraph(ctx context.Context, input NamespaceGraphQuery) (*NamespaceGraphData, error)
 }
 

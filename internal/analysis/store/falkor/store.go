@@ -171,7 +171,9 @@ func (s *Store) GetManagers(
 			WHERE resource.uid IN $resourceUIDs
 			OPTIONAL MATCH (manager:ResourceIdentity)-[manages:MANAGES]->(resource)
 			WHERE manages.confidence >= $minConfidence
-			RETURN resource.uid as resourceUID, manager, manages
+			WITH resource.uid as resourceUID, manager, manages
+			ORDER BY resourceUID ASC, manages.confidence DESC, manager.uid ASC
+			RETURN resourceUID, manager, manages
 		`,
 		Parameters: map[string]interface{}{
 			"resourceUIDs":  resourceUIDs,
@@ -189,6 +191,9 @@ func (s *Store) GetManagers(
 		}
 		resourceUID, ok := row[0].(string)
 		if !ok || row[1] == nil {
+			continue
+		}
+		if _, exists := managers[resourceUID]; exists {
 			continue
 		}
 
@@ -259,7 +264,7 @@ func (s *Store) GetRelatedResources(
 			       sa, 'USES_SERVICE_ACCOUNT' as usesSAType,
 			       selector, 'SELECTS' as selectsType,
 			       rb, 'GRANTS_TO' as grantsToType,
-			       ingress, 'edgeTypeIngressRef' as ingressRefType,
+			       ingress,
 			       role, 'BINDS_ROLE' as bindsRoleType
 		`,
 		Parameters: map[string]interface{}{
@@ -274,7 +279,7 @@ func (s *Store) GetRelatedResources(
 
 	related := make(map[string][]store.RelatedResourceData)
 	for _, row := range result.Rows {
-		if len(row) < 15 {
+		if len(row) < 14 {
 			continue
 		}
 
@@ -312,7 +317,7 @@ func (s *Store) GetRelatedResources(
 		addRelated(5, "USES_SERVICE_ACCOUNT")
 		addRelated(7, "SELECTS")
 		addRelated(9, "GRANTS_TO")
-		addRelated(13, "BINDS_ROLE")
+		addRelated(12, "BINDS_ROLE")
 
 		if row[11] != nil {
 			ingressProps, err := graph.ParseNodeFromResult(row[11])
