@@ -36,6 +36,21 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		}
 	})
 
+	t.Run("embedded mode does not require graph enabled", func(t *testing.T) {
+		mode, err := resolveServerRuntimeMode(serverModeInput{
+			Embedded:       true,
+			ImportPath:     "/tmp/import.jsonl",
+			GraphEnabled:   false,
+			WatcherEnabled: true,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mode.StartGraph || mode.StartWatcher || mode.StartMCP {
+			t.Fatalf("expected embedded mode to disable graph/watcher/mcp start flags")
+		}
+	})
+
 	t.Run("graph disabled without audit-only returns error", func(t *testing.T) {
 		_, err := resolveServerRuntimeMode(serverModeInput{
 			GraphEnabled:   false,

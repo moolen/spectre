@@ -16,6 +16,7 @@ import (
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/config"
+	"github.com/moolen/spectre/internal/embedded"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/reconciler"
 	"github.com/moolen/spectre/internal/graph/sync"
@@ -192,7 +193,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	var integrationMgr *integration.Manager
 
 	// Prepare default integrations config file if needed
-	if integrationsConfigPath != "" {
+	if !mode.Embedded && integrationsConfigPath != "" {
 		// Create default config file if it doesn't exist
 		if _, err := os.Stat(integrationsConfigPath); os.IsNotExist(err) {
 			logger.Info("Creating default integrations config file: %s", integrationsConfigPath)
@@ -237,6 +238,86 @@ func runServer(cmd *cobra.Command, args []string) {
 				logger.Error("pprof server failed: %v", err)
 			}
 		}()
+	}
+
+	if mode.Embedded {
+		logger.Info("Running in embedded mode - importing events from: %s", importPath)
+		importStartTime := time.Now()
+
+		eventValues, err := importexport.Import(importexport.FromPath(importPath), importexport.WithLogger(logger))
+		if err != nil {
+			logger.Error("Failed to import events from path: %v", err)
+			HandleError(err, "Import error")
+		}
+		if len(eventValues) == 0 {
+			logger.Error("No events found in import path: %s", importPath)
+			HandleError(fmt.Errorf("no events found at import path: %s", importPath), "Import error")
+		}
+
+		logger.InfoWithFields("Parsed import path",
+			logging.Field("event_count", len(eventValues)),
+			logging.Field("parse_duration", time.Since(importStartTime)))
+
+		embeddedExecutor, err := embedded.NewQueryExecutor(eventValues)
+		if err != nil {
+			logger.Error("Failed to initialize embedded query executor: %v", err)
+			HandleError(err, "Embedded executor error")
+		}
+
+		querySource := api.TimelineQuerySourceStorage
+		logger.Info("Timeline query source: STORAGE (embedded)")
+
+		apiComponent := apiserver.NewWithStorageGraphAndPipeline(
+			cfg.APIPort,
+			embeddedExecutor,
+			nil,
+			querySource,
+			nil, // No storage component
+			nil, // No graph client
+			nil, // No graph pipeline
+			&apiserver.NoOpReadinessChecker{},
+			tracingProvider,
+			time.Duration(metadataCacheRefreshSeconds)*time.Second,
+			apiserver.NamespaceGraphCacheConfig{
+				Enabled:     namespaceGraphCacheEnabled,
+				RefreshTTL:  time.Duration(namespaceGraphCacheRefreshSeconds) * time.Second,
+				MaxMemoryMB: int64(namespaceGraphCacheMemoryMB),
+			},
+			"",  // No integrations config
+			nil, // No integration manager
+			nil, // No MCP server
+		)
+		logger.Info("API server component created (embedded)")
+
+		if err := manager.Register(apiComponent); err != nil {
+			logger.Error("Failed to register API server component: %v", err)
+			HandleError(err, "API server registration error")
+		}
+
+		logger.Info("All components registered (embedded mode)")
+		ctx, cancel := context.WithCancel(context.Background())
+		if err := manager.Start(ctx); err != nil {
+			logger.Error("Failed to start components: %v", err)
+			HandleError(err, "Startup error")
+		}
+
+		logger.Info("Embedded mode started - serving API requests")
+
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
+		logger.Info("Shutdown signal received, gracefully shutting down...")
+		cancel()
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer shutdownCancel()
+
+		if err := manager.Stop(shutdownCtx); err != nil {
+			logger.Error("Error during shutdown: %v", err)
+		}
+
+		logger.Info("Shutdown complete")
+		return
 	}
 
 	if mode.AuditOnly {
