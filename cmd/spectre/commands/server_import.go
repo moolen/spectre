@@ -19,18 +19,18 @@ type startupImportPipeline interface {
 }
 
 type startupImportOptions struct {
-	Path               string
-	ChunkSize          int
-	BenchmarkLogPath   string
-	Mode               string
-	Logger             *logging.Logger
-	Pipeline           startupImportPipeline
-	ImportInChunksFunc func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error
+	Path             string
+	ChunkSize        int
+	BenchmarkLogPath string
+	ImportMode       bool
+	Logger           *logging.Logger
+	Pipeline         startupImportPipeline
+	Stream           func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error
 }
 
 type startupImportBenchmarkReport struct {
 	ImportPath           string `json:"import_path"`
-	ImportMode           string `json:"import_mode"`
+	ImportMode           bool   `json:"import_mode"`
 	ChunkSize            int    `json:"chunk_size"`
 	TotalEvents          int    `json:"total_events"`
 	TotalChunks          int    `json:"total_chunks"`
@@ -57,7 +57,7 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 		chunkSize = defaultStartupImportChunkSize
 	}
 
-	importInChunks := opts.ImportInChunksFunc
+	importInChunks := opts.Stream
 	if importInChunks == nil {
 		importInChunks = importexport.ImportInChunks
 	}
@@ -65,7 +65,7 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 	logger.InfoWithFields("Starting startup import",
 		logging.Field("path", opts.Path),
 		logging.Field("chunk_size", chunkSize),
-		logging.Field("import_mode", opts.Mode))
+		logging.Field("import_mode", opts.ImportMode))
 
 	totalStart := time.Now()
 	processDuration := time.Duration(0)
@@ -110,7 +110,7 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 	if opts.BenchmarkLogPath != "" {
 		report := startupImportBenchmarkReport{
 			ImportPath:           opts.Path,
-			ImportMode:           opts.Mode,
+			ImportMode:           opts.ImportMode,
 			ChunkSize:            chunkSize,
 			TotalEvents:          totalEvents,
 			TotalChunks:          totalChunks,

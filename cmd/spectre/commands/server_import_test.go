@@ -48,13 +48,13 @@ func TestRunStartupImportProcessesChunksAndWritesReport(t *testing.T) {
 	}
 
 	err := runStartupImport(context.Background(), startupImportOptions{
-		Path:               "fixtures/import.json",
-		ChunkSize:          99,
-		BenchmarkLogPath:   reportPath,
-		Mode:               "opt-in",
-		Logger:             logger,
-		Pipeline:           pipeline,
-		ImportInChunksFunc: streamFn,
+		Path:             "fixtures/import.json",
+		ChunkSize:        99,
+		BenchmarkLogPath: reportPath,
+		ImportMode:       true,
+		Logger:           logger,
+		Pipeline:         pipeline,
+		Stream:           streamFn,
 	})
 	if err != nil {
 		t.Fatalf("runStartupImport returned error: %v", err)
@@ -92,8 +92,8 @@ func TestRunStartupImportProcessesChunksAndWritesReport(t *testing.T) {
 	if report.ChunkSize != 99 {
 		t.Fatalf("expected chunk_size 99, got %d", report.ChunkSize)
 	}
-	if report.ImportMode != "opt-in" {
-		t.Fatalf("expected import_mode opt-in, got %q", report.ImportMode)
+	if !report.ImportMode {
+		t.Fatalf("expected import_mode true, got %v", report.ImportMode)
 	}
 }
 
@@ -108,11 +108,12 @@ func TestRunStartupImportPropagatesPipelineError(t *testing.T) {
 	}
 
 	err := runStartupImport(context.Background(), startupImportOptions{
-		Path:               "fixtures/import.json",
-		ChunkSize:          10,
-		Logger:             logger,
-		Pipeline:           &fakeStartupImportPipeline{err: errPipeline},
-		ImportInChunksFunc: streamFn,
+		Path:       "fixtures/import.json",
+		ChunkSize:  10,
+		Logger:     logger,
+		Pipeline:   &fakeStartupImportPipeline{err: errPipeline},
+		Stream:     streamFn,
+		ImportMode: false,
 	})
 	if !errors.Is(err, errPipeline) {
 		t.Fatalf("expected pipeline error, got: %v", err)
@@ -130,11 +131,12 @@ func TestRunStartupImportPropagatesStreamError(t *testing.T) {
 	}
 
 	err := runStartupImport(context.Background(), startupImportOptions{
-		Path:               "fixtures/import.json",
-		ChunkSize:          10,
-		Logger:             logger,
-		Pipeline:           &fakeStartupImportPipeline{},
-		ImportInChunksFunc: streamFn,
+		Path:       "fixtures/import.json",
+		ChunkSize:  10,
+		Logger:     logger,
+		Pipeline:   &fakeStartupImportPipeline{},
+		Stream:     streamFn,
+		ImportMode: false,
 	})
 	if !errors.Is(err, errStream) {
 		t.Fatalf("expected stream error, got: %v", err)
@@ -153,12 +155,13 @@ func TestRunStartupImportEmptyBenchmarkPathDoesNotWriteFile(t *testing.T) {
 	}
 
 	err := runStartupImport(context.Background(), startupImportOptions{
-		Path:               "fixtures/import.json",
-		ChunkSize:          10,
-		BenchmarkLogPath:   "",
-		Logger:             logger,
-		Pipeline:           pipeline,
-		ImportInChunksFunc: streamFn,
+		Path:             "fixtures/import.json",
+		ChunkSize:        10,
+		BenchmarkLogPath: "",
+		Logger:           logger,
+		Pipeline:         pipeline,
+		Stream:           streamFn,
+		ImportMode:       false,
 	})
 	if err != nil {
 		t.Fatalf("runStartupImport returned error: %v", err)

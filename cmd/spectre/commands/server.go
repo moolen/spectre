@@ -41,7 +41,7 @@ var (
 	importPath            string
 	importChunkSize       int
 	importBenchmarkLog    string
-	importMode            string
+	importMode            bool
 	pprofEnabled          bool
 	pprofPort             int
 	pprofReadTimeout      time.Duration
@@ -92,7 +92,7 @@ func init() {
 	serverCmd.Flags().StringVar(&importPath, "import-path", "", "Path to the binary file containing events to import on startup")
 	serverCmd.Flags().IntVar(&importChunkSize, "import-chunk-size", defaultStartupImportChunkSize, "Chunk size used for startup imports")
 	serverCmd.Flags().StringVar(&importBenchmarkLog, "import-benchmark-log", "", "Path to write startup import benchmark report as JSON")
-	serverCmd.Flags().StringVar(&importMode, "import-mode", "", "Startup import mode (reserved for opt-in tuning, no behavior changes yet)")
+	serverCmd.Flags().BoolVar(&importMode, "import-mode", false, "Enable startup import opt-in mode (reserved for future tuning)")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
 	serverCmd.Flags().DurationVar(&pprofReadTimeout, "pprof-read-timeout", 15*time.Second, "Read timeout for pprof server (default: 15s)")
@@ -551,13 +551,13 @@ func runServer(cmd *cobra.Command, args []string) {
 	// This must happen AFTER manager.Start() to ensure the graph pipeline is fully
 	// initialized (schema, indexes, etc.) before processing events.
 	if importPath != "" {
-		importCtx, importCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		importCtx, importCancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer importCancel()
 		if err := runStartupImport(importCtx, startupImportOptions{
 			Path:             importPath,
 			ChunkSize:        importChunkSize,
 			BenchmarkLogPath: importBenchmarkLog,
-			Mode:             importMode,
+			ImportMode:       importMode,
 			Logger:           logger,
 			Pipeline:         graphPipeline,
 		}); err != nil {
