@@ -40,6 +40,7 @@ var (
 	watcherEnabled        bool
 	maxConcurrentRequests int
 	importPath            string
+	embeddedMode          bool
 	pprofEnabled          bool
 	pprofPort             int
 	pprofReadTimeout      time.Duration
@@ -88,6 +89,7 @@ func init() {
 	serverCmd.Flags().BoolVar(&watcherEnabled, "watcher-enabled", true, "Enable Kubernetes watcher (default: true)")
 	serverCmd.Flags().IntVar(&maxConcurrentRequests, "max-concurrent-requests", 100, "Maximum number of concurrent API requests")
 	serverCmd.Flags().StringVar(&importPath, "import-path", "", "Path to the binary file containing events to import on startup")
+	serverCmd.Flags().BoolVar(&embeddedMode, "embedded", false, "Run in embedded mode (requires --import-path)")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
 	serverCmd.Flags().DurationVar(&pprofReadTimeout, "pprof-read-timeout", 15*time.Second, "Read timeout for pprof server (default: 15s)")
@@ -167,6 +169,23 @@ func runServer(cmd *cobra.Command, args []string) {
 	logger.Info("Starting Spectre v%s", Version)
 	logger.Debug("Configuration loaded: APIPort=%d", cfg.APIPort)
 
+	mode, err := resolveServerRuntimeMode(serverModeInput{
+		Embedded:       embeddedMode,
+		GraphEnabled:   graphEnabled,
+		WatcherEnabled: watcherEnabled,
+		ImportPath:     importPath,
+		AuditLogPath:   auditLogPath,
+	})
+	if err != nil {
+		logger.Error("Runtime mode validation failed: %v", err)
+		HandleError(err, "Configuration error")
+	}
+	logger.Info("Server runtime mode: %s (embedded=%t audit-only=%t)", mode.Name, mode.Embedded, mode.AuditOnly)
+
+	if mode.Embedded {
+		HandleError(fmt.Errorf("embedded runtime mode is not implemented yet"), "Configuration error")
+	}
+
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
 
@@ -224,14 +243,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		}()
 	}
 
-	// Graph is required unless running in audit-only mode
-	auditOnlyMode := !graphEnabled && auditLogPath != "" && watcherEnabled
-	if !graphEnabled && !auditOnlyMode {
-		logger.Error("Graph must be enabled - graph is now the only storage backend (or use --audit-log with --watcher-enabled for audit-only mode)")
-		HandleError(fmt.Errorf("graph-enabled flag must be set to true, or use audit-only mode"), "Configuration error")
-	}
-
-	if auditOnlyMode {
+	if mode.AuditOnly {
 		logger.Info("Running in audit-only mode - no graph database, events written to: %s", auditLogPath)
 	}
 
@@ -254,8 +266,8 @@ func runServer(cmd *cobra.Command, args []string) {
 	var graphClient graph.Client
 	var graphPipeline sync.Pipeline
 
-	// Initialize graph service (unless in audit-only mode)
-	if !auditOnlyMode {
+	// Initialize graph service when graph storage is enabled
+	if mode.StartGraph {
 		logger.Info("Initializing graph service")
 
 		graphConfig := graph.ClientConfig{
@@ -299,10 +311,10 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	// Initialize watcher if enabled
-	if watcherEnabled {
+	if mode.StartWatcher {
 		// Create handler - with or without graph pipeline
 		var eventHandler *watcher.EventCaptureHandler
-		if auditOnlyMode {
+		if mode.AuditOnly {
 			// Audit-only mode: no graph pipeline
 			eventHandler = watcher.NewEventCaptureHandler(nil)
 			eventHandler.SetAuditLog(auditLogWriter)
@@ -321,7 +333,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			logger.Error("Failed to create watcher component: %v", err)
 			HandleError(err, "Watcher initialization error")
 		}
-		if auditOnlyMode {
+		if mode.AuditOnly {
 			logger.Info("Watcher component created (audit-only mode)")
 		} else {
 			logger.Info("Watcher component created (graph-only mode)")
@@ -339,7 +351,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	// The remaining code only applies when not in audit-only mode
-	if auditOnlyMode {
+	if mode.AuditOnly {
 		// In audit-only mode, just register watcher and wait for events
 		if watcherComponent != nil {
 			if err := manager.Register(watcherComponent); err != nil {
