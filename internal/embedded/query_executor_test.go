@@ -190,6 +190,34 @@ func TestQueryExecutor_QueryDistinctMetadata(t *testing.T) {
 	}
 }
 
+func TestQueryExecutor_QueryDistinctMetadataIncludesPreExistingResources(t *testing.T) {
+	events := []models.Event{
+		makeEvent(1*1e9, "Pod", "ns-a", "pod-a", "uid-a", models.EventTypeCreate),
+		makeEvent(2*1e9, "Deployment", "ns-b", "dep-b", "uid-b", models.EventTypeCreate),
+		makeEvent(6*1e9, "Deployment", "ns-b", "dep-b", "uid-b", models.EventTypeUpdate),
+	}
+
+	executor, err := NewQueryExecutor(events)
+	if err != nil {
+		t.Fatalf("NewQueryExecutor error: %v", err)
+	}
+
+	namespaces, kinds, minTime, maxTime, err := executor.QueryDistinctMetadata(context.Background(), 5*1e9, 7*1e9)
+	if err != nil {
+		t.Fatalf("QueryDistinctMetadata error: %v", err)
+	}
+
+	if len(namespaces) != 2 || namespaces[0] != "ns-a" || namespaces[1] != "ns-b" {
+		t.Fatalf("unexpected namespaces for pre-existing window: %v", namespaces)
+	}
+	if len(kinds) != 2 || kinds[0] != "Deployment" || kinds[1] != "Pod" {
+		t.Fatalf("unexpected kinds for pre-existing window: %v", kinds)
+	}
+	if minTime != 1*1e9 || maxTime != 6*1e9 {
+		t.Fatalf("unexpected time range for pre-existing window: min=%d max=%d", minTime, maxTime)
+	}
+}
+
 func TestQueryExecutor_ExecutePaginatedDuplicateCursorKey(t *testing.T) {
 	events := []models.Event{
 		makeEvent(10*1e9, "Pod", "ns-a", "pod-x", "uid-a", models.EventTypeCreate),

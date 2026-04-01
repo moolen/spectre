@@ -176,13 +176,20 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 	minTime = -1
 	maxTime = -1
 
-	for _, events := range qe.eventsByResourceUID {
-		for _, event := range events {
-			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
-				continue
-			}
-			namespacesSet[event.Resource.Namespace] = struct{}{}
-			kindsSet[event.Resource.Kind] = struct{}{}
+	for _, key := range qe.orderedResources {
+		meta, ok := qe.resourceMetaByUID[key.uid]
+		if !ok {
+			continue
+		}
+
+		resourceEvents := qe.collectResourceEvents(qe.eventsByResourceUID[key.uid], startTimeNs, endTimeNs)
+		if len(resourceEvents) == 0 {
+			continue
+		}
+
+		namespacesSet[meta.Namespace] = struct{}{}
+		kindsSet[meta.Kind] = struct{}{}
+		for _, event := range resourceEvents {
 			if minTime < 0 || event.Timestamp < minTime {
 				minTime = event.Timestamp
 			}
