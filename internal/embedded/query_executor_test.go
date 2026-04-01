@@ -189,3 +189,52 @@ func TestQueryExecutor_QueryDistinctMetadata(t *testing.T) {
 		t.Fatalf("unexpected time range: min=%d max=%d", minTime, maxTime)
 	}
 }
+
+func TestQueryExecutor_ExecutePaginatedDuplicateCursorKey(t *testing.T) {
+	events := []models.Event{
+		makeEvent(10*1e9, "Pod", "ns-a", "pod-x", "uid-a", models.EventTypeCreate),
+		makeEvent(11*1e9, "Pod", "ns-a", "pod-x", "uid-b", models.EventTypeCreate),
+		makeEvent(12*1e9, "Service", "ns-a", "svc-y", "uid-c", models.EventTypeCreate),
+	}
+
+	executor, err := NewQueryExecutor(events)
+	if err != nil {
+		t.Fatalf("NewQueryExecutor error: %v", err)
+	}
+
+	query := &models.QueryRequest{
+		StartTimestamp: 9,
+		EndTimestamp:   13,
+		Filters:        models.QueryFilters{},
+	}
+
+	page1, page1Resp, err := executor.ExecutePaginated(context.Background(), query, &models.PaginationRequest{
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("ExecutePaginated page1 error: %v", err)
+	}
+	if got := len(page1.Events); got != 2 {
+		t.Fatalf("expected 2 events on page1, got %d", got)
+	}
+	if page1Resp == nil || page1Resp.NextCursor == "" || !page1Resp.HasMore {
+		t.Fatalf("expected cursor/hasMore for page1")
+	}
+
+	page2, page2Resp, err := executor.ExecutePaginated(context.Background(), query, &models.PaginationRequest{
+		PageSize: 1,
+		Cursor:   page1Resp.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("ExecutePaginated page2 error: %v", err)
+	}
+	if got := len(page2.Events); got != 1 {
+		t.Fatalf("expected 1 event on page2, got %d", got)
+	}
+	if page2Resp == nil || page2Resp.HasMore || page2Resp.NextCursor != "" {
+		t.Fatalf("expected no more pages after page2")
+	}
+	if page2.Events[0].Resource.Kind != "Service" || page2.Events[0].Resource.Name != "svc-y" {
+		t.Fatalf("unexpected page2 resource: kind=%s name=%s", page2.Events[0].Resource.Kind, page2.Events[0].Resource.Name)
+	}
+}

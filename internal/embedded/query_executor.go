@@ -136,17 +136,7 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 	filteredResources := qe.collectFilteredResources(startTimeNs, endTimeNs, query.Filters)
 
 	startIdx := qe.cursorStartIndex(filteredResources, pagination)
-	endIdx := startIdx + pageSize
-	if endIdx > len(filteredResources) {
-		endIdx = len(filteredResources)
-	}
-
-	hasMore := endIdx < len(filteredResources)
-	var nextCursor string
-	if hasMore && endIdx > 0 {
-		last := filteredResources[endIdx-1]
-		nextCursor = models.NewResourceCursor(last.kind, last.namespace, last.name).Encode()
-	}
+	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(filteredResources, startIdx, pageSize)
 
 	var resultEvents []models.Event
 	for _, resource := range filteredResources[startIdx:endIdx] {
@@ -300,24 +290,70 @@ func (qe *QueryExecutor) cursorStartIndex(resources []filteredResource, paginati
 	}
 
 	for i, resource := range resources {
-		if resource.kind > cursor.Kind {
-			return i
-		}
-		if resource.kind < cursor.Kind {
-			continue
-		}
-		if resource.namespace > cursor.Namespace {
-			return i
-		}
-		if resource.namespace < cursor.Namespace {
-			continue
-		}
-		if resource.name > cursor.Name {
+		if compareCursorKey(resource, cursor) > 0 {
 			return i
 		}
 	}
 
 	return len(resources)
+}
+
+func (qe *QueryExecutor) pageBoundsWithCursor(resources []filteredResource, startIdx, pageSize int) (endIdx int, hasMore bool, nextCursor string) {
+	if startIdx > len(resources) {
+		startIdx = len(resources)
+	}
+
+	endIdx = startIdx + pageSize
+	if endIdx > len(resources) {
+		endIdx = len(resources)
+	}
+
+	if endIdx == 0 || endIdx == len(resources) {
+		return endIdx, endIdx < len(resources), ""
+	}
+
+	lastKey := resources[endIdx-1]
+	for endIdx < len(resources) {
+		nextKey := resources[endIdx]
+		if compareCursorKey(nextKey, &models.ResourceCursor{
+			Kind:      lastKey.kind,
+			Namespace: lastKey.namespace,
+			Name:      lastKey.name,
+		}) != 0 {
+			break
+		}
+		endIdx++
+	}
+
+	hasMore = endIdx < len(resources)
+	if hasMore && endIdx > 0 {
+		last := resources[endIdx-1]
+		nextCursor = models.NewResourceCursor(last.kind, last.namespace, last.name).Encode()
+	}
+
+	return endIdx, hasMore, nextCursor
+}
+
+func compareCursorKey(resource filteredResource, cursor *models.ResourceCursor) int {
+	if resource.kind != cursor.Kind {
+		if resource.kind < cursor.Kind {
+			return -1
+		}
+		return 1
+	}
+	if resource.namespace != cursor.Namespace {
+		if resource.namespace < cursor.Namespace {
+			return -1
+		}
+		return 1
+	}
+	if resource.name != cursor.Name {
+		if resource.name < cursor.Name {
+			return -1
+		}
+		return 1
+	}
+	return 0
 }
 
 func (qe *QueryExecutor) isEventQuery(filters models.QueryFilters) bool {
@@ -379,17 +415,7 @@ func (qe *QueryExecutor) executeEventQuery(startTimeNs, endTimeNs int64, filters
 	})
 
 	startIdx := qe.cursorStartIndex(eventResources, pagination)
-	endIdx := startIdx + pageSize
-	if endIdx > len(eventResources) {
-		endIdx = len(eventResources)
-	}
-
-	hasMore := endIdx < len(eventResources)
-	var nextCursor string
-	if hasMore && endIdx > 0 {
-		last := eventResources[endIdx-1]
-		nextCursor = models.NewResourceCursor(last.kind, last.namespace, last.name).Encode()
-	}
+	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(eventResources, startIdx, pageSize)
 
 	var resultEvents []models.Event
 	for _, resource := range eventResources[startIdx:endIdx] {
