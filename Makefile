@@ -1,4 +1,4 @@
-.PHONY: help build build-ui build-mcp build-docs run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down test-graph test-graph-integration test-integration test-graph-integration-coverage test-graph-integration-single golden-generator test-golden docs-dev docs-preview
+.PHONY: help build build-ui build-mcp build-docs run test test-go test-ui test-e2e test-e2e-root-cause test-e2e-ui test-e2e-all clean clean-test-clusters docker-build docker-run deploy watch lint fmt vet favicons helm-lint helm-test helm-test-local helm-unittest helm-unittest-install proto dev-iterate dev-stop dev-logs graph-up graph-down startup-import-benchmark test-graph test-graph-integration test-integration test-graph-integration-coverage test-graph-integration-single golden-generator test-golden docs-dev docs-preview
 
 # Default target
 help:
@@ -27,6 +27,7 @@ help:
 	@echo "Graph Layer:"
 	@echo "  graph-up       - Start FalkorDB for development"
 	@echo "  graph-down     - Stop FalkorDB"
+	@echo "  startup-import-benchmark - Run startup import benchmark harness"
 	@echo ""
 	@echo "Development:"
 	@echo "  dev-iterate    - Quick iteration: clean, build, restart all services locally"
@@ -262,6 +263,8 @@ graph-down:
 	@docker compose -f docker-compose.graph.yml down falkordb
 	@echo "FalkorDB stopped"
 
+startup-import-benchmark:
+	@bash hack/benchmark-startup-import.sh
 
 # ============================================================================
 
