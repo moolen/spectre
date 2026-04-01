@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 
 	//nolint:gosec // We are using pprof for debugging
@@ -262,6 +263,15 @@ func runServer(cmd *cobra.Command, args []string) {
 		if err != nil {
 			logger.Error("Failed to initialize embedded query executor: %v", err)
 			HandleError(err, "Embedded executor error")
+		}
+		usable, err := hasUsableEmbeddedEvents(embeddedExecutor)
+		if err != nil {
+			logger.Error("Failed to validate embedded events: %v", err)
+			HandleError(err, "Embedded executor error")
+		}
+		if !usable {
+			logger.Error("No usable events found in import path: %s", importPath)
+			HandleError(fmt.Errorf("no usable events found at import path: %s", importPath), "Import error")
 		}
 
 		querySource := api.TimelineQuerySourceStorage
@@ -710,4 +720,21 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	logger.Info("Shutdown complete")
+}
+
+func hasUsableEmbeddedEvents(executor *embedded.QueryExecutor) (bool, error) {
+	if executor == nil {
+		return false, fmt.Errorf("embedded executor is nil")
+	}
+
+	namespaces, kinds, _, _, err := executor.QueryDistinctMetadata(context.Background(), 0, math.MaxInt64)
+	if err != nil {
+		return false, err
+	}
+
+	if len(namespaces) == 0 && len(kinds) == 0 {
+		return false, nil
+	}
+
+	return true, nil
 }

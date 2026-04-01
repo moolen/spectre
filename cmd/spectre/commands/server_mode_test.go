@@ -1,6 +1,11 @@
 package commands
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/moolen/spectre/internal/embedded"
+	"github.com/moolen/spectre/internal/models"
+)
 
 func TestResolveServerRuntimeMode(t *testing.T) {
 	t.Run("embedded requires import path", func(t *testing.T) {
@@ -98,6 +103,74 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		}
 		if mode.StartWatcher {
 			t.Fatalf("expected StartWatcher to be false when watcher is disabled")
+		}
+	})
+}
+
+func TestEmbeddedExecutorHasUsableEvents(t *testing.T) {
+	t.Run("returns false when executor has no usable resources", func(t *testing.T) {
+		executor, err := embedded.NewQueryExecutor([]models.Event{
+			{
+				ID:        "missing-uid",
+				Timestamp: 1,
+				Type:      models.EventTypeCreate,
+				Resource: models.ResourceMetadata{
+					Kind:    "Pod",
+					Version: "v1",
+					Name:    "pod-1",
+					UID:     "",
+				},
+			},
+			{
+				ID:        "event-missing-involved",
+				Timestamp: 2,
+				Type:      models.EventTypeCreate,
+				Resource: models.ResourceMetadata{
+					Kind:    "Event",
+					Version: "v1",
+					Name:    "event-1",
+					UID:     "event-uid",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error building executor: %v", err)
+		}
+
+		usable, err := hasUsableEmbeddedEvents(executor)
+		if err != nil {
+			t.Fatalf("unexpected error checking executor: %v", err)
+		}
+		if usable {
+			t.Fatalf("expected unusable executor to report no usable events")
+		}
+	})
+
+	t.Run("returns true when executor has usable resources", func(t *testing.T) {
+		executor, err := embedded.NewQueryExecutor([]models.Event{
+			{
+				ID:        "pod-create",
+				Timestamp: 10,
+				Type:      models.EventTypeCreate,
+				Resource: models.ResourceMetadata{
+					Kind:      "Pod",
+					Version:   "v1",
+					Name:      "pod-1",
+					Namespace: "default",
+					UID:       "pod-uid",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error building executor: %v", err)
+		}
+
+		usable, err := hasUsableEmbeddedEvents(executor)
+		if err != nil {
+			t.Fatalf("unexpected error checking executor: %v", err)
+		}
+		if !usable {
+			t.Fatalf("expected executor to report usable events")
 		}
 	})
 }
