@@ -182,10 +182,6 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 	logger.Info("Server runtime mode: %s (embedded=%t audit-only=%t)", mode.Name, mode.Embedded, mode.AuditOnly)
 
-	if mode.Embedded {
-		HandleError(fmt.Errorf("embedded runtime mode is not implemented yet"), "Configuration error")
-	}
-
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
 
