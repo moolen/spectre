@@ -1,6 +1,7 @@
 package importexport
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/moolen/spectre/internal/importexport/fileio"
@@ -15,6 +16,29 @@ type ChunkCallback func(chunk []models.Event) error
 
 type streamImportSource interface {
 	streamLoad(logger *logging.Logger, chunkSize int, onChunk ChunkCallback) error
+}
+
+type chunkCallbackError struct {
+	err error
+}
+
+func (e chunkCallbackError) Error() string {
+	return e.err.Error()
+}
+
+func (e chunkCallbackError) Unwrap() error {
+	return e.err
+}
+
+func wrapChunkCallbackError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var callbackErr chunkCallbackError
+	if errors.As(err, &callbackErr) {
+		return err
+	}
+	return chunkCallbackError{err: err}
 }
 
 // ImportInChunks imports from source and invokes callback with fixed-size chunks.
@@ -67,7 +91,7 @@ func emitChunks(events []models.Event, chunkSize int, onChunk ChunkCallback) err
 			end = len(events)
 		}
 		if err := onChunk(events[start:end]); err != nil {
-			return err
+			return wrapChunkCallbackError(err)
 		}
 	}
 	return nil
@@ -147,7 +171,7 @@ func (s *directorySource) streamLoad(logger *logging.Logger, chunkSize int, onCh
 				size = len(buffer)
 			}
 			if err := onChunk(buffer[:size]); err != nil {
-				return err
+				return wrapChunkCallbackError(err)
 			}
 			totalEvents += size
 			buffer = buffer[size:]
@@ -166,6 +190,10 @@ func (s *directorySource) streamLoad(logger *logging.Logger, chunkSize int, onCh
 			return flushBuffer(false)
 		})
 		if loadErr != nil {
+			var callbackErr chunkCallbackError
+			if errors.As(loadErr, &callbackErr) {
+				return callbackErr
+			}
 			failureCount++
 			logger.WarnWithFields("Failed to import file, skipping",
 				logging.Field("path", file.FilePath),

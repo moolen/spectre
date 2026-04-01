@@ -236,7 +236,7 @@ func parseJSONEventsInChunks(r io.Reader, chunkSize int, logger *logging.Logger,
 		}
 		enricher.Enrich(validEvents, logger)
 		validCount += len(validEvents)
-		return onChunk(validEvents)
+		return wrapChunkCallbackError(onChunk(validEvents))
 	}
 
 	for decoder.More() {

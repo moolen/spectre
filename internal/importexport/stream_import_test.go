@@ -2,6 +2,7 @@ package importexport
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -206,6 +207,52 @@ func TestImportUsesStreamingWhenAvailable(t *testing.T) {
 	}
 	if source.loadCalled {
 		t.Fatalf("expected legacy Load not to be called when streaming is available")
+	}
+}
+
+func TestImportInChunksDirectoryPropagatesCallbackError(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	writeEventsFile := func(path string, events []models.Event) {
+		t.Helper()
+		payload, err := json.Marshal(BatchEventImportRequest{Events: events})
+		if err != nil {
+			t.Fatalf("marshal failed: %v", err)
+		}
+		if err := os.WriteFile(path, payload, 0o644); err != nil {
+			t.Fatalf("write file failed: %v", err)
+		}
+	}
+
+	writeEventsFile(filepath.Join(tmpDir, "a.json"), []models.Event{
+		{
+			ID:        "a-1",
+			Timestamp: 1,
+			Type:      models.EventTypeCreate,
+			Resource:  models.ResourceMetadata{Kind: "Deployment", Name: "a"},
+		},
+	})
+	writeEventsFile(filepath.Join(tmpDir, "b.json"), []models.Event{
+		{
+			ID:        "b-1",
+			Timestamp: 2,
+			Type:      models.EventTypeCreate,
+			Resource:  models.ResourceMetadata{Kind: "Deployment", Name: "b"},
+		},
+	})
+
+	wantErr := errors.New("consumer failed")
+	callbackCalls := 0
+	err := ImportInChunks(FromDirectory(tmpDir), 1, func(_ []models.Event) error {
+		callbackCalls++
+		return wantErr
+	})
+
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("callbackCalls = %d, want 1 (abort immediately)", callbackCalls)
 	}
 }
 
