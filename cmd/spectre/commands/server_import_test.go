@@ -172,3 +172,21 @@ func TestRunStartupImportEmptyBenchmarkPathDoesNotWriteFile(t *testing.T) {
 		t.Fatalf("expected no report file to be written, stat error: %v", statErr)
 	}
 }
+
+func TestServerCommandDefinesStartupImportDisableCausalityFlag(t *testing.T) {
+	t.Parallel()
+
+	flag := serverCmd.Flags().Lookup("startup-import-disable-causality")
+	if flag == nil {
+		t.Fatal("expected startup-import-disable-causality flag to be registered")
+	}
+}
+
+func TestServerCommandDefinesStartupImportTimelineOnlyFlag(t *testing.T) {
+	t.Parallel()
+
+	flag := serverCmd.Flags().Lookup("startup-import-timeline-only")
+	if flag == nil {
+		t.Fatal("expected startup-import-timeline-only flag to be registered")
+	}
+}

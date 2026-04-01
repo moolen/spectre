@@ -9,7 +9,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	graphquery "github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/models"
 )
@@ -39,6 +42,39 @@ func TestStartupImport_StreamedChunksAgainstRealPipeline(t *testing.T) {
 	resourceCount := CountResources(t, harness.GetClient())
 	if resourceCount < 20 {
 		t.Fatalf("expected at least 20 resources from synthetic dataset, got %d", resourceCount)
+	}
+}
+
+func TestStartupImport_TimelineOnlyStillSupportsTimelineQueries(t *testing.T) {
+	harness, err := NewTestHarness(t)
+	if err != nil {
+		t.Fatalf("failed to create test harness: %v", err)
+	}
+	defer harness.Cleanup(context.Background())
+
+	importDir := generateImportDataset(t)
+	ctx := sync.WithBatchProcessingOptions(context.Background(), sync.BatchProcessingOptions{
+		TimelineOnly: true,
+	})
+
+	totalEvents, _, err := runStreamedImport(ctx, harness, importDir, 7)
+	if err != nil {
+		t.Fatalf("failed to run timeline-only import: %v", err)
+	}
+	if totalEvents <= 0 {
+		t.Fatalf("expected imported events > 0, got %d", totalEvents)
+	}
+
+	executor := graphquery.NewQueryExecutor(harness.GetClient())
+	result, err := executor.Execute(context.Background(), &models.QueryRequest{
+		StartTimestamp: 0,
+		EndTimestamp:   time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("timeline query failed after timeline-only import: %v", err)
+	}
+	if result.Count <= 0 {
+		t.Fatalf("expected timeline query to return events after timeline-only import, got %d", result.Count)
 	}
 }
 

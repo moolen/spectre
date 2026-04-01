@@ -34,23 +34,25 @@ import (
 )
 
 var (
-	apiPort               int
-	watcherConfigPath     string
-	watcherEnabled        bool
-	maxConcurrentRequests int
-	importPath            string
-	importChunkSize       int
-	importBenchmarkLog    string
-	importMode            bool
-	pprofEnabled          bool
-	pprofPort             int
-	pprofReadTimeout      time.Duration
-	pprofWriteTimeout     time.Duration
-	pprofIdleTimeout      time.Duration
-	tracingEnabled        bool
-	tracingEndpoint       string
-	tracingTLSCAPath      string
-	tracingTLSInsecure    bool
+	apiPort                       int
+	watcherConfigPath             string
+	watcherEnabled                bool
+	maxConcurrentRequests         int
+	importPath                    string
+	importChunkSize               int
+	importBenchmarkLog            string
+	importMode                    bool
+	startupImportDisableCausality bool
+	startupImportTimelineOnly     bool
+	pprofEnabled                  bool
+	pprofPort                     int
+	pprofReadTimeout              time.Duration
+	pprofWriteTimeout             time.Duration
+	pprofIdleTimeout              time.Duration
+	tracingEnabled                bool
+	tracingEndpoint               string
+	tracingTLSCAPath              string
+	tracingTLSInsecure            bool
 	// Graph reasoning layer flags
 	graphEnabled        bool
 	graphHost           string
@@ -93,6 +95,8 @@ func init() {
 	serverCmd.Flags().IntVar(&importChunkSize, "import-chunk-size", defaultStartupImportChunkSize, "Chunk size used for startup imports")
 	serverCmd.Flags().StringVar(&importBenchmarkLog, "import-benchmark-log", "", "Path to write startup import benchmark report as JSON")
 	serverCmd.Flags().BoolVar(&importMode, "import-mode", false, "Enable startup import opt-in mode (reserved for future tuning)")
+	serverCmd.Flags().BoolVar(&startupImportDisableCausality, "startup-import-disable-causality", false, "Disable causality inference during startup import only")
+	serverCmd.Flags().BoolVar(&startupImportTimelineOnly, "startup-import-timeline-only", false, "Import only timeline-critical graph data during startup import")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
 	serverCmd.Flags().DurationVar(&pprofReadTimeout, "pprof-read-timeout", 15*time.Second, "Read timeout for pprof server (default: 15s)")
@@ -553,6 +557,18 @@ func runServer(cmd *cobra.Command, args []string) {
 	if importPath != "" {
 		importCtx, importCancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer importCancel()
+		if startupImportTimelineOnly || startupImportDisableCausality {
+			opts := sync.BatchProcessingOptions{
+				DisableCausality: startupImportDisableCausality,
+				TimelineOnly:     startupImportTimelineOnly,
+			}
+			importCtx = sync.WithBatchProcessingOptions(importCtx, opts)
+			if startupImportTimelineOnly {
+				logger.Info("Startup import configured for timeline-only mode")
+			} else {
+				logger.Info("Startup import configured to skip causality inference")
+			}
+		}
 		if err := runStartupImport(importCtx, startupImportOptions{
 			Path:             importPath,
 			ChunkSize:        importChunkSize,
