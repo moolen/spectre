@@ -32,6 +32,35 @@ func TestCLIImportOnStartup(t *testing.T) {
 		verify_import_report_in_logs()
 }
 
+// TestCLIImportOnStartupEmbedded validates the embedded startup import workflow:
+// 1. Create a test cluster
+// 2. Generate test events and store them in a ConfigMap
+// 3. Deploy Spectre in embedded mode with startup import enabled
+// 4. Wait for Spectre to become ready
+// 5. Verify imported data is present via metadata and search APIs
+// 6. Verify the HTTP import endpoint is not exposed in read-only embedded mode
+func TestCLIImportOnStartupEmbedded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping e2e test in short mode")
+	}
+	t.Parallel()
+
+	given, when, then := NewImportExportStage(t)
+
+	given.a_test_cluster().and().
+		generated_test_events_stored_in_configmap()
+
+	when.spectre_is_deployed_in_embedded_mode_with_import_on_startup().and().
+		wait_for_spectre_to_become_ready().and().
+		port_forward_to_spectre()
+
+	then.verify_imported_data_is_present_via_metadata_api().and().
+		verify_resources_can_be_queried_via_search_api().and().
+		specific_resources_are_present_by_name_for_cli_import().and().
+		import_endpoint_is_not_exposed().and().
+		verify_import_report_in_logs()
+}
+
 // TestImportExportRoundTrip validates the full import/export workflow:
 // 1. Deploy Spectre via Helm
 // 2. Generate test data in two namespaces (import-1, import-2)

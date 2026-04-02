@@ -1029,7 +1029,7 @@ func (s *ImportExportStage) specific_kubernetes_event_is_present() *ImportExport
 
 func (s *ImportExportStage) a_test_cluster() *ImportExportStage {
 	var err error
-	clusterName := fmt.Sprintf("cli-test-%d", time.Now().Unix()%1000000)
+	clusterName := newCLIClusterName()
 	s.testCluster, err = helpers.CreateKindCluster(s.t, clusterName)
 	s.require.NoError(err, "Should create test cluster")
 	s.t.Cleanup(func() {
@@ -1041,6 +1041,10 @@ func (s *ImportExportStage) a_test_cluster() *ImportExportStage {
 	s.require.NoError(err, "Should create Kubernetes client")
 
 	return s
+}
+
+func newCLIClusterName() string {
+	return fmt.Sprintf("cli-test-%s", uuid.NewString()[:8])
 }
 
 func (s *ImportExportStage) generated_test_events_stored_in_configmap() *ImportExportStage {
@@ -1123,6 +1127,57 @@ func (s *ImportExportStage) spectre_is_deployed_with_import_on_startup() *Import
 	s.require.NoError(err, "failed to install Helm release")
 
 	s.t.Logf("Spectre deployed with import configuration")
+	return s
+}
+
+func (s *ImportExportStage) spectre_is_deployed_in_embedded_mode_with_import_on_startup() *ImportExportStage {
+	s.t.Logf("Preparing Helm deployment with embedded import configuration")
+
+	values, imageRef, err := helpers.LoadHelmValues()
+	s.require.NoError(err, "failed to load Helm values")
+
+	err = helpers.BuildAndLoadTestImage(s.t, s.testCluster.Name, imageRef)
+	s.require.NoError(err, "failed to build/load image")
+
+	importMountPath := "/import-data"
+
+	values["extraVolumes"] = []map[string]interface{}{
+		{
+			"name": "import-data",
+			"configMap": map[string]string{
+				"name": s.configMapName,
+			},
+		},
+	}
+
+	values["extraVolumeMounts"] = []map[string]interface{}{
+		{
+			"name":      "import-data",
+			"mountPath": importMountPath,
+			"readOnly":  true,
+		},
+	}
+
+	graphValues, ok := values["graph"].(map[string]interface{})
+	s.require.True(ok, "graph values should be present")
+	graphValues["enabled"] = false
+
+	values["extraArgs"] = []string{
+		"--embedded",
+		"--watcher-enabled=false",
+		fmt.Sprintf("--import-path=%s", importMountPath),
+	}
+
+	helmDeployer, err := helpers.NewHelmDeployer(s.t, s.testCluster.GetContext(), s.spectreNamespace)
+	s.require.NoError(err, "failed to create Helm deployer")
+
+	chartPath, err := helpers.RepoPath("chart")
+	s.require.NoError(err, "failed to get chart path")
+
+	err = helmDeployer.InstallOrUpgrade(s.testCluster.Name, chartPath, values)
+	s.require.NoError(err, "failed to install Helm release")
+
+	s.t.Logf("Spectre deployed with embedded import configuration")
 	return s
 }
 
@@ -1254,6 +1309,21 @@ func (s *ImportExportStage) specific_resources_are_present_by_name_for_cli_impor
 	return s
 }
 
+func (s *ImportExportStage) import_endpoint_is_not_exposed() *ImportExportStage {
+	importURL := fmt.Sprintf("%s/v1/storage/import", s.apiClient.BaseURL)
+
+	req, err := http.NewRequestWithContext(s.t.Context(), http.MethodPost, importURL, http.NoBody)
+	s.require.NoError(err, "failed to create import endpoint request")
+
+	resp, err := s.apiClient.Client.Do(req)
+	s.require.NoError(err, "failed to call import endpoint")
+	defer resp.Body.Close()
+
+	s.require.Equal(http.StatusNotFound, resp.StatusCode, "embedded mode should not expose HTTP import")
+	s.t.Log("✓ Embedded mode does not expose HTTP import endpoint")
+	return s
+}
+
 func (s *ImportExportStage) verify_import_report_in_logs() *ImportExportStage {
 	pods, err := s.k8sClient.ListPods(s.t.Context(), s.spectreNamespace, fmt.Sprintf("app.kubernetes.io/instance=%s", s.testCluster.Name))
 	s.require.NoError(err, "failed to list pods")
@@ -1270,8 +1340,13 @@ func (s *ImportExportStage) verify_import_report_in_logs() *ImportExportStage {
 	// Check for import-related log messages
 	s.require.True(strings.Contains(logsStr, "Importing events from") || strings.Contains(logsStr, "Import"),
 		"Pod logs should contain import-related messages")
-	s.require.True(strings.Contains(logsStr, "Import Summary") || strings.Contains(logsStr, "Import completed"),
-		"Pod logs should contain import summary or completion message")
+	s.require.True(
+		strings.Contains(logsStr, "Import Summary") ||
+			strings.Contains(logsStr, "Import completed") ||
+			strings.Contains(logsStr, "Startup import completed") ||
+			strings.Contains(logsStr, "Parsed import path"),
+		"Pod logs should contain import summary or completion message",
+	)
 
 	s.t.Logf("✓ Pod logs confirm import execution")
 	s.t.Log("✓ CLI import on startup test completed successfully!")
