@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/api"
-	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
 )
@@ -21,23 +20,23 @@ const (
 	MaxPayloadSize = 30 * 1024 * 1024
 )
 
-// ImportHandler handles event import requests using the graph pipeline
+// ImportHandler handles event import requests using a batch ingestor.
 type ImportHandler struct {
-	pipeline sync.Pipeline
-	logger   *logging.Logger
+	batchIngestor api.BatchIngestor
+	logger        *logging.Logger
 }
 
 // NewImportHandler creates a new import handler
-func NewImportHandler(pipeline sync.Pipeline, logger *logging.Logger) *ImportHandler {
+func NewImportHandler(batchIngestor api.BatchIngestor, logger *logging.Logger) *ImportHandler {
 	return &ImportHandler{
-		pipeline: pipeline,
-		logger:   logger,
+		batchIngestor: batchIngestor,
+		logger:        logger,
 	}
 }
 
 // Handle processes import requests
 func (h *ImportHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	// Parse query parameters (kept for compatibility, but not all are used in graph mode)
+	// Parse query parameters (kept for compatibility, but not all are used in ingest mode).
 	validateFilesStr := r.URL.Query().Get("validate")
 	overwriteStr := r.URL.Query().Get("overwrite")
 
@@ -45,7 +44,7 @@ func (h *ImportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	validateFiles := validateFilesStr == "true" || validateFilesStr == "1" || validateFilesStr == ""
 	overwrite := overwriteStr == "true" || overwriteStr == "1"
 
-	// Log parameters (some may not apply to graph mode)
+	// Log parameters (some may not apply to current ingest mode).
 	h.logger.DebugWithFields("Import request received",
 		logging.Field("validate", validateFiles),
 		logging.Field("overwrite", overwrite))
@@ -129,16 +128,16 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		logging.Field("event_count", len(eventValues)),
 		logging.Field("parse_duration", parseDuration))
 
-	// Process events through graph pipeline
+	// Process events through the ingest backend.
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
-	h.logger.InfoWithFields("Starting batch processing through pipeline",
+	h.logger.InfoWithFields("Starting batch processing through ingest backend",
 		logging.Field("event_count", len(eventValues)),
 		logging.Field("timeout", "5m"))
 
 	processStartTime := time.Now()
-	if err := h.pipeline.ProcessBatch(ctx, eventValues); err != nil {
+	if err := h.batchIngestor.ProcessBatch(ctx, eventValues); err != nil {
 		processDuration := time.Since(processStartTime)
 		h.logger.ErrorWithFields("Event batch processing failed",
 			logging.Field("error", err),
@@ -177,9 +176,9 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		"total_events":   len(eventValues),
 		"merged_hours":   filesCreated, // Number of unique hours
 		"files_created":  filesCreated, // For compatibility with tests
-		"imported_files": 0,            // Not applicable in graph mode
+		"imported_files": 0,            // Not applicable in ingest mode
 		"duration":       duration.String(),
-		"errors":         []string{},   // No errors in success path
+		"errors":         []string{}, // No errors in success path
 	}
 
 	h.logger.Debug("Writing import response to client")

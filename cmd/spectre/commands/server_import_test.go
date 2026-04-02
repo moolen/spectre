@@ -13,15 +13,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
-type fakeStartupImportPipeline struct {
+type fakeStartupImportBatchIngestor struct {
 	batches [][]models.Event
 	err     error
 }
+
+var _ api.BatchIngestor = (*fakeStartupImportBatchIngestor)(nil)
 
 func captureStartupImportOutput(t *testing.T, fn func()) string {
 	t.Helper()
@@ -54,7 +57,7 @@ func captureStartupImportOutput(t *testing.T, fn func()) string {
 	return stdoutBuf.String() + stderrBuf.String()
 }
 
-func (f *fakeStartupImportPipeline) ProcessBatch(ctx context.Context, events []models.Event) error {
+func (f *fakeStartupImportBatchIngestor) ProcessBatch(ctx context.Context, events []models.Event) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -68,7 +71,7 @@ func TestRunStartupImportProcessesChunksAndWritesReport(t *testing.T) {
 	t.Parallel()
 
 	logger := logging.GetLogger("test_startup_import")
-	pipeline := &fakeStartupImportPipeline{}
+	pipeline := &fakeStartupImportBatchIngestor{}
 	reportPath := filepath.Join(t.TempDir(), "import-report.json")
 
 	var gotChunkSize int
@@ -88,7 +91,7 @@ func TestRunStartupImportProcessesChunksAndWritesReport(t *testing.T) {
 		BenchmarkLogPath: reportPath,
 		ImportMode:       true,
 		Logger:           logger,
-		Pipeline:         pipeline,
+		BatchIngestor:    pipeline,
 		Stream:           streamFn,
 	})
 	if err != nil {
@@ -143,12 +146,12 @@ func TestRunStartupImportPropagatesPipelineError(t *testing.T) {
 	}
 
 	err := runStartupImport(context.Background(), startupImportOptions{
-		Path:       "fixtures/import.json",
-		ChunkSize:  10,
-		Logger:     logger,
-		Pipeline:   &fakeStartupImportPipeline{err: errPipeline},
-		Stream:     streamFn,
-		ImportMode: false,
+		Path:          "fixtures/import.json",
+		ChunkSize:     10,
+		Logger:        logger,
+		BatchIngestor: &fakeStartupImportBatchIngestor{err: errPipeline},
+		Stream:        streamFn,
+		ImportMode:    false,
 	})
 	if !errors.Is(err, errPipeline) {
 		t.Fatalf("expected pipeline error, got: %v", err)
@@ -166,12 +169,12 @@ func TestRunStartupImportPropagatesStreamError(t *testing.T) {
 	}
 
 	err := runStartupImport(context.Background(), startupImportOptions{
-		Path:       "fixtures/import.json",
-		ChunkSize:  10,
-		Logger:     logger,
-		Pipeline:   &fakeStartupImportPipeline{},
-		Stream:     streamFn,
-		ImportMode: false,
+		Path:          "fixtures/import.json",
+		ChunkSize:     10,
+		Logger:        logger,
+		BatchIngestor: &fakeStartupImportBatchIngestor{},
+		Stream:        streamFn,
+		ImportMode:    false,
 	})
 	if !errors.Is(err, errStream) {
 		t.Fatalf("expected stream error, got: %v", err)
@@ -182,7 +185,7 @@ func TestRunStartupImportEmptyBenchmarkPathDoesNotWriteFile(t *testing.T) {
 	t.Parallel()
 
 	logger := logging.GetLogger("test_startup_import_no_benchmark")
-	pipeline := &fakeStartupImportPipeline{}
+	pipeline := &fakeStartupImportBatchIngestor{}
 	reportPath := filepath.Join(t.TempDir(), "import-report.json")
 
 	streamFn := func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error {
@@ -194,7 +197,7 @@ func TestRunStartupImportEmptyBenchmarkPathDoesNotWriteFile(t *testing.T) {
 		ChunkSize:        10,
 		BenchmarkLogPath: "",
 		Logger:           logger,
-		Pipeline:         pipeline,
+		BatchIngestor:    pipeline,
 		Stream:           streamFn,
 		ImportMode:       false,
 	})
@@ -213,19 +216,19 @@ func TestRunStartupImportLogsImportCompletedMessage(t *testing.T) {
 	defer os.Unsetenv("LOG_TIMESTAMP")
 
 	logger := logging.GetLogger("test_startup_import_logs")
-	pipeline := &fakeStartupImportPipeline{}
+	pipeline := &fakeStartupImportBatchIngestor{}
 	streamFn := func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error {
 		return onChunk([]models.Event{{ID: "a"}})
 	}
 
 	output := captureStartupImportOutput(t, func() {
 		err := runStartupImport(context.Background(), startupImportOptions{
-			Path:       "fixtures/import.json",
-			ChunkSize:  10,
-			Logger:     logger,
-			Pipeline:   pipeline,
-			Stream:     streamFn,
-			ImportMode: false,
+			Path:          "fixtures/import.json",
+			ChunkSize:     10,
+			Logger:        logger,
+			BatchIngestor: pipeline,
+			Stream:        streamFn,
+			ImportMode:    false,
 		})
 		if err != nil {
 			t.Fatalf("runStartupImport returned error: %v", err)
@@ -234,6 +237,43 @@ func TestRunStartupImportLogsImportCompletedMessage(t *testing.T) {
 
 	if !strings.Contains(output, "Import completed") {
 		t.Fatalf("expected startup import logs to contain %q, got %q", "Import completed", output)
+	}
+}
+
+func TestRunStartupImportLogsWarningWhenBothIngestorsAreSet(t *testing.T) {
+	os.Setenv("LOG_TIMESTAMP", "2024-01-01T12:00:00Z")
+	defer os.Unsetenv("LOG_TIMESTAMP")
+
+	logger := logging.GetLogger("test_startup_import_both_ingestors")
+	preferred := &fakeStartupImportBatchIngestor{}
+	deprecated := &fakeStartupImportBatchIngestor{err: errors.New("deprecated pipeline should not be used")}
+	streamFn := func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error {
+		return onChunk([]models.Event{{ID: "a"}})
+	}
+
+	output := captureStartupImportOutput(t, func() {
+		err := runStartupImport(context.Background(), startupImportOptions{
+			Path:          "fixtures/import.json",
+			ChunkSize:     10,
+			Logger:        logger,
+			BatchIngestor: preferred,
+			Pipeline:      deprecated,
+			Stream:        streamFn,
+			ImportMode:    false,
+		})
+		if err != nil {
+			t.Fatalf("runStartupImport returned error: %v", err)
+		}
+	})
+
+	if len(preferred.batches) != 1 {
+		t.Fatalf("expected preferred batch ingestor to process exactly one batch, got %d", len(preferred.batches))
+	}
+	if len(deprecated.batches) != 0 {
+		t.Fatalf("expected deprecated pipeline ingestor to be unused, got %d batches", len(deprecated.batches))
+	}
+	if !strings.Contains(output, "Both BatchIngestor and deprecated Pipeline are set; using BatchIngestor") {
+		t.Fatalf("expected warning about both ingestors being set, got %q", output)
 	}
 }
 

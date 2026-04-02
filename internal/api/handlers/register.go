@@ -8,7 +8,6 @@ import (
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
-	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/trace"
@@ -23,7 +22,7 @@ func RegisterHandlers(
 	timelineService *api.TimelineService, // Shared timeline service
 	analysisStore analysisstore.AnalysisStore,
 	graphClient graph.Client,
-	graphPipeline sync.Pipeline,
+	importIngestor api.BatchIngestor,
 	metadataCache *api.MetadataCache,
 	namespaceGraphCache *namespacegraph.Cache,
 	configPath string,
@@ -128,16 +127,22 @@ func RegisterHandlers(
 		logger.Info("Registered /v1/observatory-graph endpoint")
 	}
 
-	// Register import handler if graph pipeline is available
-	if graphPipeline != nil {
-		importHandler := NewImportHandler(graphPipeline, logger)
+	// Register import handler when a backend batch ingestor is available.
+	if importIngestor != nil {
+		importHandler := NewImportHandler(importIngestor, logger)
 		router.HandleFunc("/v1/storage/import", withMethod(http.MethodPost, importHandler.Handle))
 		logger.Info("Registered /v1/storage/import endpoint for event imports")
 	}
 
-	// Register export handler if graph query executor is available
-	if graphExecutor != nil {
-		exportHandler := NewExportHandler(graphExecutor, logger)
+	// Register export handler when the selected query executor is available.
+	var exportExecutor api.QueryExecutor
+	if graphExecutor != nil && querySource == api.TimelineQuerySourceGraph {
+		exportExecutor = graphExecutor
+	} else {
+		exportExecutor = storageExecutor
+	}
+	if exportExecutor != nil {
+		exportHandler := NewExportHandler(exportExecutor, logger)
 		router.HandleFunc("/v1/storage/export", withMethod(http.MethodGet, exportHandler.Handle))
 		logger.Info("Registered /v1/storage/export endpoint for event exports")
 	}

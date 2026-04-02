@@ -2,6 +2,21 @@ package commands
 
 import "fmt"
 
+type runtimeName string
+type storageBackend string
+type ingestionMode string
+
+const (
+	runtimeNameEmbedded runtimeName = "embedded"
+	runtimeNameGraph    runtimeName = "graph"
+
+	backendEmbedded storageBackend = "embedded"
+	backendFalkor   storageBackend = "falkor"
+
+	ingestionModeLive       ingestionMode = "live"
+	ingestionModeImportOnly ingestionMode = "import-only"
+)
+
 type serverModeInput struct {
 	Embedded       bool
 	GraphEnabled   bool
@@ -11,27 +26,38 @@ type serverModeInput struct {
 }
 
 type serverRuntimeMode struct {
-	Name         string
-	Embedded     bool
-	AuditOnly    bool
-	StartGraph   bool
-	StartWatcher bool
-	StartMCP     bool
+	Name          string
+	Backend       string
+	IngestionMode string
+	Embedded      bool
+	ImportOnly    bool
+	AuditOnly     bool
+	StartGraph    bool
+	StartWatcher  bool
+	StartMCP      bool
 }
 
 func resolveServerRuntimeMode(in serverModeInput) (serverRuntimeMode, error) {
-	if in.Embedded && in.ImportPath == "" {
-		return serverRuntimeMode{}, fmt.Errorf("--embedded requires --import-path")
-	}
-
 	if in.Embedded {
+		ingestionMode := ingestionModeLive
+		importOnly := false
+		startWatcher := true
+		if !in.WatcherEnabled {
+			ingestionMode = ingestionModeImportOnly
+			importOnly = true
+			startWatcher = false
+		}
+
 		return serverRuntimeMode{
-			Name:         "embedded",
-			Embedded:     true,
-			AuditOnly:    false,
-			StartGraph:   false,
-			StartWatcher: false,
-			StartMCP:     false,
+			Name:          string(runtimeNameEmbedded),
+			Backend:       string(backendEmbedded),
+			IngestionMode: string(ingestionMode),
+			Embedded:      true,
+			ImportOnly:    importOnly,
+			AuditOnly:     false,
+			StartGraph:    false,
+			StartWatcher:  startWatcher,
+			StartMCP:      true,
 		}, nil
 	}
 
@@ -41,11 +67,15 @@ func resolveServerRuntimeMode(in serverModeInput) (serverRuntimeMode, error) {
 	}
 
 	return serverRuntimeMode{
-		Name:         "graph",
-		Embedded:     false,
-		AuditOnly:    auditOnly,
-		StartGraph:   in.GraphEnabled,
-		StartWatcher: in.WatcherEnabled,
-		StartMCP:     !auditOnly,
+		Name:    string(runtimeNameGraph),
+		Backend: string(backendFalkor),
+		// Non-embedded mode currently reports the primary ingestion family, not whether watcher is active.
+		IngestionMode: string(ingestionModeLive),
+		Embedded:      false,
+		ImportOnly:    false,
+		AuditOnly:     auditOnly,
+		StartGraph:    in.GraphEnabled,
+		StartWatcher:  in.WatcherEnabled,
+		StartMCP:      !auditOnly,
 	}, nil
 }

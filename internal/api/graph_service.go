@@ -140,6 +140,10 @@ func (s *GraphService) AnalyzeNamespaceGraph(ctx context.Context, input namespac
 
 // AnalyzeObservatoryGraph analyzes Observatory data (SignalAnchors, Alerts, Dashboards, etc.)
 func (s *GraphService) AnalyzeObservatoryGraph(ctx context.Context, input observatorygraph.AnalyzeInput) (*observatorygraph.ObservatoryGraphResponse, error) {
+	if s == nil || s.observatoryAnalyzer == nil {
+		return nil, fmt.Errorf("observatory graph analysis is not supported by the current backend")
+	}
+
 	// Add tracing span
 	var span trace.Span
 	if s.tracer != nil {

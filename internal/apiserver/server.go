@@ -11,7 +11,6 @@ import (
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
-	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/trace"
@@ -41,7 +40,7 @@ type Server struct {
 	querySource      api.TimelineQuerySource // Which executor to use for timeline queries
 	graphClient      graph.Client
 	analysisStore    analysisstore.AnalysisStore
-	graphPipeline    sync.Pipeline         // Graph sync pipeline for imports
+	importIngestor   api.BatchIngestor     // Backend ingest target for imports
 	timelineService  *api.TimelineService  // Shared timeline service for REST handlers and MCP tools
 	metadataCache    *api.MetadataCache    // In-memory metadata cache for fast responses
 	nsGraphCache     *namespacegraph.Cache // In-memory namespace graph cache for fast responses
@@ -75,7 +74,7 @@ func NewWithStorageGraphAndPipeline(
 	storage interface{}, // Can be nil - kept for signature compatibility but not used
 	graphClient graph.Client,
 	analysisStore analysisstore.AnalysisStore,
-	graphPipeline sync.Pipeline, // Graph pipeline for imports
+	importIngestor api.BatchIngestor,
 	readinessChecker ReadinessChecker,
 	tracingProvider interface {
 		GetTracer(string) trace.Tracer
@@ -95,7 +94,7 @@ func NewWithStorageGraphAndPipeline(
 		querySource:            querySource,
 		graphClient:            graphClient,
 		analysisStore:          analysisStore,
-		graphPipeline:          graphPipeline,
+		importIngestor:         importIngestor,
 		router:                 http.NewServeMux(),
 		readinessChecker:       readinessChecker,
 		tracingProvider:        tracingProvider,
