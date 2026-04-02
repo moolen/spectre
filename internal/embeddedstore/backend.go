@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
@@ -22,6 +23,11 @@ type Backend struct {
 	analysis   analysisstore.AnalysisStore
 	ready      atomic.Bool
 }
+
+var (
+	applyProjectionEventFnMu sync.RWMutex
+	applyProjectionEventFn   = applyProjectionEventDirect
+)
 
 func Open(cfg Config) (*Backend, error) {
 	if cfg.DataDir == "" {
@@ -99,13 +105,16 @@ func (b *Backend) ProcessBatch(ctx context.Context, events []models.Event) error
 	if err := b.journal.AppendBatch(ctx, events); err != nil {
 		return err
 	}
+	wasReady := b.ready.Load()
 	for i := range events {
-		if err := b.projection.Apply(events[i]); err != nil {
+		if err := applyProjectionEvent(b.projection, events[i]); err != nil {
 			b.ready.Store(false)
 			return fmt.Errorf("process embedded batch: apply event %d: %w", i, err)
 		}
 	}
-	b.ready.Store(true)
+	if wasReady {
+		b.ready.Store(true)
+	}
 	return nil
 }
 
@@ -125,4 +134,29 @@ func (b *Backend) AnalysisStore() analysisstore.AnalysisStore {
 
 func (b *Backend) IsReady() bool {
 	return b != nil && b.ready.Load()
+}
+
+func applyProjectionEvent(projection *Projection, event models.Event) error {
+	applyProjectionEventFnMu.RLock()
+	fn := applyProjectionEventFn
+	applyProjectionEventFnMu.RUnlock()
+
+	return fn(projection, event)
+}
+
+func applyProjectionEventDirect(projection *Projection, event models.Event) error {
+	return projection.Apply(event)
+}
+
+func setApplyProjectionEventFnForTest(fn func(*Projection, models.Event) error) func() {
+	applyProjectionEventFnMu.Lock()
+	previous := applyProjectionEventFn
+	applyProjectionEventFn = fn
+	applyProjectionEventFnMu.Unlock()
+
+	return func() {
+		applyProjectionEventFnMu.Lock()
+		applyProjectionEventFn = previous
+		applyProjectionEventFnMu.Unlock()
+	}
 }
