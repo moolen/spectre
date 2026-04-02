@@ -2,6 +2,21 @@ package commands
 
 import "fmt"
 
+type runtimeName string
+type storageBackend string
+type ingestionMode string
+
+const (
+	runtimeNameEmbedded runtimeName = "embedded"
+	runtimeNameGraph    runtimeName = "graph"
+
+	backendEmbedded storageBackend = "embedded"
+	backendFalkor   storageBackend = "falkor"
+
+	ingestionModeLive       ingestionMode = "live"
+	ingestionModeImportOnly ingestionMode = "import-only"
+)
+
 type serverModeInput struct {
 	Embedded       bool
 	GraphEnabled   bool
@@ -28,19 +43,19 @@ func resolveServerRuntimeMode(in serverModeInput) (serverRuntimeMode, error) {
 			return serverRuntimeMode{}, fmt.Errorf("--embedded with watcher disabled requires --import-path")
 		}
 
-		ingestionMode := "live"
+		ingestionMode := ingestionModeLive
 		importOnly := false
 		startWatcher := true
 		if !in.WatcherEnabled {
-			ingestionMode = "import-only"
+			ingestionMode = ingestionModeImportOnly
 			importOnly = true
 			startWatcher = false
 		}
 
 		return serverRuntimeMode{
-			Name:          "embedded",
-			Backend:       "embedded",
-			IngestionMode: ingestionMode,
+			Name:          string(runtimeNameEmbedded),
+			Backend:       string(backendEmbedded),
+			IngestionMode: string(ingestionMode),
 			Embedded:      true,
 			ImportOnly:    importOnly,
 			AuditOnly:     false,
@@ -56,9 +71,10 @@ func resolveServerRuntimeMode(in serverModeInput) (serverRuntimeMode, error) {
 	}
 
 	return serverRuntimeMode{
-		Name:          "graph",
-		Backend:       "falkor",
-		IngestionMode: "live",
+		Name:    string(runtimeNameGraph),
+		Backend: string(backendFalkor),
+		// Non-embedded mode currently reports the primary ingestion family, not whether watcher is active.
+		IngestionMode: string(ingestionModeLive),
 		Embedded:      false,
 		ImportOnly:    false,
 		AuditOnly:     auditOnly,

@@ -18,17 +18,17 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if mode.Name != "embedded" {
-			t.Fatalf("expected mode name embedded, got %q", mode.Name)
+		if mode.Name != string(runtimeNameEmbedded) {
+			t.Fatalf("expected mode name %s, got %q", runtimeNameEmbedded, mode.Name)
 		}
 		if !mode.Embedded {
 			t.Fatalf("expected embedded to be true")
 		}
-		if mode.Backend != "embedded" {
-			t.Fatalf("expected backend embedded, got %q", mode.Backend)
+		if mode.Backend != string(backendEmbedded) {
+			t.Fatalf("expected backend %s, got %q", backendEmbedded, mode.Backend)
 		}
-		if mode.IngestionMode != "live" {
-			t.Fatalf("expected ingestion mode live, got %q", mode.IngestionMode)
+		if mode.IngestionMode != string(ingestionModeLive) {
+			t.Fatalf("expected ingestion mode %s, got %q", ingestionModeLive, mode.IngestionMode)
 		}
 		if mode.ImportOnly {
 			t.Fatalf("expected import-only flag to be false")
@@ -54,11 +54,20 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if mode.Backend != "embedded" {
-			t.Fatalf("expected backend embedded, got %q", mode.Backend)
+		if mode.Name != string(runtimeNameEmbedded) {
+			t.Fatalf("expected mode name %s, got %q", runtimeNameEmbedded, mode.Name)
 		}
-		if mode.IngestionMode != "import-only" {
-			t.Fatalf("expected ingestion mode import-only, got %q", mode.IngestionMode)
+		if !mode.Embedded {
+			t.Fatalf("expected embedded to be true")
+		}
+		if mode.AuditOnly {
+			t.Fatalf("expected audit-only to be false")
+		}
+		if mode.Backend != string(backendEmbedded) {
+			t.Fatalf("expected backend %s, got %q", backendEmbedded, mode.Backend)
+		}
+		if mode.IngestionMode != string(ingestionModeImportOnly) {
+			t.Fatalf("expected ingestion mode %s, got %q", ingestionModeImportOnly, mode.IngestionMode)
 		}
 		if !mode.ImportOnly {
 			t.Fatalf("expected import-only flag to be true")
@@ -128,8 +137,14 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if mode.Name != "graph" {
-			t.Fatalf("expected mode name graph, got %q", mode.Name)
+		if mode.Name != string(runtimeNameGraph) {
+			t.Fatalf("expected mode name %s, got %q", runtimeNameGraph, mode.Name)
+		}
+		if mode.Backend != string(backendFalkor) {
+			t.Fatalf("expected backend %s, got %q", backendFalkor, mode.Backend)
+		}
+		if mode.IngestionMode != string(ingestionModeLive) {
+			t.Fatalf("expected ingestion mode %s, got %q", ingestionModeLive, mode.IngestionMode)
 		}
 		if mode.StartWatcher {
 			t.Fatalf("expected StartWatcher to be false when watcher is disabled")
