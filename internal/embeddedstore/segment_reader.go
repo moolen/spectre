@@ -163,13 +163,6 @@ func (r *segmentReader) ScanUID(ctx context.Context, uid string) ([]models.Event
 		events = append(events, event)
 	}
 
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].Timestamp != events[j].Timestamp {
-			return events[i].Timestamp < events[j].Timestamp
-		}
-		return events[i].ID < events[j].ID
-	})
-
 	return events, nil
 }
 
@@ -179,10 +172,13 @@ func (r *segmentReader) startOffsetForTime(timestamp int64) int64 {
 	}
 
 	indexPos := sort.Search(len(r.timeIndex), func(i int) bool {
-		return r.timeIndex[i].Timestamp > timestamp
+		return r.timeIndex[i].Timestamp >= timestamp
 	})
 	if indexPos == 0 {
 		return r.timeIndex[0].Offset
+	}
+	if indexPos == len(r.timeIndex) {
+		return r.timeIndex[len(r.timeIndex)-1].Offset
 	}
 
 	return r.timeIndex[indexPos-1].Offset

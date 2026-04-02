@@ -2,6 +2,7 @@ package embeddedstore
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,4 +81,80 @@ func TestSegment_PrunesByNamespaceKindStats(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, reader.MayContain("flux-system", "HelmRelease"))
 	require.False(t, reader.MayContain("default", "Pod"))
+}
+
+func TestSegment_ScanTimeRangeIncludesAllDuplicateTimestampsAcrossSparseIndex(t *testing.T) {
+	dir := t.TempDir()
+
+	events := make([]models.Event, 0, 96)
+	for i := 0; i < 96; i++ {
+		events = append(events, models.Event{
+			ID:        fmt.Sprintf("dup-%03d", i),
+			Timestamp: 100,
+			Resource: models.ResourceMetadata{
+				Namespace: "default",
+				Kind:      "Pod",
+				UID:       fmt.Sprintf("pod-%03d", i),
+			},
+		})
+	}
+
+	meta, err := writeSegment(dir, "seg-001", events)
+	require.NoError(t, err)
+
+	reader, err := openSegmentReader(dir, meta)
+	require.NoError(t, err)
+
+	got, err := reader.ScanTimeRange(context.Background(), 100, 100)
+	require.NoError(t, err)
+	require.Len(t, got, len(events))
+	for i := range got {
+		require.Equal(t, fmt.Sprintf("dup-%03d", i), got[i].ID)
+	}
+}
+
+func TestSegment_ScanUIDPreservesWriteOrderForSameTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	events := []models.Event{
+		{
+			ID:        "uid-z",
+			Timestamp: 200,
+			Resource: models.ResourceMetadata{
+				Namespace: "default",
+				Kind:      "Pod",
+				UID:       "pod-1",
+			},
+		},
+		{
+			ID:        "uid-a",
+			Timestamp: 200,
+			Resource: models.ResourceMetadata{
+				Namespace: "default",
+				Kind:      "Pod",
+				UID:       "pod-1",
+			},
+		},
+		{
+			ID:        "uid-m",
+			Timestamp: 200,
+			Resource: models.ResourceMetadata{
+				Namespace: "default",
+				Kind:      "Pod",
+				UID:       "pod-1",
+			},
+		},
+	}
+
+	meta, err := writeSegment(dir, "seg-001", events)
+	require.NoError(t, err)
+
+	reader, err := openSegmentReader(dir, meta)
+	require.NoError(t, err)
+
+	got, err := reader.ScanUID(context.Background(), "pod-1")
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	require.Equal(t, "uid-z", got[0].ID)
+	require.Equal(t, "uid-a", got[1].ID)
+	require.Equal(t, "uid-m", got[2].ID)
 }
