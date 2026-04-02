@@ -31,14 +31,17 @@ describe('TimestampPicker', () => {
     const user = userEvent.setup();
     render(<TimestampPicker expression="now" onChange={mockOnChange} />);
 
-    const triggerButton = screen.getAllByRole('button')[0];
+    const triggerButton = screen.getByRole('button', { name: /now/i });
     await user.click(triggerButton);
 
-    const input = screen.getByPlaceholderText(/time/i);
+    const input = screen.getByLabelText('Custom Time');
     await user.clear(input);
     await user.type(input, '2025-12-25 00:00:00');
+    expect(mockOnChange).not.toHaveBeenCalled();
+
     await user.click(screen.getByRole('button', { name: /apply/i }));
 
+    expect(mockOnChange).toHaveBeenCalledTimes(1);
     expect(mockOnChange).toHaveBeenCalledWith('2025-12-25 00:00:00');
   });
 
@@ -46,14 +49,17 @@ describe('TimestampPicker', () => {
     const user = userEvent.setup();
     render(<TimestampPicker expression="now" onChange={mockOnChange} />);
 
-    const triggerButton = screen.getAllByRole('button')[0];
+    const triggerButton = screen.getByRole('button', { name: /now/i });
     await user.click(triggerButton);
 
-    const input = screen.getByPlaceholderText(/time/i);
+    const input = screen.getByLabelText('Custom Time');
     await user.clear(input);
     await user.type(input, 'now-30m');
+    expect(mockOnChange).not.toHaveBeenCalled();
+
     await user.click(screen.getByRole('button', { name: /apply/i }));
 
+    expect(mockOnChange).toHaveBeenCalledTimes(1);
     expect(mockOnChange).toHaveBeenCalledWith('now-30m');
   });
 });
