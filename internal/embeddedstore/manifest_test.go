@@ -50,3 +50,13 @@ func TestManifestStore_LoadOrCreateManifestRejectsVersionMismatch(t *testing.T) 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "unsupported manifest format version")
 }
+
+func TestManifestStore_StoreManifestRejectsVersionMismatch(t *testing.T) {
+	dir := t.TempDir()
+
+	err := storeManifest(dir, Manifest{
+		FormatVersion: storageFormatVersion + 1,
+	})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "unsupported manifest format version")
+}

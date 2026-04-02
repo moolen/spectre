@@ -57,7 +57,7 @@ func loadOrCreateManifest(dir string) (Manifest, error) {
 	}
 
 	manifest = normalizeManifest(manifest)
-	if err := validateManifestVersion(manifest); err != nil {
+	if err := validateManifestVersion(manifest, "load manifest"); err != nil {
 		return Manifest{}, err
 	}
 
@@ -72,6 +72,9 @@ func storeManifest(dir string, manifest Manifest) error {
 	manifest = normalizeManifest(manifest)
 	if manifest.FormatVersion == 0 {
 		manifest.FormatVersion = storageFormatVersion
+	}
+	if err := validateManifestVersion(manifest, "store manifest"); err != nil {
+		return err
 	}
 
 	payload, err := json.Marshal(manifest)
@@ -151,10 +154,11 @@ func normalizeManifest(manifest Manifest) Manifest {
 	return manifest
 }
 
-func validateManifestVersion(manifest Manifest) error {
+func validateManifestVersion(manifest Manifest, operation string) error {
 	if manifest.FormatVersion != storageFormatVersion {
 		return fmt.Errorf(
-			"load manifest: unsupported manifest format version %d (expected %d)",
+			"%s: unsupported manifest format version %d (expected %d)",
+			operation,
 			manifest.FormatVersion,
 			storageFormatVersion,
 		)
