@@ -117,11 +117,79 @@ func NewProjection() *Projection {
 
 func BuildProjection(events []models.Event) (*Projection, error) {
 	projection := NewProjection()
-	for i := range events {
-		if err := projection.Apply(events[i]); err != nil {
-			return nil, err
+
+	sortedEvents := cloneEvents(events)
+	sort.SliceStable(sortedEvents, func(i, j int) bool {
+		return compareEventOrder(sortedEvents[i], sortedEvents[j]) < 0
+	})
+
+	projection.events = sortedEvents
+	for i := range sortedEvents {
+		event := sortedEvents[i]
+
+		if event.Resource.Kind == "Event" {
+			if event.Resource.InvolvedObjectUID == "" {
+				continue
+			}
+			involvedUID := event.Resource.InvolvedObjectUID
+			projection.k8sRawEventsByInvolvedUID[involvedUID] = append(projection.k8sRawEventsByInvolvedUID[involvedUID], event)
+			projection.k8sEventsByInvolvedUID[involvedUID] = append(projection.k8sEventsByInvolvedUID[involvedUID], buildK8sEventInfo(event))
+			continue
+		}
+
+		if event.Resource.UID == "" {
+			continue
+		}
+
+		uid := event.Resource.UID
+		record := projection.resourcesByUID[uid]
+		if record == nil {
+			record = &resourceRecord{uid: uid}
+			projection.resourcesByUID[uid] = record
+
+			// Kubernetes object identity fields used for cursor ordering are immutable per UID.
+			key := resourceKey{
+				namespace: event.Resource.Namespace,
+				kind:      event.Resource.Kind,
+				name:      event.Resource.Name,
+			}
+			projection.resourcesByKey[key] = append(projection.resourcesByKey[key], record)
+			projection.orderedResources = append(projection.orderedResources, orderedResourceKey{
+				kind:      event.Resource.Kind,
+				namespace: event.Resource.Namespace,
+				name:      event.Resource.Name,
+				uid:       uid,
+			})
+		}
+
+		projection.eventsByResourceUID[uid] = append(projection.eventsByResourceUID[uid], event)
+		projection.resourceMetaByUID[uid] = event.Resource
+		if projection.minTimestampNs < 0 || event.Timestamp < projection.minTimestampNs {
+			projection.minTimestampNs = event.Timestamp
+		}
+		if projection.maxTimestampNs < 0 || event.Timestamp > projection.maxTimestampNs {
+			projection.maxTimestampNs = event.Timestamp
 		}
 	}
+
+	sort.Slice(projection.orderedResources, func(i, j int) bool {
+		return compareOrderedResourceKey(projection.orderedResources[i], projection.orderedResources[j]) < 0
+	})
+
+	for uid := range projection.resourcesByUID {
+		projection.rebuildRecord(uid)
+	}
+	for involvedUID := range projection.k8sEventsByInvolvedUID {
+		sort.Slice(projection.k8sEventsByInvolvedUID[involvedUID], func(i, j int) bool {
+			left := projection.k8sEventsByInvolvedUID[involvedUID][i]
+			right := projection.k8sEventsByInvolvedUID[involvedUID][j]
+			if left.Timestamp.Equal(right.Timestamp) {
+				return left.EventID > right.EventID
+			}
+			return left.Timestamp.After(right.Timestamp)
+		})
+	}
+
 	return projection, nil
 }
 
