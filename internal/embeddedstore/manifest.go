@@ -25,7 +25,8 @@ type SegmentMeta struct {
 }
 
 type CheckpointMeta struct {
-	ID string `json:"id"`
+	ID            string `json:"id"`
+	HighWaterMark uint64 `json:"high_water_mark"`
 }
 
 func loadOrCreateManifest(dir string) (Manifest, error) {
