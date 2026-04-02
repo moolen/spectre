@@ -152,7 +152,7 @@ func (s *hotStore) CommitFlushedBatch(batch HotFlushBatch) int {
 }
 
 func (s *hotStore) appendOneLocked(event models.Event) {
-	s.events = insertEventSorted(s.events, event)
+	s.events = appendOrderedEvent(s.events, event)
 	s.incrementMetadataLocked(event.Resource)
 
 	if event.Resource.Kind == "Event" {
@@ -178,7 +178,7 @@ func (s *hotStore) appendToLogLocked(logs map[string]*RecentResourceLog, uid str
 		log = &RecentResourceLog{UID: uid}
 		logs[uid] = log
 	}
-	log.Events = insertEventSorted(log.Events, event)
+	log.Events = appendOrderedEvent(log.Events, event)
 }
 
 func (s *hotStore) enforceLogBoundLocked(logs map[string]*RecentResourceLog, uid string) {
@@ -300,4 +300,11 @@ func mapKeysSorted(counts map[string]int) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func appendOrderedEvent(events []models.Event, event models.Event) []models.Event {
+	if len(events) == 0 || compareEventOrder(events[len(events)-1], event) <= 0 {
+		return append(events, event)
+	}
+	return insertEventSorted(events, event)
 }
