@@ -22,7 +22,10 @@ const (
 
 var errJournalClosed = errors.New("journal is closed")
 
-var syncPathFn = syncPath
+var (
+	syncPathFnMu sync.RWMutex
+	syncPathFn   = syncPathDirect
+)
 
 // Journal stores events in an append-only on-disk log.
 // Callers must ensure a single writer per journal path across processes; no file lock is taken.
@@ -47,7 +50,7 @@ func OpenJournal(root string) (*Journal, error) {
 		return nil, fmt.Errorf("open journal: create root dir: %w", err)
 	}
 	if rootCreated {
-		if err := syncPathFn(filepath.Dir(root)); err != nil {
+		if err := syncPath(filepath.Dir(root)); err != nil {
 			return nil, fmt.Errorf("open journal: sync parent dir: %w", err)
 		}
 	}
@@ -63,7 +66,7 @@ func OpenJournal(root string) (*Journal, error) {
 		return nil, fmt.Errorf("open journal: open file: %w", err)
 	}
 	if fileCreated {
-		if err := syncPathFn(root); err != nil {
+		if err := syncPath(root); err != nil {
 			_ = file.Close()
 			return nil, fmt.Errorf("open journal: sync root dir: %w", err)
 		}
@@ -226,6 +229,14 @@ func pathCreated(path string) (bool, error) {
 }
 
 func syncPath(path string) error {
+	syncPathFnMu.RLock()
+	fn := syncPathFn
+	syncPathFnMu.RUnlock()
+
+	return fn(path)
+}
+
+func syncPathDirect(path string) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		return err
@@ -235,4 +246,17 @@ func syncPath(path string) error {
 	}()
 
 	return dir.Sync()
+}
+
+func setSyncPathFnForTest(fn func(string) error) func() {
+	syncPathFnMu.Lock()
+	previous := syncPathFn
+	syncPathFn = fn
+	syncPathFnMu.Unlock()
+
+	return func() {
+		syncPathFnMu.Lock()
+		syncPathFn = previous
+		syncPathFnMu.Unlock()
+	}
 }

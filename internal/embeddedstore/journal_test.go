@@ -17,18 +17,15 @@ func TestOpenJournal_SyncsParentAndRootOnFirstCreate(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, "embedded")
 
-	originalSyncPathFn := syncPathFn
 	var syncedPathsMu sync.Mutex
 	syncedPaths := make([]string, 0, 2)
-	syncPathFn = func(path string) error {
+	restoreSyncPath := setSyncPathFnForTest(func(path string) error {
 		syncedPathsMu.Lock()
 		syncedPaths = append(syncedPaths, filepath.Clean(path))
 		syncedPathsMu.Unlock()
-		return originalSyncPathFn(path)
-	}
-	t.Cleanup(func() {
-		syncPathFn = originalSyncPathFn
+		return syncPathDirect(path)
 	})
+	t.Cleanup(restoreSyncPath)
 
 	journal, err := OpenJournal(root)
 	if err != nil {
