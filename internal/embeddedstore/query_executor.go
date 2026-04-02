@@ -38,6 +38,41 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 	return result, err
 }
 
+func (qe *QueryExecutor) ExportTimeRange(ctx context.Context, query *models.QueryRequest) ([]models.Event, error) {
+	if err := query.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid query: %w", err)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	startTimeNs := query.StartTimestamp * 1e9
+	endTimeNs := query.EndTimestamp * 1e9
+
+	if qe.planner != nil {
+		return qe.planner.ExportTimeRange(ctx, startTimeNs, endTimeNs, query.Filters)
+	}
+
+	qe.projection.mu.RLock()
+	defer qe.projection.mu.RUnlock()
+
+	exported := make([]models.Event, 0)
+	for i := range qe.projection.events {
+		event := qe.projection.events[i]
+		if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+			continue
+		}
+		if !query.Filters.Matches(event.Resource) {
+			continue
+		}
+		exported = append(exported, cloneEvent(event))
+	}
+	return exported, nil
+}
+
 func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.QueryRequest, pagination *models.PaginationRequest) (*models.QueryResult, *models.PaginationResponse, error) {
 	start := time.Now()
 

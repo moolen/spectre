@@ -2,6 +2,8 @@ package embeddedstore
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/moolen/spectre/internal/models"
@@ -94,6 +96,46 @@ func TestQueryPlanner_QueryDistinctMetadataUsesProjectionState(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"default"}, namespaces)
 	require.Equal(t, []string{"Pod"}, kinds)
+}
+
+func TestQueryPlanner_ExportFallsBackToFullScanWhenDimensionIndexIsMissing(t *testing.T) {
+	engine := newFlushedTestEngine(t, []models.Event{
+		{
+			ID:        "cold-1",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+			Data: []byte(`{"kind":"Pod"}`),
+		},
+	})
+
+	require.Len(t, engine.segmentReaders, 1)
+	dimPath := filepath.Join(filepath.Dir(engine.segmentReaders[0].eventsPath), segmentDimIndexFile)
+	require.NoError(t, os.Remove(dimPath))
+
+	planner := engine.QueryExecutor().planner
+	require.NotNil(t, planner)
+	require.Len(t, planner.relevantExportSegments(models.QueryFilters{
+		Namespace: "default",
+		Kind:      "Pod",
+	}, 0, 20*1e9), 1)
+
+	exported, err := engine.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{
+		StartTimestamp: 0,
+		EndTimestamp:   20,
+		Filters: models.QueryFilters{
+			Namespace: "default",
+			Kind:      "Pod",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"cold-1"}, eventIDs(exported))
 }
 
 func newTestEngineWithEvents(t *testing.T, events []models.Event) *Engine {

@@ -106,65 +106,86 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	type paginatedExecutor interface {
 		ExecutePaginated(context.Context, *models.QueryRequest, *models.PaginationRequest) (*models.QueryResult, *models.PaginationResponse, error)
 	}
+	type rawExportExecutor interface {
+		ExportTimeRange(context.Context, *models.QueryRequest) ([]models.Event, error)
+	}
 
 	paginatedExec, supportsPagination := h.queryExecutor.(paginatedExecutor)
+	rawExportExec, supportsRawExport := h.queryExecutor.(rawExportExecutor)
 
-	for {
-		pageCount++
-		var result *models.QueryResult
-		var paginationResp *models.PaginationResponse
-		var err error
-
-		if supportsPagination {
-			// Use paginated execution with large page size
-			pagination := &models.PaginationRequest{
-				PageSize: maxPageSize,
-				Cursor:   cursor,
-			}
-			result, paginationResp, err = paginatedExec.ExecutePaginated(ctx, query, pagination)
-		} else {
-			// Fallback to Execute (will only get first page)
-			result, err = h.queryExecutor.Execute(ctx, query)
-			if err == nil {
-				// Create a dummy pagination response indicating no more pages
-				paginationResp = &models.PaginationResponse{
-					HasMore: false,
-				}
-			}
-		}
-
+	if supportsRawExport {
+		allEvents, err = rawExportExec.ExportTimeRange(ctx, query)
 		if err != nil {
 			queryDuration := time.Since(queryStartTime)
 			h.logger.ErrorWithFields("Export query failed",
 				logging.Field("error", err),
-				logging.Field("query_duration", queryDuration),
-				logging.Field("page", pageCount))
+				logging.Field("query_duration", queryDuration))
 			api.WriteError(w, http.StatusInternalServerError, "QUERY_FAILED", fmt.Sprintf("Failed to execute export query: %v", err))
 			return
 		}
 
-		// Collect events from this page
-		allEvents = append(allEvents, result.Events...)
-		h.logger.DebugWithFields("Fetched export page",
-			logging.Field("page", pageCount),
-			logging.Field("events_this_page", len(result.Events)),
-			logging.Field("total_events_so_far", len(allEvents)),
-			logging.Field("has_more", paginationResp != nil && paginationResp.HasMore))
+		h.logger.InfoWithFields("Export query completed (raw tier scan)",
+			logging.Field("total_events", len(allEvents)),
+			logging.Field("query_duration", time.Since(queryStartTime)))
+	} else {
 
-		// Check if there are more pages
-		if paginationResp == nil || !paginationResp.HasMore || paginationResp.NextCursor == "" {
-			break
+		for {
+			pageCount++
+			var result *models.QueryResult
+			var paginationResp *models.PaginationResponse
+			var err error
+
+			if supportsPagination {
+				// Use paginated execution with large page size
+				pagination := &models.PaginationRequest{
+					PageSize: maxPageSize,
+					Cursor:   cursor,
+				}
+				result, paginationResp, err = paginatedExec.ExecutePaginated(ctx, query, pagination)
+			} else {
+				// Fallback to Execute (will only get first page)
+				result, err = h.queryExecutor.Execute(ctx, query)
+				if err == nil {
+					// Create a dummy pagination response indicating no more pages
+					paginationResp = &models.PaginationResponse{
+						HasMore: false,
+					}
+				}
+			}
+
+			if err != nil {
+				queryDuration := time.Since(queryStartTime)
+				h.logger.ErrorWithFields("Export query failed",
+					logging.Field("error", err),
+					logging.Field("query_duration", queryDuration),
+					logging.Field("page", pageCount))
+				api.WriteError(w, http.StatusInternalServerError, "QUERY_FAILED", fmt.Sprintf("Failed to execute export query: %v", err))
+				return
+			}
+
+			// Collect events from this page
+			allEvents = append(allEvents, result.Events...)
+			h.logger.DebugWithFields("Fetched export page",
+				logging.Field("page", pageCount),
+				logging.Field("events_this_page", len(result.Events)),
+				logging.Field("total_events_so_far", len(allEvents)),
+				logging.Field("has_more", paginationResp != nil && paginationResp.HasMore))
+
+			// Check if there are more pages
+			if paginationResp == nil || !paginationResp.HasMore || paginationResp.NextCursor == "" {
+				break
+			}
+
+			// Continue to next page
+			cursor = paginationResp.NextCursor
 		}
 
-		// Continue to next page
-		cursor = paginationResp.NextCursor
+		queryDuration := time.Since(queryStartTime)
+		h.logger.InfoWithFields("Export query completed (all pages)",
+			logging.Field("total_events", len(allEvents)),
+			logging.Field("pages_fetched", pageCount),
+			logging.Field("query_duration", queryDuration))
 	}
-
-	queryDuration := time.Since(queryStartTime)
-	h.logger.InfoWithFields("Export query completed (all pages)",
-		logging.Field("total_events", len(allEvents)),
-		logging.Field("pages_fetched", pageCount),
-		logging.Field("query_duration", queryDuration))
 
 	// Convert []Event to []*Event for JSON export (matching import format)
 	events := make([]*models.Event, len(allEvents))
@@ -180,7 +201,7 @@ func (h *ExportHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// Set response headers
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Encoding", "gzip")
-	
+
 	// Generate filename with timestamp
 	filename := fmt.Sprintf("export-%d-%d.json.gz", from, to)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, filename))

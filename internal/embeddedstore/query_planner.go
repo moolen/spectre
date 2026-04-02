@@ -52,6 +52,52 @@ func (p *QueryPlanner) PlanResourceEvents(ctx context.Context, uid string, meta 
 	return resourceEventsInWindow(rawEvents, startTimeNs, endTimeNs), nil
 }
 
+func (p *QueryPlanner) ExportTimeRange(ctx context.Context, startTimeNs, endTimeNs int64, filters models.QueryFilters) ([]models.Event, error) {
+	if p == nil || endTimeNs < startTimeNs {
+		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var exported []models.Event
+	for _, reader := range p.relevantExportSegments(filters, startTimeNs, endTimeNs) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		events, err := reader.ScanTimeRange(ctx, startTimeNs, endTimeNs)
+		if err != nil {
+			return nil, fmt.Errorf("scan segment %q by time: %w", reader.meta.ID, err)
+		}
+		for i := range events {
+			if !filters.Matches(events[i].Resource) {
+				continue
+			}
+			exported = append(exported, cloneEvent(events[i]))
+		}
+	}
+
+	if p.hot != nil {
+		for _, event := range p.hot.ScanTimeRange(startTimeNs, endTimeNs) {
+			if !filters.Matches(event.Resource) {
+				continue
+			}
+			exported = append(exported, cloneEvent(event))
+		}
+	}
+
+	if len(exported) == 0 {
+		return nil, nil
+	}
+	sort.SliceStable(exported, func(i, j int) bool {
+		return compareEventOrder(exported[i], exported[j]) < 0
+	})
+	return dedupeEventsByID(exported), nil
+}
+
 func (p *QueryPlanner) collectMergedResourceEvents(ctx context.Context, uid string, meta models.ResourceMetadata, startTimeNs, endTimeNs int64) ([]models.Event, error) {
 	if uid == "" || endTimeNs < startTimeNs {
 		return nil, nil
@@ -116,6 +162,27 @@ func (p *QueryPlanner) relevantSegments(uid string, meta models.ResourceMetadata
 	return relevant
 }
 
+func (p *QueryPlanner) relevantExportSegments(filters models.QueryFilters, startTimeNs, endTimeNs int64) []*segmentReader {
+	if p == nil || len(p.segments) == 0 {
+		return nil
+	}
+
+	relevant := make([]*segmentReader, 0, len(p.segments))
+	for _, reader := range p.segments {
+		if reader == nil || reader.meta.EventCount == 0 {
+			continue
+		}
+		if reader.meta.MinTimestamp > endTimeNs || reader.meta.MaxTimestamp < startTimeNs {
+			continue
+		}
+		if !p.segmentMayMatchFilters(reader, filters) {
+			continue
+		}
+		relevant = append(relevant, reader)
+	}
+	return relevant
+}
+
 func (p *QueryPlanner) segmentContainsDimension(reader *segmentReader, namespace, kind string) bool {
 	if reader == nil {
 		return false
@@ -124,23 +191,57 @@ func (p *QueryPlanner) segmentContainsDimension(reader *segmentReader, namespace
 		return true
 	}
 
+	dimensions, ok := p.segmentDimensions(reader)
+	if !ok {
+		return false
+	}
+	_, exists := dimensions[segmentDimensionEntry{Namespace: namespace, Kind: kind}]
+	return exists
+}
+
+func (p *QueryPlanner) segmentMayMatchFilters(reader *segmentReader, filters models.QueryFilters) bool {
+	namespaces := filters.GetNamespaces()
+	kinds := filters.GetKinds()
+	if len(namespaces) == 0 && len(kinds) == 0 {
+		return true
+	}
+
+	dimensions, ok := p.segmentDimensions(reader)
+	if !ok {
+		return true
+	}
+	for entry := range dimensions {
+		if len(namespaces) > 0 && !containsString(namespaces, entry.Namespace) {
+			continue
+		}
+		if len(kinds) > 0 && !containsString(kinds, entry.Kind) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func (p *QueryPlanner) segmentDimensions(reader *segmentReader) (map[segmentDimensionEntry]struct{}, bool) {
+	if reader == nil {
+		return nil, false
+	}
 	p.mu.RLock()
 	dimensions, ok := p.segmentDimCache[reader.meta.ID]
 	p.mu.RUnlock()
 	if ok {
-		_, exists := dimensions[segmentDimensionEntry{Namespace: namespace, Kind: kind}]
-		return exists
+		return dimensions, true
 	}
 
 	dimPath := filepath.Join(filepath.Dir(reader.eventsPath), segmentDimIndexFile)
 	payload, err := os.ReadFile(dimPath)
 	if err != nil {
-		return false
+		return nil, false
 	}
 
 	var dimIndex segmentDimensionIndex
 	if err := json.Unmarshal(payload, &dimIndex); err != nil {
-		return false
+		return nil, false
 	}
 
 	dimensions = make(map[segmentDimensionEntry]struct{}, len(dimIndex.Entries))
@@ -151,9 +252,16 @@ func (p *QueryPlanner) segmentContainsDimension(reader *segmentReader, namespace
 	p.mu.Lock()
 	p.segmentDimCache[reader.meta.ID] = dimensions
 	p.mu.Unlock()
+	return dimensions, true
+}
 
-	_, exists := dimensions[segmentDimensionEntry{Namespace: namespace, Kind: kind}]
-	return exists
+func containsString(values []string, target string) bool {
+	for i := range values {
+		if values[i] == target {
+			return true
+		}
+	}
+	return false
 }
 
 func resourceEventsInWindow(events []models.Event, startTimeNs, endTimeNs int64) []models.Event {

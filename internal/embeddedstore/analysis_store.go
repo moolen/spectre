@@ -27,7 +27,8 @@ const (
 	edgeTypeIngress   = "INGRESS_REF"
 )
 
-// Store implements analysis queries over a shared embedded projection.
+// Store implements analysis queries over checkpoint-restored projection state.
+// It does not scan raw hot/cold event tiers during normal query execution.
 type Store struct {
 	projection *Projection
 }
