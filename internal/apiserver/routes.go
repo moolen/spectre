@@ -168,16 +168,6 @@ func (s *Server) registerIntegrationConfigHandlers() {
 			return
 		}
 
-		// Check for /signals/validate/status suffix (GET signal validation status)
-		if len(name) > 24 && name[len(name)-24:] == "/signals/validate/status" {
-			if r.Method != "GET" {
-				api.WriteError(w, 405, "METHOD_NOT_ALLOWED", "GET required")
-				return
-			}
-			configHandler.HandleSignalValidationStatus(w, r)
-			return
-		}
-
 		// Check for /signals/validate suffix (POST trigger signal validation)
 		if len(name) > 17 && name[len(name)-17:] == "/signals/validate" {
 			if r.Method != "POST" {

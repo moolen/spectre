@@ -7,7 +7,6 @@ interface DetailPanelProps {
   resource: K8sResource | null;
   selectedIndex?: number;
   onClose: () => void;
-  onAnalyzeRootCause?: () => void;
 }
 
 const DiffLineView = ({ line }: { line: DiffLine }) => {
@@ -131,7 +130,7 @@ const ConfigDiff = ({
   );
 };
 
-export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedIndex = 0, onClose, onAnalyzeRootCause }) => {
+export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedIndex = 0, onClose }) => {
   const { formatTime } = useSettings();
   const [showFullDiff, setShowFullDiff] = useState(false);
   const [width, setWidth] = useState(384); // Default w-96 = 24rem = 384px
@@ -309,14 +308,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ resource, selectedInde
         <span className="text-xs text-[var(--color-text-muted)]">
           Use Arrow Left/Right to navigate history
         </span>
-        {onAnalyzeRootCause && (
-          <button
-            onClick={onAnalyzeRootCause}
-            className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-          >
-            Analyze Root Cause
-          </button>
-        )}
       </div>
     </div>
   );

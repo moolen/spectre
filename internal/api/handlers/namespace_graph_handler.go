@@ -36,6 +36,18 @@ func normalizeNamespaceGraphTimestamp(ts, now int64) int64 {
 	return ts
 }
 
+// normalizeToNanoseconds accepts Unix timestamps in seconds, milliseconds, or nanoseconds.
+func normalizeToNanoseconds(ts int64) int64 {
+	switch {
+	case ts < 100_000_000_000:
+		return ts * int64(time.Second)
+	case ts < 100_000_000_000_000:
+		return ts * int64(time.Millisecond)
+	default:
+		return ts
+	}
+}
+
 // NamespaceGraphHandler handles /v1/namespace-graph requests
 type NamespaceGraphHandler struct {
 	graphService *api.GraphService

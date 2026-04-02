@@ -2,7 +2,7 @@ package models
 
 import "encoding/json"
 
-// SearchResponse represents the response from /v1/search endpoint
+// SearchResponse represents the timeline resource collection response.
 type SearchResponse struct {
 	Resources       []Resource `json:"resources"`
 	Count           int        `json:"count"`
@@ -55,20 +55,6 @@ type MetadataResponse struct {
 type TimeRangeInfo struct {
 	Earliest int64 `json:"earliest"`
 	Latest   int64 `json:"latest"`
-}
-
-// EventsResponse represents the response from /v1/resources/{id}/events
-type EventsResponse struct {
-	Events     []K8sEvent `json:"events"`
-	Count      int        `json:"count"`
-	ResourceID string     `json:"resourceId"`
-}
-
-// SegmentsResponse represents the response from /v1/resources/{id}/segments
-type SegmentsResponse struct {
-	Segments   []StatusSegment `json:"segments"`
-	ResourceID string          `json:"resourceId"`
-	Count      int             `json:"count"`
 }
 
 // Validate validates SearchResponse

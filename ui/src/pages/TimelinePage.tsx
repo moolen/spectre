@@ -3,17 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Timeline } from '../components/Timeline';
 import { DetailPanel } from '../components/DetailPanel';
-import { RootCauseView } from '../components/RootCauseView';
 import { useTimeline } from '../hooks/useTimeline';
 import { useMetadata } from '../hooks/useMetadata';
 import { usePersistedFilters } from '../hooks/usePersistedFilters';
 import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
 import { K8sResource, FilterState, SelectedPoint, TimeRange, ResourceStatus } from '../types';
-import { RootCauseAnalysisV2 } from '../types/rootCause';
 import { useSettings } from '../hooks/useSettings';
 import { parseTimeExpression } from '../utils/timeParsing';
-import { fetchRootCauseAnalysis } from '../services/rootCauseService';
-import { toast } from '../utils/toast';
 import { fromNamespaceFilterValue, sortNamespaceFilterOptions } from '../utils/namespaceFilters';
 
 const AUTO_REFRESH_INTERVALS: Record<string, number> = {
@@ -215,65 +211,6 @@ function TimelinePage() {
   // Selection State
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
 
-  // Root Cause State
-  const [showRootCause, setShowRootCause] = useState(false);
-  const [rootCauseAnalysis, setRootCauseAnalysis] = useState<RootCauseAnalysisV2 | null>(null);
-  const [rootCauseLoading, setRootCauseLoading] = useState(false);
-  const [rootCauseError, setRootCauseError] = useState<string | null>(null);
-  const [rootCauseParams, setRootCauseParams] = useState<{
-    uid: string;
-    timestamp: Date;
-    lookbackMs: number;
-  } | null>(null);
-
-  // Debug: Log state changes
-  useEffect(() => {
-    console.log('[RootCause] State changed:', {
-      showRootCause,
-      hasAnalysis: !!rootCauseAnalysis,
-      analysisChainLength: rootCauseAnalysis?.incident?.causalChain?.length,
-    });
-  }, [showRootCause, rootCauseAnalysis]);
-
-  // Deep link support - check for rootCause URL params on mount
-  const deepLinkLoadedRef = useRef(false);
-  useEffect(() => {
-    // Only run once on mount, or if URL params change and we haven't loaded yet
-    const rcResourceUID = searchParams.get('rcResourceUID');
-    const rcTimestamp = searchParams.get('rcTimestamp');
-
-    // Skip if we've already loaded from deep link or if we're already showing root cause
-    if (deepLinkLoadedRef.current || showRootCause || !rcResourceUID || !rcTimestamp) {
-      return;
-    }
-
-    console.log('[RootCause] Deep link detected:', { rcResourceUID, rcTimestamp });
-    deepLinkLoadedRef.current = true;
-
-    const fetchFromDeepLink = async () => {
-      setRootCauseLoading(true);
-      try {
-        const timestamp = new Date(parseInt(rcTimestamp));
-        const defaultLookbackMs = 600000; // 10 minutes
-        const analysis = await fetchRootCauseAnalysis(rcResourceUID, timestamp, { lookbackMs: defaultLookbackMs });
-        setRootCauseAnalysis(analysis);
-        setRootCauseParams({
-          uid: rcResourceUID,
-          timestamp,
-          lookbackMs: defaultLookbackMs,
-        });
-        setShowRootCause(true);
-      } catch (err) {
-        console.error('[RootCause] Failed to fetch from deep link:', err);
-        deepLinkLoadedRef.current = false; // Allow retry on error
-      } finally {
-        setRootCauseLoading(false);
-      }
-    };
-
-    fetchFromDeepLink();
-  }, [searchParams, showRootCause]); // Re-check if searchParams change but only if not already showing
-
   // Filters - search and hasProblematicStatus are component state only (reset on reload)
   // kinds and namespaces come from persisted filters
   const [search, setSearch] = useState<string>('');
@@ -419,95 +356,6 @@ function TimelinePage() {
 
   const handleClosePanel = () => {
     setSelectedPoint(null);
-  };
-
-  const handleAnalyzeRootCause = async () => {
-    if (!selectedResource || selectedPoint === null) return;
-
-    const segment = selectedResource.statusSegments[selectedPoint.index];
-    if (!segment) return;
-
-    console.log('[RootCause] Starting analysis for:', {
-      resourceId: selectedResource.id,
-      resourceName: selectedResource.name,
-      segmentStart: segment.start,
-      segmentEnd: segment.end,
-    });
-
-    setRootCauseLoading(true);
-    // Prevent deep link effect from interfering
-    deepLinkLoadedRef.current = true;
-
-    const defaultLookbackMs = 600000; // 10 minutes
-
-    try {
-      console.log('[RootCause] Calling fetchRootCauseAnalysis...');
-      const analysis = await fetchRootCauseAnalysis(selectedResource.id, segment.start, { lookbackMs: defaultLookbackMs });
-      console.log('[RootCause] Analysis received:', analysis);
-
-      // Set both states together
-      setRootCauseAnalysis(analysis);
-      setRootCauseParams({
-        uid: selectedResource.id,
-        timestamp: segment.start,
-        lookbackMs: defaultLookbackMs,
-      });
-      setShowRootCause(true);
-      setSelectedPoint(null); // Close detail panel
-
-      console.log('[RootCause] State updated, adding URL params...');
-
-      // Add root cause params to URL for deep linking
-      const currentParams = Object.fromEntries(searchParams.entries());
-      setSearchParams({
-        ...currentParams,
-        rcResourceUID: selectedResource.id,
-        rcTimestamp: segment.start.getTime().toString(),
-      }, { replace: true }); // Use replace to avoid triggering unnecessary navigation
-
-      console.log('[RootCause] URL params added');
-    } catch (err) {
-      console.error('[RootCause] Failed to fetch:', err);
-      deepLinkLoadedRef.current = false; // Allow retry on error
-      toast.apiError(err, 'Failed to load root cause analysis');
-    } finally {
-      setRootCauseLoading(false);
-      console.log('[RootCause] Loading state cleared');
-    }
-  };
-
-  const handleRootCauseRefresh = async (
-    uid: string,
-    timestamp: Date,
-    lookbackMs: number
-  ) => {
-    setRootCauseLoading(true);
-    setRootCauseError(null); // Clear previous errors
-    try {
-      const analysis = await fetchRootCauseAnalysis(uid, timestamp, { lookbackMs });
-      setRootCauseAnalysis(analysis);
-      setRootCauseParams({ uid, timestamp, lookbackMs });
-    } catch (err) {
-      console.error('[RootCause] Failed to refresh:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch root cause analysis';
-      setRootCauseError(errorMessage);
-      toast.apiError(err, 'Failed to refresh root cause analysis');
-    } finally {
-      setRootCauseLoading(false);
-    }
-  };
-
-  const handleCloseRootCause = () => {
-    setShowRootCause(false);
-    setRootCauseAnalysis(null);
-    setRootCauseParams(null);
-    setRootCauseError(null);
-    deepLinkLoadedRef.current = false; // Reset so deep link can work again if needed
-
-    // Remove root cause params from URL
-    const currentParams = Object.fromEntries(searchParams.entries());
-    const { rcResourceUID, rcTimestamp, ...remainingParams } = currentParams;
-    setSearchParams(remainingParams);
   };
 
   // Keyboard Navigation
@@ -664,34 +512,12 @@ function TimelinePage() {
           )}
         </div>
 
-        {/* Detail Panel - Only visible when not in root cause view */}
-        {!showRootCause && (
-          <DetailPanel
-            resource={selectedResource}
-            selectedIndex={selectedPoint?.index}
-            onClose={handleClosePanel}
-            onAnalyzeRootCause={handleAnalyzeRootCause}
-          />
-        )}
+        <DetailPanel
+          resource={selectedResource}
+          selectedIndex={selectedPoint?.index}
+          onClose={handleClosePanel}
+        />
       </div>
-
-      {/* Root Cause View - Full screen overlay (outside main container) */}
-      {showRootCause && rootCauseAnalysis && rootCauseParams ? (
-        <>
-          {console.log('[TimelinePage] Rendering RootCauseView - condition met')}
-          <RootCauseView
-            analysis={rootCauseAnalysis}
-            initialResourceUID={rootCauseParams.uid}
-            initialTimestamp={rootCauseParams.timestamp}
-            initialLookbackMs={rootCauseParams.lookbackMs}
-            onClose={handleCloseRootCause}
-            onRefresh={handleRootCauseRefresh}
-            error={rootCauseError}
-          />
-        </>
-      ) : (
-        showRootCause && console.warn('[TimelinePage] RootCauseView NOT rendering - missing analysis or params', { showRootCause, hasAnalysis: !!rootCauseAnalysis, hasParams: !!rootCauseParams })
-      )}
     </div>
   );
 }

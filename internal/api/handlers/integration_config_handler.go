@@ -575,20 +575,6 @@ type SignalValidationResponse struct {
 	Message string `json:"message"`
 }
 
-// SignalValidationStatusResponse represents the status of signal validation job.
-type SignalValidationStatusResponse struct {
-	LastRunTime          string `json:"lastRunTime,omitempty"`
-	LastRunDuration      string `json:"lastRunDuration,omitempty"`
-	AlertsProcessed      int    `json:"alertsProcessed"`
-	TransitionsEvaluated int    `json:"transitionsEvaluated"`
-	CorrelationsFound    int    `json:"correlationsFound"`
-	CorrelationsUpdated  int    `json:"correlationsUpdated"`
-	Errors               int    `json:"errors"`
-	InProgress           bool   `json:"inProgress"`
-	LastError            string `json:"lastError,omitempty"`
-	NextScheduledRun     string `json:"nextScheduledRun,omitempty"`
-}
-
 // HandleSignalValidation handles POST /api/config/integrations/{name}/signals/validate - triggers signal validation.
 func (h *IntegrationConfigHandler) HandleSignalValidation(w http.ResponseWriter, r *http.Request) {
 	// Extract name from URL path
@@ -662,105 +648,6 @@ func (h *IntegrationConfigHandler) HandleSignalValidation(w http.ResponseWriter,
 	}
 	if fullRun {
 		response.Message = "Full signal validation backfill triggered successfully"
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = api.WriteJSON(w, response)
-}
-
-// HandleSignalValidationStatus handles GET /api/config/integrations/{name}/signals/validate/status - returns validation status.
-func (h *IntegrationConfigHandler) HandleSignalValidationStatus(w http.ResponseWriter, r *http.Request) {
-	// Extract name from URL path
-	name := strings.TrimPrefix(r.URL.Path, "/api/config/integrations/")
-	name = strings.TrimSuffix(name, "/signals/validate/status")
-	if name == "" || name == r.URL.Path {
-		api.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Integration name required")
-		return
-	}
-
-	// Get integration from manager registry
-	registry := h.manager.GetRegistry()
-	instance, ok := registry.Get(name)
-	if !ok {
-		api.WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("Integration %q not found or not started", name))
-		return
-	}
-
-	// Type assertion to check if integration supports signal validation
-	type SignalValidator interface {
-		SignalValidationJob() interface{}
-	}
-
-	validator, ok := instance.(SignalValidator)
-	if !ok {
-		api.WriteError(w, http.StatusBadRequest, "NOT_SUPPORTED", "Signal validation only supported for Grafana integrations with Prometheus configured")
-		return
-	}
-
-	job := validator.SignalValidationJob()
-	if job == nil {
-		api.WriteError(w, http.StatusBadRequest, "NOT_CONFIGURED", "Signal validation job not configured. Ensure Prometheus URL is set and signal validation is enabled.")
-		return
-	}
-
-	// Type assert to get Status method
-	type StatusGetter interface {
-		Status() interface{}
-	}
-
-	statusGetter, ok := job.(StatusGetter)
-	if !ok {
-		api.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Signal validation job does not support status")
-		return
-	}
-
-	status := statusGetter.Status()
-
-	// Convert status to response (using reflection-free approach with type assertion)
-	// The status is SignalValidationJobStatus from grafana package
-	type jobStatus struct {
-		LastRunTime          time.Time
-		LastRunDuration      time.Duration
-		AlertsProcessed      int
-		TransitionsEvaluated int
-		CorrelationsFound    int
-		CorrelationsUpdated  int
-		Errors               int
-		InProgress           bool
-		LastError            string
-		NextScheduledRun     time.Time
-	}
-
-	// Use JSON round-trip to convert
-	statusBytes, err := json.Marshal(status)
-	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to serialize status")
-		return
-	}
-
-	var js jobStatus
-	if err := json.Unmarshal(statusBytes, &js); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to parse status")
-		return
-	}
-
-	response := SignalValidationStatusResponse{
-		AlertsProcessed:      js.AlertsProcessed,
-		TransitionsEvaluated: js.TransitionsEvaluated,
-		CorrelationsFound:    js.CorrelationsFound,
-		CorrelationsUpdated:  js.CorrelationsUpdated,
-		Errors:               js.Errors,
-		InProgress:           js.InProgress,
-		LastError:            js.LastError,
-	}
-
-	if !js.LastRunTime.IsZero() {
-		response.LastRunTime = js.LastRunTime.Format(time.RFC3339)
-		response.LastRunDuration = js.LastRunDuration.String()
-	}
-	if !js.NextScheduledRun.IsZero() {
-		response.NextScheduledRun = js.NextScheduledRun.Format(time.RFC3339)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -31,18 +31,6 @@ func RegisterHandlers(
 	tracer trace.Tracer,
 	withMethod func(string, http.HandlerFunc) http.HandlerFunc,
 ) {
-	// Create SearchService with appropriate executor
-	var searchExecutor api.QueryExecutor
-	if graphExecutor != nil && querySource == api.TimelineQuerySourceGraph {
-		searchExecutor = graphExecutor
-		logger.Info("Search service using GRAPH query executor")
-	} else {
-		searchExecutor = storageExecutor
-		logger.Info("Search service using STORAGE query executor")
-	}
-	searchService := api.NewSearchService(searchExecutor, logger, tracer)
-	searchHandler := NewSearchHandler(searchService, logger, tracer)
-
 	// Use provided timeline service (created by apiserver for sharing between REST and MCP)
 	// Create timeline handler using the service
 	timelineHandler := NewTimelineHandler(timelineService, logger, tracer)
@@ -59,16 +47,8 @@ func RegisterHandlers(
 	metadataService := api.NewMetadataService(metadataExecutor, metadataCache, logger, tracer)
 	metadataHandler := NewMetadataHandler(metadataService, logger, tracer)
 
-	router.HandleFunc("/v1/search", withMethod(http.MethodGet, searchHandler.Handle))
 	router.HandleFunc("/v1/timeline", withMethod(http.MethodGet, timelineHandler.Handle))
 	router.HandleFunc("/v1/metadata", withMethod(http.MethodGet, metadataHandler.Handle))
-
-	// Register A/B test comparison endpoint if both executors are available
-	if storageExecutor != nil && graphExecutor != nil {
-		compareHandler := NewTimelineCompareHandler(storageExecutor, graphExecutor, logger)
-		router.HandleFunc("/v1/timeline/compare", withMethod(http.MethodGet, compareHandler.Handle))
-		logger.Info("Registered /v1/timeline/compare endpoint for A/B testing")
-	}
 
 	// Create GraphService if graph client is available (shared by graph-related handlers)
 	var graphService *api.GraphService
@@ -79,32 +59,6 @@ func RegisterHandlers(
 	case analysisStore != nil:
 		graphService = api.NewGraphService(analysisStore, logger, tracer)
 		logger.Info("Created GraphService for embedded analysis operations")
-	}
-
-	// Register causal graph handler if analysis data is available
-	switch {
-	case analysisStore != nil:
-		causalGraphHandler := NewCausalGraphHandler(analysisStore, logger, tracer)
-		router.HandleFunc("/v1/causal-graph", withMethod(http.MethodGet, causalGraphHandler.Handle))
-		logger.Info("Registered /v1/causal-graph endpoint")
-	case graphClient != nil:
-		causalGraphHandler := NewCausalGraphHandlerFromGraphClient(graphClient, logger, tracer)
-		router.HandleFunc("/v1/causal-graph", withMethod(http.MethodGet, causalGraphHandler.Handle))
-		logger.Info("Registered /v1/causal-graph endpoint")
-	}
-
-	// Register anomaly handler if graph service is available
-	if graphService != nil {
-		anomalyHandler := NewAnomalyHandler(graphService, logger, tracer)
-		router.HandleFunc("/v1/anomalies", withMethod(http.MethodGet, anomalyHandler.Handle))
-		logger.Info("Registered /v1/anomalies endpoint")
-	}
-
-	// Register causal paths handler if graph service is available
-	if graphService != nil {
-		causalPathsHandler := NewCausalPathsHandler(graphService, logger, tracer)
-		router.HandleFunc("/v1/causal-paths", withMethod(http.MethodGet, causalPathsHandler.Handle))
-		logger.Info("Registered /v1/causal-paths endpoint")
 	}
 
 	// Register namespace graph handler if graph service is available
@@ -199,16 +153,6 @@ func RegisterHandlers(
 					return
 				}
 				configHandler.HandleSync(w, r)
-				return
-			}
-
-			// Check for /signals/validate/status suffix (GET signal validation status)
-			if strings.HasSuffix(name, "/signals/validate/status") {
-				if r.Method != http.MethodGet {
-					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
-					return
-				}
-				configHandler.HandleSignalValidationStatus(w, r)
 				return
 			}
 

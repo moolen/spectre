@@ -5,11 +5,7 @@
 
 import {
   SearchResponse,
-  Resource,
-  StatusSegment,
   MetadataResponse,
-  EventsResponse,
-  SegmentsResponse,
 } from './apiTypes';
 import { K8sResource, K8sEvent, ResourceStatusSegment, ResourceStatus } from '../types';
 import {

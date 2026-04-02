@@ -7,7 +7,7 @@ import (
 )
 
 // BuildLogsQuery constructs an Elasticsearch DSL query from structured parameters.
-// Returns a map that can be marshaled to JSON for the Logz.io /v1/search endpoint.
+// Returns a map that can be marshaled to JSON for Logz.io's /v1/search endpoint.
 func BuildLogsQuery(params QueryParams) map[string]interface{} {
 	// Use default time range if not specified
 	timeRange := params.TimeRange
@@ -108,7 +108,7 @@ func BuildLogsQuery(params QueryParams) map[string]interface{} {
 }
 
 // BuildAggregationQuery constructs an Elasticsearch DSL aggregation query.
-// Returns a map that can be marshaled to JSON for the Logz.io /v1/search endpoint.
+// Returns a map that can be marshaled to JSON for Logz.io's /v1/search endpoint.
 func BuildAggregationQuery(params QueryParams, groupByFields []string) map[string]interface{} {
 	// Use default time range if not specified
 	timeRange := params.TimeRange

@@ -23,6 +23,7 @@ func TestUIDetailPanelInteraction(t *testing.T) {
 	when.resource_label_is_clicked()
 
 	then.detail_panel_is_visible().and().
+		analyze_root_cause_button_is_not_visible().and().
 		escape_key_is_pressed()
 
 	then.detail_panel_is_not_visible()
