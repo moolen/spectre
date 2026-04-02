@@ -12,6 +12,16 @@ type QueryExecutor interface {
 	SetSharedCache(cache interface{})
 }
 
+// EventIngestor defines the interface for ingesting single events.
+type EventIngestor interface {
+	ProcessEvent(ctx context.Context, event models.Event) error
+}
+
+// BatchIngestor defines the interface for ingesting event batches.
+type BatchIngestor interface {
+	ProcessBatch(ctx context.Context, events []models.Event) error
+}
+
 // TimelineQuerySource specifies which executor to use for queries
 type TimelineQuerySource string
 

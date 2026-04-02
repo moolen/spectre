@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
@@ -14,17 +15,14 @@ import (
 
 const defaultStartupImportChunkSize = 1024
 
-type startupImportPipeline interface {
-	ProcessBatch(ctx context.Context, events []models.Event) error
-}
-
 type startupImportOptions struct {
 	Path             string
 	ChunkSize        int
 	BenchmarkLogPath string
 	ImportMode       bool
 	Logger           *logging.Logger
-	Pipeline         startupImportPipeline
+	BatchIngestor    api.BatchIngestor
+	Pipeline         api.BatchIngestor // Deprecated compatibility alias for existing callers
 	Stream           func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error
 }
 
@@ -43,8 +41,13 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 	if opts.Path == "" {
 		return nil
 	}
-	if opts.Pipeline == nil {
-		return fmt.Errorf("startup import pipeline is required")
+
+	batchIngestor := opts.BatchIngestor
+	if batchIngestor == nil {
+		batchIngestor = opts.Pipeline
+	}
+	if batchIngestor == nil {
+		return fmt.Errorf("startup import batch ingestor is required")
 	}
 
 	logger := opts.Logger
@@ -80,7 +83,7 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 			totalEvents += len(chunk)
 
 			processStart := time.Now()
-			if err := opts.Pipeline.ProcessBatch(ctx, chunk); err != nil {
+			if err := batchIngestor.ProcessBatch(ctx, chunk); err != nil {
 				return err
 			}
 			processDuration += time.Since(processStart)

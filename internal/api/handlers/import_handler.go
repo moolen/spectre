@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/api"
-	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
 )
@@ -23,15 +22,15 @@ const (
 
 // ImportHandler handles event import requests using the graph pipeline
 type ImportHandler struct {
-	pipeline sync.Pipeline
-	logger   *logging.Logger
+	batchIngestor api.BatchIngestor
+	logger        *logging.Logger
 }
 
 // NewImportHandler creates a new import handler
-func NewImportHandler(pipeline sync.Pipeline, logger *logging.Logger) *ImportHandler {
+func NewImportHandler(batchIngestor api.BatchIngestor, logger *logging.Logger) *ImportHandler {
 	return &ImportHandler{
-		pipeline: pipeline,
-		logger:   logger,
+		batchIngestor: batchIngestor,
+		logger:        logger,
 	}
 }
 
@@ -138,7 +137,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		logging.Field("timeout", "5m"))
 
 	processStartTime := time.Now()
-	if err := h.pipeline.ProcessBatch(ctx, eventValues); err != nil {
+	if err := h.batchIngestor.ProcessBatch(ctx, eventValues); err != nil {
 		processDuration := time.Since(processStartTime)
 		h.logger.ErrorWithFields("Event batch processing failed",
 			logging.Field("error", err),
@@ -179,7 +178,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		"files_created":  filesCreated, // For compatibility with tests
 		"imported_files": 0,            // Not applicable in graph mode
 		"duration":       duration.String(),
-		"errors":         []string{},   // No errors in success path
+		"errors":         []string{}, // No errors in success path
 	}
 
 	h.logger.Debug("Writing import response to client")
