@@ -216,6 +216,12 @@ describe('formatDateTimeForInput', () => {
     expect(result).toBe('2025-12-02 13:45:00');
   });
 
+  it('preserves non-zero seconds in input formatting', () => {
+    const date = new Date('2025-12-02T13:45:07');
+    const result = formatDateTimeForInput(date);
+    expect(result).toBe('2025-12-02 13:45:07');
+  });
+
   it('should pad single-digit values', () => {
     const date = new Date('2025-01-05T09:05:00');
     const result = formatDateTimeForInput(date);
