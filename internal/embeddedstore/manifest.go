@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -55,7 +56,12 @@ func loadOrCreateManifest(dir string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("load manifest: decode %s: %w", manifestPath, err)
 	}
 
-	return normalizeManifest(manifest), nil
+	manifest = normalizeManifest(manifest)
+	if err := validateManifestVersion(manifest); err != nil {
+		return Manifest{}, err
+	}
+
+	return manifest, nil
 }
 
 func storeManifest(dir string, manifest Manifest) error {
@@ -83,9 +89,18 @@ func storeManifest(dir string, manifest Manifest) error {
 		_ = os.Remove(tmpPath)
 	}()
 
-	if _, err := tmpFile.Write(payload); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("store manifest: write temp file: %w", err)
+	written := 0
+	for written < len(payload) {
+		n, err := tmpFile.Write(payload[written:])
+		if err != nil {
+			_ = tmpFile.Close()
+			return fmt.Errorf("store manifest: write temp file: %w", err)
+		}
+		if n == 0 {
+			_ = tmpFile.Close()
+			return fmt.Errorf("store manifest: write temp file: %w", io.ErrShortWrite)
+		}
+		written += n
 	}
 	if err := tmpFile.Sync(); err != nil {
 		_ = tmpFile.Close()
@@ -134,4 +149,15 @@ func normalizeManifest(manifest Manifest) Manifest {
 		manifest.Checkpoints = []CheckpointMeta{}
 	}
 	return manifest
+}
+
+func validateManifestVersion(manifest Manifest) error {
+	if manifest.FormatVersion != storageFormatVersion {
+		return fmt.Errorf(
+			"load manifest: unsupported manifest format version %d (expected %d)",
+			manifest.FormatVersion,
+			storageFormatVersion,
+		)
+	}
+	return nil
 }
