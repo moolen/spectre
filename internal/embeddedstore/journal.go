@@ -170,7 +170,7 @@ func (j *Journal) Replay(ctx context.Context) ([]models.Event, error) {
 		}
 
 		length := binary.BigEndian.Uint32(header[:])
-		if int(length) > maxJournalRecordSize {
+		if length > uint32(maxJournalRecordSize) {
 			return nil, fmt.Errorf("oversized journal entry payload at record %d: size %d exceeds max %d", recordIndex, length, maxJournalRecordSize)
 		}
 		payload := make([]byte, int(length))
