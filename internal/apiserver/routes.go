@@ -6,6 +6,7 @@ import (
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/api/handlers"
 	"github.com/moolen/spectre/internal/api/pb/pbconnect"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -20,6 +21,9 @@ func (s *Server) registerHandlers() {
 
 	// Register health and readiness endpoints
 	s.registerHealthEndpoints()
+
+	// Register metrics endpoint before the static UI catch-all.
+	s.registerMetricsEndpoint()
 
 	// Register MCP endpoint (must be before static UI catch-all)
 	s.registerMCPHandler()
@@ -78,6 +82,10 @@ func (s *Server) registerHTTPHandlers() {
 func (s *Server) registerHealthEndpoints() {
 	s.router.HandleFunc("/health", s.handleHealth)
 	s.router.HandleFunc("/ready", s.handleReady)
+}
+
+func (s *Server) registerMetricsEndpoint() {
+	s.router.Handle("/metrics", promhttp.Handler())
 }
 
 // registerStaticUIHandlers registers static UI file serving handlers

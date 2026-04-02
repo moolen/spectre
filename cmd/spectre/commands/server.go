@@ -34,6 +34,7 @@ import (
 	"github.com/moolen/spectre/internal/mcp"
 	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -256,7 +257,10 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	if mode.Embedded {
-		embeddedCfg := embeddedstore.Config{DataDir: dataDir}
+		embeddedCfg := embeddedstore.Config{
+			DataDir:           dataDir,
+			MetricsRegisterer: prometheus.DefaultRegisterer,
+		}
 		effectiveEmbeddedCfg, err := embeddedCfg.EffectiveEngineConfig()
 		if err != nil {
 			logger.Error("Invalid embedded engine configuration: %v", err)

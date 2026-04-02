@@ -25,6 +25,7 @@ type hotStore struct {
 	mu sync.RWMutex
 
 	config                HotStoreConfig
+	metrics               *Metrics
 	events                []models.Event
 	recentByUID           map[string]*RecentResourceLog
 	recentAssociatedByUID map[string]*RecentResourceLog
@@ -34,9 +35,10 @@ type hotStore struct {
 	versionCounts         map[string]int
 }
 
-func newHotStore(config HotStoreConfig) *hotStore {
-	return &hotStore{
+func newHotStore(config HotStoreConfig, metrics *Metrics) *hotStore {
+	store := &hotStore{
 		config:                config,
+		metrics:               metrics,
 		recentByUID:           make(map[string]*RecentResourceLog),
 		recentAssociatedByUID: make(map[string]*RecentResourceLog),
 		namespaceCounts:       make(map[string]int),
@@ -44,6 +46,8 @@ func newHotStore(config HotStoreConfig) *hotStore {
 		groupCounts:           make(map[string]int),
 		versionCounts:         make(map[string]int),
 	}
+	store.updateHotEventsLocked()
+	return store
 }
 
 func (s *hotStore) Append(events []models.Event) {
@@ -57,6 +61,7 @@ func (s *hotStore) Append(events []models.Event) {
 	for i := range events {
 		s.appendOneLocked(cloneEvent(events[i]))
 	}
+	s.updateHotEventsLocked()
 }
 
 func (s *hotStore) ScanTimeRange(startTimestampNs, endTimestampNs int64) []models.Event {
@@ -148,6 +153,7 @@ func (s *hotStore) CommitFlushedBatch(batch HotFlushBatch) int {
 			removed++
 		}
 	}
+	s.updateHotEventsLocked()
 	return removed
 }
 
@@ -191,7 +197,12 @@ func (s *hotStore) enforceLogBoundLocked(logs map[string]*RecentResourceLog, uid
 		if log == nil || len(log.Events) <= s.config.MaxResourceVersions {
 			return
 		}
-		s.removeEventLocked(log.Events[0].ID)
+		if !s.removeEventLocked(log.Events[0].ID) {
+			return
+		}
+		if s.metrics != nil {
+			s.metrics.RecordHotEvictions("uid", 1)
+		}
 	}
 }
 
@@ -203,7 +214,17 @@ func (s *hotStore) enforceGlobalBoundLocked() {
 		if !s.removeEventLocked(s.events[0].ID) {
 			return
 		}
+		if s.metrics != nil {
+			s.metrics.RecordHotEvictions("global", 1)
+		}
 	}
+}
+
+func (s *hotStore) updateHotEventsLocked() {
+	if s.metrics == nil {
+		return
+	}
+	s.metrics.SetHotEvents(len(s.events))
 }
 
 func (s *hotStore) removeEventLocked(eventID string) bool {

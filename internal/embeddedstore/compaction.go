@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/moolen/spectre/internal/models"
 )
@@ -33,6 +34,7 @@ func (e *Engine) Compact(ctx context.Context) error {
 	if len(e.manifest.ActiveSegments) < minSegments {
 		return nil
 	}
+	start := time.Now()
 
 	mergedEvents := make([]models.Event, 0)
 	oldSegmentIDs := make([]string, 0, len(e.segmentReaders))
@@ -47,6 +49,7 @@ func (e *Engine) Compact(ctx context.Context) error {
 		}
 		events, err := reader.ScanTimeRange(ctx, reader.meta.MinTimestamp, reader.meta.MaxTimestamp)
 		if err != nil {
+			e.metrics.RecordCompaction(time.Since(start), err)
 			return fmt.Errorf("compact embedded engine: scan segment %q: %w", reader.meta.ID, err)
 		}
 		mergedEvents = append(mergedEvents, events...)
@@ -59,10 +62,12 @@ func (e *Engine) Compact(ctx context.Context) error {
 	compactedSegmentID := newSegmentID(newSegmentHighWaterMark)
 	meta, err := writeSegment(e.rootDir, compactedSegmentID, mergedEvents)
 	if err != nil {
+		e.metrics.RecordCompaction(time.Since(start), err)
 		return fmt.Errorf("compact embedded engine: write compacted segment: %w", err)
 	}
 	newReader, err := openSegmentReader(e.rootDir, meta)
 	if err != nil {
+		e.metrics.RecordCompaction(time.Since(start), err)
 		return fmt.Errorf("compact embedded engine: open compacted segment reader: %w", err)
 	}
 
@@ -74,12 +79,14 @@ func (e *Engine) Compact(ctx context.Context) error {
 		},
 	}
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
+		e.metrics.RecordCompaction(time.Since(start), err)
 		return fmt.Errorf("compact embedded engine: store manifest: %w", err)
 	}
 
 	e.manifest = updatedManifest
 	e.segmentReaders = []*segmentReader{newReader}
 	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
+	e.metrics.SetActiveSegments(len(e.segmentReaders))
 
 	segmentsRoot := filepath.Join(e.rootDir, segmentsDirName)
 	for i := range oldSegmentIDs {
@@ -87,11 +94,14 @@ func (e *Engine) Compact(ctx context.Context) error {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(segmentsRoot, oldSegmentIDs[i])); err != nil {
+			e.metrics.RecordCompaction(time.Since(start), err)
 			return fmt.Errorf("compact embedded engine: remove old segment %q: %w", oldSegmentIDs[i], err)
 		}
 	}
 	if err := syncPath(segmentsRoot); err != nil {
+		e.metrics.RecordCompaction(time.Since(start), err)
 		return fmt.Errorf("compact embedded engine: sync segments dir: %w", err)
 	}
+	e.metrics.RecordCompaction(time.Since(start), nil)
 	return nil
 }

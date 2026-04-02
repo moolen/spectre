@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/models"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type Config struct {
@@ -17,6 +18,7 @@ type Config struct {
 	CheckpointInterval     time.Duration
 	SegmentTargetBytes     int64
 	CompactionMinSegments  int
+	MetricsRegisterer      prometheus.Registerer
 }
 
 type Backend struct {
@@ -42,7 +44,6 @@ func Open(cfg Config) (*Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open embedded backend: %w", err)
 	}
-
 	engine, err := OpenEngine(engineCfg)
 	if err != nil {
 		return nil, fmt.Errorf("open embedded backend: %w", err)
@@ -81,6 +82,7 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 		CheckpointInterval:     cfg.CheckpointInterval,
 		SegmentTargetBytes:     cfg.SegmentTargetBytes,
 		CompactionMinSegments:  cfg.CompactionMinSegments,
+		MetricsRegisterer:      cfg.MetricsRegisterer,
 	}
 	if engineCfg.HotMaxEvents == 0 {
 		engineCfg.HotMaxEvents = defaultHotMaxEvents

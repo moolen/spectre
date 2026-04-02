@@ -18,6 +18,7 @@ type Engine struct {
 
 	logger            *logging.Logger
 	config            EngineConfig
+	metrics           *Metrics
 	rootDir           string
 	manifest          Manifest
 	hot               *hotStore
@@ -61,19 +62,25 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		}
 	}
 
+	metrics := NewMetrics(cfg.MetricsRegisterer)
+	hot := newHotStore(HotStoreConfig{MaxEvents: cfg.HotMaxEvents, MaxResourceVersions: cfg.HotMaxResourceVersions}, metrics)
+
 	engine := &Engine{
 		logger:            logging.GetLogger("embedded.engine"),
 		config:            cfg,
+		metrics:           metrics,
 		rootDir:           rootDir,
 		manifest:          manifest,
-		hot:               newHotStore(HotStoreConfig{MaxEvents: cfg.HotMaxEvents, MaxResourceVersions: cfg.HotMaxResourceVersions}),
+		hot:               hot,
 		projection:        projection,
 		queryExec:         NewQueryExecutor(projection),
 		analysis:          NewAnalysisStore(projection),
 		segmentReaders:    readers,
 		nextHighWaterMark: maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), checkpointHighWaterMark),
 	}
+	engine.queryExec.SetMetrics(metrics)
 	engine.queryExec.SetSharedCache(newQueryPlanner(engine.projection, engine.hot, engine.segmentReaders))
+	engine.metrics.SetActiveSegments(len(engine.segmentReaders))
 	engine.ready.Store(true)
 
 	return engine, nil
@@ -153,7 +160,7 @@ func (e *Engine) ProcessEvent(ctx context.Context, event models.Event) error {
 	return e.ProcessBatch(ctx, []models.Event{event})
 }
 
-func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) error {
+func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err error) {
 	if len(events) == 0 {
 		return nil
 	}
@@ -166,6 +173,14 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) error 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	start := time.Now()
+	defer func() {
+		eventCount := 0
+		if err == nil {
+			eventCount = len(events)
+		}
+		e.metrics.RecordIngest(eventCount, time.Since(start), err)
+	}()
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -233,7 +248,7 @@ func (e *Engine) runPeriodicFlush(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (e *Engine) flushLocked(ctx context.Context) error {
+func (e *Engine) flushLocked(ctx context.Context) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -245,6 +260,11 @@ func (e *Engine) flushLocked(ctx context.Context) error {
 	if len(batch.Events) == 0 {
 		return nil
 	}
+	start := time.Now()
+	byteCount := estimatedEventsSizeBytes(batch.Events)
+	defer func() {
+		e.metrics.RecordFlush(time.Since(start), len(batch.Events), byteCount, err)
+	}()
 
 	segmentID := newSegmentID(e.nextHighWaterMark)
 	meta, err := writeSegment(e.rootDir, segmentID, batch.Events)
@@ -275,6 +295,7 @@ func (e *Engine) flushLocked(ctx context.Context) error {
 	e.manifest = updatedManifest
 	e.segmentReaders = append(e.segmentReaders, reader)
 	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
+	e.metrics.SetActiveSegments(len(e.segmentReaders))
 	return nil
 }
 
@@ -328,19 +349,23 @@ func (e *Engine) Checkpoint(ctx context.Context) error {
 	if e.closed {
 		return nil
 	}
+	start := time.Now()
 
 	meta, err := writeCheckpoint(e.rootDir, e.projection, e.nextHighWaterMark)
 	if err != nil {
+		e.metrics.RecordCheckpoint(time.Since(start), err)
 		return fmt.Errorf("checkpoint embedded engine: write checkpoint: %w", err)
 	}
 
 	updatedManifest := e.manifest
 	updatedManifest.Checkpoints = append(updatedManifest.Checkpoints, meta)
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
+		e.metrics.RecordCheckpoint(time.Since(start), err)
 		return fmt.Errorf("checkpoint embedded engine: store manifest: %w", err)
 	}
 
 	e.manifest = updatedManifest
+	e.metrics.RecordCheckpoint(time.Since(start), nil)
 	return nil
 }
 

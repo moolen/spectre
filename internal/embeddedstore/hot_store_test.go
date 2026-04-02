@@ -29,7 +29,7 @@ func TestAppendOrderedEvent_InsertsOutOfOrderInput(t *testing.T) {
 }
 
 func TestHotStore_QueryRecentTimeRange(t *testing.T) {
-	store := newHotStore(HotStoreConfig{MaxEvents: 10, MaxResourceVersions: 4})
+	store := newHotStore(HotStoreConfig{MaxEvents: 10, MaxResourceVersions: 4}, nil)
 	store.Append([]models.Event{
 		{ID: "1", Timestamp: 10, Resource: models.ResourceMetadata{UID: "pod-1", Namespace: "default", Kind: "Pod"}},
 		{ID: "2", Timestamp: 20, Resource: models.ResourceMetadata{UID: "pod-1", Namespace: "default", Kind: "Pod"}},
@@ -41,7 +41,7 @@ func TestHotStore_QueryRecentTimeRange(t *testing.T) {
 }
 
 func TestHotStore_BoundsResourceVersionHistory(t *testing.T) {
-	store := newHotStore(HotStoreConfig{MaxEvents: 100, MaxResourceVersions: 2})
+	store := newHotStore(HotStoreConfig{MaxEvents: 100, MaxResourceVersions: 2}, nil)
 	for i := 0; i < 3; i++ {
 		store.Append([]models.Event{{ID: fmt.Sprintf("%d", i), Timestamp: int64(i + 1), Resource: models.ResourceMetadata{UID: "pod-1", Namespace: "default", Kind: "Pod"}}})
 	}

@@ -21,6 +21,16 @@ type QueryPlanner struct {
 	segmentDimCache map[string]map[segmentDimensionEntry]struct{}
 }
 
+type queryPlanStats struct {
+	projectionUsed   bool
+	hotUsed          bool
+	coldUsed         bool
+	relevantSegments int
+	scannedSegments  int
+	uidDiskLookups   int
+	hotScans         int
+}
+
 func NewQueryPlanner(projection *Projection, hot *hotStore, segments []*segmentReader) *QueryPlanner {
 	return newQueryPlanner(projection, hot, segments)
 }
@@ -35,42 +45,68 @@ func newQueryPlanner(projection *Projection, hot *hotStore, segments []*segmentR
 }
 
 func (p *QueryPlanner) PlanResourceEvents(ctx context.Context, uid string, meta models.ResourceMetadata, startTimeNs, endTimeNs int64) ([]models.Event, error) {
+	events, _, err := p.planResourceEvents(ctx, uid, meta, startTimeNs, endTimeNs)
+	return events, err
+}
+
+func (p *QueryPlanner) planResourceEvents(
+	ctx context.Context,
+	uid string,
+	meta models.ResourceMetadata,
+	startTimeNs, endTimeNs int64,
+) ([]models.Event, queryPlanStats, error) {
 	if p == nil {
-		return nil, nil
+		return nil, queryPlanStats{}, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, queryPlanStats{}, err
 	}
 
-	rawEvents, err := p.collectMergedResourceEvents(ctx, uid, meta, startTimeNs, endTimeNs)
+	rawEvents, stats, err := p.collectMergedResourceEvents(ctx, uid, meta, startTimeNs, endTimeNs)
 	if err != nil {
-		return nil, err
+		return nil, queryPlanStats{}, err
 	}
-	return resourceEventsInWindow(rawEvents, startTimeNs, endTimeNs), nil
+	return resourceEventsInWindow(rawEvents, startTimeNs, endTimeNs), stats, nil
 }
 
 func (p *QueryPlanner) ExportTimeRange(ctx context.Context, startTimeNs, endTimeNs int64, filters models.QueryFilters) ([]models.Event, error) {
+	events, _, err := p.exportTimeRange(ctx, startTimeNs, endTimeNs, filters)
+	return events, err
+}
+
+func (p *QueryPlanner) exportTimeRange(
+	ctx context.Context,
+	startTimeNs, endTimeNs int64,
+	filters models.QueryFilters,
+) ([]models.Event, queryPlanStats, error) {
 	if p == nil || endTimeNs < startTimeNs {
-		return nil, nil
+		return nil, queryPlanStats{}, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, queryPlanStats{}, err
 	}
 
+	stats := queryPlanStats{}
 	var exported []models.Event
-	for _, reader := range p.relevantExportSegments(filters, startTimeNs, endTimeNs) {
+	relevant := p.relevantExportSegments(filters, startTimeNs, endTimeNs)
+	stats.relevantSegments = len(relevant)
+	if len(relevant) > 0 {
+		stats.coldUsed = true
+		stats.scannedSegments += len(relevant)
+	}
+	for _, reader := range relevant {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, stats, err
 		}
 		events, err := reader.ScanTimeRange(ctx, startTimeNs, endTimeNs)
 		if err != nil {
-			return nil, fmt.Errorf("scan segment %q by time: %w", reader.meta.ID, err)
+			return nil, stats, fmt.Errorf("scan segment %q by time: %w", reader.meta.ID, err)
 		}
 		for i := range events {
 			if !filters.Matches(events[i].Resource) {
@@ -81,7 +117,12 @@ func (p *QueryPlanner) ExportTimeRange(ctx context.Context, startTimeNs, endTime
 	}
 
 	if p.hot != nil {
-		for _, event := range p.hot.ScanTimeRange(startTimeNs, endTimeNs) {
+		hotEvents := p.hot.ScanTimeRange(startTimeNs, endTimeNs)
+		if len(hotEvents) > 0 {
+			stats.hotUsed = true
+			stats.hotScans++
+		}
+		for _, event := range hotEvents {
 			if !filters.Matches(event.Resource) {
 				continue
 			}
@@ -90,30 +131,48 @@ func (p *QueryPlanner) ExportTimeRange(ctx context.Context, startTimeNs, endTime
 	}
 
 	if len(exported) == 0 {
-		return nil, nil
+		return nil, stats, nil
 	}
 	sort.SliceStable(exported, func(i, j int) bool {
 		return compareEventOrder(exported[i], exported[j]) < 0
 	})
-	return dedupeEventsByID(exported), nil
+	return dedupeEventsByID(exported), stats, nil
 }
 
-func (p *QueryPlanner) collectMergedResourceEvents(ctx context.Context, uid string, meta models.ResourceMetadata, startTimeNs, endTimeNs int64) ([]models.Event, error) {
+func (p *QueryPlanner) collectMergedResourceEvents(
+	ctx context.Context,
+	uid string,
+	meta models.ResourceMetadata,
+	startTimeNs, endTimeNs int64,
+) ([]models.Event, queryPlanStats, error) {
 	if uid == "" || endTimeNs < startTimeNs {
-		return nil, nil
+		return nil, queryPlanStats{}, nil
 	}
 
+	stats := queryPlanStats{}
 	var merged []models.Event
 	if p.hot != nil {
-		merged = cloneEvents(p.hot.RecentEventsByUID(uid))
+		hotEvents := p.hot.RecentEventsByUID(uid)
+		if len(hotEvents) > 0 {
+			stats.hotUsed = true
+			stats.hotScans++
+			merged = cloneEvents(hotEvents)
+		}
 	}
-	for _, reader := range p.relevantSegments(uid, meta, startTimeNs, endTimeNs) {
+	relevant := p.relevantSegments(uid, meta, startTimeNs, endTimeNs)
+	stats.relevantSegments = len(relevant)
+	if len(relevant) > 0 {
+		stats.coldUsed = true
+		stats.scannedSegments += len(relevant)
+		stats.uidDiskLookups += len(relevant)
+	}
+	for _, reader := range relevant {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, stats, err
 		}
 		events, err := reader.ScanUID(ctx, uid)
 		if err != nil {
-			return nil, fmt.Errorf("scan segment %q for uid %q: %w", reader.meta.ID, uid, err)
+			return nil, stats, fmt.Errorf("scan segment %q for uid %q: %w", reader.meta.ID, uid, err)
 		}
 		for i := range events {
 			merged = append(merged, cloneEvent(events[i]))
@@ -121,13 +180,40 @@ func (p *QueryPlanner) collectMergedResourceEvents(ctx context.Context, uid stri
 	}
 
 	if len(merged) == 0 {
-		return nil, nil
+		return nil, stats, nil
 	}
 
 	sort.SliceStable(merged, func(i, j int) bool {
 		return compareEventOrder(merged[i], merged[j]) < 0
 	})
-	return dedupeEventsByID(merged), nil
+	return dedupeEventsByID(merged), stats, nil
+}
+
+func (s queryPlanStats) merge(other queryPlanStats) queryPlanStats {
+	return queryPlanStats{
+		projectionUsed:   s.projectionUsed || other.projectionUsed,
+		hotUsed:          s.hotUsed || other.hotUsed,
+		coldUsed:         s.coldUsed || other.coldUsed,
+		relevantSegments: s.relevantSegments + other.relevantSegments,
+		scannedSegments:  s.scannedSegments + other.scannedSegments,
+		uidDiskLookups:   s.uidDiskLookups + other.uidDiskLookups,
+		hotScans:         s.hotScans + other.hotScans,
+	}
+}
+
+func (s queryPlanStats) storeMix() string {
+	switch {
+	case s.projectionUsed && !s.hotUsed && !s.coldUsed:
+		return storeMixProjectionOnly
+	case s.hotUsed && s.coldUsed:
+		return storeMixMixed
+	case s.hotUsed:
+		return storeMixHotOnly
+	case s.coldUsed:
+		return storeMixColdOnly
+	default:
+		return storeMixProjectionOnly
+	}
 }
 
 func (p *QueryPlanner) relevantSegments(uid string, meta models.ResourceMetadata, startTimeNs, endTimeNs int64) []*segmentReader {

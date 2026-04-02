@@ -1,6 +1,10 @@
 package embeddedstore
 
-import "time"
+import (
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 type EngineConfig struct {
 	DataDir                string
@@ -10,4 +14,5 @@ type EngineConfig struct {
 	CheckpointInterval     time.Duration
 	SegmentTargetBytes     int64
 	CompactionMinSegments  int
+	MetricsRegisterer      prometheus.Registerer
 }

@@ -21,6 +21,7 @@ type QueryExecutor struct {
 	logger     *logging.Logger
 	projection *Projection
 	planner    *QueryPlanner
+	metrics    *Metrics
 }
 
 func NewQueryExecutor(projection *Projection) *QueryExecutor {
@@ -39,6 +40,7 @@ func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest
 }
 
 func (qe *QueryExecutor) ExportTimeRange(ctx context.Context, query *models.QueryRequest) ([]models.Event, error) {
+	start := time.Now()
 	if err := query.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid query: %w", err)
 	}
@@ -52,12 +54,16 @@ func (qe *QueryExecutor) ExportTimeRange(ctx context.Context, query *models.Quer
 	startTimeNs := query.StartTimestamp * 1e9
 	endTimeNs := query.EndTimestamp * 1e9
 
+	stats := queryPlanStats{}
 	if qe.planner != nil {
-		return qe.planner.ExportTimeRange(ctx, startTimeNs, endTimeNs, query.Filters)
+		events, planStats, err := qe.planner.exportTimeRange(ctx, startTimeNs, endTimeNs, query.Filters)
+		qe.recordQueryMetrics(queryFamilyExportTimeRange, planStats, start, err)
+		return events, err
 	}
 
 	qe.projection.mu.RLock()
 	defer qe.projection.mu.RUnlock()
+	stats.projectionUsed = true
 
 	exported := make([]models.Event, 0)
 	for i := range qe.projection.events {
@@ -70,6 +76,7 @@ func (qe *QueryExecutor) ExportTimeRange(ctx context.Context, query *models.Quer
 		}
 		exported = append(exported, cloneEvent(event))
 	}
+	qe.recordQueryMetrics(queryFamilyExportTimeRange, stats, start, nil)
 	return exported, nil
 }
 
@@ -95,8 +102,9 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 		return qe.executeEventQuery(startTimeNs, endTimeNs, query.Filters, pagination, pageSize, start)
 	}
 
-	filteredResources, err := qe.collectFilteredResources(ctx, startTimeNs, endTimeNs, query.Filters)
+	filteredResources, stats, err := qe.collectFilteredResources(ctx, startTimeNs, endTimeNs, query.Filters)
 	if err != nil {
+		qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, err)
 		return nil, nil, err
 	}
 	startIdx := qe.cursorStartIndex(filteredResources, pagination)
@@ -124,6 +132,7 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 		PageSize:   pageSize,
 	}
 
+	qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, nil)
 	return queryResult, paginationResp, nil
 }
 
@@ -135,7 +144,12 @@ func (qe *QueryExecutor) SetSharedCache(cache interface{}) {
 	qe.planner = planner
 }
 
+func (qe *QueryExecutor) SetMetrics(metrics *Metrics) {
+	qe.metrics = metrics
+}
+
 func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) (namespaces []string, kinds []string, minTime int64, maxTime int64, err error) {
+	start := time.Now()
 	qe.projection.mu.RLock()
 	defer qe.projection.mu.RUnlock()
 
@@ -184,11 +198,17 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 	sort.Strings(namespaces)
 	sort.Strings(kinds)
 
+	qe.recordQueryMetrics(queryFamilyDistinctMeta, queryPlanStats{projectionUsed: true}, start, nil)
 	return namespaces, kinds, minTime, maxTime, nil
 }
 
-func (qe *QueryExecutor) collectFilteredResources(ctx context.Context, startTimeNs, endTimeNs int64, filters models.QueryFilters) ([]filteredResource, error) {
+func (qe *QueryExecutor) collectFilteredResources(
+	ctx context.Context,
+	startTimeNs, endTimeNs int64,
+	filters models.QueryFilters,
+) ([]filteredResource, queryPlanStats, error) {
 	filtered := make([]filteredResource, 0, len(qe.projection.orderedResources))
+	stats := queryPlanStats{}
 
 	for _, key := range qe.projection.orderedResources {
 		meta, ok := qe.projection.resourceMetaByUID[key.uid]
@@ -199,10 +219,11 @@ func (qe *QueryExecutor) collectFilteredResources(ctx context.Context, startTime
 			continue
 		}
 
-		resourceEvents, err := qe.resourceEvents(ctx, key.uid, meta, startTimeNs, endTimeNs)
+		resourceEvents, resourceStats, err := qe.resourceEvents(ctx, key.uid, meta, startTimeNs, endTimeNs)
 		if err != nil {
-			return nil, err
+			return nil, stats.merge(resourceStats), err
 		}
+		stats = stats.merge(resourceStats)
 		if len(resourceEvents) == 0 {
 			continue
 		}
@@ -213,18 +234,23 @@ func (qe *QueryExecutor) collectFilteredResources(ctx context.Context, startTime
 		})
 	}
 
-	return filtered, nil
+	return filtered, stats, nil
 }
 
 func (qe *QueryExecutor) collectResourceEvents(events []models.Event, startTimeNs, endTimeNs int64) []models.Event {
 	return resourceEventsInWindow(events, startTimeNs, endTimeNs)
 }
 
-func (qe *QueryExecutor) resourceEvents(ctx context.Context, uid string, meta models.ResourceMetadata, startTimeNs, endTimeNs int64) ([]models.Event, error) {
+func (qe *QueryExecutor) resourceEvents(
+	ctx context.Context,
+	uid string,
+	meta models.ResourceMetadata,
+	startTimeNs, endTimeNs int64,
+) ([]models.Event, queryPlanStats, error) {
 	if qe.planner == nil {
-		return qe.collectResourceEvents(qe.projection.eventsByResourceUID[uid], startTimeNs, endTimeNs), nil
+		return qe.collectResourceEvents(qe.projection.eventsByResourceUID[uid], startTimeNs, endTimeNs), queryPlanStats{projectionUsed: true}, nil
 	}
-	return qe.planner.PlanResourceEvents(ctx, uid, meta, startTimeNs, endTimeNs)
+	return qe.planner.planResourceEvents(ctx, uid, meta, startTimeNs, endTimeNs)
 }
 
 func (qe *QueryExecutor) cursorStartIndex(resources []filteredResource, pagination *models.PaginationRequest) int {
@@ -442,5 +468,16 @@ func (qe *QueryExecutor) executeEventQuery(startTimeNs, endTimeNs int64, filters
 		PageSize:   pageSize,
 	}
 
+	qe.recordQueryMetrics(queryFamilyResourceEvents, queryPlanStats{projectionUsed: true}, start, nil)
 	return queryResult, paginationResp, nil
+}
+
+func (qe *QueryExecutor) recordQueryMetrics(queryFamily string, stats queryPlanStats, start time.Time, err error) {
+	if qe == nil || qe.metrics == nil {
+		return
+	}
+	qe.metrics.RecordQuery(queryFamily, stats.storeMix(), time.Since(start), err)
+	qe.metrics.RecordSegmentScans(queryFamily, stats.scannedSegments)
+	qe.metrics.RecordHotScans(queryFamily, stats.hotScans)
+	qe.metrics.RecordUIDDiskLookups(queryFamily, stats.uidDiskLookups)
 }
