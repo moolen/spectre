@@ -42,17 +42,21 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 		return nil
 	}
 
+	logger := opts.Logger
+	if logger == nil {
+		logger = logging.GetLogger("server")
+	}
+
+	if opts.BatchIngestor != nil && opts.Pipeline != nil {
+		logger.Warn("Both BatchIngestor and deprecated Pipeline are set; using BatchIngestor")
+	}
+
 	batchIngestor := opts.BatchIngestor
 	if batchIngestor == nil {
 		batchIngestor = opts.Pipeline
 	}
 	if batchIngestor == nil {
 		return fmt.Errorf("startup import batch ingestor is required")
-	}
-
-	logger := opts.Logger
-	if logger == nil {
-		logger = logging.GetLogger("server")
 	}
 
 	chunkSize := opts.ChunkSize

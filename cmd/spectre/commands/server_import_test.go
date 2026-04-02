@@ -240,6 +240,43 @@ func TestRunStartupImportLogsImportCompletedMessage(t *testing.T) {
 	}
 }
 
+func TestRunStartupImportLogsWarningWhenBothIngestorsAreSet(t *testing.T) {
+	os.Setenv("LOG_TIMESTAMP", "2024-01-01T12:00:00Z")
+	defer os.Unsetenv("LOG_TIMESTAMP")
+
+	logger := logging.GetLogger("test_startup_import_both_ingestors")
+	preferred := &fakeStartupImportBatchIngestor{}
+	deprecated := &fakeStartupImportBatchIngestor{err: errors.New("deprecated pipeline should not be used")}
+	streamFn := func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error {
+		return onChunk([]models.Event{{ID: "a"}})
+	}
+
+	output := captureStartupImportOutput(t, func() {
+		err := runStartupImport(context.Background(), startupImportOptions{
+			Path:          "fixtures/import.json",
+			ChunkSize:     10,
+			Logger:        logger,
+			BatchIngestor: preferred,
+			Pipeline:      deprecated,
+			Stream:        streamFn,
+			ImportMode:    false,
+		})
+		if err != nil {
+			t.Fatalf("runStartupImport returned error: %v", err)
+		}
+	})
+
+	if len(preferred.batches) != 1 {
+		t.Fatalf("expected preferred batch ingestor to process exactly one batch, got %d", len(preferred.batches))
+	}
+	if len(deprecated.batches) != 0 {
+		t.Fatalf("expected deprecated pipeline ingestor to be unused, got %d batches", len(deprecated.batches))
+	}
+	if !strings.Contains(output, "Both BatchIngestor and deprecated Pipeline are set; using BatchIngestor") {
+		t.Fatalf("expected warning about both ingestors being set, got %q", output)
+	}
+}
+
 func TestServerCommandDefinesStartupImportDisableCausalityFlag(t *testing.T) {
 	t.Parallel()
 
