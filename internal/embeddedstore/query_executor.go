@@ -7,7 +7,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
@@ -22,8 +21,6 @@ type QueryExecutor struct {
 	logger     *logging.Logger
 	projection *Projection
 }
-
-var _ api.QueryExecutor = (*QueryExecutor)(nil)
 
 func NewQueryExecutor(projection *Projection) *QueryExecutor {
 	if projection == nil {

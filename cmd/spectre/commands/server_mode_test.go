@@ -83,15 +83,21 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		}
 	})
 
-	t.Run("embedded mode with watcher disabled requires import path", func(t *testing.T) {
-		_, err := resolveServerRuntimeMode(serverModeInput{
+	t.Run("embedded import-only mode without import path still serves persisted data", func(t *testing.T) {
+		mode, err := resolveServerRuntimeMode(serverModeInput{
 			Embedded:       true,
 			ImportPath:     "",
 			GraphEnabled:   true,
 			WatcherEnabled: false,
 		})
-		if err == nil {
-			t.Fatalf("expected error when embedded has watcher disabled without import path")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mode.IngestionMode != string(ingestionModeImportOnly) {
+			t.Fatalf("expected ingestion mode %s, got %q", ingestionModeImportOnly, mode.IngestionMode)
+		}
+		if mode.StartWatcher {
+			t.Fatalf("expected StartWatcher to be false when watcher is disabled")
 		}
 	})
 

@@ -7,8 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	analysisstore "github.com/moolen/spectre/internal/analysis/store"
-	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -19,8 +17,8 @@ type Config struct {
 type Backend struct {
 	journal    *Journal
 	projection *Projection
-	queryExec  api.QueryExecutor
-	analysis   analysisstore.AnalysisStore
+	queryExec  *QueryExecutor
+	analysis   *Store
 	ready      atomic.Bool
 }
 
@@ -118,14 +116,14 @@ func (b *Backend) ProcessBatch(ctx context.Context, events []models.Event) error
 	return nil
 }
 
-func (b *Backend) QueryExecutor() api.QueryExecutor {
+func (b *Backend) QueryExecutor() *QueryExecutor {
 	if b == nil {
 		return nil
 	}
 	return b.queryExec
 }
 
-func (b *Backend) AnalysisStore() analysisstore.AnalysisStore {
+func (b *Backend) AnalysisStore() *Store {
 	if b == nil {
 		return nil
 	}

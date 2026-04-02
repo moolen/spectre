@@ -39,10 +39,6 @@ type serverRuntimeMode struct {
 
 func resolveServerRuntimeMode(in serverModeInput) (serverRuntimeMode, error) {
 	if in.Embedded {
-		if !in.WatcherEnabled && in.ImportPath == "" {
-			return serverRuntimeMode{}, fmt.Errorf("--embedded with watcher disabled requires --import-path")
-		}
-
 		ingestionMode := ingestionModeLive
 		importOnly := false
 		startWatcher := true

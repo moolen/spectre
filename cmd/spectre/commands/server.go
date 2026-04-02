@@ -35,6 +35,7 @@ import (
 	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -295,14 +296,15 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 
 		if mode.ImportOnly {
-			usable, err := hasUsableEmbeddedEvents(embeddedBackend.QueryExecutor().(embeddedMetadataQuerier))
+			usable, err := hasUsableEmbeddedBackend(embeddedBackend)
 			if err != nil {
 				logger.Error("Failed to validate embedded events: %v", err)
 				HandleError(err, "Embedded executor error")
 			}
 			if !usable {
-				logger.Error("No usable events found in import path: %s", importPath)
-				HandleError(fmt.Errorf("no usable events found at import path: %s", importPath), "Import error")
+				source := embeddedImportSourceDescription(importPath, dataDir)
+				logger.Error("No usable embedded events found in %s", source)
+				HandleError(fmt.Errorf("no usable embedded events found in %s", source), "Import error")
 			}
 		}
 
@@ -356,7 +358,7 @@ func runServer(cmd *cobra.Command, args []string) {
 
 		if mode.StartMCP {
 			timelineService := apiComponent.GetTimelineService()
-			tracer := tracingProvider.GetTracer("graph_service")
+			tracer := getTracingProviderTracer(tracingProvider, "graph_service")
 			graphService := api.NewGraphService(embeddedBackend.AnalysisStore(), logger, tracer)
 
 			spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
@@ -618,7 +620,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	// Create GraphService if graph client is available
 	var graphService *api.GraphService
 	if graphClient != nil {
-		tracer := tracingProvider.GetTracer("graph_service")
+		tracer := getTracingProviderTracer(tracingProvider, "graph_service")
 		graphService = api.NewGraphServiceFromGraphClient(graphClient, logger, tracer)
 		logger.Info("Created GraphService for MCP graph tools")
 	}
@@ -813,6 +815,36 @@ func runServer(cmd *cobra.Command, args []string) {
 
 type embeddedMetadataQuerier interface {
 	QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) ([]string, []string, int64, int64, error)
+}
+
+func getTracingProviderTracer(provider interface {
+	GetTracer(string) trace.Tracer
+	IsEnabled() bool
+}, name string) trace.Tracer {
+	if provider == nil {
+		return nil
+	}
+	return provider.GetTracer(name)
+}
+
+func hasUsableEmbeddedBackend(backend *embeddedstore.Backend) (bool, error) {
+	if backend == nil {
+		return false, fmt.Errorf("embedded backend is nil")
+	}
+
+	executor := backend.QueryExecutor()
+	if executor == nil {
+		return false, fmt.Errorf("embedded query executor is nil")
+	}
+
+	return hasUsableEmbeddedEvents(executor)
+}
+
+func embeddedImportSourceDescription(importPath, dataDir string) string {
+	if importPath != "" {
+		return fmt.Sprintf("import path %s", importPath)
+	}
+	return fmt.Sprintf("data dir %s", dataDir)
 }
 
 func hasUsableEmbeddedEvents(executor embeddedMetadataQuerier) (bool, error) {
