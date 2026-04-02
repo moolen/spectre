@@ -1,0 +1,97 @@
+package embeddedstore
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/moolen/spectre/internal/models"
+)
+
+func (e *Engine) Compact(ctx context.Context) error {
+	if e == nil {
+		return fmt.Errorf("compact embedded engine: engine is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil
+	}
+
+	minSegments := e.config.CompactionMinSegments
+	if minSegments < 2 {
+		minSegments = 2
+	}
+	if len(e.manifest.ActiveSegments) < minSegments {
+		return nil
+	}
+
+	mergedEvents := make([]models.Event, 0)
+	oldSegmentIDs := make([]string, 0, len(e.segmentReaders))
+	for i := range e.segmentReaders {
+		reader := e.segmentReaders[i]
+		if reader == nil {
+			continue
+		}
+		oldSegmentIDs = append(oldSegmentIDs, reader.meta.ID)
+		if reader.meta.EventCount == 0 {
+			continue
+		}
+		events, err := reader.ScanTimeRange(ctx, reader.meta.MinTimestamp, reader.meta.MaxTimestamp)
+		if err != nil {
+			return fmt.Errorf("compact embedded engine: scan segment %q: %w", reader.meta.ID, err)
+		}
+		mergedEvents = append(mergedEvents, events...)
+	}
+	if len(oldSegmentIDs) < minSegments {
+		return nil
+	}
+
+	newSegmentHighWaterMark := maxSegmentHighWaterMark(e.manifest.ActiveSegments)
+	compactedSegmentID := newSegmentID(newSegmentHighWaterMark)
+	meta, err := writeSegment(e.rootDir, compactedSegmentID, mergedEvents)
+	if err != nil {
+		return fmt.Errorf("compact embedded engine: write compacted segment: %w", err)
+	}
+	newReader, err := openSegmentReader(e.rootDir, meta)
+	if err != nil {
+		return fmt.Errorf("compact embedded engine: open compacted segment reader: %w", err)
+	}
+
+	updatedManifest := e.manifest
+	updatedManifest.ActiveSegments = []SegmentMeta{
+		{
+			ID:            meta.ID,
+			HighWaterMark: newSegmentHighWaterMark,
+		},
+	}
+	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
+		return fmt.Errorf("compact embedded engine: store manifest: %w", err)
+	}
+
+	e.manifest = updatedManifest
+	e.segmentReaders = []*segmentReader{newReader}
+	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
+
+	segmentsRoot := filepath.Join(e.rootDir, segmentsDirName)
+	for i := range oldSegmentIDs {
+		if oldSegmentIDs[i] == meta.ID {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(segmentsRoot, oldSegmentIDs[i])); err != nil {
+			return fmt.Errorf("compact embedded engine: remove old segment %q: %w", oldSegmentIDs[i], err)
+		}
+	}
+	if err := syncPath(segmentsRoot); err != nil {
+		return fmt.Errorf("compact embedded engine: sync segments dir: %w", err)
+	}
+	return nil
+}

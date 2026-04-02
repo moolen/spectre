@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	corev1 "k8s.io/api/core/v1"
@@ -16,30 +17,25 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// GraphPipeline is the interface for processing events through the graph pipeline
-type GraphPipeline interface {
-	ProcessEvent(ctx context.Context, event models.Event) error
-}
-
-// TimelineMode specifies where events are written (graph-only now)
+// TimelineMode specifies where events are written.
 type TimelineMode string
 
 const (
 	TimelineModeGraph TimelineMode = "graph"
 )
 
-// EventCaptureHandler captures Kubernetes events and routes them to graph
+// EventCaptureHandler captures Kubernetes events and routes them to an ingest backend.
 type EventCaptureHandler struct {
-	graphPipeline GraphPipeline
+	eventIngestor api.EventIngestor
 	auditLog      AuditLogWriter // Optional audit log
 	logger        *logging.Logger
 	pruner        *ManagedFieldsPruner
 }
 
-// NewEventCaptureHandler creates a new event capture handler (graph-only mode)
-func NewEventCaptureHandler(graphPipeline GraphPipeline) *EventCaptureHandler {
+// NewEventCaptureHandler creates a new event capture handler.
+func NewEventCaptureHandler(eventIngestor api.EventIngestor) *EventCaptureHandler {
 	return &EventCaptureHandler{
-		graphPipeline: graphPipeline,
+		eventIngestor: eventIngestor,
 		logger:        logging.GetLogger("event_handler"),
 		pruner:        NewManagedFieldsPruner(),
 	}
@@ -50,12 +46,12 @@ func (h *EventCaptureHandler) SetAuditLog(writer AuditLogWriter) {
 	h.auditLog = writer
 }
 
-// NewEventCaptureHandlerWithMode creates an event handler with specified mode (graph-only now)
-func NewEventCaptureHandlerWithMode(storage interface{}, graphPipeline GraphPipeline, mode TimelineMode) *EventCaptureHandler {
+// NewEventCaptureHandlerWithMode creates an event handler with specified mode.
+func NewEventCaptureHandlerWithMode(storage interface{}, eventIngestor api.EventIngestor, mode TimelineMode) *EventCaptureHandler {
 	// storage parameter is ignored - kept for signature compatibility
 	// mode must be TimelineModeGraph
 	return &EventCaptureHandler{
-		graphPipeline: graphPipeline,
+		eventIngestor: eventIngestor,
 		logger:        logging.GetLogger("event_handler"),
 		pruner:        NewManagedFieldsPruner(),
 	}
@@ -148,11 +144,11 @@ func (h *EventCaptureHandler) OnDelete(obj runtime.Object) error {
 	return h.writeEvent(event)
 }
 
-// writeEvent writes an event to graph and/or audit log
+// writeEvent writes an event to the ingest backend and/or audit log.
 func (h *EventCaptureHandler) writeEvent(event *models.Event) error {
 	ctx := context.Background() // Use background context for event processing
 
-	// Write to audit log FIRST (independent of graph mode)
+	// Write to audit log FIRST (independent of ingest backend mode).
 	if h.auditLog != nil {
 		if err := h.auditLog.WriteEvent(event); err != nil {
 			h.logger.Warn("Failed to write event to audit log: %v", err)
@@ -160,20 +156,20 @@ func (h *EventCaptureHandler) writeEvent(event *models.Event) error {
 		}
 	}
 
-	// Write to graph if available
-	if h.graphPipeline != nil {
-		if err := h.graphPipeline.ProcessEvent(ctx, *event); err != nil {
-			h.logger.Error("Failed to write event to graph: %v", err)
+	// Write to ingest backend if available
+	if h.eventIngestor != nil {
+		if err := h.eventIngestor.ProcessEvent(ctx, *event); err != nil {
+			h.logger.Error("Failed to write event to ingest backend: %v", err)
 			return err
 		}
 	} else {
-		h.logger.Warn("graphPipeline is nil, event %s not written to graph (kind=%s)", event.ID, event.Resource.Kind)
+		h.logger.Warn("event ingestor is nil, event %s not written to ingest backend (kind=%s)", event.ID, event.Resource.Kind)
 	}
-	if h.graphPipeline == nil && h.auditLog == nil {
-		// Only error if neither graph nor audit log is configured
-		return fmt.Errorf("neither graph pipeline nor audit log is configured")
+	if h.eventIngestor == nil && h.auditLog == nil {
+		// Only error if neither ingest backend nor audit log is configured.
+		return fmt.Errorf("neither ingest backend nor audit log is configured")
 	}
-	// If only audit log is configured (no graph), that's valid - audit-only mode
+	// If only audit log is configured (no ingest backend), that's valid - audit-only mode.
 
 	return nil
 }

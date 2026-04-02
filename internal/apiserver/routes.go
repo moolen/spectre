@@ -63,7 +63,7 @@ func (s *Server) registerHTTPHandlers() {
 		s.timelineService, // Pass shared timeline service
 		s.analysisStore,
 		s.graphClient,
-		s.graphPipeline,
+		s.importIngestor,
 		s.metadataCache,
 		s.nsGraphCache,
 		s.integrationsConfigPath,
