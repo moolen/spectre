@@ -79,6 +79,68 @@ func TestEmbeddedRuntimeExportServesFlushedColdRawEvents(t *testing.T) {
 	require.Equal(t, []string{"pod-1", "event-1"}, eventIDs(payload.Events))
 }
 
+func TestEmbeddedRuntimeColdHistoryRemainsQueryableAfterHotTierEviction(t *testing.T) {
+	engine, err := embeddedstore.OpenEngine(embeddedstore.EngineConfig{
+		DataDir:                t.TempDir(),
+		HotMaxEvents:           1,
+		HotMaxResourceVersions: 1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "cold-pod-created",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "cold-pod-uid",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "cold-pod",
+			},
+		},
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "hot-pod-created",
+			Timestamp: 20,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "hot-pod-uid",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "hot-pod",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"hot-pod","namespace":"default","uid":"hot-pod-uid"}}`),
+		},
+		{
+			ID:        "hot-pod-updated",
+			Timestamp: 30,
+			Type:      models.EventTypeUpdate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "hot-pod-uid",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "hot-pod",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"hot-pod","namespace":"default","uid":"hot-pod-uid"}}`),
+		},
+	}))
+
+	server := newEmbeddedRuntimeServer(t, engine)
+	response := queryEmbeddedTimeline(t, server, 0, 4102444800)
+	require.NotNil(t, findResource(response.Resources, "Pod", "cold-pod"))
+	require.NotNil(t, findResource(response.Resources, "Pod", "hot-pod"))
+}
+
 func eventIDs(events []models.Event) []string {
 	ids := make([]string, 0, len(events))
 	for i := range events {
