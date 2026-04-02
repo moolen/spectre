@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { formatDateTimeForInput, parseTimeExpression } from '../utils/timeParsing';
 
 interface TimeInputWithCalendarProps {
   value: string;
@@ -56,48 +57,31 @@ export const TimeInputWithCalendar: React.FC<TimeInputWithCalendarProps> = ({
   const handleCalendarSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const dateValue = e.target.value;
     if (dateValue) {
-      const date = new Date(dateValue);
-      if (!isNaN(date.getTime())) {
-        // Format as YYYY-MM-DD HH:mm for display
-        const formatted = formatDateTimeForDisplay(date);
-        onChange(formatted);
+      const selected = new Date(`${dateValue}T00:00:00`);
+      if (!isNaN(selected.getTime())) {
+        onChange(formatDateTimeForInput(selected));
         if (onDateSelected) {
-          onDateSelected(date);
+          onDateSelected(selected);
         }
         setIsCalendarOpen(false);
       }
     }
   };
 
-  const formatDateTimeForDisplay = (date: Date): string => {
+  const formatDateForPicker = (date: Date): string => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}`;
-  };
-
-  const formatDateTimeLocal = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
+    return `${year}-${month}-${day}`;
   };
 
   // Try to parse current value to pre-populate calendar
   const getCalendarValue = (): string => {
-    try {
-      const date = new Date(value);
-      if (!isNaN(date.getTime())) {
-        return formatDateTimeLocal(date);
-      }
-    } catch {
-      // ignore
+    const parsedValue = parseTimeExpression(value);
+    if (parsedValue) {
+      return formatDateForPicker(parsedValue);
     }
-    return formatDateTimeLocal(new Date());
+    return formatDateForPicker(new Date());
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -146,10 +130,10 @@ export const TimeInputWithCalendar: React.FC<TimeInputWithCalendarProps> = ({
           className="absolute z-50 mt-1 p-3 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl"
         >
           <div className="text-xs text-[var(--color-text-muted)] mb-2">
-            Select date and time
+            Select date
           </div>
           <input
-            type="datetime-local"
+            type="date"
             defaultValue={getCalendarValue()}
             onChange={handleCalendarSelect}
             className="w-full px-3 py-2 text-sm border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"

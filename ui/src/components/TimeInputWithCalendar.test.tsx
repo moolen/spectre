@@ -94,17 +94,15 @@ describe('TimeInputWithCalendar', () => {
     expect(mockOnEnter).toHaveBeenCalledTimes(1);
   });
 
-  it('should open calendar when calendar button is clicked', async () => {
+  it('opens a date-only picker from the calendar button', async () => {
     const user = userEvent.setup();
     render(<TimeInputWithCalendar {...defaultProps} />);
 
-    const calendarButton = screen.getByRole('button', { name: /open calendar/i });
-    await user.click(calendarButton);
+    await user.click(screen.getByRole('button', { name: /open calendar/i }));
 
-    // Calendar should be visible - check for the datetime-local input type
-    const calendarInput = screen.getByDisplayValue('2025-01-01T10:00');
+    const calendarInput = screen.getByDisplayValue('2025-01-01');
     expect(calendarInput).toBeInTheDocument();
-    expect(calendarInput).toHaveAttribute('type', 'datetime-local');
+    expect(calendarInput).toHaveAttribute('type', 'date');
   });
 
   it('should close calendar when clicking calendar button again', async () => {
@@ -112,38 +110,31 @@ describe('TimeInputWithCalendar', () => {
     render(<TimeInputWithCalendar {...defaultProps} />);
 
     const calendarButton = screen.getByRole('button', { name: /open calendar/i });
-    
+
     // Open calendar
     await user.click(calendarButton);
-    const calendarInput = screen.getByDisplayValue('2025-01-01T10:00');
+    const calendarInput = screen.getByDisplayValue('2025-01-01');
     expect(calendarInput).toBeInTheDocument();
-    expect(calendarInput).toHaveAttribute('type', 'datetime-local');
+    expect(calendarInput).toHaveAttribute('type', 'date');
 
     // Close calendar
     await user.click(calendarButton);
-    
-    // Check that the datetime-local input is gone
-    const dateTimeInputs = screen.queryAllByDisplayValue('2025-01-01T10:00');
-    expect(dateTimeInputs.every(input => input.getAttribute('type') === 'text')).toBe(true);
+
+    expect(screen.queryByDisplayValue('2025-01-01')).not.toBeInTheDocument();
   });
 
-  it('should call onChange when date is selected from calendar', async () => {
+  it('writes midnight seconds when a day is selected', async () => {
     const user = userEvent.setup();
     render(<TimeInputWithCalendar {...defaultProps} onDateSelected={mockOnDateSelected} />);
 
-    // Open calendar
-    const calendarButton = screen.getByRole('button', { name: /open calendar/i });
-    await user.click(calendarButton);
+    await user.click(screen.getByRole('button', { name: /open calendar/i }));
 
-    // Change the datetime-local input - get by type attribute to avoid ambiguity
-    const calendarInput = screen.getByDisplayValue('2025-01-01T10:00');
-    expect(calendarInput).toHaveAttribute('type', 'datetime-local');
-    
+    const calendarInput = screen.getByDisplayValue('2025-01-01');
+    expect(calendarInput).toHaveAttribute('type', 'date');
     await user.clear(calendarInput);
-    await user.type(calendarInput, '2025-12-25T15:30');
+    await user.type(calendarInput, '2025-12-25');
 
-    // onChange should be called with formatted date
-    expect(mockOnChange).toHaveBeenCalled();
+    expect(mockOnChange).toHaveBeenCalledWith('2025-12-25 00:00:00');
     expect(mockOnDateSelected).toHaveBeenCalled();
   });
 
@@ -174,16 +165,14 @@ describe('TimeInputWithCalendar', () => {
     const calendarButton = screen.getByRole('button', { name: /open calendar/i });
     await user.click(calendarButton);
 
-    const calendarInput = screen.getByDisplayValue('2025-01-01T10:00');
+    const calendarInput = screen.getByDisplayValue('2025-01-01');
     expect(calendarInput).toBeInTheDocument();
-    expect(calendarInput).toHaveAttribute('type', 'datetime-local');
+    expect(calendarInput).toHaveAttribute('type', 'date');
 
     // Press Escape
     await user.keyboard('{Escape}');
 
-    // Calendar should be closed - the datetime-local input should not be present
-    const dateTimeInputs = screen.queryAllByDisplayValue('2025-01-01T10:00');
-    expect(dateTimeInputs.every(input => input.getAttribute('type') === 'text')).toBe(true);
+    expect(screen.queryByDisplayValue('2025-01-01')).not.toBeInTheDocument();
   });
 
   it('should not trigger onEnter when typing other keys', async () => {
