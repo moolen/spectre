@@ -138,6 +138,19 @@ describe('TimeInputWithCalendar', () => {
     expect(mockOnDateSelected).toHaveBeenCalled();
   });
 
+  it('closes the picker after selecting a day', async () => {
+    const user = userEvent.setup();
+    render(<TimeInputWithCalendar {...defaultProps} />);
+
+    await user.click(screen.getByRole('button', { name: /open calendar/i }));
+
+    const calendarInput = screen.getByDisplayValue('2025-01-01');
+    await user.clear(calendarInput);
+    await user.type(calendarInput, '2025-12-25');
+
+    expect(screen.queryByDisplayValue('2025-12-25')).not.toBeInTheDocument();
+  });
+
   it('should render without label when label prop is not provided', () => {
     const propsWithoutLabel = {
       ...defaultProps,
