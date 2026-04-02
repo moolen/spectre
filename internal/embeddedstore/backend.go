@@ -136,6 +136,10 @@ func (b *Backend) IsReady() bool {
 	return b != nil && b.ready.Load()
 }
 
+func (b *Backend) Name() string {
+	return "embedded-backend"
+}
+
 func applyProjectionEvent(projection *Projection, event models.Event) error {
 	applyProjectionEventFnMu.RLock()
 	fn := applyProjectionEventFn

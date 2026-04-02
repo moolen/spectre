@@ -15,17 +15,15 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
-	analysisembedded "github.com/moolen/spectre/internal/analysis/store/embedded"
 	analysisfalkor "github.com/moolen/spectre/internal/analysis/store/falkor"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/config"
-	"github.com/moolen/spectre/internal/embedded"
+	"github.com/moolen/spectre/internal/embeddedstore"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/reconciler"
 	"github.com/moolen/spectre/internal/graph/sync"
 	"github.com/moolen/spectre/internal/graphservice"
-	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/integration"
 
 	// Import integration implementations to register their factories
@@ -51,6 +49,7 @@ var (
 	startupImportDisableCausality bool
 	startupImportTimelineOnly     bool
 	embeddedMode                  bool
+	dataDir                       string
 	pprofEnabled                  bool
 	pprofPort                     int
 	pprofReadTimeout              time.Duration
@@ -104,7 +103,8 @@ func init() {
 	serverCmd.Flags().BoolVar(&importMode, "import-mode", false, "Enable startup import opt-in mode (reserved for future tuning)")
 	serverCmd.Flags().BoolVar(&startupImportDisableCausality, "startup-import-disable-causality", false, "Disable causality inference during startup import only")
 	serverCmd.Flags().BoolVar(&startupImportTimelineOnly, "startup-import-timeline-only", false, "Import only timeline-critical graph data during startup import")
-	serverCmd.Flags().BoolVar(&embeddedMode, "embedded", false, "Run in embedded mode (requires --import-path)")
+	serverCmd.Flags().BoolVar(&embeddedMode, "embedded", false, "Run with the persistent embedded backend instead of FalkorDB")
+	serverCmd.Flags().StringVar(&dataDir, "data-dir", "./data", "Directory for embedded persistent state")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")
 	serverCmd.Flags().DurationVar(&pprofReadTimeout, "pprof-read-timeout", 15*time.Second, "Read timeout for pprof server (default: 15s)")
@@ -255,57 +255,92 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	if mode.Embedded {
-		logger.Info("Running in embedded mode - importing events from: %s", importPath)
-		importStartTime := time.Now()
+		logger.Info("Running in embedded mode with data dir: %s", dataDir)
 
-		eventValues, err := importexport.Import(importexport.FromPath(importPath), importexport.WithLogger(logger))
+		embeddedBackend, err := embeddedstore.Open(embeddedstore.Config{DataDir: dataDir})
 		if err != nil {
-			logger.Error("Failed to import events from path: %v", err)
-			HandleError(err, "Import error")
-		}
-		if len(eventValues) == 0 {
-			logger.Error("No events found in import path: %s", importPath)
-			HandleError(fmt.Errorf("no events found at import path: %s", importPath), "Import error")
+			logger.Error("Failed to open embedded backend: %v", err)
+			HandleError(err, "Embedded backend initialization error")
 		}
 
-		logger.InfoWithFields("Parsed import path",
-			logging.Field("event_count", len(eventValues)),
-			logging.Field("parse_duration", time.Since(importStartTime)))
-
-		embeddedExecutor, err := embedded.NewQueryExecutor(eventValues)
-		if err != nil {
-			logger.Error("Failed to initialize embedded query executor: %v", err)
-			HandleError(err, "Embedded executor error")
-		}
-		usable, err := hasUsableEmbeddedEvents(embeddedExecutor)
-		if err != nil {
-			logger.Error("Failed to validate embedded events: %v", err)
-			HandleError(err, "Embedded executor error")
-		}
-		if !usable {
-			logger.Error("No usable events found in import path: %s", importPath)
-			HandleError(fmt.Errorf("no usable events found at import path: %s", importPath), "Import error")
+		if err := manager.Register(embeddedBackend); err != nil {
+			logger.Error("Failed to register embedded backend: %v", err)
+			HandleError(err, "Embedded backend registration error")
 		}
 
-		analysisStore, err := analysisembedded.New(eventValues)
-		if err != nil {
-			logger.Error("Failed to initialize embedded analysis store: %v", err)
-			HandleError(err, "Embedded analysis store error")
+		var auditLogWriter *watcher.FileAuditLogWriter
+		if auditLogPath != "" {
+			logger.Info("Event audit logging enabled: %s", auditLogPath)
+			auditLogWriter, err = watcher.NewFileAuditLogWriter(auditLogPath)
+			if err != nil {
+				logger.Error("Failed to create audit log writer: %v", err)
+				HandleError(err, "Audit log initialization error")
+			}
 		}
 
-		querySource := api.TimelineQuerySourceStorage
-		logger.Info("Timeline query source: STORAGE (embedded)")
+		if importPath != "" {
+			importCtx, importCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer importCancel()
+			if err := runStartupImport(importCtx, startupImportOptions{
+				Path:             importPath,
+				ChunkSize:        importChunkSize,
+				BenchmarkLogPath: importBenchmarkLog,
+				ImportMode:       importMode,
+				Logger:           logger,
+				BatchIngestor:    embeddedBackend,
+			}); err != nil {
+				logger.Error("Failed to run embedded startup import: %v", err)
+				HandleError(err, "Import error")
+			}
+		}
+
+		if mode.ImportOnly {
+			usable, err := hasUsableEmbeddedEvents(embeddedBackend.QueryExecutor().(embeddedMetadataQuerier))
+			if err != nil {
+				logger.Error("Failed to validate embedded events: %v", err)
+				HandleError(err, "Embedded executor error")
+			}
+			if !usable {
+				logger.Error("No usable events found in import path: %s", importPath)
+				HandleError(fmt.Errorf("no usable events found at import path: %s", importPath), "Import error")
+			}
+		}
+
+		var watcherComponent *watcher.Watcher
+		if mode.StartWatcher {
+			eventHandler := watcher.NewEventCaptureHandler(embeddedBackend)
+			if auditLogWriter != nil {
+				eventHandler.SetAuditLog(auditLogWriter)
+			}
+
+			watcherComponent, err = watcher.New(eventHandler, cfg.WatcherConfigPath)
+			if err != nil {
+				logger.Error("Failed to create embedded watcher component: %v", err)
+				HandleError(err, "Watcher initialization error")
+			}
+			if err := manager.Register(watcherComponent, embeddedBackend); err != nil {
+				logger.Error("Failed to register embedded watcher component: %v", err)
+				HandleError(err, "Watcher registration error")
+			}
+		} else {
+			logger.Info("Embedded import-only mode - watcher disabled")
+		}
+
+		var readinessChecker apiserver.ReadinessChecker = embeddedBackend
+		if watcherComponent != nil {
+			readinessChecker = watcherComponent
+		}
 
 		apiComponent := apiserver.NewWithStorageGraphAndPipeline(
 			cfg.APIPort,
-			embeddedExecutor,
+			embeddedBackend.QueryExecutor(),
 			nil,
-			querySource,
-			nil, // No storage component
-			nil, // No graph client
-			analysisStore,
-			nil, // No graph pipeline
-			&apiserver.NoOpReadinessChecker{},
+			api.TimelineQuerySourceStorage,
+			nil,
+			nil,
+			embeddedBackend.AnalysisStore(),
+			embeddedBackend,
+			readinessChecker,
 			tracingProvider,
 			time.Duration(metadataCacheRefreshSeconds)*time.Second,
 			apiserver.NamespaceGraphCacheConfig{
@@ -313,14 +348,35 @@ func runServer(cmd *cobra.Command, args []string) {
 				RefreshTTL:  time.Duration(namespaceGraphCacheRefreshSeconds) * time.Second,
 				MaxMemoryMB: int64(namespaceGraphCacheMemoryMB),
 			},
-			"",  // No integrations config
-			nil, // No integration manager
-			nil, // No MCP server
+			"",
+			nil,
+			nil,
 		)
 		logger.Info("API server component created (embedded)")
 
-		if err := manager.Register(apiComponent); err != nil {
-			logger.Error("Failed to register API server component: %v", err)
+		if mode.StartMCP {
+			timelineService := apiComponent.GetTimelineService()
+			tracer := tracingProvider.GetTracer("graph_service")
+			graphService := api.NewGraphService(embeddedBackend.AnalysisStore(), logger, tracer)
+
+			spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
+				Version:         Version,
+				TimelineService: timelineService,
+				GraphService:    graphService,
+			})
+			if err != nil {
+				logger.Error("Failed to create embedded MCP server: %v", err)
+				HandleError(err, "MCP server initialization error")
+			}
+			mcpServer = spectreServer.GetMCPServer()
+			if err := apiComponent.RegisterMCPEndpoint(mcpServer); err != nil {
+				logger.Error("Failed to register embedded MCP endpoint: %v", err)
+				HandleError(err, "MCP endpoint registration error")
+			}
+		}
+
+		if err := manager.Register(apiComponent, embeddedBackend); err != nil {
+			logger.Error("Failed to register embedded API server component: %v", err)
 			HandleError(err, "API server registration error")
 		}
 
@@ -329,6 +385,15 @@ func runServer(cmd *cobra.Command, args []string) {
 		if err := manager.Start(ctx); err != nil {
 			logger.Error("Failed to start components: %v", err)
 			HandleError(err, "Startup error")
+		}
+
+		if stdioEnabled && mcpServer != nil {
+			logger.Info("Starting stdio MCP transport alongside HTTP")
+			go func() {
+				if err := server.ServeStdio(mcpServer); err != nil {
+					logger.Error("Stdio transport error: %v", err)
+				}
+			}()
 		}
 
 		logger.Info("Embedded mode started - serving API requests")
@@ -344,6 +409,11 @@ func runServer(cmd *cobra.Command, args []string) {
 
 		if err := manager.Stop(shutdownCtx); err != nil {
 			logger.Error("Error during shutdown: %v", err)
+		}
+		if auditLogWriter != nil {
+			if err := auditLogWriter.Close(); err != nil {
+				logger.Error("Failed to close audit log: %v", err)
+			}
 		}
 
 		logger.Info("Shutdown complete")
@@ -741,7 +811,11 @@ func runServer(cmd *cobra.Command, args []string) {
 	logger.Info("Shutdown complete")
 }
 
-func hasUsableEmbeddedEvents(executor *embedded.QueryExecutor) (bool, error) {
+type embeddedMetadataQuerier interface {
+	QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) ([]string, []string, int64, int64, error)
+}
+
+func hasUsableEmbeddedEvents(executor embeddedMetadataQuerier) (bool, error) {
 	if executor == nil {
 		return false, fmt.Errorf("embedded executor is nil")
 	}
