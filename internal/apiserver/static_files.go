@@ -7,12 +7,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
 
 const pathIndexHTML = "/index.html"
+
+var (
+	scriptSrcPattern      = regexp.MustCompile(`(?i)<script[^>]+src=["']([^"']+)["']`)
+	stylesheetHrefPattern = regexp.MustCompile(`(?i)<link[^>]+rel=["'](?:stylesheet|modulepreload)["'][^>]+href=["']([^"']+)["']`)
+)
 
 // cachedFile represents a single cached static file
 type cachedFile struct {
@@ -27,7 +33,7 @@ type staticFileCache struct {
 	mu         sync.RWMutex
 	files      map[string]*cachedFile
 	uiDir      string
-	reloadLock sync.Mutex // Prevents concurrent reloads
+	reloadLock sync.Mutex      // Prevents concurrent reloads
 	reloading  map[string]bool // Tracks files currently being reloaded
 }
 
@@ -56,6 +62,26 @@ func (c *staticFileCache) get(path string) (*cachedFile, error) {
 
 	// Slow path: file not in cache, load it with write lock
 	return c.loadAndCache(path)
+}
+
+func (c *staticFileCache) validateIndexBundle() error {
+	indexFile, err := c.get(pathIndexHTML)
+	if err != nil {
+		return fmt.Errorf("load index bundle: %w", err)
+	}
+
+	html := string(indexFile.content)
+	requiredAssets := make([]string, 0, 4)
+	requiredAssets = append(requiredAssets, collectLocalBundleAssets(scriptSrcPattern, html)...)
+	requiredAssets = append(requiredAssets, collectLocalBundleAssets(stylesheetHrefPattern, html)...)
+
+	for _, assetPath := range requiredAssets {
+		if _, err := c.get(assetPath); err != nil {
+			return fmt.Errorf("ui bundle references missing asset %q: %w", assetPath, err)
+		}
+	}
+
+	return nil
 }
 
 // loadAndCache loads a file from disk and caches it (with write lock)
@@ -244,6 +270,13 @@ func (s *Server) serveStaticUI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Try to serve the file from cache
+	if path == pathIndexHTML {
+		if err := s.staticCache.validateIndexBundle(); err != nil {
+			http.Error(w, fmt.Sprintf("UI bundle is incomplete. %v. Run `make build-ui` and retry.", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	cached, err := s.staticCache.get(path)
 	if err == nil {
 		// File found in cache, serve it
@@ -253,6 +286,11 @@ func (s *Server) serveStaticUI(w http.ResponseWriter, r *http.Request) {
 
 	// For SPA routing, serve index.html for non-existent files that aren't assets
 	if !isAssetPath(originalPath) {
+		if err := s.staticCache.validateIndexBundle(); err != nil {
+			http.Error(w, fmt.Sprintf("UI bundle is incomplete. %v. Run `make build-ui` and retry.", err), http.StatusInternalServerError)
+			return
+		}
+
 		cached, err := s.staticCache.get(pathIndexHTML)
 		if err == nil {
 			// Serve index.html with no-cache headers
@@ -328,4 +366,34 @@ func isAssetPath(path string) bool {
 	}
 	ext := filepath.Ext(path)
 	return assetExtensions[ext]
+}
+
+func collectLocalBundleAssets(pattern *regexp.Regexp, html string) []string {
+	matches := pattern.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	assets := make([]string, 0, len(matches))
+	seen := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+
+		assetPath := strings.TrimSpace(match[1])
+		if assetPath == "" || strings.HasPrefix(assetPath, "http://") || strings.HasPrefix(assetPath, "https://") || strings.HasPrefix(assetPath, "//") {
+			continue
+		}
+		if !strings.HasPrefix(assetPath, "/") {
+			assetPath = "/" + assetPath
+		}
+		if _, ok := seen[assetPath]; ok {
+			continue
+		}
+		seen[assetPath] = struct{}{}
+		assets = append(assets, assetPath)
+	}
+
+	return assets
 }
