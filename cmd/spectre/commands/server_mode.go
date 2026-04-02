@@ -11,27 +11,42 @@ type serverModeInput struct {
 }
 
 type serverRuntimeMode struct {
-	Name         string
-	Embedded     bool
-	AuditOnly    bool
-	StartGraph   bool
-	StartWatcher bool
-	StartMCP     bool
+	Name          string
+	Backend       string
+	IngestionMode string
+	Embedded      bool
+	ImportOnly    bool
+	AuditOnly     bool
+	StartGraph    bool
+	StartWatcher  bool
+	StartMCP      bool
 }
 
 func resolveServerRuntimeMode(in serverModeInput) (serverRuntimeMode, error) {
-	if in.Embedded && in.ImportPath == "" {
-		return serverRuntimeMode{}, fmt.Errorf("--embedded requires --import-path")
-	}
-
 	if in.Embedded {
+		if !in.WatcherEnabled && in.ImportPath == "" {
+			return serverRuntimeMode{}, fmt.Errorf("--embedded with watcher disabled requires --import-path")
+		}
+
+		ingestionMode := "live"
+		importOnly := false
+		startWatcher := true
+		if !in.WatcherEnabled {
+			ingestionMode = "import-only"
+			importOnly = true
+			startWatcher = false
+		}
+
 		return serverRuntimeMode{
-			Name:         "embedded",
-			Embedded:     true,
-			AuditOnly:    false,
-			StartGraph:   false,
-			StartWatcher: false,
-			StartMCP:     false,
+			Name:          "embedded",
+			Backend:       "embedded",
+			IngestionMode: ingestionMode,
+			Embedded:      true,
+			ImportOnly:    importOnly,
+			AuditOnly:     false,
+			StartGraph:    false,
+			StartWatcher:  startWatcher,
+			StartMCP:      true,
 		}, nil
 	}
 
@@ -41,11 +56,14 @@ func resolveServerRuntimeMode(in serverModeInput) (serverRuntimeMode, error) {
 	}
 
 	return serverRuntimeMode{
-		Name:         "graph",
-		Embedded:     false,
-		AuditOnly:    auditOnly,
-		StartGraph:   in.GraphEnabled,
-		StartWatcher: in.WatcherEnabled,
-		StartMCP:     !auditOnly,
+		Name:          "graph",
+		Backend:       "falkor",
+		IngestionMode: "live",
+		Embedded:      false,
+		ImportOnly:    false,
+		AuditOnly:     auditOnly,
+		StartGraph:    in.GraphEnabled,
+		StartWatcher:  in.WatcherEnabled,
+		StartMCP:      !auditOnly,
 	}, nil
 }
