@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	analysisembedded "github.com/moolen/spectre/internal/analysis/store/embedded"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/embedded"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,9 @@ func newEmbeddedTestServer(t *testing.T) *Server {
 	executor, err := embedded.NewQueryExecutor(nil)
 	require.NoError(t, err)
 
+	analysisStore, err := analysisembedded.New(nil)
+	require.NoError(t, err)
+
 	return NewWithStorageGraphAndPipeline(
 		0,
 		executor,
@@ -24,6 +28,7 @@ func newEmbeddedTestServer(t *testing.T) *Server {
 		api.TimelineQuerySourceStorage,
 		nil,
 		nil,
+		analysisStore,
 		nil,
 		&NoOpReadinessChecker{},
 		nil,
@@ -55,6 +60,9 @@ func TestServer_EmbeddedMode_RouteSurface(t *testing.T) {
 	assertRouteStatus(t, handler, http.MethodGet, "/v1/metadata", http.StatusOK)
 
 	assertRouteStatus(t, handler, http.MethodPost, "/v1/storage/import", http.StatusNotFound)
-	assertRouteStatus(t, handler, http.MethodGet, "/v1/causal-graph", http.StatusNotFound)
+	assertRouteStatus(t, handler, http.MethodGet, "/v1/causal-graph", http.StatusBadRequest)
+	assertRouteStatus(t, handler, http.MethodGet, "/v1/anomalies", http.StatusBadRequest)
+	assertRouteStatus(t, handler, http.MethodGet, "/v1/causal-paths", http.StatusBadRequest)
+	assertRouteStatus(t, handler, http.MethodGet, "/v1/namespace-graph", http.StatusBadRequest)
 	assertRouteStatus(t, handler, http.MethodPost, "/v1/mcp", http.StatusNotFound)
 }

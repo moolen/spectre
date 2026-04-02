@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
@@ -20,6 +21,7 @@ func RegisterHandlers(
 	graphExecutor api.QueryExecutor,
 	querySource api.TimelineQuerySource,
 	timelineService *api.TimelineService, // Shared timeline service
+	analysisStore analysisstore.AnalysisStore,
 	graphClient graph.Client,
 	graphPipeline sync.Pipeline,
 	metadataCache *api.MetadataCache,
@@ -71,14 +73,23 @@ func RegisterHandlers(
 
 	// Create GraphService if graph client is available (shared by graph-related handlers)
 	var graphService *api.GraphService
-	if graphClient != nil {
-		graphService = api.NewGraphService(graphClient, logger, tracer)
+	switch {
+	case graphClient != nil:
+		graphService = api.NewGraphServiceFromGraphClient(graphClient, logger, tracer)
 		logger.Info("Created GraphService for graph analysis operations")
+	case analysisStore != nil:
+		graphService = api.NewGraphService(analysisStore, logger, tracer)
+		logger.Info("Created GraphService for embedded analysis operations")
 	}
 
-	// Register causal graph handler if graph client is available
-	if graphClient != nil {
-		causalGraphHandler := NewCausalGraphHandler(graphClient, logger, tracer)
+	// Register causal graph handler if analysis data is available
+	switch {
+	case analysisStore != nil:
+		causalGraphHandler := NewCausalGraphHandler(analysisStore, logger, tracer)
+		router.HandleFunc("/v1/causal-graph", withMethod(http.MethodGet, causalGraphHandler.Handle))
+		logger.Info("Registered /v1/causal-graph endpoint")
+	case graphClient != nil:
+		causalGraphHandler := NewCausalGraphHandlerFromGraphClient(graphClient, logger, tracer)
 		router.HandleFunc("/v1/causal-graph", withMethod(http.MethodGet, causalGraphHandler.Handle))
 		logger.Info("Registered /v1/causal-graph endpoint")
 	}
@@ -111,7 +122,7 @@ func RegisterHandlers(
 	}
 
 	// Register observatory graph handler if graph service is available
-	if graphService != nil {
+	if graphService != nil && graphService.HasObservatoryAnalyzer() {
 		observatoryGraphHandler := NewObservatoryGraphHandler(graphService.GetObservatoryAnalyzer(), logger, tracer)
 		router.HandleFunc("/v1/observatory-graph", withMethod(http.MethodGet, observatoryGraphHandler.Handle))
 		logger.Info("Registered /v1/observatory-graph endpoint")

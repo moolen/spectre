@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
+	analysisembedded "github.com/moolen/spectre/internal/analysis/store/embedded"
+	analysisfalkor "github.com/moolen/spectre/internal/analysis/store/falkor"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/config"
@@ -284,6 +287,12 @@ func runServer(cmd *cobra.Command, args []string) {
 			HandleError(fmt.Errorf("no usable events found at import path: %s", importPath), "Import error")
 		}
 
+		analysisStore, err := analysisembedded.New(eventValues)
+		if err != nil {
+			logger.Error("Failed to initialize embedded analysis store: %v", err)
+			HandleError(err, "Embedded analysis store error")
+		}
+
 		querySource := api.TimelineQuerySourceStorage
 		logger.Info("Timeline query source: STORAGE (embedded)")
 
@@ -294,6 +303,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			querySource,
 			nil, // No storage component
 			nil, // No graph client
+			analysisStore,
 			nil, // No graph pipeline
 			&apiserver.NoOpReadinessChecker{},
 			tracingProvider,
@@ -361,6 +371,7 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	var graphServiceComponent *graphservice.Service
 	var graphClient graph.Client
+	var analysisStore analysisstore.AnalysisStore
 	var graphPipeline sync.Pipeline
 
 	// Initialize graph service when graph storage is enabled
@@ -402,6 +413,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		// Create graph query executor
 		graphClient = graphServiceComponent.GetClient()
 		graphQueryExecutor = graph.NewQueryExecutor(graphClient)
+		analysisStore = analysisfalkor.New(graphClient)
 		logger.Info("Graph query executor created")
 
 		graphPipeline = graphServiceComponent.GetPipeline()
@@ -513,6 +525,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		querySource,
 		nil, // No storage component
 		graphClient,
+		analysisStore,
 		graphPipeline,
 		readinessChecker,
 		tracingProvider,
@@ -536,7 +549,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	var graphService *api.GraphService
 	if graphClient != nil {
 		tracer := tracingProvider.GetTracer("graph_service")
-		graphService = api.NewGraphService(graphClient, logger, tracer)
+		graphService = api.NewGraphServiceFromGraphClient(graphClient, logger, tracer)
 		logger.Info("Created GraphService for MCP graph tools")
 	}
 

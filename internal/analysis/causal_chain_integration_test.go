@@ -76,7 +76,7 @@ func TestCausalChainIntegration(t *testing.T) {
 		// Create analyzer and test
 		analyzer := NewRootCauseAnalyzerFromGraphClient(client)
 
-		chain, err := analyzer.getOwnershipChain(ctx, pod.UID)
+		chain, err := analyzer.getOwnershipChain(ctx, pod.UID, now, MaxOwnershipDepth)
 		require.NoError(t, err)
 		require.Len(t, chain, 3)
 

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analysis"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
+	analysisfalkor "github.com/moolen/spectre/internal/analysis/store/falkor"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
@@ -23,13 +25,17 @@ type CausalGraphHandler struct {
 }
 
 // NewCausalGraphHandler creates a new handler
-func NewCausalGraphHandler(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *CausalGraphHandler {
+func NewCausalGraphHandler(store analysisstore.AnalysisStore, logger *logging.Logger, tracer trace.Tracer) *CausalGraphHandler {
 	return &CausalGraphHandler{
-		analyzer:  analysis.NewRootCauseAnalyzerFromGraphClient(graphClient),
+		analyzer:  analysis.NewRootCauseAnalyzer(store),
 		logger:    logger,
 		validator: api.NewValidator(),
 		tracer:    tracer,
 	}
+}
+
+func NewCausalGraphHandlerFromGraphClient(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *CausalGraphHandler {
+	return NewCausalGraphHandler(analysisfalkor.New(graphClient), logger, tracer)
 }
 
 // Handle processes causal graph requests

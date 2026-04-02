@@ -25,6 +25,17 @@ func bucketTimestamp(ts int64) int64 {
 	return (ts / bucketNs) * bucketNs
 }
 
+func normalizeNamespaceGraphTimestamp(ts, now int64) int64 {
+	delta := now - ts
+	if delta < 0 {
+		delta = -delta
+	}
+	if delta <= int64(TimestampBucketSize) {
+		return bucketTimestamp(ts)
+	}
+	return ts
+}
+
 // NamespaceGraphHandler handles /v1/namespace-graph requests
 type NamespaceGraphHandler struct {
 	graphService *api.GraphService
@@ -159,9 +170,9 @@ func (h *NamespaceGraphHandler) parseInput(r *http.Request) (namespacegraph.Anal
 		return namespacegraph.AnalyzeInput{}, api.NewValidationError("invalid timestamp: %v", err)
 	}
 
-	// Bucket timestamp to 30s intervals for cache efficiency
-	// All requests within a 30s window get the same cached snapshot
-	timestamp = bucketTimestamp(timestamp)
+	// Bucket only near-real-time requests for cache efficiency.
+	// Historical imported data must keep the exact timestamp.
+	timestamp = normalizeNamespaceGraphTimestamp(timestamp, time.Now().UnixNano())
 
 	// Optional: includeAnomalies (default false)
 	includeAnomalies := false

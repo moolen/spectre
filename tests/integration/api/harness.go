@@ -21,10 +21,10 @@ type TestHarness struct {
 	graphService *api.GraphService
 	pipeline     sync.Pipeline
 	container    testcontainers.Container
-	config    graph.ClientConfig
-	ctx       context.Context
-	t         *testing.T
-	graphName string
+	config       graph.ClientConfig
+	ctx          context.Context
+	t            *testing.T
+	graphName    string
 }
 
 // NewTestHarness creates a new test harness with a fresh FalkorDB container
@@ -113,7 +113,7 @@ func NewTestHarness(t *testing.T) (*TestHarness, error) {
 
 	// Create graph service for handlers
 	logger := logging.GetLogger("test")
-	graphService := api.NewGraphService(client, logger, nil)
+	graphService := api.NewGraphServiceFromGraphClient(client, logger, nil)
 
 	harness := &TestHarness{
 		client:       client,

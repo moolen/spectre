@@ -10,7 +10,7 @@ import (
 
 	"github.com/moolen/spectre/internal/analysis"
 	"github.com/moolen/spectre/internal/analysis/anomaly"
-	"github.com/moolen/spectre/internal/graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/logging"
 )
 
@@ -23,7 +23,7 @@ func containsIgnoreCase(s, substr string) bool {
 
 // PathDiscoverer discovers and ranks causal paths from root causes to symptoms
 type PathDiscoverer struct {
-	graphClient        graph.Client
+	store              analysisstore.AnalysisStore
 	analyzer           *analysis.RootCauseAnalyzer
 	anomalyDetector    *anomaly.AnomalyDetector
 	ranker             *PathRanker
@@ -32,11 +32,11 @@ type PathDiscoverer struct {
 }
 
 // NewPathDiscoverer creates a new PathDiscoverer instance
-func NewPathDiscoverer(graphClient graph.Client) *PathDiscoverer {
+func NewPathDiscoverer(store analysisstore.AnalysisStore) *PathDiscoverer {
 	return &PathDiscoverer{
-		graphClient:        graphClient,
-		analyzer:           analysis.NewRootCauseAnalyzerFromGraphClient(graphClient),
-		anomalyDetector:    anomaly.NewDetector(graphClient),
+		store:              store,
+		analyzer:           analysis.NewRootCauseAnalyzer(store),
+		anomalyDetector:    anomaly.NewDetector(store),
 		ranker:             NewPathRanker(),
 		explanationBuilder: NewExplanationBuilder(),
 		logger:             logging.GetLogger("causalpaths.discovery"),
@@ -326,21 +326,27 @@ func (d *PathDiscoverer) identifyFirstFailure(
 	symptomAnomalies []anomaly.Anomaly,
 	fallbackTimestamp int64,
 ) time.Time {
-	// Look for the earliest anomaly on the symptom node
-	var earliest time.Time
+	// Look for the earliest non-change anomaly on the symptom node.
+	// Pure change anomalies like SpecModified or ResourceCreated often happen when the
+	// symptom resource is created, which is too early to use as the incident boundary.
+	var earliestNonChange time.Time
 
 	for _, a := range symptomAnomalies {
-		if earliest.IsZero() || a.Timestamp.Before(earliest) {
-			earliest = a.Timestamp
+		if a.Category == anomaly.CategoryChange {
+			continue
+		}
+		if earliestNonChange.IsZero() || a.Timestamp.Before(earliestNonChange) {
+			earliestNonChange = a.Timestamp
 		}
 	}
 
-	// If no anomalies, use the fallback timestamp
-	if earliest.IsZero() {
+	// If the symptom only has change anomalies, use the requested failure time as the
+	// incident boundary so upstream controller/config anomalies are still considered.
+	if earliestNonChange.IsZero() {
 		return time.Unix(0, fallbackTimestamp)
 	}
 
-	return earliest
+	return earliestNonChange
 }
 
 // traverseUpstream performs DFS from symptom toward root causes
@@ -835,7 +841,7 @@ func (d *PathDiscoverer) traverseFromServiceSymptom(
 	var paths []CausalPath
 
 	// Query the graph database directly to find Pods selected by this Service
-	selectsTargets, err := d.querySelectsTargets(ctx, serviceNode.Resource.UID)
+	selectsTargets, err := d.querySelectsTargets(ctx, serviceNode.Resource.UID, input.FailureTimestamp)
 	if err != nil {
 		d.logger.Error("traverseFromServiceSymptom: failed to query SELECTS targets: %v", err)
 		return []CausalPath{d.buildServiceOnlyPath(serviceNode, nodeAnomalies)}
@@ -1077,45 +1083,57 @@ type selectsTarget struct {
 }
 
 // querySelectsTargets queries the graph database to find Pods selected by a Service
-func (d *PathDiscoverer) querySelectsTargets(ctx context.Context, serviceUID string) ([]selectsTarget, error) {
-	query := graph.GraphQuery{
-		Timeout: 120000,
-		Query: `
-			MATCH (service:ResourceIdentity {uid: $serviceUID})-[:SELECTS]->(pod:ResourceIdentity)
-			WHERE pod.kind = 'Pod' AND (pod.deleted IS NULL OR pod.deleted = false)
-			RETURN pod.uid as uid, pod.kind as kind, pod.namespace as namespace, pod.name as name
-		`,
-		Parameters: map[string]interface{}{
-			"serviceUID": serviceUID,
-		},
-	}
-
-	result, err := d.graphClient.ExecuteQuery(ctx, query)
+func (d *PathDiscoverer) querySelectsTargets(ctx context.Context, serviceUID string, failureTimestampNs int64) ([]selectsTarget, error) {
+	service, err := d.store.GetResource(ctx, serviceUID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query SELECTS targets: %w", err)
+		return nil, fmt.Errorf("failed to load Service resource: %w", err)
+	}
+	if service == nil || service.Namespace == "" {
+		return nil, nil
 	}
 
-	targets := make([]selectsTarget, 0, len(result.Rows))
-	for _, row := range result.Rows {
-		if len(row) < 4 {
-			continue
-		}
+	targets := make([]selectsTarget, 0)
+	seen := make(map[string]bool)
+	cursor := ""
 
-		uid, _ := row[0].(string)
-		kind, _ := row[1].(string)
-		namespace, _ := row[2].(string)
-		name, _ := row[3].(string)
-
-		if uid == "" {
-			continue
-		}
-
-		targets = append(targets, selectsTarget{
-			uid:       uid,
-			kind:      kind,
-			namespace: namespace,
-			name:      name,
+	for {
+		namespaceGraph, graphErr := d.store.GetNamespaceGraph(ctx, analysisstore.NamespaceGraphQuery{
+			Namespace:   service.Namespace,
+			TimestampNs: failureTimestampNs,
+			MaxDepth:    1,
+			Limit:       500,
+			Cursor:      cursor,
 		})
+		if graphErr != nil {
+			return nil, fmt.Errorf("failed to load namespace graph for Service %s: %w", serviceUID, graphErr)
+		}
+
+		nodesByUID := make(map[string]analysisstore.NamespaceGraphNode, len(namespaceGraph.Graph.Nodes))
+		for _, node := range namespaceGraph.Graph.Nodes {
+			nodesByUID[node.UID] = node
+		}
+
+		for _, edge := range namespaceGraph.Graph.Edges {
+			if edge.Source != serviceUID || edge.RelationshipType != "SELECTS" {
+				continue
+			}
+			targetNode, ok := nodesByUID[edge.Target]
+			if !ok || targetNode.Kind != "Pod" || seen[targetNode.UID] {
+				continue
+			}
+			seen[targetNode.UID] = true
+			targets = append(targets, selectsTarget{
+				uid:       targetNode.UID,
+				kind:      targetNode.Kind,
+				namespace: targetNode.Namespace,
+				name:      targetNode.Name,
+			})
+		}
+
+		if !namespaceGraph.Metadata.HasMore || namespaceGraph.Metadata.NextCursor == "" {
+			break
+		}
+		cursor = namespaceGraph.Metadata.NextCursor
 	}
 
 	// Sort for deterministic ordering

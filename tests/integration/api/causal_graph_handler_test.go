@@ -45,7 +45,7 @@ func TestCausalGraphHandler_FluxHelmRelease(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewCausalGraphHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewCausalGraphHandlerFromGraphClient(harness.GetClient(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/causal-graph", nil)
@@ -120,7 +120,7 @@ func TestCausalGraphHandler_FluxKustomization(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewCausalGraphHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewCausalGraphHandlerFromGraphClient(harness.GetClient(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/causal-graph", nil)
@@ -193,7 +193,7 @@ func TestCausalGraphHandler_StatefulSet(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewCausalGraphHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewCausalGraphHandlerFromGraphClient(harness.GetClient(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/causal-graph", nil)
@@ -262,7 +262,7 @@ func TestCausalGraphHandler_NetworkPolicy(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewCausalGraphHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewCausalGraphHandlerFromGraphClient(harness.GetClient(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/causal-graph", nil)
@@ -332,7 +332,7 @@ func TestCausalGraphHandler_Ingress(t *testing.T) {
 
 	// Create the handler
 	logger := logging.GetLogger("test")
-	handler := handlers.NewCausalGraphHandler(harness.GetClient(), logger, nil)
+	handler := handlers.NewCausalGraphHandlerFromGraphClient(harness.GetClient(), logger, nil)
 
 	// Create HTTP request
 	req := httptest.NewRequest(http.MethodGet, "/v1/causal-graph", nil)

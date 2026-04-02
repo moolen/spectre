@@ -88,7 +88,7 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 	a.logger.Debug("Using lookback window: %v (%d ns)", time.Duration(lookbackNs), lookbackNs)
 
 	graphStart := time.Now()
-	graph, graphErr := a.buildCausalGraph(ctx, symptom, input.FailureTimestamp, lookbackNs)
+	graph, graphErr := a.buildCausalGraph(ctx, symptom, input.FailureTimestamp, lookbackNs, input.MaxDepth)
 	graphDuration := time.Since(graphStart)
 	perfMetrics.GraphBuildDurationMs = graphDuration.Milliseconds()
 

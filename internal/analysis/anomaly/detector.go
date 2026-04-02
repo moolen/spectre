@@ -8,15 +8,14 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analysis"
-	"github.com/moolen/spectre/internal/graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/logging"
 )
 
 // AnomalyDetector orchestrates anomaly detection across the causal subgraph
 type AnomalyDetector struct {
-	graphClient graph.Client
-	analyzer    *analysis.RootCauseAnalyzer
-	logger      *logging.Logger
+	analyzer *analysis.RootCauseAnalyzer
+	logger   *logging.Logger
 
 	// Sub-detectors
 	eventDetector     *EventAnomalyDetector
@@ -28,10 +27,9 @@ type AnomalyDetector struct {
 }
 
 // NewDetector creates a new anomaly detector
-func NewDetector(graphClient graph.Client) *AnomalyDetector {
+func NewDetector(store analysisstore.AnalysisStore) *AnomalyDetector {
 	return &AnomalyDetector{
-		graphClient:       graphClient,
-		analyzer:          analysis.NewRootCauseAnalyzerFromGraphClient(graphClient),
+		analyzer:          analysis.NewRootCauseAnalyzer(store),
 		logger:            logging.GetLogger("anomaly.detector"),
 		eventDetector:     NewEventAnomalyDetector(),
 		stateDetector:     NewStateAnomalyDetector(),

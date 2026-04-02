@@ -14,8 +14,6 @@ import (
 
 	"github.com/moolen/spectre/internal/analysis/anomaly"
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
-	"github.com/moolen/spectre/internal/api/handlers"
-	"github.com/moolen/spectre/internal/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,9 +35,9 @@ type ScenarioInfo struct {
 
 // ExpectedResults contains expected anomalies and causal paths
 type ExpectedResults struct {
-	Anomalies   []ExpectedAnomaly      `json:"anomalies"`
-	CausalPath  *ExpectedCausalPath    `json:"causal_path"`
-	Performance *ExpectedPerformance   `json:"performance,omitempty"`
+	Anomalies   []ExpectedAnomaly    `json:"anomalies"`
+	CausalPath  *ExpectedCausalPath  `json:"causal_path"`
+	Performance *ExpectedPerformance `json:"performance,omitempty"`
 }
 
 // ExpectedPerformance defines performance thresholds for the scenario
@@ -73,6 +71,10 @@ type ExpectedCausalPath struct {
 
 // TestGoldenScenarios runs tests against all golden fixtures generated from real scenarios
 func TestGoldenScenarios(t *testing.T) {
+	runGoldenScenarios(t, newGraphGoldenHarness)
+}
+
+func runGoldenScenarios(t *testing.T, harnessFactory goldenHarnessFactory) {
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("failed to get caller information")
@@ -117,12 +119,12 @@ func TestGoldenScenarios(t *testing.T) {
 	for scenarioName, metaFile := range scenarios {
 		t.Run(scenarioName, func(t *testing.T) {
 			t.Parallel() // Run scenarios in parallel
-			runGoldenScenario(t, goldenDir, scenarioName, metaFile)
+			runGoldenScenario(t, goldenDir, scenarioName, metaFile, harnessFactory)
 		})
 	}
 }
 
-func runGoldenScenario(t *testing.T, goldenDir, scenarioName, metaFile string) {
+func runGoldenScenario(t *testing.T, goldenDir, scenarioName, metaFile string, harnessFactory goldenHarnessFactory) {
 	ctx := context.Background()
 	metadata, err := loadGoldenMetadata(metaFile)
 	if err != nil {
@@ -175,14 +177,11 @@ func runGoldenScenario(t *testing.T, goldenDir, scenarioName, metaFile string) {
 	}
 	t.Logf("Using %s resource UID: %s, timestamp: %d", symptomKind, resourceUID, timestamp)
 
-	harness, err := NewTestHarness(t)
+	harness, err := harnessFactory(t, fixtureFile)
 	if err != nil {
-		t.Fatalf("failed to create test harness: %v", err)
+		t.Fatalf("failed to create golden test harness: %v", err)
 	}
 	defer harness.Cleanup(ctx)
-	if err := harness.SeedEventsFromAuditLog(ctx, fixtureFile); err != nil {
-		t.Fatalf("failed to seed events from fixture: %v", err)
-	}
 
 	if len(metadata.Expected.Anomalies) > 0 {
 		t.Run("Anomalies", func(t *testing.T) {
@@ -197,10 +196,7 @@ func runGoldenScenario(t *testing.T, goldenDir, scenarioName, metaFile string) {
 	}
 }
 
-func testGoldenAnomalies(t *testing.T, harness *TestHarness, resourceUID string, timestamp int64, expectedAnomalies []ExpectedAnomaly, perf *ExpectedPerformance) {
-	logger := logging.GetLogger("test")
-	handler := handlers.NewAnomalyHandler(harness.GetGraphService(), logger, nil)
-
+func testGoldenAnomalies(t *testing.T, harness goldenHarness, resourceUID string, timestamp int64, expectedAnomalies []ExpectedAnomaly, perf *ExpectedPerformance) {
 	// Convert nanoseconds to seconds, rounding up to ensure we include events in the same second
 	endSec := (timestamp / 1_000_000_000) + 1
 	startSec := endSec - 600 // 10 minutes
@@ -213,7 +209,7 @@ func testGoldenAnomalies(t *testing.T, harness *TestHarness, resourceUID string,
 	req.URL.RawQuery = q.Encode()
 
 	rr := httptest.NewRecorder()
-	handler.Handle(rr, req)
+	harness.AnomalyHandler().Handle(rr, req)
 	require.Equal(t, http.StatusOK, rr.Code, "Expected status OK, got: %s", rr.Body.String())
 
 	var result anomaly.AnomalyResponse
@@ -264,10 +260,7 @@ func testGoldenAnomalies(t *testing.T, harness *TestHarness, resourceUID string,
 		result.Metadata.NodesAnalyzed, minNodesAnalyzed)
 }
 
-func testGoldenCausalPaths(t *testing.T, harness *TestHarness, resourceUID string, timestamp int64, expected *ExpectedCausalPath, perf *ExpectedPerformance) {
-	logger := logging.GetLogger("test")
-	handler := handlers.NewCausalPathsHandler(harness.GetGraphService(), logger, nil)
-
+func testGoldenCausalPaths(t *testing.T, harness goldenHarness, resourceUID string, timestamp int64, expected *ExpectedCausalPath, perf *ExpectedPerformance) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/causal-paths", http.NoBody)
 	q := req.URL.Query()
 	q.Set("resourceUID", resourceUID)
@@ -279,7 +272,7 @@ func testGoldenCausalPaths(t *testing.T, harness *TestHarness, resourceUID strin
 	req.URL.RawQuery = q.Encode()
 
 	rr := httptest.NewRecorder()
-	handler.Handle(rr, req)
+	harness.CausalPathsHandler().Handle(rr, req)
 	require.Equal(t, http.StatusOK, rr.Code, "Expected status OK, got: %s", rr.Body.String())
 
 	var result causalpaths.CausalPathsResponse

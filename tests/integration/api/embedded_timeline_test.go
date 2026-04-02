@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	analysisembedded "github.com/moolen/spectre/internal/analysis/store/embedded"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/embedded"
@@ -95,6 +96,9 @@ func TestEmbeddedTimelineAPI(t *testing.T) {
 	executor, err := embedded.NewQueryExecutor(events)
 	require.NoError(t, err)
 
+	analysisStore, err := analysisembedded.New(events)
+	require.NoError(t, err)
+
 	server := apiserver.NewWithStorageGraphAndPipeline(
 		0,
 		executor,
@@ -102,6 +106,7 @@ func TestEmbeddedTimelineAPI(t *testing.T) {
 		api.TimelineQuerySourceStorage,
 		nil,
 		nil,
+		analysisStore,
 		nil,
 		&apiserver.NoOpReadinessChecker{},
 		nil,

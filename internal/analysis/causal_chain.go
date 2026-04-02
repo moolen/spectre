@@ -35,13 +35,14 @@ func (a *RootCauseAnalyzer) buildCausalGraph(
 	symptom *ObservedSymptom,
 	failureTimestamp int64,
 	lookbackNs int64,
+	maxDepth int,
 ) (CausalGraph, error) {
 	queryStart := time.Now()
 
 	// Step 1: Get ownership chain (must succeed first)
 	a.logger.Debug("buildCausalGraph: getting ownership chain for symptom %s", symptom.Resource.UID)
 	chainStart := time.Now()
-	chain, err := a.getOwnershipChain(ctx, symptom.Resource.UID)
+	chain, err := a.getOwnershipChain(ctx, symptom.Resource.UID, failureTimestamp, maxDepth)
 	chainDuration := time.Since(chainStart)
 
 	if err != nil {

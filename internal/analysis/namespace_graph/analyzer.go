@@ -5,32 +5,27 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/moolen/spectre/internal/analysis"
 	"github.com/moolen/spectre/internal/analysis/anomaly"
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
-	"github.com/moolen/spectre/internal/graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/logging"
 )
 
 // Analyzer orchestrates namespace graph analysis
 type Analyzer struct {
-	graphClient         graph.Client
-	resourceFetcher     *ResourceFetcher
-	relationshipFetcher *RelationshipFetcher
-	anomalyDetector     *anomaly.AnomalyDetector
-	pathDiscoverer      *causalpaths.PathDiscoverer
-	logger              *logging.Logger
+	store           analysisstore.AnalysisStore
+	anomalyDetector *anomaly.AnomalyDetector
+	pathDiscoverer  *causalpaths.PathDiscoverer
+	logger          *logging.Logger
 }
 
 // NewAnalyzer creates a new namespace graph Analyzer
-func NewAnalyzer(graphClient graph.Client) *Analyzer {
+func NewAnalyzer(store analysisstore.AnalysisStore) *Analyzer {
 	return &Analyzer{
-		graphClient:         graphClient,
-		resourceFetcher:     NewResourceFetcher(graphClient),
-		relationshipFetcher: NewRelationshipFetcher(graphClient),
-		anomalyDetector:     anomaly.NewDetector(graphClient),
-		pathDiscoverer:      causalpaths.NewPathDiscoverer(graphClient),
-		logger:              logging.GetLogger("namespacegraph.analyzer"),
+		store:           store,
+		anomalyDetector: anomaly.NewDetector(store),
+		pathDiscoverer:  causalpaths.NewPathDiscoverer(store),
+		logger:          logging.GetLogger("namespacegraph.analyzer"),
 	}
 }
 
@@ -61,93 +56,26 @@ func (a *Analyzer) Analyze(ctx context.Context, input AnalyzeInput) (*NamespaceG
 	a.logger.Debug("Analyzing namespace graph: namespace=%s, timestamp=%d, limit=%d, maxDepth=%d",
 		input.Namespace, input.Timestamp, input.Limit, input.MaxDepth)
 
-	// Step 1: Fetch namespaced resources
-	namespacedResources, hasMore, nextCursor, err := a.resourceFetcher.FetchNamespacedResources(
-		ctx, input.Namespace, input.Timestamp, input.Limit, input.Cursor)
+	storeGraph, err := a.store.GetNamespaceGraph(ctx, analysisstore.NamespaceGraphQuery{
+		Namespace:   input.Namespace,
+		TimestampNs: input.Timestamp,
+		LookbackNs:  input.Lookback.Nanoseconds(),
+		MaxDepth:    input.MaxDepth,
+		Limit:       input.Limit,
+		Cursor:      input.Cursor,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch namespaced resources: %w", err)
+		return nil, fmt.Errorf("failed to fetch namespace graph: %w", err)
 	}
 
-	a.logger.Debug("Fetched %d namespaced resources", len(namespacedResources))
-
-	// Extract UIDs for further queries
-	namespacedUIDs := make([]string, len(namespacedResources))
-	for i, r := range namespacedResources {
-		namespacedUIDs[i] = r.UID
-	}
-
-	// Step 2: Fetch cluster-scoped resources related to namespaced resources
-	clusterScopedResources, err := a.resourceFetcher.FetchClusterScopedResources(
-		ctx, namespacedUIDs, input.Timestamp, input.MaxDepth)
-	if err != nil {
-		a.logger.Warn("Failed to fetch cluster-scoped resources: %v", err)
-		// Continue without cluster-scoped resources
-		clusterScopedResources = nil
-	}
-
-	a.logger.Debug("Fetched %d cluster-scoped resources", len(clusterScopedResources))
-
-	// Combine all resources
-	namespacedResources = append(namespacedResources, clusterScopedResources...)
-
-	// Collect all UIDs for relationship query
-	allUIDs := make([]string, len(namespacedResources))
-	for i, r := range namespacedResources {
-		allUIDs[i] = r.UID
-	}
-
-	// Step 3: Fetch latest events for all resources
-	latestEvents, err := a.resourceFetcher.FetchLatestEvents(ctx, allUIDs, input.Timestamp)
-	if err != nil {
-		a.logger.Warn("Failed to fetch latest events: %v", err)
-		latestEvents = make(map[string]*ChangeEventInfo)
-	}
-
-	a.logger.Info("Fetched %d latest events for %d resources", len(latestEvents), len(allUIDs))
-
-	// Step 3.5: Fetch spec changes within lookback window
-	lookbackNs := input.Lookback.Nanoseconds()
-	specChanges, err := a.resourceFetcher.FetchSpecChanges(ctx, allUIDs, input.Timestamp, lookbackNs)
-	if err != nil {
-		a.logger.Warn("Failed to fetch spec changes: %v", err)
-		specChanges = make(map[string]*specChangeResult)
-	}
-
-	// Compute diffs and attach to latest events
-	for uid, sc := range specChanges {
-		if event, ok := latestEvents[uid]; ok {
-			diffs, err := analysis.ComputeJSONDiff(sc.EarliestData, sc.LatestData)
-			if err != nil {
-				a.logger.Debug("Failed to compute diff for %s: %v", uid, err)
-				continue
-			}
-			// Filter to only include spec changes (exclude status, managedFields, etc.)
-			diffs = analysis.FilterSpecOnly(diffs)
-			if len(diffs) > 0 {
-				event.SpecChanges = analysis.FormatUnifiedDiff(diffs)
-			}
-		}
-	}
-
-	a.logger.Debug("Computed spec changes for %d resources", len(specChanges))
-
-	// Step 4: Fetch relationships between all resources
-	edgeResults, err := a.relationshipFetcher.FetchRelationships(ctx, allUIDs)
-	if err != nil {
-		a.logger.Warn("Failed to fetch relationships: %v", err)
-		edgeResults = nil
-	}
-
-	a.logger.Info("Fetched %d relationships for %d resources", len(edgeResults), len(allUIDs))
-
-	// Step 5: Build graph response
-	nodes := a.buildNodes(namespacedResources, latestEvents)
-	edges := a.buildEdges(edgeResults)
+	nodes := buildNodesFromStore(storeGraph.Graph.Nodes)
+	edges := buildEdgesFromStore(storeGraph.Graph.Edges)
+	resources := buildResourceResultsFromStore(storeGraph.Graph.Nodes)
 
 	// Step 6: Full-fledged anomaly detection (runs per-resource anomaly analysis)
 	var anomalies []anomaly.Anomaly
 	if input.IncludeAnomalies {
-		anomalies = a.detectAnomalies(ctx, namespacedResources, input)
+		anomalies = a.detectAnomalies(ctx, resources, input)
 		a.logger.Debug("Detected %d anomalies", len(anomalies))
 	}
 
@@ -167,17 +95,79 @@ func (a *Analyzer) Analyze(ctx context.Context, input AnalyzeInput) (*NamespaceG
 		Anomalies:   anomalies,
 		CausalPaths: causalPaths,
 		Metadata: Metadata{
-			Namespace:        input.Namespace,
-			Timestamp:        input.Timestamp,
-			NodeCount:        len(nodes),
-			EdgeCount:        len(edges),
+			Namespace:        storeGraph.Metadata.Namespace,
+			Timestamp:        storeGraph.Metadata.TimestampNs,
+			NodeCount:        storeGraph.Metadata.NodeCount,
+			EdgeCount:        storeGraph.Metadata.EdgeCount,
 			QueryExecutionMs: time.Since(startTime).Milliseconds(),
-			HasMore:          hasMore,
-			NextCursor:       nextCursor,
+			HasMore:          storeGraph.Metadata.HasMore,
+			NextCursor:       storeGraph.Metadata.NextCursor,
+			Cached:           storeGraph.Metadata.Cached,
+			CacheAge:         storeGraph.Metadata.CacheAgeMs,
 		},
 	}
 
 	return response, nil
+}
+
+func buildNodesFromStore(nodes []analysisstore.NamespaceGraphNode) []Node {
+	result := make([]Node, 0, len(nodes))
+	for _, n := range nodes {
+		node := Node{
+			UID:       n.UID,
+			Kind:      n.Kind,
+			APIGroup:  n.APIGroup,
+			Namespace: n.Namespace,
+			Name:      n.Name,
+			Status:    n.Status,
+			Labels:    n.Labels,
+		}
+		if n.LatestEvent != nil {
+			node.LatestEvent = &ChangeEventInfo{
+				Timestamp:       n.LatestEvent.TimestampNs,
+				EventType:       n.LatestEvent.EventType,
+				Status:          n.LatestEvent.Status,
+				ErrorMessage:    n.LatestEvent.ErrorMessage,
+				ContainerIssues: n.LatestEvent.ContainerIssues,
+				ImpactScore:     n.LatestEvent.ImpactScore,
+				SpecChanges:     n.LatestEvent.SpecChanges,
+				SpecReplicas:    n.LatestEvent.SpecReplicas,
+			}
+		}
+		if node.Status == "" {
+			node.Status = StatusUnknown
+		}
+		result = append(result, node)
+	}
+	return result
+}
+
+func buildEdgesFromStore(edges []analysisstore.NamespaceGraphEdge) []Edge {
+	result := make([]Edge, 0, len(edges))
+	for _, e := range edges {
+		result = append(result, Edge{
+			ID:               e.ID,
+			Source:           e.Source,
+			Target:           e.Target,
+			RelationshipType: e.RelationshipType,
+		})
+	}
+	return result
+}
+
+func buildResourceResultsFromStore(nodes []analysisstore.NamespaceGraphNode) []resourceResult {
+	result := make([]resourceResult, 0, len(nodes))
+	for _, n := range nodes {
+		result = append(result, resourceResult{
+			UID:       n.UID,
+			Kind:      n.Kind,
+			APIGroup:  n.APIGroup,
+			Namespace: n.Namespace,
+			Name:      n.Name,
+			Labels:    n.Labels,
+		})
+	}
+	return result
 }
 
 // buildNodes converts resource results to Node structs

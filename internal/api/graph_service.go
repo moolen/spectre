@@ -8,6 +8,8 @@ import (
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	observatorygraph "github.com/moolen/spectre/internal/analysis/observatory_graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
+	analysisfalkor "github.com/moolen/spectre/internal/analysis/store/falkor"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/trace"
@@ -17,9 +19,8 @@ import (
 // It wraps existing analyzers (causal paths, anomaly detection, namespace graph)
 // and provides a service layer for both REST handlers and MCP tools.
 type GraphService struct {
-	graphClient graph.Client
-	logger      *logging.Logger
-	tracer      trace.Tracer
+	logger *logging.Logger
+	tracer trace.Tracer
 
 	// Wrapped analyzers
 	pathDiscoverer      *causalpaths.PathDiscoverer
@@ -29,16 +30,33 @@ type GraphService struct {
 }
 
 // NewGraphService creates a new GraphService instance
-func NewGraphService(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *GraphService {
+func NewGraphService(store analysisstore.AnalysisStore, logger *logging.Logger, tracer trace.Tracer) *GraphService {
 	return &GraphService{
-		graphClient:         graphClient,
-		logger:              logger,
-		tracer:              tracer,
-		pathDiscoverer:      causalpaths.NewPathDiscoverer(graphClient),
-		anomalyDetector:     anomaly.NewDetector(graphClient),
-		namespaceAnalyzer:   namespacegraph.NewAnalyzer(graphClient),
-		observatoryAnalyzer: observatorygraph.NewAnalyzer(graphClient),
+		logger:            logger,
+		tracer:            tracer,
+		pathDiscoverer:    causalpaths.NewPathDiscoverer(store),
+		anomalyDetector:   anomaly.NewDetector(store),
+		namespaceAnalyzer: namespacegraph.NewAnalyzer(store),
 	}
+}
+
+// NewGraphServiceFromGraphClient preserves the graph-backed entrypoint while
+// routing analysis reads through the Falkor store adapter.
+func NewGraphServiceFromGraphClient(graphClient graph.Client, logger *logging.Logger, tracer trace.Tracer) *GraphService {
+	service := NewGraphService(analysisfalkor.New(graphClient), logger, tracer)
+	service.observatoryAnalyzer = observatorygraph.NewAnalyzer(graphClient)
+	return service
+}
+
+func (s *GraphService) HasObservatoryAnalyzer() bool {
+	return s != nil && s.observatoryAnalyzer != nil
+}
+
+func (s *GraphService) GetObservatoryAnalyzer() *observatorygraph.Analyzer {
+	if s == nil {
+		return nil
+	}
+	return s.observatoryAnalyzer
 }
 
 // DiscoverCausalPaths discovers causal paths from root causes to a symptom resource
@@ -145,9 +163,4 @@ func (s *GraphService) AnalyzeObservatoryGraph(ctx context.Context, input observ
 	s.logger.Debug("GraphService: Observatory graph has %d nodes and %d edges",
 		result.Metadata.NodeCount, result.Metadata.EdgeCount)
 	return result, nil
-}
-
-// GetObservatoryAnalyzer returns the observatory analyzer for direct use
-func (s *GraphService) GetObservatoryAnalyzer() *observatorygraph.Analyzer {
-	return s.observatoryAnalyzer
 }

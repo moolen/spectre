@@ -8,6 +8,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/graph/sync"
@@ -39,11 +40,12 @@ type Server struct {
 	graphExecutor    api.QueryExecutor       // Graph-based query executor
 	querySource      api.TimelineQuerySource // Which executor to use for timeline queries
 	graphClient      graph.Client
-	graphPipeline    sync.Pipeline               // Graph sync pipeline for imports
-	timelineService  *api.TimelineService        // Shared timeline service for REST handlers and MCP tools
-	metadataCache    *api.MetadataCache          // In-memory metadata cache for fast responses
-	nsGraphCache     *namespacegraph.Cache       // In-memory namespace graph cache for fast responses
-	staticCache      *staticFileCache            // In-memory static file cache for fast UI serving
+	analysisStore    analysisstore.AnalysisStore
+	graphPipeline    sync.Pipeline         // Graph sync pipeline for imports
+	timelineService  *api.TimelineService  // Shared timeline service for REST handlers and MCP tools
+	metadataCache    *api.MetadataCache    // In-memory metadata cache for fast responses
+	nsGraphCache     *namespacegraph.Cache // In-memory namespace graph cache for fast responses
+	staticCache      *staticFileCache      // In-memory static file cache for fast UI serving
 	router           *http.ServeMux
 	readinessChecker ReadinessChecker
 	tracingProvider  interface {
@@ -72,6 +74,7 @@ func NewWithStorageGraphAndPipeline(
 	querySource api.TimelineQuerySource,
 	storage interface{}, // Can be nil - kept for signature compatibility but not used
 	graphClient graph.Client,
+	analysisStore analysisstore.AnalysisStore,
 	graphPipeline sync.Pipeline, // Graph pipeline for imports
 	readinessChecker ReadinessChecker,
 	tracingProvider interface {
@@ -80,7 +83,7 @@ func NewWithStorageGraphAndPipeline(
 	},
 	metadataRefreshPeriod time.Duration, // How often to refresh the metadata cache
 	nsGraphCacheConfig NamespaceGraphCacheConfig, // Namespace graph cache configuration
-	integrationsConfigPath string,         // Path to integrations config file (optional)
+	integrationsConfigPath string, // Path to integrations config file (optional)
 	integrationManager *integration.Manager, // Integration manager (optional)
 	mcpServer *server.MCPServer, // MCP server for /v1/mcp endpoint (optional)
 ) *Server {
@@ -91,6 +94,7 @@ func NewWithStorageGraphAndPipeline(
 		graphExecutor:          graphExecutor,
 		querySource:            querySource,
 		graphClient:            graphClient,
+		analysisStore:          analysisStore,
 		graphPipeline:          graphPipeline,
 		router:                 http.NewServeMux(),
 		readinessChecker:       readinessChecker,
@@ -130,8 +134,8 @@ func NewWithStorageGraphAndPipeline(
 	}
 
 	// Create namespace graph cache if enabled and graph client is available
-	if nsGraphCacheConfig.Enabled && graphClient != nil {
-		analyzer := namespacegraph.NewAnalyzer(graphClient)
+	if nsGraphCacheConfig.Enabled && analysisStore != nil {
+		analyzer := namespacegraph.NewAnalyzer(analysisStore)
 		cacheConfig := namespacegraph.CacheConfig{
 			RefreshTTL:  nsGraphCacheConfig.RefreshTTL,
 			MaxMemoryMB: nsGraphCacheConfig.MaxMemoryMB,

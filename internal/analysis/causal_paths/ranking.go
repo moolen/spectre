@@ -2,6 +2,7 @@ package causalpaths
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -49,6 +50,10 @@ func (r *PathRanker) RankPaths(paths []CausalPath, symptomFirstFailure time.Time
 		// Tie-breaker 3: Longer path (deeper root cause) wins
 		return len(paths[i].Steps) > len(paths[j].Steps)
 	})
+
+	for i := range paths {
+		paths[i].ConfidenceScore = roundConfidenceScore(paths[i].ConfidenceScore)
+	}
 
 	return paths
 }
@@ -141,6 +146,10 @@ func (r *PathRanker) calculateConfidenceScore(path CausalPath) float64 {
 	}
 
 	return finalScore
+}
+
+func roundConfidenceScore(score float64) float64 {
+	return math.Round(score*100) / 100
 }
 
 // calculateTemporalScore computes temporal proximity score
