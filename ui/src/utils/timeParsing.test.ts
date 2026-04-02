@@ -131,6 +131,12 @@ describe('parseTimeExpression', () => {
     expect(result).toEqual(new Date('2025-12-02T15:30:00'));
   });
 
+  it('parses datetime strings with seconds', () => {
+    expect(parseTimeExpression('2025-12-02 15:30:45')).toEqual(
+      new Date('2025-12-02T15:30:45')
+    );
+  });
+
   it('should parse date only', () => {
     const result = parseTimeExpression('2025-12-02');
     expect(result).toBeInstanceOf(Date);
@@ -204,16 +210,16 @@ describe('validateTimeRange', () => {
 });
 
 describe('formatDateTimeForInput', () => {
-  it('should format a date correctly', () => {
+  it('formats input values with seconds', () => {
     const date = new Date('2025-12-02T13:45:00');
     const result = formatDateTimeForInput(date);
-    expect(result).toBe('2025-12-02 13:45');
+    expect(result).toBe('2025-12-02 13:45:00');
   });
 
   it('should pad single-digit values', () => {
     const date = new Date('2025-01-05T09:05:00');
     const result = formatDateTimeForInput(date);
-    expect(result).toBe('2025-01-05 09:05');
+    expect(result).toBe('2025-01-05 09:05:00');
   });
 });
 
