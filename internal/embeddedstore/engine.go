@@ -9,12 +9,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
 type Engine struct {
 	mu sync.Mutex
 
+	logger            *logging.Logger
 	config            EngineConfig
 	rootDir           string
 	manifest          Manifest
@@ -25,6 +27,7 @@ type Engine struct {
 	segmentReaders    []*segmentReader
 	nextHighWaterMark uint64
 	ready             atomic.Bool
+	periodicFlushStop context.CancelFunc
 	closed            bool
 }
 
@@ -59,6 +62,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	}
 
 	engine := &Engine{
+		logger:            logging.GetLogger("embedded.engine"),
 		config:            cfg,
 		rootDir:           rootDir,
 		manifest:          manifest,
@@ -76,12 +80,30 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 }
 
 func (e *Engine) Start(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if e == nil {
 		return fmt.Errorf("start embedded engine: engine is nil")
 	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return fmt.Errorf("start embedded engine: engine is closed")
+	}
+	if e.config.FlushInterval <= 0 || e.periodicFlushStop != nil {
+		return nil
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	e.periodicFlushStop = cancel
+	interval := e.config.FlushInterval
+	go e.runPeriodicFlush(runCtx, interval)
+
 	return nil
 }
 
@@ -103,6 +125,10 @@ func (e *Engine) Close() error {
 	if e.closed {
 		e.mu.Unlock()
 		return nil
+	}
+	if e.periodicFlushStop != nil {
+		e.periodicFlushStop()
+		e.periodicFlushStop = nil
 	}
 	e.mu.Unlock()
 
@@ -162,6 +188,11 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) error 
 	if wasReady {
 		e.ready.Store(true)
 	}
+	if e.shouldFlushHotBySizeLocked() {
+		if err := e.flushLocked(ctx); err != nil {
+			e.logAutoFlushError("size-triggered flush failed", err)
+		}
+	}
 
 	return nil
 }
@@ -183,6 +214,33 @@ func (e *Engine) Flush(ctx context.Context) error {
 		return nil
 	}
 
+	return e.flushLocked(ctx)
+}
+
+func (e *Engine) runPeriodicFlush(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := e.Flush(context.Background()); err != nil {
+				e.logAutoFlushError("periodic flush failed", err)
+			}
+		}
+	}
+}
+
+func (e *Engine) flushLocked(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	batch := e.hot.ExtractFlushBatch(0)
 	if len(batch.Events) == 0 {
 		return nil
@@ -199,11 +257,6 @@ func (e *Engine) Flush(ctx context.Context) error {
 		return fmt.Errorf("flush embedded engine: open segment reader: %w", err)
 	}
 
-	removed := e.hot.CommitFlushedBatch(batch)
-	if removed != len(batch.Events) {
-		return fmt.Errorf("flush embedded engine: removed %d of %d flushed events", removed, len(batch.Events))
-	}
-
 	updatedManifest := e.manifest
 	updatedManifest.ActiveSegments = append(updatedManifest.ActiveSegments, SegmentMeta{
 		ID:            meta.ID,
@@ -214,10 +267,49 @@ func (e *Engine) Flush(ctx context.Context) error {
 		return fmt.Errorf("flush embedded engine: store manifest: %w", err)
 	}
 
+	removed := e.hot.CommitFlushedBatch(batch)
+	if removed != len(batch.Events) {
+		return fmt.Errorf("flush embedded engine: removed %d of %d flushed events", removed, len(batch.Events))
+	}
+
 	e.manifest = updatedManifest
 	e.segmentReaders = append(e.segmentReaders, reader)
 	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
 	return nil
+}
+
+func (e *Engine) shouldFlushHotBySizeLocked() bool {
+	if e.config.SegmentTargetBytes <= 0 {
+		return false
+	}
+	batch := e.hot.ExtractFlushBatch(0)
+	if len(batch.Events) == 0 {
+		return false
+	}
+	return estimatedEventsSizeBytes(batch.Events) >= e.config.SegmentTargetBytes
+}
+
+func estimatedEventsSizeBytes(events []models.Event) int64 {
+	var total int64
+	for i := range events {
+		// Estimate serialized footprint; exact framing size is unnecessary for threshold triggering.
+		total += int64(len(events[i].ID) + len(events[i].Type))
+		total += int64(len(events[i].Resource.UID) + len(events[i].Resource.Namespace) + len(events[i].Resource.Kind))
+		total += int64(len(events[i].Resource.Name) + len(events[i].Resource.Group) + len(events[i].Resource.Version))
+		total += int64(len(events[i].Data))
+		total += 32
+	}
+	return total
+}
+
+func (e *Engine) logAutoFlushError(message string, err error) {
+	if e == nil || err == nil {
+		return
+	}
+	if e.logger == nil {
+		e.logger = logging.GetLogger("embedded.engine")
+	}
+	e.logger.ErrorWithErr(message, err)
 }
 
 func (e *Engine) Checkpoint(ctx context.Context) error {
@@ -249,13 +341,6 @@ func (e *Engine) Checkpoint(ctx context.Context) error {
 	}
 
 	e.manifest = updatedManifest
-	return nil
-}
-
-func (e *Engine) Compact(context.Context) error {
-	if e == nil {
-		return fmt.Errorf("compact embedded engine: engine is nil")
-	}
 	return nil
 }
 
