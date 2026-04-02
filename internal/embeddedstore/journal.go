@@ -1,0 +1,157 @@
+package embeddedstore
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/moolen/spectre/internal/models"
+)
+
+const journalFileName = "events.journal"
+
+// Journal stores events in an append-only on-disk log.
+type Journal struct {
+	mu   sync.Mutex
+	path string
+	file *os.File
+}
+
+// OpenJournal opens (or creates) a journal rooted at the provided directory.
+func OpenJournal(root string) (*Journal, error) {
+	if root == "" {
+		return nil, fmt.Errorf("open journal: root path is empty")
+	}
+
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, fmt.Errorf("open journal: create root dir: %w", err)
+	}
+
+	path := filepath.Join(root, journalFileName)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open journal: open file: %w", err)
+	}
+
+	return &Journal{
+		path: path,
+		file: file,
+	}, nil
+}
+
+// Append appends one event durably.
+func (j *Journal) Append(ctx context.Context, event models.Event) error {
+	return j.AppendBatch(ctx, []models.Event{event})
+}
+
+// AppendBatch appends events durably in order.
+func (j *Journal) AppendBatch(ctx context.Context, events []models.Event) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(events) == 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	var writeBuf bytes.Buffer
+	for i := range events {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		payload, err := json.Marshal(events[i])
+		if err != nil {
+			return fmt.Errorf("append journal entry: marshal event: %w", err)
+		}
+
+		var header [4]byte
+		binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
+		if _, err := writeBuf.Write(header[:]); err != nil {
+			return fmt.Errorf("append journal entry: encode length: %w", err)
+		}
+		if _, err := writeBuf.Write(payload); err != nil {
+			return fmt.Errorf("append journal entry: encode payload: %w", err)
+		}
+	}
+
+	if _, err := j.file.Write(writeBuf.Bytes()); err != nil {
+		return fmt.Errorf("append journal batch: write: %w", err)
+	}
+	if err := j.file.Sync(); err != nil {
+		return fmt.Errorf("append journal batch: sync: %w", err)
+	}
+
+	return nil
+}
+
+// Replay replays all events in append order.
+func (j *Journal) Replay(ctx context.Context) ([]models.Event, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	readFile, err := os.Open(j.path)
+	if err != nil {
+		return nil, fmt.Errorf("replay journal: open file: %w", err)
+	}
+	defer func() {
+		_ = readFile.Close()
+	}()
+
+	events := make([]models.Event, 0)
+	recordIndex := 0
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		var header [4]byte
+		_, err := io.ReadFull(readFile, header[:])
+		if err == nil {
+			// continue parsing below
+		} else if errors.Is(err, io.EOF) {
+			return events, nil
+		} else if errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("truncated journal entry header at record %d: %w", recordIndex, err)
+		} else {
+			return nil, fmt.Errorf("replay journal: read entry header at record %d: %w", recordIndex, err)
+		}
+
+		length := binary.BigEndian.Uint32(header[:])
+		payload := make([]byte, int(length))
+		if _, err := io.ReadFull(readFile, payload); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, fmt.Errorf("truncated journal entry payload at record %d: %w", recordIndex, err)
+			}
+			return nil, fmt.Errorf("replay journal: read entry payload at record %d: %w", recordIndex, err)
+		}
+
+		var event models.Event
+		if err := json.Unmarshal(payload, &event); err != nil {
+			return nil, fmt.Errorf("corrupt journal entry at record %d: %w", recordIndex, err)
+		}
+
+		events = append(events, event)
+		recordIndex++
+	}
+}
