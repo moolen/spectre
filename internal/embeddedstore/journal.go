@@ -15,9 +15,15 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
-const journalFileName = "events.journal"
+const (
+	journalFileName      = "events.journal"
+	maxJournalRecordSize = 8 * 1024 * 1024 // 8 MiB
+)
+
+var errJournalClosed = errors.New("journal is closed")
 
 // Journal stores events in an append-only on-disk log.
+// Callers must ensure a single writer per journal path across processes; no file lock is taken.
 type Journal struct {
 	mu   sync.Mutex
 	path string
@@ -46,6 +52,23 @@ func OpenJournal(root string) (*Journal, error) {
 	}, nil
 }
 
+// Close releases the underlying file handle.
+func (j *Journal) Close() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	if j.file == nil {
+		return nil
+	}
+
+	if err := j.file.Close(); err != nil {
+		return fmt.Errorf("close journal: %w", err)
+	}
+	j.file = nil
+
+	return nil
+}
+
 // Append appends one event durably.
 func (j *Journal) Append(ctx context.Context, event models.Event) error {
 	return j.AppendBatch(ctx, []models.Event{event})
@@ -65,6 +88,9 @@ func (j *Journal) AppendBatch(ctx context.Context, events []models.Event) error 
 
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.file == nil {
+		return errJournalClosed
+	}
 
 	var writeBuf bytes.Buffer
 	for i := range events {
@@ -75,6 +101,9 @@ func (j *Journal) AppendBatch(ctx context.Context, events []models.Event) error 
 		payload, err := json.Marshal(events[i])
 		if err != nil {
 			return fmt.Errorf("append journal entry: marshal event: %w", err)
+		}
+		if len(payload) > maxJournalRecordSize {
+			return fmt.Errorf("append journal entry: payload size %d exceeds max %d", len(payload), maxJournalRecordSize)
 		}
 
 		var header [4]byte
@@ -108,6 +137,9 @@ func (j *Journal) Replay(ctx context.Context) ([]models.Event, error) {
 
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.file == nil {
+		return nil, errJournalClosed
+	}
 
 	readFile, err := os.Open(j.path)
 	if err != nil {
@@ -138,6 +170,9 @@ func (j *Journal) Replay(ctx context.Context) ([]models.Event, error) {
 		}
 
 		length := binary.BigEndian.Uint32(header[:])
+		if int(length) > maxJournalRecordSize {
+			return nil, fmt.Errorf("oversized journal entry payload at record %d: size %d exceeds max %d", recordIndex, length, maxJournalRecordSize)
+		}
 		payload := make([]byte, int(length))
 		if _, err := io.ReadFull(readFile, payload); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {

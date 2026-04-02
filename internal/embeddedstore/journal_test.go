@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -57,7 +58,7 @@ func TestJournal_ReopenThenReplay(t *testing.T) {
 		t.Fatalf("open journal: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = journal.file.Close()
+		_ = journal.Close()
 	})
 
 	events := []models.Event{
@@ -69,7 +70,7 @@ func TestJournal_ReopenThenReplay(t *testing.T) {
 		t.Fatalf("append batch: %v", err)
 	}
 
-	if err := journal.file.Close(); err != nil {
+	if err := journal.Close(); err != nil {
 		t.Fatalf("close journal: %v", err)
 	}
 
@@ -78,7 +79,7 @@ func TestJournal_ReopenThenReplay(t *testing.T) {
 		t.Fatalf("re-open journal: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = reopened.file.Close()
+		_ = reopened.Close()
 	})
 
 	replayed, err := reopened.Replay(ctx)
@@ -201,6 +202,60 @@ func TestJournal_ReplayCorruptOrTruncatedReturnsError(t *testing.T) {
 	})
 }
 
+func TestJournal_AppendBatchOversizedPayloadReturnsError(t *testing.T) {
+	t.Parallel()
+
+	journal := openTestJournal(t)
+	ctx := context.Background()
+
+	oversizedData := `"` + strings.Repeat("a", maxJournalRecordSize+1) + `"`
+	event := newTestEvent("too-big", 123)
+	event.Data = []byte(oversizedData)
+
+	err := journal.AppendBatch(ctx, []models.Event{event})
+	if err == nil {
+		t.Fatal("expected append to fail for oversized record")
+	}
+	if !strings.Contains(err.Error(), "max") {
+		t.Fatalf("expected size limit error, got: %v", err)
+	}
+}
+
+func TestJournal_ReplayOversizedHeaderReturnsError(t *testing.T) {
+	t.Parallel()
+
+	journal := openTestJournal(t)
+	ctx := context.Background()
+
+	corruptFile, err := os.OpenFile(journal.path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatalf("open for corruption: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = corruptFile.Close()
+	})
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(maxJournalRecordSize+1))
+	if _, err := corruptFile.Write(header[:]); err != nil {
+		t.Fatalf("write oversized header: %v", err)
+	}
+	if err := corruptFile.Sync(); err != nil {
+		t.Fatalf("sync corrupt write: %v", err)
+	}
+
+	_, err = journal.Replay(ctx)
+	if err == nil {
+		t.Fatal("expected replay error for oversized record header")
+	}
+	if !strings.Contains(err.Error(), "oversized") {
+		t.Fatalf("expected oversized error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(maxJournalRecordSize+1)) {
+		t.Fatalf("expected header size in error, got: %v", err)
+	}
+}
+
 func openTestJournal(t *testing.T) *Journal {
 	t.Helper()
 
@@ -210,7 +265,7 @@ func openTestJournal(t *testing.T) *Journal {
 		t.Fatalf("open journal: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = journal.file.Close()
+		_ = journal.Close()
 	})
 
 	return journal
@@ -241,7 +296,7 @@ func TestJournal_FileLocationUnderRoot(t *testing.T) {
 		t.Fatalf("open journal: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = journal.file.Close()
+		_ = journal.Close()
 	})
 
 	if filepath.Dir(journal.path) != root {
