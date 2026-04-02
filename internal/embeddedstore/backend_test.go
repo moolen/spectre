@@ -4,10 +4,79 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/moolen/spectre/internal/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConfig_EffectiveEngineConfigAppliesDefaults(t *testing.T) {
+	cfg := Config{DataDir: t.TempDir()}
+
+	engineCfg, err := cfg.EffectiveEngineConfig()
+	require.NoError(t, err)
+	require.Equal(t, cfg.DataDir, engineCfg.DataDir)
+	require.Equal(t, defaultHotMaxEvents, engineCfg.HotMaxEvents)
+	require.Equal(t, defaultHotMaxResourceVersions, engineCfg.HotMaxResourceVersions)
+	require.Equal(t, defaultFlushInterval, engineCfg.FlushInterval)
+	require.Equal(t, defaultCheckpointInterval, engineCfg.CheckpointInterval)
+	require.Equal(t, defaultSegmentTargetBytes, engineCfg.SegmentTargetBytes)
+	require.Equal(t, defaultCompactionMinSegments, engineCfg.CompactionMinSegments)
+}
+
+func TestConfig_EffectiveEngineConfigRejectsInvalidValues(t *testing.T) {
+	testCases := []struct {
+		name   string
+		cfg    Config
+		substr string
+	}{
+		{
+			name:   "empty data dir",
+			cfg:    Config{},
+			substr: "data dir is empty",
+		},
+		{
+			name: "negative hot max events",
+			cfg: Config{
+				DataDir:      t.TempDir(),
+				HotMaxEvents: -1,
+			},
+			substr: "hot max events must be positive",
+		},
+		{
+			name: "negative flush interval",
+			cfg: Config{
+				DataDir:       t.TempDir(),
+				FlushInterval: -1 * time.Second,
+			},
+			substr: "flush interval must be positive",
+		},
+		{
+			name: "negative segment target bytes",
+			cfg: Config{
+				DataDir:            t.TempDir(),
+				SegmentTargetBytes: -1,
+			},
+			substr: "segment target bytes must be positive",
+		},
+		{
+			name: "compaction min segments below two",
+			cfg: Config{
+				DataDir:               t.TempDir(),
+				CompactionMinSegments: 1,
+			},
+			substr: "compaction min segments must be at least 2",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.cfg.EffectiveEngineConfig()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.substr)
+		})
+	}
+}
 
 func TestBackend_ProcessBatchPersistsAcrossRestart(t *testing.T) {
 	dir := t.TempDir()

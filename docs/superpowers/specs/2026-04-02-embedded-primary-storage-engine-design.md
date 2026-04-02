@@ -366,8 +366,10 @@ Because throughput-first durability is acceptable, the write path should be memo
 3. hot recent indexes and hot projections update immediately
 4. write is acknowledged
 5. background flusher groups buffered events into a sealed segment
-6. periodic checkpoint persists projection state
+6. projection state is checkpointed on explicit lifecycle checkpoints in the current implementation
 7. background compactor rewrites older segments
+
+The current implementation checkpoints on explicit calls such as shutdown/restart preparation rather than on a periodic background cadence. Periodic checkpoint scheduling remains a follow-on tuning step.
 
 ### Consequence of chosen durability model
 

@@ -256,9 +256,17 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	if mode.Embedded {
-		logger.Info("Running in embedded mode with data dir: %s", dataDir)
+		embeddedCfg := embeddedstore.Config{DataDir: dataDir}
+		effectiveEmbeddedCfg, err := embeddedCfg.EffectiveEngineConfig()
+		if err != nil {
+			logger.Error("Invalid embedded engine configuration: %v", err)
+			HandleError(err, "Embedded backend configuration error")
+		}
 
-		embeddedBackend, err := embeddedstore.Open(embeddedstore.Config{DataDir: dataDir})
+		logger.Info("Running in embedded mode with data dir: %s", dataDir)
+		logger.Info("Embedded engine config: %s", describeEmbeddedEngineConfig(effectiveEmbeddedCfg))
+
+		embeddedBackend, err := embeddedstore.Open(embeddedCfg)
 		if err != nil {
 			logger.Error("Failed to open embedded backend: %v", err)
 			HandleError(err, "Embedded backend initialization error")
@@ -333,6 +341,11 @@ func runServer(cmd *cobra.Command, args []string) {
 			readinessChecker = watcherComponent
 		}
 
+		var importIngestor api.BatchIngestor
+		if embeddedImportAPIEnabled(mode) {
+			importIngestor = embeddedBackend
+		}
+
 		apiComponent := apiserver.NewWithStorageGraphAndPipeline(
 			cfg.APIPort,
 			embeddedBackend.QueryExecutor(),
@@ -341,7 +354,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			nil,
 			nil,
 			embeddedBackend.AnalysisStore(),
-			embeddedBackend,
+			importIngestor,
 			readinessChecker,
 			tracingProvider,
 			time.Duration(metadataCacheRefreshSeconds)*time.Second,
@@ -825,6 +838,27 @@ func getTracingProviderTracer(provider interface {
 		return nil
 	}
 	return provider.GetTracer(name)
+}
+
+func describeEmbeddedEngineConfig(cfg embeddedstore.EngineConfig) string {
+	checkpointValue := fmt.Sprintf("checkpoint_interval=%s", cfg.CheckpointInterval)
+	if cfg.CheckpointInterval <= 0 {
+		checkpointValue = "checkpoint_strategy=explicit+shutdown"
+	}
+
+	return fmt.Sprintf(
+		"hot_max_events=%d hot_max_resource_versions=%d flush_interval=%s %s segment_target_bytes=%d compaction_min_segments=%d",
+		cfg.HotMaxEvents,
+		cfg.HotMaxResourceVersions,
+		cfg.FlushInterval,
+		checkpointValue,
+		cfg.SegmentTargetBytes,
+		cfg.CompactionMinSegments,
+	)
+}
+
+func embeddedImportAPIEnabled(mode serverRuntimeMode) bool {
+	return mode.Embedded && mode.StartWatcher
 }
 
 func hasUsableEmbeddedBackend(backend *embeddedstore.Backend) (bool, error) {
