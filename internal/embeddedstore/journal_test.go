@@ -7,10 +7,63 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/moolen/spectre/internal/models"
 )
+
+func TestOpenJournal_SyncsParentAndRootOnFirstCreate(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "embedded")
+
+	originalSyncPathFn := syncPathFn
+	var syncedPathsMu sync.Mutex
+	syncedPaths := make([]string, 0, 2)
+	syncPathFn = func(path string) error {
+		syncedPathsMu.Lock()
+		syncedPaths = append(syncedPaths, filepath.Clean(path))
+		syncedPathsMu.Unlock()
+		return originalSyncPathFn(path)
+	}
+	t.Cleanup(func() {
+		syncPathFn = originalSyncPathFn
+	})
+
+	journal, err := OpenJournal(root)
+	if err != nil {
+		t.Fatalf("open journal: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = journal.Close()
+	})
+
+	syncedPathsMu.Lock()
+	defer syncedPathsMu.Unlock()
+
+	parentPath := filepath.Clean(parent)
+	rootPath := filepath.Clean(root)
+	parentIndex := -1
+	rootIndex := -1
+	for i, path := range syncedPaths {
+		if path == parentPath && parentIndex == -1 {
+			parentIndex = i
+		}
+		if path == rootPath && rootIndex == -1 {
+			rootIndex = i
+		}
+	}
+
+	if parentIndex == -1 {
+		t.Fatalf("expected parent dir sync %q, got %v", parentPath, syncedPaths)
+	}
+	if rootIndex == -1 {
+		t.Fatalf("expected root dir sync %q, got %v", rootPath, syncedPaths)
+	}
+	if parentIndex >= rootIndex {
+		t.Fatalf("expected parent dir sync before root dir sync, got %v", syncedPaths)
+	}
+}
 
 func TestJournal_AppendReplayOrder(t *testing.T) {
 	t.Parallel()
@@ -253,6 +306,41 @@ func TestJournal_ReplayOversizedHeaderReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), strconv.Itoa(maxJournalRecordSize+1)) {
 		t.Fatalf("expected header size in error, got: %v", err)
+	}
+}
+
+func TestJournal_ReplayMaxUint32HeaderReturnsError(t *testing.T) {
+	t.Parallel()
+
+	journal := openTestJournal(t)
+	ctx := context.Background()
+
+	corruptFile, err := os.OpenFile(journal.path, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatalf("open for corruption: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = corruptFile.Close()
+	})
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], ^uint32(0))
+	if _, err := corruptFile.Write(header[:]); err != nil {
+		t.Fatalf("write max uint32 header: %v", err)
+	}
+	if err := corruptFile.Sync(); err != nil {
+		t.Fatalf("sync corrupt write: %v", err)
+	}
+
+	_, err = journal.Replay(ctx)
+	if err == nil {
+		t.Fatal("expected replay error for max uint32 record header")
+	}
+	if !strings.Contains(err.Error(), "oversized") {
+		t.Fatalf("expected oversized error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "4294967295") {
+		t.Fatalf("expected max uint32 size in error, got: %v", err)
 	}
 }
 

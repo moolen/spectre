@@ -22,6 +22,8 @@ const (
 
 var errJournalClosed = errors.New("journal is closed")
 
+var syncPathFn = syncPath
+
 // Journal stores events in an append-only on-disk log.
 // Callers must ensure a single writer per journal path across processes; no file lock is taken.
 type Journal struct {
@@ -36,14 +38,35 @@ func OpenJournal(root string) (*Journal, error) {
 		return nil, fmt.Errorf("open journal: root path is empty")
 	}
 
+	rootCreated, err := pathCreated(root)
+	if err != nil {
+		return nil, fmt.Errorf("open journal: stat root dir: %w", err)
+	}
+
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("open journal: create root dir: %w", err)
 	}
+	if rootCreated {
+		if err := syncPathFn(filepath.Dir(root)); err != nil {
+			return nil, fmt.Errorf("open journal: sync parent dir: %w", err)
+		}
+	}
 
 	path := filepath.Join(root, journalFileName)
+	fileCreated, err := pathCreated(path)
+	if err != nil {
+		return nil, fmt.Errorf("open journal: stat file: %w", err)
+	}
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open journal: open file: %w", err)
+	}
+	if fileCreated {
+		if err := syncPathFn(root); err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("open journal: sync root dir: %w", err)
+		}
 	}
 
 	return &Journal{
@@ -189,4 +212,27 @@ func (j *Journal) Replay(ctx context.Context) ([]models.Event, error) {
 		events = append(events, event)
 		recordIndex++
 	}
+}
+
+func pathCreated(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return false, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	return false, err
+}
+
+func syncPath(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = dir.Close()
+	}()
+
+	return dir.Sync()
 }
