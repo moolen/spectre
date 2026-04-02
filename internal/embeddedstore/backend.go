@@ -3,9 +3,7 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
-	"sync/atomic"
 
 	"github.com/moolen/spectre/internal/models"
 )
@@ -15,11 +13,7 @@ type Config struct {
 }
 
 type Backend struct {
-	journal    *Journal
-	projection *Projection
-	queryExec  *QueryExecutor
-	analysis   *Store
-	ready      atomic.Bool
+	engine *Engine
 }
 
 var (
@@ -32,33 +26,11 @@ func Open(cfg Config) (*Backend, error) {
 		return nil, fmt.Errorf("open embedded backend: data dir is empty")
 	}
 
-	journalRoot := filepath.Join(cfg.DataDir, "embedded")
-	journal, err := OpenJournal(journalRoot)
+	engine, err := OpenEngine(EngineConfig{DataDir: cfg.DataDir})
 	if err != nil {
 		return nil, fmt.Errorf("open embedded backend: %w", err)
 	}
-
-	events, err := journal.Replay(context.Background())
-	if err != nil {
-		_ = journal.Close()
-		return nil, fmt.Errorf("open embedded backend: replay journal: %w", err)
-	}
-
-	projection, err := BuildProjection(events)
-	if err != nil {
-		_ = journal.Close()
-		return nil, fmt.Errorf("open embedded backend: rebuild projection: %w", err)
-	}
-
-	backend := &Backend{
-		journal:    journal,
-		projection: projection,
-	}
-	backend.queryExec = NewQueryExecutor(projection)
-	backend.analysis = NewAnalysisStore(projection)
-	backend.ready.Store(true)
-
-	return backend, nil
+	return &Backend{engine: engine}, nil
 }
 
 func (b *Backend) Start(ctx context.Context) error {
@@ -68,7 +40,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	if b == nil {
 		return fmt.Errorf("start embedded backend: backend is nil")
 	}
-	return nil
+	return b.engine.Start(ctx)
 }
 
 func (b *Backend) Stop(ctx context.Context) error {
@@ -78,15 +50,14 @@ func (b *Backend) Stop(ctx context.Context) error {
 	if b == nil {
 		return fmt.Errorf("stop embedded backend: backend is nil")
 	}
-	return b.Close()
+	return b.engine.Stop(ctx)
 }
 
 func (b *Backend) Close() error {
-	if b == nil || b.journal == nil {
+	if b == nil || b.engine == nil {
 		return nil
 	}
-	b.ready.Store(false)
-	return b.journal.Close()
+	return b.engine.Close()
 }
 
 func (b *Backend) ProcessEvent(ctx context.Context, event models.Event) error {
@@ -100,38 +71,25 @@ func (b *Backend) ProcessBatch(ctx context.Context, events []models.Event) error
 	if b == nil {
 		return fmt.Errorf("process embedded batch: backend is nil")
 	}
-	if err := b.journal.AppendBatch(ctx, events); err != nil {
-		return err
-	}
-	wasReady := b.ready.Load()
-	for i := range events {
-		if err := applyProjectionEvent(b.projection, events[i]); err != nil {
-			b.ready.Store(false)
-			return fmt.Errorf("process embedded batch: apply event %d: %w", i, err)
-		}
-	}
-	if wasReady {
-		b.ready.Store(true)
-	}
-	return nil
+	return b.engine.ProcessBatch(ctx, events)
 }
 
 func (b *Backend) QueryExecutor() *QueryExecutor {
 	if b == nil {
 		return nil
 	}
-	return b.queryExec
+	return b.engine.QueryExecutor()
 }
 
 func (b *Backend) AnalysisStore() *Store {
 	if b == nil {
 		return nil
 	}
-	return b.analysis
+	return b.engine.AnalysisStore()
 }
 
 func (b *Backend) IsReady() bool {
-	return b != nil && b.ready.Load()
+	return b != nil && b.engine != nil && b.engine.IsReady()
 }
 
 func (b *Backend) Name() string {

@@ -21,7 +21,8 @@ type Manifest struct {
 }
 
 type SegmentMeta struct {
-	ID string `json:"id"`
+	ID            string `json:"id"`
+	HighWaterMark uint64 `json:"high_water_mark"`
 }
 
 type CheckpointMeta struct {
