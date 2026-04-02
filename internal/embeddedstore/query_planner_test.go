@@ -1,0 +1,123 @@
+package embeddedstore
+
+import (
+	"context"
+	"testing"
+
+	"github.com/moolen/spectre/internal/models"
+	"github.com/stretchr/testify/require"
+)
+
+func TestQueryPlanner_MergesHotAndColdTimeRangeResults(t *testing.T) {
+	resource := models.ResourceMetadata{
+		UID:       "pod-1",
+		Namespace: "default",
+		Kind:      "Pod",
+		Name:      "pod-1",
+	}
+	engine := newTestEngineWithColdSegment(t,
+		[]models.Event{{
+			ID:        "cold-1",
+			Timestamp: 10,
+			Resource:  resource,
+		}},
+		[]models.Event{{
+			ID:        "hot-1",
+			Timestamp: 20,
+			Resource:  resource,
+		}},
+	)
+
+	engine.projection.mu.Lock()
+	engine.projection.eventsByResourceUID["pod-1"] = nil
+	engine.projection.mu.Unlock()
+
+	result, err := engine.QueryExecutor().Execute(context.Background(), &models.QueryRequest{
+		StartTimestamp: 0,
+		EndTimestamp:   30,
+		Filters:        models.QueryFilters{},
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Events, 2)
+	require.Equal(t, []string{"cold-1", "hot-1"}, []string{result.Events[0].ID, result.Events[1].ID})
+}
+
+func TestQueryPlanner_PrunesColdSegmentsOutsideRequestedTimeRange(t *testing.T) {
+	engine := newTestEngineWithColdSegment(t,
+		[]models.Event{{
+			ID:        "cold-old",
+			Timestamp: 10,
+			Resource: models.ResourceMetadata{
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+		}},
+		[]models.Event{{
+			ID:        "hot-new",
+			Timestamp: 40,
+			Resource: models.ResourceMetadata{
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+		}},
+	)
+
+	planner := engine.QueryExecutor().planner
+	require.NotNil(t, planner)
+
+	relevant := planner.relevantSegments("pod-1", models.ResourceMetadata{
+		UID:       "pod-1",
+		Namespace: "default",
+		Kind:      "Pod",
+		Name:      "pod-1",
+	}, 30*1e9, 50*1e9)
+	require.Empty(t, relevant)
+}
+
+func TestQueryPlanner_QueryDistinctMetadataUsesProjectionState(t *testing.T) {
+	engine := newTestEngineWithEvents(t, []models.Event{{
+		ID:        "1",
+		Timestamp: 10,
+		Resource: models.ResourceMetadata{
+			UID:       "pod-1",
+			Namespace: "default",
+			Kind:      "Pod",
+			Name:      "pod-1",
+		},
+	}})
+
+	namespaces, kinds, _, _, err := engine.QueryExecutor().QueryDistinctMetadata(context.Background(), 0, 30)
+	require.NoError(t, err)
+	require.Equal(t, []string{"default"}, namespaces)
+	require.Equal(t, []string{"Pod"}, kinds)
+}
+
+func newTestEngineWithEvents(t *testing.T, events []models.Event) *Engine {
+	t.Helper()
+
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                t.TempDir(),
+		HotMaxEvents:           100,
+		HotMaxResourceVersions: 10,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), events))
+	return engine
+}
+
+func newTestEngineWithColdSegment(t *testing.T, coldEvents, hotEvents []models.Event) *Engine {
+	t.Helper()
+
+	engine := newTestEngineWithEvents(t, coldEvents)
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.ProcessBatch(context.Background(), hotEvents))
+	return engine
+}

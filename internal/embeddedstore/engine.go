@@ -69,6 +69,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		segmentReaders:    readers,
 		nextHighWaterMark: maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), checkpointHighWaterMark),
 	}
+	engine.queryExec.SetSharedCache(newQueryPlanner(engine.projection, engine.hot, engine.segmentReaders))
 	engine.ready.Store(true)
 
 	return engine, nil
@@ -215,6 +216,7 @@ func (e *Engine) Flush(ctx context.Context) error {
 
 	e.manifest = updatedManifest
 	e.segmentReaders = append(e.segmentReaders, reader)
+	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
 	return nil
 }
 

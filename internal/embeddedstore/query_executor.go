@@ -20,6 +20,7 @@ type filteredResource struct {
 type QueryExecutor struct {
 	logger     *logging.Logger
 	projection *Projection
+	planner    *QueryPlanner
 }
 
 func NewQueryExecutor(projection *Projection) *QueryExecutor {
@@ -59,7 +60,10 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 		return qe.executeEventQuery(startTimeNs, endTimeNs, query.Filters, pagination, pageSize, start)
 	}
 
-	filteredResources := qe.collectFilteredResources(startTimeNs, endTimeNs, query.Filters)
+	filteredResources, err := qe.collectFilteredResources(ctx, startTimeNs, endTimeNs, query.Filters)
+	if err != nil {
+		return nil, nil, err
+	}
 	startIdx := qe.cursorStartIndex(filteredResources, pagination)
 	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(filteredResources, startIdx, pageSize)
 
@@ -89,6 +93,11 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 }
 
 func (qe *QueryExecutor) SetSharedCache(cache interface{}) {
+	planner, ok := cache.(*QueryPlanner)
+	if !ok {
+		return
+	}
+	qe.planner = planner
 }
 
 func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs, endTimeNs int64) (namespaces []string, kinds []string, minTime int64, maxTime int64, err error) {
@@ -143,7 +152,7 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 	return namespaces, kinds, minTime, maxTime, nil
 }
 
-func (qe *QueryExecutor) collectFilteredResources(startTimeNs, endTimeNs int64, filters models.QueryFilters) []filteredResource {
+func (qe *QueryExecutor) collectFilteredResources(ctx context.Context, startTimeNs, endTimeNs int64, filters models.QueryFilters) ([]filteredResource, error) {
 	filtered := make([]filteredResource, 0, len(qe.projection.orderedResources))
 
 	for _, key := range qe.projection.orderedResources {
@@ -155,7 +164,10 @@ func (qe *QueryExecutor) collectFilteredResources(startTimeNs, endTimeNs int64, 
 			continue
 		}
 
-		resourceEvents := qe.collectResourceEvents(qe.projection.eventsByResourceUID[key.uid], startTimeNs, endTimeNs)
+		resourceEvents, err := qe.resourceEvents(ctx, key.uid, meta, startTimeNs, endTimeNs)
+		if err != nil {
+			return nil, err
+		}
 		if len(resourceEvents) == 0 {
 			continue
 		}
@@ -166,43 +178,18 @@ func (qe *QueryExecutor) collectFilteredResources(startTimeNs, endTimeNs int64, 
 		})
 	}
 
-	return filtered
+	return filtered, nil
 }
 
 func (qe *QueryExecutor) collectResourceEvents(events []models.Event, startTimeNs, endTimeNs int64) []models.Event {
-	if len(events) == 0 {
-		return nil
+	return resourceEventsInWindow(events, startTimeNs, endTimeNs)
+}
+
+func (qe *QueryExecutor) resourceEvents(ctx context.Context, uid string, meta models.ResourceMetadata, startTimeNs, endTimeNs int64) ([]models.Event, error) {
+	if qe.planner == nil {
+		return qe.collectResourceEvents(qe.projection.eventsByResourceUID[uid], startTimeNs, endTimeNs), nil
 	}
-
-	var inRange []models.Event
-	var lastBefore models.Event
-	var hasLastBefore bool
-
-	for i := range events {
-		event := events[i]
-		if event.Timestamp < startTimeNs {
-			lastBefore = cloneEvent(event)
-			hasLastBefore = true
-			continue
-		}
-		if event.Timestamp > endTimeNs {
-			break
-		}
-		inRange = append(inRange, cloneEvent(event))
-	}
-
-	var result []models.Event
-	if hasLastBefore && lastBefore.Type != models.EventTypeDelete {
-		lastBefore.PreExisting = true
-		result = append(result, lastBefore)
-	}
-
-	if len(inRange) == 0 && len(result) == 0 {
-		return nil
-	}
-
-	result = append(result, inRange...)
-	return result
+	return qe.planner.PlanResourceEvents(ctx, uid, meta, startTimeNs, endTimeNs)
 }
 
 func (qe *QueryExecutor) cursorStartIndex(resources []filteredResource, pagination *models.PaginationRequest) int {
