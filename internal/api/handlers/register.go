@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/api"
@@ -19,7 +20,7 @@ func RegisterHandlers(
 	storageExecutor api.QueryExecutor,
 	graphExecutor api.QueryExecutor,
 	querySource api.TimelineQuerySource,
-	timelineService *api.TimelineService, // Shared timeline service
+	timelineService *apptimeline.Service, // Shared timeline service
 	analysisStore analysisstore.AnalysisStore,
 	graphClient graph.Client,
 	importIngestor api.BatchIngestor,

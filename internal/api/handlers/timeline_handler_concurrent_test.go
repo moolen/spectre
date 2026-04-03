@@ -180,6 +180,17 @@ func TestExecuteConcurrentQueries_BothQueriesSucceed(t *testing.T) {
 	}
 }
 
+func TestNewTimelineHandler_UsesAppTimelineService(t *testing.T) {
+	logger := logging.GetLogger("test")
+	tracer := noop.NewTracerProvider().Tracer("test")
+	service := apptimeline.NewService(&mockConcurrentQueryExecutor{}, logger, tracer)
+
+	handler := NewTimelineHandler(service, logger, tracer)
+	if handler == nil {
+		t.Fatal("expected handler")
+	}
+}
+
 // TestExecuteConcurrentQueries_ResourceQueryFails tests resource query failure
 func TestExecuteConcurrentQueries_ResourceQueryFails(t *testing.T) {
 	logger := logging.GetLogger("test")

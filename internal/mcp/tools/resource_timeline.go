@@ -7,17 +7,17 @@ import (
 	"sort"
 	"time"
 
-	"github.com/moolen/spectre/internal/api"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/models"
 )
 
 // ResourceTimelineTool implements the resource_timeline MCP tool
 type ResourceTimelineTool struct {
-	timelineService *api.TimelineService
+	timelineService *apptimeline.Service
 }
 
 // NewResourceTimelineTool creates a new resource_timeline tool using TimelineService
-func NewResourceTimelineTool(timelineService *api.TimelineService) *ResourceTimelineTool {
+func NewResourceTimelineTool(timelineService *apptimeline.Service) *ResourceTimelineTool {
 	return &ResourceTimelineTool{
 		timelineService: timelineService,
 	}
