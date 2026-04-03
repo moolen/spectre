@@ -238,6 +238,48 @@ func TestQueryExecutor_PreExistingResources(t *testing.T) {
 	assert.True(t, foundUpdate, "Should find the update event")
 }
 
+func TestQueryExecutor_PreExistingResourcesUseLatestPreviousEvent(t *testing.T) {
+	harness, err := NewTestHarness(t)
+	require.NoError(t, err)
+	defer harness.Cleanup(context.Background())
+
+	ctx := context.Background()
+	client := harness.GetClient()
+
+	queryStartTime := time.Now().Add(-1 * time.Hour)
+	queryEndTime := queryStartTime.Add(30 * time.Minute)
+	podUID := uuid.New().String()
+
+	oldestPrevious := CreatePodEvent(podUID, "pre-existing-pod", "default", queryStartTime.Add(-30*time.Minute), models.EventTypeCreate, "Running", nil)
+	latestPrevious := CreatePodEvent(podUID, "pre-existing-pod", "default", queryStartTime.Add(-5*time.Minute), models.EventTypeUpdate, "Running", nil)
+	inRange := CreatePodEvent(podUID, "pre-existing-pod", "default", queryStartTime.Add(10*time.Minute), models.EventTypeUpdate, "Ready", nil)
+
+	err = harness.SeedEvents(ctx, []models.Event{oldestPrevious, latestPrevious, inRange})
+	require.NoError(t, err)
+
+	queryExecutor := graph.NewQueryExecutor(client)
+	query := &models.QueryRequest{
+		StartTimestamp: queryStartTime.Unix(),
+		EndTimestamp:   queryEndTime.Unix(),
+		Filters:        models.QueryFilters{},
+	}
+
+	result, err := queryExecutor.Execute(ctx, query)
+	require.NoError(t, err)
+
+	resourceEvents := make([]models.Event, 0, 2)
+	for _, event := range result.Events {
+		if event.Resource.UID == podUID {
+			resourceEvents = append(resourceEvents, event)
+		}
+	}
+
+	require.Len(t, resourceEvents, 2, "expected one latest pre-window anchor plus one in-range event")
+	assert.True(t, resourceEvents[0].PreExisting, "first event should be marked pre-existing")
+	assert.Equal(t, latestPrevious.Timestamp, resourceEvents[0].Timestamp, "expected latest previous event to be used as anchor")
+	assert.Equal(t, inRange.Timestamp, resourceEvents[1].Timestamp, "expected in-range event to follow the anchor")
+}
+
 func TestQueryExecutor_EmptyResults(t *testing.T) {
 	harness, err := NewTestHarness(t)
 	require.NoError(t, err)

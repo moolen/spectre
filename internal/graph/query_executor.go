@@ -290,8 +290,13 @@ func (qe *QueryExecutor) buildTimelineQuery(startNs, endNs int64, filters models
 		OPTIONAL MATCH (r)-[:CHANGED]->(e:ChangeEvent)
 		WHERE e.timestamp >= $startNs AND e.timestamp <= $endNs
 		WITH r, collect(e) as inRangeEvents
+		OPTIONAL MATCH (r)-[:CHANGED]->(prevCandidate:ChangeEvent)
+		WHERE prevCandidate.timestamp < $startNs
+		WITH r, inRangeEvents, max(prevCandidate.timestamp) as prevTimestamp
 		OPTIONAL MATCH (r)-[:CHANGED]->(prev:ChangeEvent)
-		WHERE prev.timestamp < $startNs
+		WHERE prev.timestamp = prevTimestamp
+		WITH r, inRangeEvents, prev
+		ORDER BY prev.id
 		WITH r, inRangeEvents, head(collect(prev)) as prev
 		OPTIONAL MATCH (r)-[:EMITTED_EVENT]->(k:K8sEvent)
 		WHERE k.timestamp >= $startNs AND k.timestamp <= $endNs

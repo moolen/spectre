@@ -372,17 +372,22 @@ func (s *TimelineService) ParsePagination(pageSizeParam, cursor string, maxPageS
 // BuildTimelineResponse converts query results into a timeline response
 func (s *TimelineService) BuildTimelineResponse(queryResult, eventResult *models.QueryResult) *models.SearchResponse {
 	if queryResult == nil || len(queryResult.Events) == 0 {
+		var executionTimeMs int64
+		if queryResult != nil {
+			executionTimeMs = int64(queryResult.ExecutionTimeMs)
+		}
+
 		return &models.SearchResponse{
 			Resources:       []models.Resource{},
 			Count:           0,
-			ExecutionTimeMs: int64(queryResult.ExecutionTimeMs),
+			ExecutionTimeMs: executionTimeMs,
 		}
 	}
 
 	// Group events by resource UID
 	eventsByResource := make(map[string][]models.Event)
-	queryStartTime := queryResult.Events[0].Timestamp
-	queryEndTime := queryResult.Events[0].Timestamp
+	queryStartTime := queryResult.QueryStartTime
+	queryEndTime := queryResult.QueryEndTime
 
 	for _, event := range queryResult.Events {
 		uid := event.Resource.UID
@@ -390,13 +395,19 @@ func (s *TimelineService) BuildTimelineResponse(queryResult, eventResult *models
 			continue
 		}
 		eventsByResource[uid] = append(eventsByResource[uid], event)
+	}
 
-		// Track actual time range from events
-		if event.Timestamp < queryStartTime {
-			queryStartTime = event.Timestamp
-		}
-		if event.Timestamp > queryEndTime {
-			queryEndTime = event.Timestamp
+	// Fallback for callers that don't populate query bounds.
+	if queryStartTime == 0 || queryEndTime == 0 {
+		queryStartTime = queryResult.Events[0].Timestamp
+		queryEndTime = queryResult.Events[0].Timestamp
+		for _, event := range queryResult.Events {
+			if event.Timestamp < queryStartTime {
+				queryStartTime = event.Timestamp
+			}
+			if event.Timestamp > queryEndTime {
+				queryEndTime = event.Timestamp
+			}
 		}
 	}
 
@@ -424,6 +435,7 @@ func (s *TimelineService) BuildTimelineResponse(queryResult, eventResult *models
 			Namespace: firstEvent.Resource.Namespace,
 			Name:      firstEvent.Resource.Name,
 			Events:    []models.K8sEvent{},
+			PreExisting: firstEvent.PreExisting,
 		}
 
 		// Build status segments from events
@@ -440,8 +452,13 @@ func (s *TimelineService) BuildTimelineResponse(queryResult, eventResult *models
 				endTime = queryEndTime
 			}
 
+			startTime := event.Timestamp
+			if event.PreExisting && event.Type != models.EventTypeDelete && queryStartTime > 0 && event.Timestamp < queryStartTime {
+				startTime = queryStartTime
+			}
+
 			segment := models.StatusSegment{
-				StartTime:    event.Timestamp,
+				StartTime:    startTime,
 				EndTime:      endTime,
 				Status:       status,
 				ResourceData: event.Data, // Include full resource data for container issue analysis

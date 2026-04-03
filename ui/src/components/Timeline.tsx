@@ -155,6 +155,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   // API already provides resources sorted by namespace, kind, and name
   // No need for client-side sorting - this improves performance significantly
   const sortedResources = resources;
+  const timelineStartMs = timeRange.start.getTime();
 
   // Scales (memoized to prevent flicker during non-data updates)
   const innerWidth = width - MARGIN.left - MARGIN.right;
@@ -380,7 +381,13 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     // Segments
     rows.selectAll('.segment')
-        .data(d => d.statusSegments.map((s, i) => ({ ...s, resourceId: d.id, index: i, preExisting: d.preExisting })))
+        .data(d => d.statusSegments.map((s, i) => ({
+          ...s,
+          resourceId: d.id,
+          index: i,
+          preExisting: d.preExisting,
+          showContinuationCue: Boolean(d.preExisting && i === 0 && s.start.getTime() <= timelineStartMs),
+        })))
         .enter()
         .append('rect')
         .attr('class', 'segment')
@@ -390,10 +397,34 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('height', yScale.bandwidth())
         .attr('rx', 4)
         .attr('fill', s => STATUS_COLORS[s.status])
-        .attr('opacity', s => s.preExisting ? 0.5 : 1) // Lighter for pre-existing resources
+        .attr('opacity', 1)
         .attr('stroke', 'none')
         .attr('stroke-width', 0);
         // Note: stroke/selection is handled in separate effect
+
+    rows.selectAll('.segment-continuation')
+        .data(d => d.statusSegments
+          .map((s, i) => ({
+            ...s,
+            resourceId: d.id,
+            index: i,
+            showContinuationCue: Boolean(d.preExisting && i === 0 && s.start.getTime() <= timelineStartMs),
+          }))
+          .filter(s => s.showContinuationCue))
+        .enter()
+        .append('rect')
+        .attr('class', 'segment-continuation')
+        .attr('y', 0)
+        .attr('height', yScale.bandwidth())
+        .attr('rx', 4)
+        .attr('fill', s => STATUS_COLORS[s.status])
+        .attr('opacity', 0.35)
+        .attr('pointer-events', 'none')
+        .each(function() {
+          d3.select(this)
+            .append('title')
+            .text('Continues before selected range');
+        });
 
     // Events
     const eventDots = rows.selectAll('.event-dot')
@@ -470,6 +501,13 @@ export const Timeline: React.FC<TimelineProps> = ({
                     return 2;
                 }
                 return Math.max(4, calculatedWidth);
+            });
+
+        contentGroup.selectAll<SVGRectElement, any>('.segment-continuation')
+            .attr('x', d => newXScale(d.start))
+            .attr('width', d => {
+                const segmentWidth = Math.max(4, newXScale(d.end) - newXScale(d.start));
+                return Math.min(10, segmentWidth);
             });
 
         contentGroup.selectAll<SVGCircleElement, any>('.event-dot')
