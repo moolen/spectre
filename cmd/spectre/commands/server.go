@@ -18,6 +18,7 @@ import (
 	analysisfalkor "github.com/moolen/spectre/internal/analysis/store/falkor"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
+	appgraph "github.com/moolen/spectre/internal/app/graph"
 	"github.com/moolen/spectre/internal/config"
 	"github.com/moolen/spectre/internal/embeddedstore"
 	"github.com/moolen/spectre/internal/graph"
@@ -27,6 +28,7 @@ import (
 	"github.com/moolen/spectre/internal/integration"
 
 	// Import integration implementations to register their factories
+	_ "github.com/moolen/spectre/internal/integration/grafana"
 	_ "github.com/moolen/spectre/internal/integration/logzio"
 	_ "github.com/moolen/spectre/internal/integration/victorialogs"
 	"github.com/moolen/spectre/internal/lifecycle"
@@ -376,7 +378,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		if mode.StartMCP {
 			timelineService := apiComponent.GetTimelineService()
 			tracer := getTracingProviderTracer(tracingProvider, "graph_service")
-			graphService := api.NewGraphService(embeddedBackend.AnalysisStore(), logger, tracer)
+			graphService := appgraph.NewService(embeddedBackend.AnalysisStore(), logger, tracer)
 
 			spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
 				Version:         Version,
@@ -635,10 +637,10 @@ func runServer(cmd *cobra.Command, args []string) {
 	timelineService := apiComponent.GetTimelineService()
 
 	// Create GraphService if graph client is available
-	var graphService *api.GraphService
+	var graphService *appgraph.Service
 	if graphClient != nil {
 		tracer := getTracingProviderTracer(tracingProvider, "graph_service")
-		graphService = api.NewGraphServiceFromGraphClient(graphClient, logger, tracer)
+		graphService = appgraph.NewServiceFromGraphClient(graphClient, logger, tracer)
 		logger.Info("Created GraphService for MCP graph tools")
 	}
 

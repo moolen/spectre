@@ -17,7 +17,7 @@ tests:
           value: 1
       - equal:
           path: spec.template.spec.containers[0].image
-          value: "spectre:latest"
+          value: "ghcr.io/moolen/spectre:test-build"
 
   - it: should set correct labels
     asserts:
@@ -361,38 +361,40 @@ tests:
           path: spec.template.spec.containers[0].resources.limits.cpu
           value: "1000m"
 
-  - it: should use PVC for data volume when persistence enabled
+  - it: should use integrations PVC when integrations persistence is enabled
     set:
-      persistence:
+      integrations:
         enabled: true
+        persistence:
+          enabled: true
+          mountPath: /var/lib/custom-spectre
     asserts:
-      - equal:
-          path: spec.template.spec.volumes[0].name
-          value: data
-      - equal:
-          path: spec.template.spec.volumes[0].persistentVolumeClaim.claimName
-          value: RELEASE-NAME-spectre
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--data-dir=/var/lib/custom-spectre/data"
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: integrations-data
+            mountPath: /var/lib/custom-spectre
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: integrations-data
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-spectre-integrations
 
-  - it: should use existing PVC when specified
+  - it: should omit integrations PVC when integrations persistence is disabled
     set:
-      persistence:
+      integrations:
         enabled: true
-        existingClaim: my-existing-pvc
+        persistence:
+          enabled: false
     asserts:
-      - equal:
-          path: spec.template.spec.volumes[0].persistentVolumeClaim.claimName
-          value: my-existing-pvc
-
-  - it: should use emptyDir when persistence disabled
-    set:
-      persistence:
-        enabled: false
-    asserts:
-      - equal:
-          path: spec.template.spec.volumes[0].name
-          value: data
-      - isNotNull:
-          path: spec.template.spec.volumes[0].emptyDir
+      - isNull:
+          path: spec.template.spec.containers[0].volumeMounts[1]
+      - isNull:
+          path: spec.template.spec.volumes[2]
 
   - it: should add extra volumes and volume mounts
     set:

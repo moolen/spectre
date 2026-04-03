@@ -6,17 +6,18 @@ import (
 	"fmt"
 
 	"github.com/moolen/spectre/internal/analysis/anomaly"
-	"github.com/moolen/spectre/internal/api"
+	appgraph "github.com/moolen/spectre/internal/app/graph"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 )
 
 // DetectAnomaliesTool implements the detect_anomalies MCP tool
 type DetectAnomaliesTool struct {
-	graphService    *api.GraphService
-	timelineService *api.TimelineService
+	graphService    *appgraph.Service
+	timelineService *apptimeline.Service
 }
 
 // NewDetectAnomaliesTool creates a new detect anomalies tool with services
-func NewDetectAnomaliesTool(graphService *api.GraphService, timelineService *api.TimelineService) *DetectAnomaliesTool {
+func NewDetectAnomaliesTool(graphService *appgraph.Service, timelineService *apptimeline.Service) *DetectAnomaliesTool {
 	return &DetectAnomaliesTool{
 		graphService:    graphService,
 		timelineService: timelineService,
@@ -320,4 +321,3 @@ func (t *DetectAnomaliesTool) transformAnomalyResponse(response *anomaly.Anomaly
 
 	return output
 }
-

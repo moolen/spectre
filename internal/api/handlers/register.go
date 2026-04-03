@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"net/http"
-	"strings"
 
-	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/api"
+	appgraph "github.com/moolen/spectre/internal/app/graph"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
@@ -52,13 +52,13 @@ func RegisterHandlers(
 	router.HandleFunc("/v1/metadata", withMethod(http.MethodGet, metadataHandler.Handle))
 
 	// Create GraphService if graph client is available (shared by graph-related handlers)
-	var graphService *api.GraphService
+	var graphService *appgraph.Service
 	switch {
 	case graphClient != nil:
-		graphService = api.NewGraphServiceFromGraphClient(graphClient, logger, tracer)
+		graphService = appgraph.NewServiceFromGraphClient(graphClient, logger, tracer)
 		logger.Info("Created GraphService for graph analysis operations")
 	case analysisStore != nil:
-		graphService = api.NewGraphService(analysisStore, logger, tracer)
+		graphService = appgraph.NewService(analysisStore, logger, tracer)
 		logger.Info("Created GraphService for embedded analysis operations")
 	}
 
@@ -77,7 +77,7 @@ func RegisterHandlers(
 
 	// Register observatory graph handler if graph service is available
 	if graphService != nil && graphService.HasObservatoryAnalyzer() {
-		observatoryGraphHandler := NewObservatoryGraphHandler(graphService.GetObservatoryAnalyzer(), logger, tracer)
+		observatoryGraphHandler := NewObservatoryGraphHandler(graphService, logger, tracer)
 		router.HandleFunc("/v1/observatory-graph", withMethod(http.MethodGet, observatoryGraphHandler.Handle))
 		logger.Info("Registered /v1/observatory-graph endpoint")
 	}
@@ -102,86 +102,5 @@ func RegisterHandlers(
 		logger.Info("Registered /v1/storage/export endpoint for event exports")
 	}
 
-	// Register integration config management endpoints
-	if configPath != "" && integrationManager != nil {
-		configHandler := NewIntegrationConfigHandler(configPath, integrationManager, logger)
-
-		// Collection endpoints
-		router.HandleFunc("/api/config/integrations", func(w http.ResponseWriter, r *http.Request) {
-			switch r.Method {
-			case http.MethodGet:
-				configHandler.HandleList(w, r)
-			case http.MethodPost:
-				configHandler.HandleCreate(w, r)
-			default:
-				api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Allowed: GET, POST")
-			}
-		})
-
-		// Test endpoint for unsaved integrations (must be registered before the trailing-slash route)
-		router.HandleFunc("/api/config/integrations/test", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
-				return
-			}
-			configHandler.HandleTest(w, r)
-		})
-
-		// Instance-specific endpoints with path parameter
-		router.HandleFunc("/api/config/integrations/", func(w http.ResponseWriter, r *http.Request) {
-			name := strings.TrimPrefix(r.URL.Path, "/api/config/integrations/")
-			name = strings.TrimSuffix(name, "/") // Normalize trailing slash
-			logger.Debug("Integration endpoint: path=%s, name=%s, method=%s", r.URL.Path, name, r.Method)
-			if name == "" {
-				api.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Integration name required")
-				return
-			}
-
-			// Check for /test suffix (for saved integrations: /api/config/integrations/{name}/test)
-			if strings.HasSuffix(name, "/test") {
-				if r.Method != http.MethodPost {
-					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
-					return
-				}
-				configHandler.HandleTest(w, r)
-				return
-			}
-
-			// Check for /sync suffix (for Grafana integrations: /api/config/integrations/{name}/sync)
-			if strings.HasSuffix(name, "/sync") {
-				if r.Method != http.MethodPost {
-					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
-					return
-				}
-				configHandler.HandleSync(w, r)
-				return
-			}
-
-			// Check for /signals/validate suffix (POST trigger signal validation)
-			if strings.HasSuffix(name, "/signals/validate") {
-				if r.Method != http.MethodPost {
-					api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
-					return
-				}
-				configHandler.HandleSignalValidation(w, r)
-				return
-			}
-
-			// Route by method for /{name} operations
-			switch r.Method {
-			case http.MethodGet:
-				configHandler.HandleGet(w, r)
-			case http.MethodPut:
-				configHandler.HandleUpdate(w, r)
-			case http.MethodDelete:
-				configHandler.HandleDelete(w, r)
-			default:
-				api.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Allowed: GET, PUT, DELETE")
-			}
-		})
-
-		logger.Info("Registered /api/config/integrations endpoints")
-	} else {
-		logger.Warn("Integration config endpoints NOT registered (configPath=%q, manager=%v)", configPath, integrationManager != nil)
-	}
+	RegisterIntegrationConfigRoutes(router, configPath, integrationManager, logger)
 }

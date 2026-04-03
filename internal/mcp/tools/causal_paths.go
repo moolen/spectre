@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/moolen/spectre/internal/api"
 	causalpaths "github.com/moolen/spectre/internal/analysis/causal_paths"
+	appgraph "github.com/moolen/spectre/internal/app/graph"
 )
 
 // CausalPathsTool implements causal path discovery using GraphService
 type CausalPathsTool struct {
-	graphService *api.GraphService
+	graphService *appgraph.Service
 }
 
 // NewCausalPathsTool creates a new causal paths tool with GraphService
-func NewCausalPathsTool(graphService *api.GraphService) *CausalPathsTool {
+func NewCausalPathsTool(graphService *appgraph.Service) *CausalPathsTool {
 	return &CausalPathsTool{
 		graphService: graphService,
 	}
