@@ -10,10 +10,10 @@ import (
 
 func TestIsReplicaSetRoutineChange(t *testing.T) {
 	tests := []struct {
-		name           string
-		kind           string
-		changedFields  []string
-		expectRoutine  bool
+		name          string
+		kind          string
+		changedFields []string
+		expectRoutine bool
 	}{
 		{
 			name: "ReplicaSet with only routine changes",
@@ -83,8 +83,8 @@ func TestIsReplicaSetRoutineChange(t *testing.T) {
 			expectRoutine: false,
 		},
 		{
-			name: "Empty changed fields",
-			kind: "ReplicaSet",
+			name:          "Empty changed fields",
+			kind:          "ReplicaSet",
 			changedFields: []string{},
 			expectRoutine: false,
 		},

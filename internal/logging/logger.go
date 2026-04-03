@@ -1,6 +1,6 @@
 // Package logging provides structured logging for the Spectre application.
 //
-// Design Philosophy
+// # Design Philosophy
 //
 // This package provides a simple structured logging API optimized for
 // incident-time debuggability in Kubernetes controller contexts. It prioritizes
@@ -9,7 +9,7 @@
 // The logger supports multiple log levels (DEBUG, INFO, WARN, ERROR, FATAL)
 // and structured logging with key-value fields for better observability.
 //
-// Basic Usage
+// # Basic Usage
 //
 // Initialize the logger at application startup:
 //
@@ -31,7 +31,7 @@
 //	    logging.Field("path", r.URL.Path),
 //	)
 //
-// Context Logger
+// # Context Logger
 //
 // Create child loggers with persistent fields for request/operation context:
 //
@@ -43,7 +43,7 @@
 //	requestLogger.Info("querying database")
 //	// All logs automatically include request_id and user fields
 //
-// Context Support
+// # Context Support
 //
 // The logger supports Go's context.Context for automatic trace and span ID extraction.
 // This is useful for distributed tracing and request correlation:
@@ -68,7 +68,7 @@
 //	)
 //	// Output includes: trace_id, span_id, user_id, and duration_ms
 //
-// Log Levels
+// # Log Levels
 //
 // The package supports five log levels in increasing severity:
 //
@@ -83,7 +83,7 @@
 //
 //	logging.Initialize("warn")  // Only WARN, ERROR, FATAL will be logged
 //
-// Per-Package Log Levels
+// # Per-Package Log Levels
 //
 // You can override the log level for specific packages while keeping others
 // at the default level. This is useful for targeted debugging:
@@ -103,7 +103,7 @@
 //
 // See LOG_LEVELS.md in the project root for detailed configuration guide.
 //
-// Error Handling
+// # Error Handling
 //
 // For logging errors with context:
 //
@@ -119,7 +119,7 @@
 //	    logging.Field("duration_ms", elapsed.Milliseconds()),
 //	)
 //
-// Fatal Handling
+// # Fatal Handling
 //
 // Fatal logs terminate the application with exit code 1:
 //
@@ -128,7 +128,7 @@
 //	    // Application exits here
 //	}
 //
-// Thread Safety
+// # Thread Safety
 //
 // Logger instances are safe for concurrent use by multiple goroutines.
 // The global logger initialization using GetLogger() is protected by sync.Once
@@ -138,7 +138,7 @@
 // return new Logger instances rather than modifying the original, making them
 // safe to use across goroutines without coordination.
 //
-// Testing
+// # Testing
 //
 // The package provides test helpers for capturing log output:
 //
@@ -150,7 +150,6 @@
 package logging
 
 import (
-	"context"
 	"os"
 	"strings"
 	"sync"
@@ -190,7 +189,6 @@ func Initialize(levelStr string, packageLevels ...map[string]string) error {
 		name:  "spectre",
 	}
 
-	// Set up per-package log levels if provided
 	if len(packageLevels) > 0 && packageLevels[0] != nil {
 		if err := SetPackageLogLevels(packageLevels[0]); err != nil {
 			return err
@@ -200,188 +198,18 @@ func Initialize(levelStr string, packageLevels ...map[string]string) error {
 	return nil
 }
 
-// GetLogger returns a logger with the specified name
-// Thread-safe: uses sync.Once to ensure single initialization
+// GetLogger returns a logger with the specified name.
+// Thread-safe: uses sync.Once to ensure single initialization.
 func GetLogger(name string) *Logger {
 	initOnce.Do(func() {
 		if globalLogger == nil {
 			_ = Initialize("info")
 		}
 	})
+
 	return &Logger{
 		level:  globalLogger.level,
 		name:   name,
 		fields: make(map[string]interface{}),
 	}
-}
-
-// shouldLog checks if a log message at the given level should be output
-// Considers both the logger's level and any per-package level overrides
-func (l *Logger) shouldLog(level LogLevel) bool {
-	// Check package-specific overrides first
-	if pkgLevel := GetPackageLogLevel(l.name); pkgLevel >= 0 {
-		return level >= pkgLevel
-	}
-	// Fall back to logger's level
-	return level >= l.level
-}
-
-// Debug logs a debug message
-func (l *Logger) Debug(msg string, args ...interface{}) {
-	if l.shouldLog(DEBUG) {
-		l.logf("DEBUG", msg, args...)
-	}
-}
-
-// Info logs an info message
-func (l *Logger) Info(msg string, args ...interface{}) {
-	if l.shouldLog(INFO) {
-		l.logf("INFO", msg, args...)
-	}
-}
-
-// Warn logs a warning message
-func (l *Logger) Warn(msg string, args ...interface{}) {
-	if l.shouldLog(WARN) {
-		l.logf("WARN", msg, args...)
-	}
-}
-
-// Error logs an error message
-func (l *Logger) Error(msg string, args ...interface{}) {
-	if l.shouldLog(ERROR) {
-		l.logf(strError, msg, args...)
-	}
-}
-
-// Fatal logs a fatal message and exits the program with code 1
-func (l *Logger) Fatal(msg string, args ...interface{}) {
-	if l.shouldLog(FATAL) {
-		l.logf("FATAL", msg, args...)
-		exitFunc(1)
-	}
-}
-
-// FatalWithFields logs a fatal message with structured fields and exits the program with code 1
-func (l *Logger) FatalWithFields(msg string, fields ...LogField) {
-	if l.shouldLog(FATAL) {
-		l.logWithFields("FATAL", msg, fields...)
-		exitFunc(1)
-	}
-}
-
-// ErrorWithErr logs an error message with an error object
-func (l *Logger) ErrorWithErr(msg string, err error, args ...interface{}) {
-	if l.shouldLog(ERROR) {
-		args = append(args, err)
-		l.logf("ERROR", msg+" - %v", args...)
-	}
-}
-
-// WithName returns a new logger with a custom name
-func (l *Logger) WithName(name string) *Logger {
-	return &Logger{
-		level:  l.level,
-		name:   name,
-		fields: make(map[string]interface{}),
-		ctx:    l.ctx,
-	}
-}
-
-// WithField adds a structured field to the logger
-func (l *Logger) WithField(key string, value interface{}) *Logger {
-	newLogger := &Logger{
-		level:  l.level,
-		name:   l.name,
-		fields: cloneFields(l.fields),
-		ctx:    l.ctx,
-	}
-	newLogger.fields[key] = value
-	return newLogger
-}
-
-// WithFields adds multiple structured fields to the logger
-func (l *Logger) WithFields(fields ...LogField) *Logger {
-	newLogger := &Logger{
-		level:  l.level,
-		name:   l.name,
-		fields: cloneFields(l.fields),
-		ctx:    l.ctx,
-	}
-	// Add new fields
-	for _, f := range fields {
-		newLogger.fields[f.Key] = f.Value
-	}
-	return newLogger
-}
-
-// WithContext returns a new logger with the provided context attached.
-// The context is used to extract trace_id and span_id values if present.
-// These fields are automatically included in all log messages from the returned logger.
-// If ctx is nil, this method returns a logger without context support.
-func (l *Logger) WithContext(ctx context.Context) *Logger {
-	return &Logger{
-		level:  l.level,
-		name:   l.name,
-		fields: cloneFields(l.fields),
-		ctx:    ctx,
-	}
-}
-
-// DebugWithFields logs a debug message with structured fields
-func (l *Logger) DebugWithFields(msg string, fields ...LogField) {
-	if l.shouldLog(DEBUG) {
-		l.logWithFields("DEBUG", msg, fields...)
-	}
-}
-
-// InfoWithFields logs an info message with structured fields
-func (l *Logger) InfoWithFields(msg string, fields ...LogField) {
-	if l.shouldLog(INFO) {
-		l.logWithFields("INFO", msg, fields...)
-	}
-}
-
-// WarnWithFields logs a warning message with structured fields
-func (l *Logger) WarnWithFields(msg string, fields ...LogField) {
-	if l.shouldLog(WARN) {
-		l.logWithFields("WARN", msg, fields...)
-	}
-}
-
-// ErrorWithFields logs an error message with structured fields
-func (l *Logger) ErrorWithFields(msg string, fields ...LogField) {
-	if l.shouldLog(ERROR) {
-		l.logWithFields("ERROR", msg, fields...)
-	}
-}
-
-// logWithFields logs a message with structured fields
-func (l *Logger) logWithFields(level, msg string, fields ...LogField) {
-	// Extract context fields (trace_id, span_id) if context is present
-	contextFields := extractContextFields(l.ctx)
-
-	// Merge all fields: context fields, logger fields, and method-specific fields
-	// Priority order (last wins): context fields < logger fields < method fields
-	var mergedFields map[string]interface{}
-	if contextFields != nil || len(l.fields) > 0 || len(fields) > 0 {
-		mergedFields = make(map[string]interface{})
-
-		// Add context fields first (lowest priority)
-		for k, v := range contextFields {
-			mergedFields[k] = v
-		}
-
-		// Add logger's persistent fields (medium priority)
-		for k, v := range l.fields {
-			mergedFields[k] = v
-		}
-
-		// Add method-specific fields last (highest priority)
-		for _, f := range fields {
-			mergedFields[f.Key] = f.Value
-		}
-	}
-
-	l.writeLog(level, msg, mergedFields)
 }

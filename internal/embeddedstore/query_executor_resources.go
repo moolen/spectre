@@ -1,0 +1,123 @@
+package embeddedstore
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/moolen/spectre/internal/models"
+)
+
+func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.QueryRequest, pagination *models.PaginationRequest) (*models.QueryResult, *models.PaginationResponse, error) {
+	start := time.Now()
+
+	if err := query.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("invalid query: %w", err)
+	}
+
+	startTimeNs := query.StartTimestamp * 1e9
+	endTimeNs := query.EndTimestamp * 1e9
+
+	pageSize := models.DefaultPageSize
+	if pagination != nil {
+		pageSize = pagination.GetPageSize()
+	}
+
+	qe.projection.mu.RLock()
+	defer qe.projection.mu.RUnlock()
+
+	if qe.isEventQuery(query.Filters) {
+		return qe.executeEventQuery(startTimeNs, endTimeNs, query.Filters, pagination, pageSize, start)
+	}
+
+	filteredResources, stats, err := qe.collectFilteredResources(ctx, startTimeNs, endTimeNs, query.Filters)
+	if err != nil {
+		qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, err)
+		return nil, nil, err
+	}
+
+	startIdx := qe.cursorStartIndex(filteredResources, pagination)
+	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(filteredResources, startIdx, pageSize)
+
+	var resultEvents []models.Event
+	k8sEventsByResource := qe.collectK8sEventsForResources(filteredResources[startIdx:endIdx], startTimeNs, endTimeNs)
+	for _, resource := range filteredResources[startIdx:endIdx] {
+		resultEvents = append(resultEvents, resource.events...)
+	}
+
+	executionTime := time.Since(start)
+	queryResult := &models.QueryResult{
+		Events:              resultEvents,
+		Count:               int32(len(resultEvents)),            // #nosec G115 -- bounded by page size
+		ExecutionTimeMs:     int32(executionTime.Milliseconds()), // #nosec G115 -- bounded by duration
+		QueryStartTime:      startTimeNs,
+		QueryEndTime:        endTimeNs,
+		K8sEventsByResource: k8sEventsByResource,
+	}
+
+	paginationResp := &models.PaginationResponse{
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+		PageSize:   pageSize,
+	}
+
+	qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, nil)
+	return queryResult, paginationResp, nil
+}
+
+func (qe *QueryExecutor) collectFilteredResources(
+	ctx context.Context,
+	startTimeNs, endTimeNs int64,
+	filters models.QueryFilters,
+) ([]filteredResource, queryPlanStats, error) {
+	filtered := make([]filteredResource, 0, len(qe.projection.orderedResources))
+	stats := queryPlanStats{}
+
+	for _, key := range qe.projection.orderedResources {
+		meta, ok := qe.projection.resourceMetaByUID[key.uid]
+		if !ok {
+			continue
+		}
+		if !filters.Matches(meta) {
+			continue
+		}
+
+		resourceEvents, resourceStats, err := qe.resourceEvents(ctx, key.uid, meta, startTimeNs, endTimeNs)
+		if err != nil {
+			return nil, stats.merge(resourceStats), err
+		}
+		stats = stats.merge(resourceStats)
+		if len(resourceEvents) == 0 {
+			continue
+		}
+
+		filtered = append(filtered, filteredResource{
+			orderedResourceKey: key,
+			events:             resourceEvents,
+		})
+	}
+
+	return filtered, stats, nil
+}
+
+func (qe *QueryExecutor) collectResourceEvents(events []models.Event, startTimeNs, endTimeNs int64) []models.Event {
+	return resourceEventsInWindow(events, startTimeNs, endTimeNs)
+}
+
+func (qe *QueryExecutor) resourceEvents(
+	ctx context.Context,
+	uid string,
+	meta models.ResourceMetadata,
+	startTimeNs, endTimeNs int64,
+) ([]models.Event, queryPlanStats, error) {
+	if qe.planner == nil {
+		return qe.collectResourceEvents(qe.projection.eventsByResourceUID[uid], startTimeNs, endTimeNs), queryPlanStats{projectionUsed: true}, nil
+	}
+
+	return qe.planner.planResourceEvents(ctx, uid, meta, startTimeNs, endTimeNs)
+}
+
+func (qe *QueryExecutor) isEventQuery(filters models.QueryFilters) bool {
+	kinds := filters.GetKinds()
+	return len(kinds) == 1 && kinds[0] == "Event"
+}
