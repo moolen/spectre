@@ -11,6 +11,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/portforward"
@@ -126,14 +127,16 @@ func (pf *PortForwarder) run(contextName string) error {
 		return fmt.Errorf("no pods found in namespace %s", pf.Namespace)
 	}
 
-	// Use first pod (typically there's only one for services)
-	pod := pods.Items[0]
+	podName, err := selectPortForwardPodName(pods.Items)
+	if err != nil {
+		return err
+	}
 
 	// Prepare the port forward request
 	req := clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Namespace(pf.Namespace).
-		Name(pod.Name).
+		Name(podName).
 		SubResource("portforward")
 
 	transport, upgrader, err := spdy.RoundTripperFor(config)
@@ -153,6 +156,23 @@ func (pf *PortForwarder) run(contextName string) error {
 	}
 
 	return fw.ForwardPorts()
+}
+
+func selectPortForwardPodName(pods []corev1.Pod) (string, error) {
+	for _, pod := range pods {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		if !isPodReady(&pod) {
+			continue
+		}
+		return pod.Name, nil
+	}
+
+	return "", fmt.Errorf("no running ready pod available for port-forward")
 }
 
 // WaitForReady waits until the port-forwarded service is responsive.
