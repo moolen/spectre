@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { FilterBar } from './FilterBar';
 import { FilterState } from '../types';
@@ -71,6 +71,21 @@ describe('FilterBar - MultiSelectDropdown (Namespace Filter)', () => {
     expect(screen.getByText('production')).toBeInTheDocument();
   });
 
+  it('should render cluster-scoped resources with an explicit label', async () => {
+    const user = userEvent.setup();
+    const propsWithClusterScoped = {
+      ...defaultProps,
+      availableNamespaces: ['', 'default', 'production'],
+    };
+
+    render(<FilterBar {...propsWithClusterScoped} />);
+
+    const button = screen.getByRole('button', { name: /all namespaces/i });
+    await user.click(button);
+
+    expect(screen.getByText('Cluster-scoped')).toBeInTheDocument();
+  });
+
   it('should filter options when typing in search box', async () => {
     const user = userEvent.setup();
     render(<FilterBar {...defaultProps} />);
@@ -97,8 +112,6 @@ describe('FilterBar - MultiSelectDropdown (Namespace Filter)', () => {
     // Open dropdown
     const button = screen.getByRole('button', { name: /all namespaces/i });
     await user.click(button);
-
-    const listbox = screen.getByRole('listbox');
 
     // The dropdown opens and should have options visible
     expect(screen.getByText('default')).toBeInTheDocument();

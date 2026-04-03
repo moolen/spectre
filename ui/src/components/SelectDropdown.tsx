@@ -56,7 +56,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     if (multiple) {
       return (selected as string[]) || [];
     }
-    return selected ? [selected as string] : [];
+    return selected !== null ? [selected as string] : [];
   }, [selected, multiple]);
 
   // Optionally sort options alphabetically and filter by search query

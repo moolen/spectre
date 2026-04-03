@@ -8,6 +8,7 @@ import { usePersistedGraphTimestamp } from '../hooks/usePersistedGraphTimestamp'
 import { usePersistedGraphLookback } from '../hooks/usePersistedGraphLookback';
 import { useSettings } from '../hooks/useSettings';
 import { parseTimeExpression, formatDateTimeForDisplay } from '../utils/timeParsing';
+import { sortNamespaceFilterOptions, toNamespaceFilterValue } from '../utils/namespaceFilters';
 import { D3GraphNode } from '../types/namespaceGraph';
 import {
   NamespaceGraph,
@@ -98,22 +99,23 @@ export default function NamespaceGraphPage() {
   // Fetch available namespaces and kinds
   const { namespaces, kinds: availableKinds, loading: namespacesLoading, error: namespacesError } = useMetadata(metadataTimeRange);
 
-  // Sort namespaces alphabetically
-  const sortedNamespaces = useMemo(() => [...namespaces].sort(), [namespaces]);
+  // Sort namespaces alphabetically and keep cluster-scoped resources explicit
+  const sortedNamespaces = useMemo(() => sortNamespaceFilterOptions(namespaces), [namespaces]);
 
   // Persisted namespace from localStorage
   const { namespace: persistedNamespace, setNamespace: setPersistedNamespace } = usePersistedGraphNamespace(sortedNamespaces);
 
   // Parse URL parameters - namespace from URL takes priority
-  const urlNamespace = searchParams.get('namespace');
+  const rawUrlNamespace = searchParams.get('namespace');
+  const urlNamespace = rawUrlNamespace === null ? null : toNamespaceFilterValue(rawUrlNamespace);
   
   // Effective namespace: URL param > persisted > null
-  const selectedNamespace = urlNamespace || persistedNamespace;
+  const selectedNamespace = urlNamespace ?? persistedNamespace;
 
   // Update URL and persist when namespace changes
   const setSelectedNamespace = useCallback((ns: string | null) => {
     // Update URL
-    if (ns) {
+    if (ns !== null) {
       setSearchParams({ namespace: ns }, { replace: true });
     } else {
       setSearchParams({}, { replace: true });
@@ -127,7 +129,7 @@ export default function NamespaceGraphPage() {
 
   // Sync URL with persisted namespace on initial load (if no URL param but has persisted)
   useEffect(() => {
-    if (!urlNamespace && persistedNamespace && sortedNamespaces.includes(persistedNamespace)) {
+    if (urlNamespace === null && persistedNamespace && sortedNamespaces.includes(persistedNamespace)) {
       setSearchParams({ namespace: persistedNamespace }, { replace: true });
     }
   }, [urlNamespace, persistedNamespace, sortedNamespaces, setSearchParams]);
@@ -152,7 +154,7 @@ export default function NamespaceGraphPage() {
     }
     // Fallback to "now" if expression is invalid
     return new Date();
-  }, [timestampExpression, selectedNamespace]);
+  }, [timestampExpression]);
 
   // Determine if we're in live mode (viewing "now")
   const isLiveMode = timestampExpression.toLowerCase().trim() === 'now';
@@ -347,7 +349,7 @@ export default function NamespaceGraphPage() {
     <div className="h-full flex flex-col bg-[var(--color-app-bg)]">
       {/* Controls bar */}
       <NamespaceGraphControls
-        namespace={selectedNamespace || sortedNamespaces[0]}
+        namespace={selectedNamespace ?? sortedNamespaces[0]}
         namespaces={sortedNamespaces}
         onNamespaceChange={setSelectedNamespace}
         kinds={selectedKinds}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef, startTransition } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Timeline } from '../components/Timeline';
@@ -14,6 +14,7 @@ import { useSettings } from '../hooks/useSettings';
 import { parseTimeExpression } from '../utils/timeParsing';
 import { fetchRootCauseAnalysis } from '../services/rootCauseService';
 import { toast } from '../utils/toast';
+import { fromNamespaceFilterValue, sortNamespaceFilterOptions } from '../utils/namespaceFilters';
 
 const AUTO_REFRESH_INTERVALS: Record<string, number> = {
   off: 0,
@@ -199,6 +200,10 @@ function TimelinePage() {
 
   // Fetch metadata (namespaces and kinds) for the time range
   const { namespaces: availableNamespaces, kinds: availableKinds } = useMetadata(timeRange);
+  const sortedAvailableNamespaces = useMemo(
+    () => sortNamespaceFilterOptions(availableNamespaces),
+    [availableNamespaces]
+  );
 
   // Get default kinds from settings
   const { defaultKinds } = useSettings();
@@ -309,7 +314,7 @@ function TimelinePage() {
 
   // Pass filter arrays to API for server-side filtering with pagination
   const apiFilters = useMemo(() => ({
-    namespaces: filters.namespaces,
+    namespaces: filters.namespaces.map(fromNamespaceFilterValue),
     kinds: filters.kinds,
   }), [filters.namespaces, filters.kinds]);
 
@@ -550,7 +555,7 @@ function TimelinePage() {
         setFilters={setFilters}
         timeRange={displayTimeRange}
         onTimeRangeChange={handleTimeRangeChange}
-        availableNamespaces={availableNamespaces}
+        availableNamespaces={sortedAvailableNamespaces}
         availableKinds={availableKinds}
         rawStart={rawTimeExpressions.start}
         rawEnd={rawTimeExpressions.end}
@@ -692,4 +697,3 @@ function TimelinePage() {
 }
 
 export default TimelinePage;
-

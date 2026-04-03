@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient } from '../services/api';
 import { NamespaceGraphResponse, mergeNamespaceGraphResponses } from '../types/namespaceGraph';
+import { fromNamespaceFilterValue } from '../utils/namespaceFilters';
 
 export interface UseNamespaceGraphOptions {
   /** Namespace to fetch graph for (null to disable fetching) */
@@ -124,7 +125,7 @@ export function useNamespaceGraph(options: UseNamespaceGraphOptions): UseNamespa
       const opts = optionsRef.current;
 
       const response = await apiClient.getNamespaceGraph({
-        namespace: opts.namespace!,
+        namespace: fromNamespaceFilterValue(opts.namespace!),
         timestamp: opts.timestampNanos,
         includeAnomalies: opts.includeAnomalies,
         includeCausalPaths: opts.includeCausalPaths,

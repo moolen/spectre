@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '../services/api';
 import { TimeRange } from '../types';
+import { toNamespaceFilterValue } from '../utils/namespaceFilters';
 
 interface UseMetadataResult {
   namespaces: string[];
@@ -17,9 +18,11 @@ export const useMetadata = (timeRange: TimeRange | null): UseMetadataResult => {
   const [kinds, setKinds] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
+  const startTimeMs = timeRange?.start.getTime();
+  const endTimeMs = timeRange?.end.getTime();
 
   useEffect(() => {
-    if (!timeRange) {
+    if (startTimeMs === undefined || endTimeMs === undefined) {
       setLoading(false);
       return;
     }
@@ -30,10 +33,10 @@ export const useMetadata = (timeRange: TimeRange | null): UseMetadataResult => {
         setError(null);
 
         let metadata = await apiClient.getMetadata(
-          timeRange.start.getTime(),
-          timeRange.end.getTime()
+          startTimeMs,
+          endTimeMs
         );
-        setNamespaces(metadata.namespaces || []);
+        setNamespaces((metadata.namespaces || []).map(toNamespaceFilterValue));
         setKinds(metadata.kinds || []);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to fetch metadata';
@@ -45,7 +48,7 @@ export const useMetadata = (timeRange: TimeRange | null): UseMetadataResult => {
     };
 
     fetchMetadata();
-  }, [timeRange?.start.getTime(), timeRange?.end.getTime()]);
+  }, [startTimeMs, endTimeMs]);
 
   return {
     namespaces,
@@ -54,4 +57,3 @@ export const useMetadata = (timeRange: TimeRange | null): UseMetadataResult => {
     error,
   };
 };
-

@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { SelectDropdown } from '../SelectDropdown';
 import { TimestampPicker } from '../TimestampPicker';
 import { LOOKBACK_OPTIONS } from '../../hooks/usePersistedGraphLookback';
+import { formatNamespaceFilterOption } from '../../utils/namespaceFilters';
 
 // Create a lookup map for formatting lookback values to labels
 const LOOKBACK_LABELS: Record<string, string> = Object.fromEntries(
@@ -51,7 +52,7 @@ export const NamespaceGraphControls: React.FC<NamespaceGraphControlsProps> = ({
   onLookbackChange,
 }) => {
   const handleNamespaceChange = (value: string | string[] | null) => {
-    if (value && typeof value === 'string') {
+    if (typeof value === 'string') {
       onNamespaceChange(value);
     }
   };
@@ -69,6 +70,7 @@ export const NamespaceGraphControls: React.FC<NamespaceGraphControlsProps> = ({
         selected={namespace}
         onChange={handleNamespaceChange}
         multiple={false}
+        formatOption={formatNamespaceFilterOption}
         minWidth="200px"
       />
 

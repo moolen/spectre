@@ -2,6 +2,7 @@ import React from 'react';
 import { FilterState, TimeRange } from '../types';
 import { TimeRangeDropdown } from './TimeRangeDropdown';
 import { SelectDropdown } from './SelectDropdown';
+import { formatNamespaceFilterOption } from '../utils/namespaceFilters';
 
 interface FilterBarProps {
   filters: FilterState;
@@ -52,6 +53,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeR
                 selected={filters.namespaces}
                 onChange={handleNamespacesChange}
                 multiple={true}
+                formatOption={formatNamespaceFilterOption}
             />
 
             <SelectDropdown
