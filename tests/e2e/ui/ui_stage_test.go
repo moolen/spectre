@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -1156,220 +1155,15 @@ fallback:
 	return s
 }
 
-func (s *UIStage) analyze_root_cause_button_exists() *UIStage {
-	// Look for the "Analyze Root Cause" button in the detail panel
+func (s *UIStage) analyze_root_cause_button_is_not_visible() *UIStage {
 	button := s.browserTest.Page.GetByRole("button", playwright.PageGetByRoleOptions{
 		Name: "Analyze Root Cause",
 	})
 
-	// Wait for button to be visible
-	err := button.WaitFor(playwright.LocatorWaitForOptions{
-		State:   playwright.WaitForSelectorStateVisible,
-		Timeout: playwright.Float(10000),
-	})
-	s.require.NoError(err, "Analyze Root Cause button should be visible")
-	s.t.Log("✓ Analyze Root Cause button found")
-	return s
-}
-
-func (s *UIStage) analyze_root_cause_button_is_clicked() *UIStage {
-	button := s.browserTest.Page.GetByRole("button", playwright.PageGetByRoleOptions{
-		Name: "Analyze Root Cause",
-	})
-
-	s.require.NoError(button.Click(), "failed to click Analyze Root Cause button")
-	s.t.Log("✓ Clicked Analyze Root Cause button")
-
-	// Wait for navigation to root cause page
-	time.Sleep(3 * time.Second)
-	return s
-}
-
-func (s *UIStage) root_cause_page_is_loaded() *UIStage {
-	// Wait for URL to contain rcResourceUID and rcTimestamp query parameters
-	// The root cause view is shown as a modal on the timeline page, not a separate page
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		url := s.browserTest.Page.URL()
-		if containsString(url, "rcResourceUID") && containsString(url, "rcTimestamp") {
-			s.t.Logf("✓ Root cause parameters in URL: %s", url)
-
-			// Wait for network to be idle (API call to fetch root cause)
-			s.require.NoError(s.browserTest.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-				State: playwright.LoadStateNetworkidle,
-			}))
-
-			// Wait for React to render the root cause modal
-			time.Sleep(3 * time.Second)
-			return s
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	s.t.Fatal("Timeout waiting for root cause parameters in URL")
-	return s
-}
-
-func (s *UIStage) root_cause_graph_is_visible() *UIStage {
-	// The root cause view appears as a modal/overlay
-	// First verify the modal is visible, then check for the graph
-
-	// Wait a bit for modal animation to complete and for data to load
-	time.Sleep(2 * time.Second)
-
-	// The root cause graph renders nodes as <div> elements with specific classes
-	// (not as SVG g.node elements - SVG is only used for edges/arrows)
-	// Look for the node cards which are divs with class "absolute cursor-pointer"
-	graphNodes := s.browserTest.Page.Locator("div.absolute.cursor-pointer")
-
-	// Wait for at least one node to appear
-	err := graphNodes.First().WaitFor(playwright.LocatorWaitForOptions{
-		State:   playwright.WaitForSelectorStateVisible,
-		Timeout: playwright.Float(30000),
-	})
-	s.require.NoError(err, "root cause graph nodes should be visible")
-
-	// Count the nodes
-	nodeCount, err := graphNodes.Count()
-	s.require.NoError(err)
-	s.require.Greater(nodeCount, 0, "graph should have at least one node")
-
-	s.t.Logf("✓ Root cause graph visible with %d node cards", nodeCount)
-	return s
-}
-
-func (s *UIStage) root_cause_graph_has_expected_nodes() *UIStage {
-	// Verify the graph has the expected nodes:
-	// - Pod (symptom)
-	// - Deployment (managed by)
-	// Potentially also ReplicaSet depending on the graph structure
-
-	// Nodes are rendered as div cards with the kind in an uppercase span element
-	result, err := s.browserTest.Page.Evaluate(`() => {
-		// Find all node cards (divs with absolute cursor-pointer classes)
-		const nodeCards = document.querySelectorAll('div.absolute.cursor-pointer');
-		const nodeKinds = [];
-
-		nodeCards.forEach(card => {
-			// Find the kind span (uppercase text)
-			const kindSpan = card.querySelector('span.uppercase');
-			if (kindSpan) {
-				nodeKinds.push(kindSpan.textContent.trim());
-			}
-		});
-
-		return {
-			kinds: nodeKinds,
-			count: nodeKinds.length
-		};
-	}`, nil)
-	s.require.NoError(err)
-
-	resultMap := result.(map[string]interface{})
-	kinds := resultMap["kinds"].([]interface{})
-
-	// Handle both int and float64 types for count
-	var count int
-	switch v := resultMap["count"].(type) {
-	case float64:
-		count = int(v)
-	case int:
-		count = v
-	default:
-		s.t.Logf("⚠ Unexpected count type: %T", v)
-		count = 0
-	}
-
-	s.t.Logf("✓ Found %d node cards in graph", count)
-	for i, kind := range kinds {
-		s.t.Logf("  Node %d: %v", i, kind)
-	}
-
-	// Verify we have at least 2 nodes (Pod and Deployment)
-	s.require.GreaterOrEqual(count, 2, "graph should have at least 2 nodes (Pod and Deployment)")
-
-	// Check for Pod and Deployment in node kinds (case-insensitive)
-	hasKind := func(expectedKind string) bool {
-		for _, kind := range kinds {
-			if kindStr, ok := kind.(string); ok {
-				if strings.EqualFold(kindStr, expectedKind) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	s.require.True(hasKind("POD"), "graph should contain a Pod node")
-	s.require.True(hasKind("DEPLOYMENT"), "graph should contain a Deployment node")
-
-	return s
-}
-
-func (s *UIStage) root_cause_graph_has_expected_edges() *UIStage {
-	// Verify the graph has edges connecting the nodes
-	// Edges are SVG paths within a g.arrows group
-	result, err := s.browserTest.Page.Evaluate(`() => {
-		const arrowGroups = document.querySelectorAll('g.arrows');
-		let totalPaths = 0;
-
-		arrowGroups.forEach(group => {
-			const paths = group.querySelectorAll('path');
-			totalPaths += paths.length;
-		});
-
-		return totalPaths;
-	}`, nil)
-	s.require.NoError(err)
-
-	var edgeCount int
-	switch v := result.(type) {
-	case float64:
-		edgeCount = int(v)
-	case int:
-		edgeCount = v
-	default:
-		s.t.Logf("⚠ Unexpected edge count type: %T", v)
-		edgeCount = 0
-	}
-
-	s.require.Greater(edgeCount, 0, "graph should have at least one edge")
-	s.t.Logf("✓ Found %d edge paths in graph", edgeCount)
-	return s
-}
-
-func (s *UIStage) root_cause_lookback_is_changed_to(duration string) *UIStage {
-	s.t.Logf("Changing root cause lookback to: %s", duration)
-
-	// Look for lookback dropdown or input
-	// The exact selector depends on the UI implementation
-	// Try common patterns for time selection
-
-	// The lookback dropdown is a native <select> element
-	// Find it by looking for a select with options containing time durations
-	lookbackSelect := s.browserTest.Page.Locator("select").Filter(playwright.LocatorFilterOptions{
-		HasText: "minutes",
-	})
-
-	// Use selectOption to select by visible text label
-	_, err := lookbackSelect.SelectOption(playwright.SelectOptionValues{
-		Labels: &[]string{duration},
-	}, playwright.LocatorSelectOptionOptions{
-		Timeout: playwright.Float(10000),
-	})
-	s.require.NoError(err, "should be able to select lookback option: %s", duration)
-
-	s.t.Logf("✓ Changed lookback to: %s", duration)
-
-	// Wait for graph to reload
-	time.Sleep(5 * time.Second)
-
-	// Wait for network to be idle again
-	s.require.NoError(s.browserTest.Page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-		State: playwright.LoadStateNetworkidle,
-	}))
-
-	time.Sleep(2 * time.Second)
+	visible, err := button.IsVisible()
+	s.require.NoError(err, "failed to check Analyze Root Cause button visibility")
+	s.require.False(visible, "Analyze Root Cause button should not be visible")
+	s.t.Log("✓ Analyze Root Cause button is not visible")
 	return s
 }
 
@@ -1396,18 +1190,4 @@ func (s *UIStage) waitForDeploymentReady(ctx context.Context, namespace, name st
 	}
 
 	s.t.Fatalf("Timeout waiting for deployment %s/%s to be ready", namespace, name)
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || substr == "" ||
-		(s != "" && substr != "" && findInString(s, substr)))
-}
-
-func findInString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

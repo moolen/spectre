@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
@@ -18,13 +19,13 @@ import (
 // TimelineHandler handles /v1/timeline requests
 // Returns full resource data with statusSegments and events for timeline visualization
 type TimelineHandler struct {
-	timelineService *api.TimelineService
+	timelineService *apptimeline.Service
 	logger          *logging.Logger
 	tracer          trace.Tracer
 }
 
 // NewTimelineHandler creates a new timeline handler using the provided TimelineService
-func NewTimelineHandler(timelineService *api.TimelineService, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
+func NewTimelineHandler(timelineService *apptimeline.Service, logger *logging.Logger, tracer trace.Tracer) *TimelineHandler {
 	return &TimelineHandler{
 		timelineService: timelineService,
 		logger:          logger,

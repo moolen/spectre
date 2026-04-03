@@ -9,18 +9,18 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analysis"
-	"github.com/moolen/spectre/internal/api"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/models"
 )
 
 // ResourceTimelineChangesTool implements the resource_timeline_changes MCP tool
 // which returns semantic field-level diffs for specific resources by UID.
 type ResourceTimelineChangesTool struct {
-	timelineService *api.TimelineService
+	timelineService *apptimeline.Service
 }
 
 // NewResourceTimelineChangesTool creates a new resource timeline changes tool
-func NewResourceTimelineChangesTool(timelineService *api.TimelineService) *ResourceTimelineChangesTool {
+func NewResourceTimelineChangesTool(timelineService *apptimeline.Service) *ResourceTimelineChangesTool {
 	return &ResourceTimelineChangesTool{
 		timelineService: timelineService,
 	}

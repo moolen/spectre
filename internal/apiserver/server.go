@@ -10,6 +10,7 @@ import (
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/api"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/integration"
 	"github.com/moolen/spectre/internal/logging"
@@ -41,7 +42,7 @@ type Server struct {
 	graphClient      graph.Client
 	analysisStore    analysisstore.AnalysisStore
 	importIngestor   api.BatchIngestor     // Backend ingest target for imports
-	timelineService  *api.TimelineService  // Shared timeline service for REST handlers and MCP tools
+	timelineService  *apptimeline.Service  // Shared timeline service for REST handlers and MCP tools
 	metadataCache    *api.MetadataCache    // In-memory metadata cache for fast responses
 	nsGraphCache     *namespacegraph.Cache // In-memory namespace graph cache for fast responses
 	staticCache      *staticFileCache      // In-memory static file cache for fast UI serving
@@ -123,13 +124,13 @@ func NewWithStorageGraphAndPipeline(
 	tracer := s.getTracer("spectre.api.timeline")
 	if graphExecutor != nil && querySource == api.TimelineQuerySourceGraph {
 		s.logger.Info("Timeline service using GRAPH query executor")
-		s.timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, querySource, s.logger, tracer)
+		s.timelineService = apptimeline.NewServiceWithMode(storageExecutor, graphExecutor, apptimeline.QuerySourceGraph, s.logger, tracer)
 	} else if graphExecutor != nil {
 		s.logger.Info("Timeline service using STORAGE query executor (graph available for comparison)")
-		s.timelineService = api.NewTimelineServiceWithMode(storageExecutor, graphExecutor, api.TimelineQuerySourceStorage, s.logger, tracer)
+		s.timelineService = apptimeline.NewServiceWithMode(storageExecutor, graphExecutor, apptimeline.QuerySourceStorage, s.logger, tracer)
 	} else {
 		s.logger.Info("Timeline service using STORAGE query executor only")
-		s.timelineService = api.NewTimelineService(storageExecutor, s.logger, tracer)
+		s.timelineService = apptimeline.NewService(storageExecutor, s.logger, tracer)
 	}
 
 	// Create namespace graph cache if enabled and graph client is available
@@ -342,7 +343,7 @@ func (s *Server) GetNamespaceGraphCache() *namespacegraph.Cache {
 
 // GetTimelineService returns the shared timeline service for use by MCP tools.
 // This enables MCP tools to call the service directly instead of making HTTP requests.
-func (s *Server) GetTimelineService() *api.TimelineService {
+func (s *Server) GetTimelineService() *apptimeline.Service {
 	return s.timelineService
 }
 

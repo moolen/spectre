@@ -37,7 +37,7 @@ func NewClient(baseURL string, httpClient *http.Client, secretWatcher *victorial
 }
 
 // QueryLogs executes a log query and returns matching log entries.
-// Uses /v1/search endpoint with Elasticsearch DSL.
+// Uses Logz.io's /v1/search endpoint with Elasticsearch DSL.
 func (c *Client) QueryLogs(ctx context.Context, params QueryParams) (*QueryResponse, error) {
 	// Build Elasticsearch DSL query
 	query := BuildLogsQuery(params)
@@ -116,7 +116,7 @@ func (c *Client) QueryLogs(ctx context.Context, params QueryParams) (*QueryRespo
 }
 
 // QueryAggregation executes an aggregation query and returns grouped counts.
-// Uses /v1/search endpoint with Elasticsearch aggregations.
+// Uses Logz.io's /v1/search endpoint with Elasticsearch aggregations.
 func (c *Client) QueryAggregation(ctx context.Context, params QueryParams, groupByFields []string) (*AggregationResponse, error) {
 	// Build Elasticsearch DSL aggregation query
 	query := BuildAggregationQuery(params, groupByFields)

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/moolen/spectre/internal/api"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	corev1 "k8s.io/api/core/v1"
@@ -26,14 +26,14 @@ const (
 
 // EventCaptureHandler captures Kubernetes events and routes them to an ingest backend.
 type EventCaptureHandler struct {
-	eventIngestor api.EventIngestor
+	eventIngestor apptimeline.EventIngestor
 	auditLog      AuditLogWriter // Optional audit log
 	logger        *logging.Logger
 	pruner        *ManagedFieldsPruner
 }
 
 // NewEventCaptureHandler creates a new event capture handler.
-func NewEventCaptureHandler(eventIngestor api.EventIngestor) *EventCaptureHandler {
+func NewEventCaptureHandler(eventIngestor apptimeline.EventIngestor) *EventCaptureHandler {
 	return &EventCaptureHandler{
 		eventIngestor: eventIngestor,
 		logger:        logging.GetLogger("event_handler"),
@@ -47,7 +47,7 @@ func (h *EventCaptureHandler) SetAuditLog(writer AuditLogWriter) {
 }
 
 // NewEventCaptureHandlerWithMode creates an event handler with specified mode.
-func NewEventCaptureHandlerWithMode(storage interface{}, eventIngestor api.EventIngestor, mode TimelineMode) *EventCaptureHandler {
+func NewEventCaptureHandlerWithMode(storage interface{}, eventIngestor apptimeline.EventIngestor, mode TimelineMode) *EventCaptureHandler {
 	// storage parameter is ignored - kept for signature compatibility
 	// mode must be TimelineModeGraph
 	return &EventCaptureHandler{

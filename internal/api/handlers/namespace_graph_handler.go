@@ -8,6 +8,7 @@ import (
 
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
+	appgraph "github.com/moolen/spectre/internal/app/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -36,9 +37,21 @@ func normalizeNamespaceGraphTimestamp(ts, now int64) int64 {
 	return ts
 }
 
+// normalizeToNanoseconds accepts Unix timestamps in seconds, milliseconds, or nanoseconds.
+func normalizeToNanoseconds(ts int64) int64 {
+	switch {
+	case ts < 100_000_000_000:
+		return ts * int64(time.Second)
+	case ts < 100_000_000_000_000:
+		return ts * int64(time.Millisecond)
+	default:
+		return ts
+	}
+}
+
 // NamespaceGraphHandler handles /v1/namespace-graph requests
 type NamespaceGraphHandler struct {
-	graphService *api.GraphService
+	graphService *appgraph.Service
 	cache        *namespacegraph.Cache
 	logger       *logging.Logger
 	validator    *api.Validator
@@ -46,7 +59,7 @@ type NamespaceGraphHandler struct {
 }
 
 // NewNamespaceGraphHandler creates a new handler without caching
-func NewNamespaceGraphHandler(graphService *api.GraphService, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
+func NewNamespaceGraphHandler(graphService *appgraph.Service, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
 	return &NamespaceGraphHandler{
 		graphService: graphService,
 		logger:       logger,
@@ -56,7 +69,7 @@ func NewNamespaceGraphHandler(graphService *api.GraphService, logger *logging.Lo
 }
 
 // NewNamespaceGraphHandlerWithCache creates a new handler with caching enabled
-func NewNamespaceGraphHandlerWithCache(graphService *api.GraphService, cache *namespacegraph.Cache, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
+func NewNamespaceGraphHandlerWithCache(graphService *appgraph.Service, cache *namespacegraph.Cache, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
 	return &NamespaceGraphHandler{
 		graphService: graphService,
 		cache:        cache,

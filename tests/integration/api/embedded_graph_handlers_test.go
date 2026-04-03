@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moolen/spectre/internal/analysis"
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	analysisembedded "github.com/moolen/spectre/internal/analysis/store/embedded"
 	"github.com/moolen/spectre/internal/api"
@@ -18,33 +17,6 @@ import (
 	"github.com/moolen/spectre/internal/models"
 	"github.com/stretchr/testify/require"
 )
-
-func TestEmbeddedCausalGraphHandler_FluxHelmRelease(t *testing.T) {
-	server := newEmbeddedFixtureServer(t, "testrootcause-fluxhelmrelease-endpoint-e.jsonl")
-	timestamp, podUID, err := ExtractTimestampAndPodUIDFromFile(fixturePath(t, "testrootcause-fluxhelmrelease-endpoint-e.jsonl"))
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/causal-graph", http.NoBody)
-	q := req.URL.Query()
-	q.Set("resourceUID", podUID)
-	q.Set("failureTimestamp", time.Unix(0, timestamp).Format(time.RFC3339Nano))
-	q.Set("lookback", "10m")
-	q.Set("maxDepth", "5")
-	req.URL.RawQuery = q.Encode()
-
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-
-	var result analysis.RootCauseAnalysisV2
-	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &result))
-	require.Contains(t, nodeKinds(&result), "HelmRelease")
-	require.Contains(t, nodeKinds(&result), "Deployment")
-	assertEdgeBetweenKindsLocal(t, &result, "HelmRelease", "MANAGES", "Deployment")
-	assertEdgeBetweenKindsLocal(t, &result, "Deployment", "OWNS", "ReplicaSet")
-	assertEdgeBetweenKindsLocal(t, &result, "ReplicaSet", "OWNS", "Pod")
-}
 
 func TestEmbeddedNamespaceGraphHandler_IngressFixture(t *testing.T) {
 	server := newEmbeddedFixtureServer(t, "testrootcause-ingress-samenamespace-endp.jsonl")
@@ -159,37 +131,4 @@ func namespaceForUID(events []models.Event, uid string) string {
 		}
 	}
 	return ""
-}
-
-func nodeKinds(result *analysis.RootCauseAnalysisV2) map[string]bool {
-	kinds := make(map[string]bool)
-	for _, node := range result.Incident.Graph.Nodes {
-		kinds[node.Resource.Kind] = true
-	}
-	return kinds
-}
-
-func findNodeByKindLocal(result *analysis.RootCauseAnalysisV2, kind string) *analysis.GraphNode {
-	for i := range result.Incident.Graph.Nodes {
-		if result.Incident.Graph.Nodes[i].Resource.Kind == kind {
-			return &result.Incident.Graph.Nodes[i]
-		}
-	}
-	return nil
-}
-
-func assertEdgeBetweenKindsLocal(t *testing.T, result *analysis.RootCauseAnalysisV2, fromKind, relType, toKind string) {
-	t.Helper()
-	fromNode := findNodeByKindLocal(result, fromKind)
-	require.NotNil(t, fromNode)
-	toNode := findNodeByKindLocal(result, toKind)
-	require.NotNil(t, toNode)
-	found := false
-	for _, edge := range result.Incident.Graph.Edges {
-		if edge.From == fromNode.ID && edge.To == toNode.ID && edge.RelationshipType == relType {
-			found = true
-			break
-		}
-	}
-	require.True(t, found, "expected edge %s -[%s]-> %s", fromKind, relType, toKind)
 }

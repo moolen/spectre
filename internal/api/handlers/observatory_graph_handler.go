@@ -6,6 +6,7 @@ import (
 
 	observatorygraph "github.com/moolen/spectre/internal/analysis/observatory_graph"
 	"github.com/moolen/spectre/internal/api"
+	appgraph "github.com/moolen/spectre/internal/app/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -13,17 +14,17 @@ import (
 
 // ObservatoryGraphHandler handles /v1/observatory-graph requests
 type ObservatoryGraphHandler struct {
-	analyzer  *observatorygraph.Analyzer
-	logger    *logging.Logger
-	tracer    trace.Tracer
+	graphService *appgraph.Service
+	logger       *logging.Logger
+	tracer       trace.Tracer
 }
 
 // NewObservatoryGraphHandler creates a new handler
-func NewObservatoryGraphHandler(analyzer *observatorygraph.Analyzer, logger *logging.Logger, tracer trace.Tracer) *ObservatoryGraphHandler {
+func NewObservatoryGraphHandler(graphService *appgraph.Service, logger *logging.Logger, tracer trace.Tracer) *ObservatoryGraphHandler {
 	return &ObservatoryGraphHandler{
-		analyzer: analyzer,
-		logger:   logger,
-		tracer:   tracer,
+		graphService: graphService,
+		logger:       logger,
+		tracer:       tracer,
 	}
 }
 
@@ -56,7 +57,7 @@ func (h *ObservatoryGraphHandler) Handle(w http.ResponseWriter, r *http.Request)
 		input.Integration, input.Namespace, input.WorkloadName)
 
 	// Execute analysis
-	result, err := h.analyzer.Analyze(ctx, input)
+	result, err := h.graphService.AnalyzeObservatoryGraph(ctx, input)
 	if err != nil {
 		if span != nil {
 			span.RecordError(err)

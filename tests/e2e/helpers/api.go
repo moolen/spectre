@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/moolen/spectre/internal/analysis"
 	pb "github.com/moolen/spectre/internal/api/pb"
 	"github.com/moolen/spectre/internal/api/pb/pbconnect"
 )
@@ -23,7 +21,7 @@ type APIClient struct {
 	t       *testing.T
 }
 
-// SearchResponse matches the /v1/search endpoint response.
+// SearchResponse matches the timeline response shape used by e2e tests.
 type SearchResponse struct {
 	Resources       []Resource `json:"resources"`
 	Count           int        `json:"count"`
@@ -76,20 +74,6 @@ type TimeRange struct {
 	Latest   int64 `json:"latest"`
 }
 
-// SegmentsResponse represents the /v1/resources/{id}/segments response.
-type SegmentsResponse struct {
-	Segments   []StatusSegment `json:"segments"`
-	ResourceID string          `json:"resourceId"`
-	Count      int             `json:"count"`
-}
-
-// EventsResponse represents the /v1/resources/{id}/events response.
-type EventsResponse struct {
-	Events     []K8sEvent `json:"events"`
-	Count      int        `json:"count"`
-	ResourceID string     `json:"resourceId"`
-}
-
 // NewAPIClient creates a new API client.
 // baseURL is the HTTP REST API endpoint (supports HTTP, Connect, gRPC, and gRPC-Web)
 func NewAPIClient(t *testing.T, baseURL string) *APIClient {
@@ -102,29 +86,9 @@ func NewAPIClient(t *testing.T, baseURL string) *APIClient {
 	}
 }
 
-// Search queries the /v1/search endpoint.
+// Search queries the timeline endpoint with the historical search semantics used by tests.
 func (a *APIClient) Search(ctx context.Context, startTime, endTime int64, namespace, kind string) (*SearchResponse, error) {
-	url := fmt.Sprintf("%s/v1/search?start=%d&end=%d", a.BaseURL, startTime, endTime)
-
-	if namespace != "" {
-		url += fmt.Sprintf("&namespace=%s", namespace)
-	}
-	if kind != "" {
-		url += fmt.Sprintf("&kind=%s", kind)
-	}
-
-	resp, err := a.doRequest(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result SearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode search response: %w", err)
-	}
-
-	return &result, nil
+	return a.Timeline(ctx, startTime, endTime, namespace, kind)
 }
 
 // GetMetadata queries the /v1/metadata endpoint.
@@ -144,79 +108,6 @@ func (a *APIClient) GetMetadata(ctx context.Context, startTime, endTime *int64) 
 	var result MetadataResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode metadata response: %w", err)
-	}
-
-	return &result, nil
-}
-
-// GetResource queries the /v1/resources/{id} endpoint.
-func (a *APIClient) GetResource(ctx context.Context, resourceID string) (*Resource, error) {
-	url := fmt.Sprintf("%s/v1/resources/%s", a.BaseURL, resourceID)
-
-	resp, err := a.doRequest(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result Resource
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode resource response: %w", err)
-	}
-
-	return &result, nil
-}
-
-// GetSegments queries the /v1/resources/{id}/segments endpoint.
-func (a *APIClient) GetSegments(ctx context.Context, resourceID string, startTime, endTime *int64) (*SegmentsResponse, error) {
-	url := fmt.Sprintf("%s/v1/resources/%s/segments", a.BaseURL, resourceID)
-
-	if startTime != nil && endTime != nil {
-		url += fmt.Sprintf("?start=%d&end=%d", *startTime, *endTime)
-	}
-
-	resp, err := a.doRequest(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result SegmentsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode segments response: %w", err)
-	}
-
-	return &result, nil
-}
-
-// GetEvents queries the /v1/resources/{id}/events endpoint.
-func (a *APIClient) GetEvents(ctx context.Context, resourceID string, startTime, endTime *int64, limit *int) (*EventsResponse, error) {
-	url := fmt.Sprintf("%s/v1/resources/%s/events", a.BaseURL, resourceID)
-
-	first := true
-	if startTime != nil && endTime != nil {
-		url += fmt.Sprintf("?start=%d&end=%d", *startTime, *endTime)
-		first = false
-	}
-
-	if limit != nil {
-		if first {
-			url += "?"
-		} else {
-			url += "&"
-		}
-		url += fmt.Sprintf("limit=%d", *limit)
-	}
-
-	resp, err := a.doRequest(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result EventsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode events response: %w", err)
 	}
 
 	return &result, nil
@@ -280,56 +171,6 @@ func (a *APIClient) Health(ctx context.Context) error {
 	}
 	resp.Body.Close()
 	return nil
-}
-
-// RootCause queries the /v1/causal-graph endpoint.
-func (a *APIClient) RootCause(ctx context.Context, resourceUID string, failureTimestamp int64, lookback time.Duration, maxDepth int, minConfidence float64) (*analysis.RootCauseAnalysisV2, error) {
-	baseURL := fmt.Sprintf("%s/v1/causal-graph", a.BaseURL)
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse base URL: %w", err)
-	}
-
-	q := u.Query()
-	q.Set("resourceUID", resourceUID)
-	q.Set("failureTimestamp", fmt.Sprintf("%d", failureTimestamp))
-
-	if lookback > 0 {
-		q.Set("lookback", lookback.String())
-	}
-	if maxDepth > 0 {
-		q.Set("maxDepth", fmt.Sprintf("%d", maxDepth))
-	}
-	if minConfidence > 0 {
-		q.Set("minConfidence", fmt.Sprintf("%.2f", minConfidence))
-	}
-
-	u.RawQuery = q.Encode()
-	urlStr := u.String()
-
-	resp, err := a.doRequest(ctx, "GET", urlStr, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// Read the full response body for better error reporting
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var result analysis.RootCauseAnalysisV2
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		// Include first 500 chars of response in error for debugging
-		preview := string(bodyBytes)
-		if len(preview) > 500 {
-			preview = preview[:500] + "..."
-		}
-		return nil, fmt.Errorf("failed to decode root cause response: %w. Response body: %s", err, preview)
-	}
-
-	return &result, nil
 }
 
 // TimelineGRPC queries the timeline using the Connect streaming API.

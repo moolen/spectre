@@ -3,7 +3,7 @@
  * These interfaces match the backend API response formats
  */
 
-// Search endpoint response
+// Timeline endpoint response
 export interface SearchResponse {
   resources: Resource[];
   count: number;
@@ -55,18 +55,4 @@ export interface MetadataResponse {
 export interface TimeRangeInfo {
   earliest: number;  // Unix seconds
   latest: number;    // Unix seconds
-}
-
-// Events response for resource audit trail
-export interface EventsResponse {
-  events: K8sEventDTO[];
-  count: number;
-  resourceId: string;
-}
-
-// Segments response for status timeline
-export interface SegmentsResponse {
-  segments: StatusSegment[];
-  resourceId: string;
-  count: number;
 }

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/analyzer"
-	"github.com/moolen/spectre/internal/api"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -25,11 +25,11 @@ const (
 
 // ClusterHealthTool implements the cluster_health MCP tool
 type ClusterHealthTool struct {
-	timelineService *api.TimelineService
+	timelineService *apptimeline.Service
 }
 
 // NewClusterHealthTool creates a new cluster health tool using TimelineService
-func NewClusterHealthTool(timelineService *api.TimelineService) *ClusterHealthTool {
+func NewClusterHealthTool(timelineService *apptimeline.Service) *ClusterHealthTool {
 	return &ClusterHealthTool{
 		timelineService: timelineService,
 	}

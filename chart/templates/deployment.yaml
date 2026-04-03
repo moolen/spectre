@@ -119,6 +119,9 @@ spec:
         {{- if .Values.integrations.enabled }}
         - --integrations-config={{ .Values.integrations.configPath }}
         {{- end }}
+        {{- if .Values.integrations.persistence.enabled }}
+        - --data-dir={{ .Values.integrations.persistence.mountPath }}/data
+        {{- end }}
         {{- range .Values.extraArgs }}
         - {{ . }}
         {{- end }}
