@@ -1,0 +1,27 @@
+{{- if and .Values.embedded.enabled .Values.embedded.persistence.enabled (not .Values.embedded.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "spectre.fullname" . }}-embedded
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "spectre.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embedded
+  {{- with .Values.embedded.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.embedded.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.embedded.persistence.size }}
+  {{- if .Values.embedded.persistence.storageClassName }}
+  storageClassName: {{ .Values.embedded.persistence.storageClassName }}
+  {{- end }}
+  {{- with .Values.embedded.persistence.selector }}
+  selector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

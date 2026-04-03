@@ -1,0 +1,50 @@
+suite: test embedded deployment
+templates:
+  - deployment.yaml
+tests:
+  - it: should configure embedded mode with a dedicated data volume and no falkordb sidecar
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        persistence:
+          enabled: true
+      graph:
+        enabled: true
+        falkordb:
+          sidecar: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--data-dir=/var/lib/spectre-data"
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[2].name
+          value: embedded-data
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[2].mountPath
+          value: /var/lib/spectre-data
+      - equal:
+          path: spec.template.spec.volumes[2].name
+          value: embedded-data
+      - equal:
+          path: spec.template.spec.volumes[2].persistentVolumeClaim.claimName
+          value: RELEASE-NAME-spectre-embedded
+      - isNull:
+          path: spec.template.spec.containers[1]
+
+  - it: should fall back to emptyDir when embedded persistence is disabled
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        persistence:
+          enabled: false
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[2].name
+          value: embedded-data
+      - isNotNull:
+          path: spec.template.spec.volumes[2].emptyDir

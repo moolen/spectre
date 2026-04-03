@@ -155,6 +155,19 @@ graph:
     # Batch timeout (in seconds)
     batchTimeoutSeconds: 5
 
+embedded:
+  enabled: false
+  dataDir: /var/lib/spectre-data
+  persistence:
+    enabled: false
+    size: 10Gi
+    # storageClassName: ""  # Use default storage class if not specified
+    accessModes:
+      - ReadWriteOnce
+    annotations: {}
+    selector: {}
+    existingClaim: ""
+
 # Metadata cache configuration
 metadataCache:
   # How often to refresh the metadata cache (in seconds)

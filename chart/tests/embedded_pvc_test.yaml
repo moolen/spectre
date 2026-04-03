@@ -1,0 +1,39 @@
+suite: test embedded pvc
+templates:
+  - embedded-pvc.yaml
+tests:
+  - it: should create an embedded PVC when embedded persistence is enabled
+    set:
+      embedded:
+        enabled: true
+        persistence:
+          enabled: true
+    asserts:
+      - isKind:
+          of: PersistentVolumeClaim
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-spectre-embedded
+      - equal:
+          path: metadata.namespace
+          value: monitoring
+
+  - it: should not create an embedded PVC when embedded mode is disabled
+    set:
+      embedded:
+        enabled: false
+        persistence:
+          enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create an embedded PVC when persistence is disabled
+    set:
+      embedded:
+        enabled: true
+        persistence:
+          enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

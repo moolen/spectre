@@ -106,7 +106,11 @@ spec:
         - --tracing-enabled=true
         - --tracing-endpoint={{ .Values.tracing.endpoint }}
         {{- end }}
-        {{- if .Values.graph.enabled }}
+        {{- if .Values.embedded.enabled }}
+        - --embedded
+        - --data-dir={{ .Values.embedded.dataDir }}
+        {{- end }}
+        {{- if and .Values.graph.enabled (not .Values.embedded.enabled) }}
         - --graph-enabled=true
         - --graph-host=127.0.0.1
         - --graph-port={{ .Values.graph.falkordb.port }}
@@ -132,6 +136,10 @@ spec:
         {{- if .Values.integrations.persistence.enabled }}
         - name: integrations-data
           mountPath: {{ .Values.integrations.persistence.mountPath }}
+        {{- end }}
+        {{- if .Values.embedded.enabled }}
+        - name: embedded-data
+          mountPath: {{ .Values.embedded.dataDir }}
         {{- end }}
         {{- with .Values.extraVolumeMounts }}
         {{- toYaml . | nindent 8 }}
@@ -162,7 +170,7 @@ spec:
         {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 12 }}
-      {{- if and .Values.graph.enabled .Values.graph.falkordb.sidecar }}
+      {{- if and .Values.graph.enabled (not .Values.embedded.enabled) .Values.graph.falkordb.sidecar }}
       - name: falkordb
         image: "{{ .Values.graph.falkordb.image.repository }}:{{ .Values.graph.falkordb.image.tag }}"
         imagePullPolicy: {{ .Values.graph.falkordb.image.pullPolicy }}
@@ -223,7 +231,7 @@ spec:
       - name: watcher-config
         configMap:
           name: {{ include "spectre.fullname" . }}
-      {{- if and .Values.graph.enabled .Values.graph.falkordb.sidecar .Values.graph.falkordb.persistence.enabled }}
+      {{- if and .Values.graph.enabled (not .Values.embedded.enabled) .Values.graph.falkordb.sidecar .Values.graph.falkordb.persistence.enabled }}
       - name: graph-data
         persistentVolumeClaim:
           claimName: {{ include "spectre.fullname" . }}-graph
@@ -232,6 +240,15 @@ spec:
       - name: integrations-data
         persistentVolumeClaim:
           claimName: {{ include "spectre.fullname" . }}-integrations
+      {{- end }}
+      {{- if .Values.embedded.enabled }}
+      - name: embedded-data
+        {{- if .Values.embedded.persistence.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ default (printf "%s-embedded" (include "spectre.fullname" .)) .Values.embedded.persistence.existingClaim }}
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
       {{- end }}
       {{- with .Values.extraVolumes }}
       {{- toYaml . | nindent 6 }}
