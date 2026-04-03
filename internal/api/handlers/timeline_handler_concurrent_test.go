@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moolen/spectre/internal/api"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -129,7 +129,7 @@ func TestExecuteConcurrentQueries_BothQueriesSucceed(t *testing.T) {
 	}
 
 	// Create timeline service for testing
-	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
+	timelineService := apptimeline.NewService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -202,7 +202,7 @@ func TestExecuteConcurrentQueries_ResourceQueryFails(t *testing.T) {
 	}
 
 	// Create timeline service for testing
-	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
+	timelineService := apptimeline.NewService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -252,7 +252,7 @@ func TestExecuteConcurrentQueries_EventQueryFails(t *testing.T) {
 	}
 
 	// Create timeline service for testing
-	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
+	timelineService := apptimeline.NewService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -301,7 +301,7 @@ func TestExecuteConcurrentQueries_ContextCancellation(t *testing.T) {
 	}
 
 	// Create timeline service for testing
-	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
+	timelineService := apptimeline.NewService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -348,7 +348,7 @@ func TestExecuteConcurrentQueries_EmptyResults(t *testing.T) {
 	}
 
 	// Create timeline service for testing
-	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
+	timelineService := apptimeline.NewService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -399,7 +399,7 @@ func TestExecuteConcurrentQueries_ConcurrentSafety(t *testing.T) {
 	}
 
 	// Create timeline service for testing
-	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
+	timelineService := apptimeline.NewService(mockExecutor, logger, tracer)
 
 	query := &models.QueryRequest{
 		StartTimestamp: time.Now().Add(-1 * time.Hour).Unix(),
@@ -447,7 +447,7 @@ func TestBuildTimelineResponse_WithEvents(t *testing.T) {
 
 	// Create a mock executor for the service
 	mockExecutor := &mockConcurrentQueryExecutor{}
-	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
+	timelineService := apptimeline.NewService(mockExecutor, logger, tracer)
 
 	now := time.Now()
 	podUID := "pod-uid-123"
@@ -518,7 +518,7 @@ func TestBuildTimelineResponse_WithoutEvents(t *testing.T) {
 
 	// Create a mock executor for the service
 	mockExecutor := &mockConcurrentQueryExecutor{}
-	timelineService := api.NewTimelineService(mockExecutor, logger, tracer)
+	timelineService := apptimeline.NewService(mockExecutor, logger, tracer)
 
 	now := time.Now()
 
