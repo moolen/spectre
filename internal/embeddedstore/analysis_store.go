@@ -234,11 +234,15 @@ func (s *Store) GetChangeEvents(_ context.Context, resourceUIDs []string, window
 			if version.timestamp < startNs || version.timestamp > window.FailureTimestampNs {
 				continue
 			}
+			changeEvent := version.changeEvent
+			if len(changeEvent.Data) == 0 && len(version.data) > 0 {
+				changeEvent.Data = cloneBytes(version.data)
+			}
 			if version.changeEvent.ConfigChanged {
-				configEvents = append(configEvents, version.changeEvent)
+				configEvents = append(configEvents, changeEvent)
 			}
 			if len(recentEvents) < maxRecentEvents {
-				recentEvents = append(recentEvents, version.changeEvent)
+				recentEvents = append(recentEvents, changeEvent)
 			}
 		}
 

@@ -62,7 +62,7 @@ func buildChangeEventInfo(event models.Event, data, previousData []byte) analysi
 		ConfigChanged: configChanged,
 		StatusChanged: statusChanged,
 		Description:   fmt.Sprintf("%s event", event.Type),
-		Data:          cloneBytes(data),
+		Data:          nil,
 		FullSnapshot:  nil,
 		Significance:  nil,
 		Diff:          nil,

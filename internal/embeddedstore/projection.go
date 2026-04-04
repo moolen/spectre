@@ -22,7 +22,6 @@ type orderedResourceKey struct {
 }
 
 type resourceVersion struct {
-	event       models.Event
 	timestamp   int64
 	eventType   models.EventType
 	identity    graph.ResourceIdentity

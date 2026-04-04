@@ -15,7 +15,7 @@ func (p *Projection) rebuildRecord(uid string) {
 	events := p.eventsByResourceUID[uid]
 	versions := make([]resourceVersion, 0, len(events))
 	for i := range events {
-		event := cloneEvent(events[i])
+		event := events[i]
 		object := parseObject(event.Data)
 
 		var previousData []byte
@@ -24,10 +24,9 @@ func (p *Projection) rebuildRecord(uid string) {
 		}
 
 		version := resourceVersion{
-			event:     event,
 			timestamp: event.Timestamp,
 			eventType: event.Type,
-			data:      cloneBytes(event.Data),
+			data:      event.Data,
 			object:    object,
 		}
 		version.identity = buildResourceIdentity(event, object, versions, previousData)
