@@ -48,3 +48,37 @@ tests:
           value: embedded-data
       - isNotNull:
           path: spec.template.spec.volumes[2].emptyDir
+
+  - it: should use Recreate for single-replica embedded persistent deployments with the default strategy
+    set:
+      embedded:
+        enabled: true
+        persistence:
+          enabled: true
+      replicaCount: 1
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: Recreate
+
+  - it: should keep an explicit embedded rolling update override
+    set:
+      embedded:
+        enabled: true
+        persistence:
+          enabled: true
+      updateStrategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1
+          maxSurge: 0
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 0

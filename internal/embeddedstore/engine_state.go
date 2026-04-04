@@ -14,7 +14,7 @@ func embeddedRootDir(dataDir string) string {
 	return filepath.Join(dataDir, "embedded")
 }
 
-func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, []models.Event, uint64, *Projection, error) {
+func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, uint64, *Projection, error) {
 	var checkpointProjection *Projection
 	var checkpointHighWaterMark uint64
 	if len(manifest.Checkpoints) > 0 {
@@ -22,17 +22,17 @@ func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, []mod
 		var err error
 		checkpointProjection, checkpointHighWaterMark, err = loadCheckpoint(rootDir, latestCheckpoint)
 		if err != nil {
-			return nil, nil, 0, nil, err
+			return nil, 0, nil, err
 		}
 	}
 
 	readers := make([]*segmentReader, 0, len(manifest.ActiveSegments))
-	replayEvents := make([]models.Event, 0)
+	replayReaders := make([]replaySegmentReader, 0, len(manifest.ActiveSegments))
 	for i := range manifest.ActiveSegments {
 		segmentMeta := manifest.ActiveSegments[i]
 		reader, err := openSegmentReader(rootDir, segmentBundleMeta{ID: segmentMeta.ID})
 		if err != nil {
-			return nil, nil, 0, nil, fmt.Errorf("open active segment %q: %w", segmentMeta.ID, err)
+			return nil, 0, nil, fmt.Errorf("open active segment %q: %w", segmentMeta.ID, err)
 		}
 		readers = append(readers, reader)
 
@@ -41,14 +41,35 @@ func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, []mod
 			continue
 		}
 
-		events, err := reader.ScanTimeRange(context.Background(), reader.meta.MinTimestamp, reader.meta.MaxTimestamp)
-		if err != nil {
-			return nil, nil, 0, nil, fmt.Errorf("scan active segment %q: %w", segmentMeta.ID, err)
-		}
-		replayEvents = append(replayEvents, events...)
+		replayReaders = append(replayReaders, replaySegmentReader{
+			segmentID:      segmentMeta.ID,
+			reader:         reader,
+			startTimestamp: reader.meta.MinTimestamp,
+			endTimestamp:   reader.meta.MaxTimestamp,
+		})
 	}
 
-	return readers, replayEvents, checkpointHighWaterMark, checkpointProjection, nil
+	projection := checkpointProjection
+	if projection == nil {
+		if len(replayReaders) == 0 {
+			projection = NewProjection()
+		} else if applyProjectionEventUsesDefaultImplementation() {
+			var err error
+			projection, err = buildProjectionFromReplayReaders(context.Background(), replayReaders)
+			if err != nil {
+				return nil, 0, nil, err
+			}
+		} else {
+			projection = NewProjection()
+			if err := replaySegmentReaders(context.Background(), projection, replayReaders); err != nil {
+				return nil, 0, nil, err
+			}
+		}
+	} else if err := replaySegmentReaders(context.Background(), projection, replayReaders); err != nil {
+		return nil, 0, nil, err
+	}
+
+	return readers, checkpointHighWaterMark, projection, nil
 }
 
 func sortReplayEvents(events []models.Event) {

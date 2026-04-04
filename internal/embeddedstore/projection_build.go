@@ -41,6 +41,32 @@ func BuildProjection(events []models.Event) (*Projection, error) {
 	return projection, nil
 }
 
+func (p *Projection) appendReplayEvent(event models.Event) {
+	cloned := cloneEvent(event)
+	p.events = append(p.events, cloned)
+	p.applyEventToIndexes(cloned)
+}
+
+func (p *Projection) finalizeReplayBuild() {
+	sort.Slice(p.orderedResources, func(i, j int) bool {
+		return compareOrderedResourceKey(p.orderedResources[i], p.orderedResources[j]) < 0
+	})
+
+	for uid := range p.resourcesByUID {
+		p.rebuildRecord(uid)
+	}
+	for involvedUID := range p.k8sEventsByInvolvedUID {
+		sort.Slice(p.k8sEventsByInvolvedUID[involvedUID], func(i, j int) bool {
+			left := p.k8sEventsByInvolvedUID[involvedUID][i]
+			right := p.k8sEventsByInvolvedUID[involvedUID][j]
+			if left.Timestamp.Equal(right.Timestamp) {
+				return left.EventID > right.EventID
+			}
+			return left.Timestamp.After(right.Timestamp)
+		})
+	}
+}
+
 func (p *Projection) Apply(event models.Event) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

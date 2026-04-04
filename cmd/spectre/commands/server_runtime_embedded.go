@@ -47,8 +47,9 @@ func runEmbeddedServerRuntime(cfg *config.Config, mode serverRuntimeMode, manage
 	auditLogWriter := newAuditLogWriter(logger)
 	runEmbeddedStartupImport(embeddedBackend, logger)
 	validateEmbeddedImportMode(mode, embeddedBackend, logger)
+	skipInitialListReplay := shouldSkipEmbeddedInitialListReplay(embeddedBackend, logger)
 
-	watcherComponent := registerEmbeddedWatcher(mode, cfg, manager, embeddedBackend, auditLogWriter, logger)
+	watcherComponent := registerEmbeddedWatcher(mode, cfg, manager, embeddedBackend, auditLogWriter, skipInitialListReplay, logger)
 	apiComponent, mcpServer := newEmbeddedAPI(cfg, mode, tracingProvider, embeddedBackend, watcherComponent, logger)
 
 	if err := manager.Register(apiComponent, embeddedBackend); err != nil {
@@ -117,7 +118,7 @@ func validateEmbeddedImportMode(mode serverRuntimeMode, embeddedBackend *embedde
 	HandleError(fmt.Errorf("no usable embedded events found in %s", source), "Import error")
 }
 
-func registerEmbeddedWatcher(mode serverRuntimeMode, cfg *config.Config, manager *lifecycle.Manager, embeddedBackend *embeddedstore.Backend, auditLogWriter *watcher.FileAuditLogWriter, logger *logging.Logger) *watcher.Watcher {
+func registerEmbeddedWatcher(mode serverRuntimeMode, cfg *config.Config, manager *lifecycle.Manager, embeddedBackend *embeddedstore.Backend, auditLogWriter *watcher.FileAuditLogWriter, skipInitialListReplay bool, logger *logging.Logger) *watcher.Watcher {
 	if !mode.StartWatcher {
 		logger.Info("Embedded import-only mode - watcher disabled")
 		return nil
@@ -132,6 +133,10 @@ func registerEmbeddedWatcher(mode serverRuntimeMode, cfg *config.Config, manager
 	if err != nil {
 		logger.Error("Failed to create embedded watcher component: %v", err)
 		HandleError(err, "Watcher initialization error")
+	}
+	if skipInitialListReplay {
+		logger.Info("Skipping embedded watcher initial List replay because persisted embedded state already exists")
+		watcherComponent.SetSkipInitialListReplay(true)
 	}
 	if err := manager.Register(watcherComponent, embeddedBackend); err != nil {
 		logger.Error("Failed to register embedded watcher component: %v", err)
@@ -237,6 +242,15 @@ func hasUsableEmbeddedBackend(backend *embeddedstore.Backend) (bool, error) {
 		return false, fmt.Errorf("embedded query executor is nil")
 	}
 	return hasUsableEmbeddedEvents(executor)
+}
+
+func shouldSkipEmbeddedInitialListReplay(backend *embeddedstore.Backend, logger *logging.Logger) bool {
+	usable, err := hasUsableEmbeddedBackend(backend)
+	if err != nil {
+		logger.Warn("Failed to determine whether embedded watcher should skip initial List replay: %v", err)
+		return false
+	}
+	return usable
 }
 
 func embeddedImportSourceDescription(importPath, dataDir string) string {

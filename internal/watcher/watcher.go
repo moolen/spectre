@@ -41,8 +41,9 @@ type Watcher struct {
 	pendingMutex     sync.RWMutex
 
 	// Readiness tracking
-	readinessMutex      sync.RWMutex
-	initialLoadComplete bool // Flag to indicate initial load is done (prevents reset on hot-reload)
+	readinessMutex        sync.RWMutex
+	initialLoadComplete   bool // Flag to indicate initial load is done (prevents reset on hot-reload)
+	skipInitialListReplay bool
 }
 
 // EventHandler is called when a resource event occurs

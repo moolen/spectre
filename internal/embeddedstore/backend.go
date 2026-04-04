@@ -3,6 +3,7 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -192,4 +193,12 @@ func setApplyProjectionEventFnForTest(fn func(*Projection, models.Event) error) 
 		applyProjectionEventFn = previous
 		applyProjectionEventFnMu.Unlock()
 	}
+}
+
+func applyProjectionEventUsesDefaultImplementation() bool {
+	applyProjectionEventFnMu.RLock()
+	fn := applyProjectionEventFn
+	applyProjectionEventFnMu.RUnlock()
+
+	return reflect.ValueOf(fn).Pointer() == reflect.ValueOf(applyProjectionEventDirect).Pointer()
 }

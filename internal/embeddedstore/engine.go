@@ -38,19 +38,13 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		return nil, fmt.Errorf("open embedded engine: load manifest: %w", err)
 	}
 
-	readers, replayEvents, checkpointHighWaterMark, projection, err := loadEngineState(rootDir, manifest)
+	readers, checkpointHighWaterMark, projection, err := loadEngineState(rootDir, manifest)
 	if err != nil {
 		return nil, fmt.Errorf("open embedded engine: load state: %w", err)
 	}
 
 	if projection == nil {
 		projection = NewProjection()
-	}
-	if len(replayEvents) > 0 {
-		sortReplayEvents(replayEvents)
-		if err := replayProjectionEvents(projection, replayEvents); err != nil {
-			return nil, err
-		}
 	}
 
 	metrics := NewMetrics(cfg.MetricsRegisterer)

@@ -7,9 +7,15 @@ metadata:
     {{- include "spectre.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- $useEmbeddedRecreate := and .Values.embedded.enabled .Values.embedded.persistence.enabled (eq (int .Values.replicaCount) 1) (eq .Values.updateStrategy.type "RollingUpdate") (eq (int .Values.updateStrategy.rollingUpdate.maxUnavailable) 0) (eq (int .Values.updateStrategy.rollingUpdate.maxSurge) 1) }}
+  {{- if $useEmbeddedRecreate }}
+  strategy:
+    type: Recreate
+  {{- else }}
   {{- with .Values.updateStrategy }}
   strategy:
     {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- end }}
   {{- if .Values.minReadySeconds }}
   minReadySeconds: {{ .Values.minReadySeconds }}

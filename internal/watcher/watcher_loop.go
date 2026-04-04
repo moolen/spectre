@@ -164,6 +164,11 @@ func (w *Watcher) processListedItems(
 	source string,
 	shouldProcess func(string) bool,
 ) error {
+	if w.shouldSkipInitialListReplay() {
+		w.logger.Info("Skipping %s List replay for %s to avoid duplicating persisted state", source, gvk.Kind)
+		return nil
+	}
+
 	for i := range items {
 		if err := w.checkWatchContext(ctx); err != nil {
 			return err

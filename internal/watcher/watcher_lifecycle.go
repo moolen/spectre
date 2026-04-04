@@ -112,6 +112,18 @@ func (w *Watcher) IsReady() bool {
 	return w.initialLoadComplete
 }
 
+func (w *Watcher) SetSkipInitialListReplay(skip bool) {
+	w.readinessMutex.Lock()
+	defer w.readinessMutex.Unlock()
+	w.skipInitialListReplay = skip
+}
+
+func (w *Watcher) shouldSkipInitialListReplay() bool {
+	w.readinessMutex.RLock()
+	defer w.readinessMutex.RUnlock()
+	return w.skipInitialListReplay
+}
+
 func (w *Watcher) stopActiveWatchers() {
 	w.watchersMutex.Lock()
 	defer w.watchersMutex.Unlock()
