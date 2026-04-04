@@ -130,6 +130,58 @@ func TestQueryMetrics_DistinctMetadataMergesPlannerStats(t *testing.T) {
 	}))
 }
 
+func TestQueryMetrics_CompactProjectionFallbackRecordsProjectionOnly(t *testing.T) {
+	dataDir := t.TempDir()
+
+	bootstrapEngine, err := OpenEngine(EngineConfig{
+		DataDir:                   dataDir,
+		HotMaxEvents:              16,
+		HotMaxResourceVersions:    8,
+		ProjectionHistoryFallback: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, bootstrapEngine.ProcessBatch(context.Background(), []models.Event{
+		testMetricsEvent("pod-fallback", "cold-1", 10),
+	}))
+	require.NoError(t, bootstrapEngine.Flush(context.Background()))
+	require.NoError(t, bootstrapEngine.Close())
+
+	reg := prometheus.NewRegistry()
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                   dataDir,
+		HotMaxEvents:              16,
+		HotMaxResourceVersions:    8,
+		MetricsRegisterer:         reg,
+		ProjectionHistoryFallback: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	exported, err := engine.QueryExecutor().ExportTimeRange(context.Background(), testMetricsQuery("default", "Pod", 0, 20))
+	require.NoError(t, err)
+	require.Len(t, exported, 1)
+
+	namespaces, kinds, _, _, err := engine.QueryExecutor().QueryDistinctMetadata(context.Background(), 0, 20*1e9)
+	require.NoError(t, err)
+	require.Equal(t, []string{"default"}, namespaces)
+	require.Equal(t, []string{"Pod"}, kinds)
+
+	families, gatherErr := reg.Gather()
+	require.NoError(t, gatherErr)
+	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_query_total"), map[string]string{
+		"query_family": "export_time_range",
+		"store_mix":    "projection_only",
+		"result":       "success",
+	}))
+	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_query_total"), map[string]string{
+		"query_family": "distinct_metadata",
+		"store_mix":    "projection_only",
+		"result":       "success",
+	}))
+}
+
 func newMetricsTestEngine(t *testing.T, reg prometheus.Registerer) *Engine {
 	t.Helper()
 
