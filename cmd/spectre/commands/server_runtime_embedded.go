@@ -21,10 +21,7 @@ import (
 )
 
 func runEmbeddedServerRuntime(cfg *config.Config, mode serverRuntimeMode, manager *lifecycle.Manager, tracingProvider *tracing.TracingProvider, logger *logging.Logger) {
-	embeddedCfg := embeddedstore.Config{
-		DataDir:           dataDir,
-		MetricsRegisterer: prometheus.DefaultRegisterer,
-	}
+	embeddedCfg := embeddedStoreConfig()
 	effectiveEmbeddedCfg, err := embeddedCfg.EffectiveEngineConfig()
 	if err != nil {
 		logger.Error("Invalid embedded engine configuration: %v", err)
@@ -62,6 +59,14 @@ func runEmbeddedServerRuntime(cfg *config.Config, mode serverRuntimeMode, manage
 	startStdioTransport(mcpServer, logger)
 	logger.Info("Embedded mode started - serving API requests")
 	waitForShutdown(manager, cancel, auditLogWriter, logger)
+}
+
+func embeddedStoreConfig() embeddedstore.Config {
+	return embeddedstore.Config{
+		DataDir:                   dataDir,
+		MetricsRegisterer:         prometheus.DefaultRegisterer,
+		ProjectionHistoryFallback: embeddedProjectionHistoryFallback,
+	}
 }
 
 func newAuditLogWriter(logger *logging.Logger) *watcher.FileAuditLogWriter {

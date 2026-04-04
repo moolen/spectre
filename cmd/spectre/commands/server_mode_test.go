@@ -1,10 +1,14 @@
 package commands
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/moolen/spectre/internal/embedded"
+	"github.com/moolen/spectre/internal/embeddedstore"
 	"github.com/moolen/spectre/internal/models"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolveServerRuntimeMode(t *testing.T) {
@@ -224,4 +228,57 @@ func TestEmbeddedExecutorHasUsableEvents(t *testing.T) {
 			t.Fatalf("expected executor to report usable events")
 		}
 	})
+}
+
+func TestServer_EmbeddedProjectionHistoryFallbackFlag(t *testing.T) {
+	flag := serverCmd.Flags().Lookup("embedded-projection-history-fallback")
+	require.NotNil(t, flag)
+
+	originalDataDir := dataDir
+	originalFallback := embeddedProjectionHistoryFallback
+	t.Cleanup(func() {
+		dataDir = originalDataDir
+		embeddedProjectionHistoryFallback = originalFallback
+	})
+
+	dataDir = t.TempDir()
+	require.NoError(t, serverCmd.Flags().Set("embedded-projection-history-fallback", "true"))
+	require.True(t, embeddedProjectionHistoryFallback)
+
+	embeddedCfg := embeddedStoreConfig()
+	embeddedCfg.MetricsRegisterer = prometheus.NewRegistry()
+	backend, err := embeddedstore.Open(embeddedCfg)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, backend.Close())
+	})
+
+	require.False(t, queryExecutorPlannerInstalled(t, backend.QueryExecutor()))
+
+	require.NoError(t, serverCmd.Flags().Set("embedded-projection-history-fallback", "false"))
+	dataDir = t.TempDir()
+
+	embeddedCfgWithFallbackDisabled := embeddedStoreConfig()
+	embeddedCfgWithFallbackDisabled.MetricsRegisterer = prometheus.NewRegistry()
+	backendWithFallbackDisabled, err := embeddedstore.Open(embeddedCfgWithFallbackDisabled)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, backendWithFallbackDisabled.Close())
+	})
+
+	require.True(t, queryExecutorPlannerInstalled(t, backendWithFallbackDisabled.QueryExecutor()))
+}
+
+func queryExecutorPlannerInstalled(t *testing.T, executor interface{}) bool {
+	t.Helper()
+	require.NotNil(t, executor)
+
+	value := reflect.ValueOf(executor)
+	require.Equal(t, reflect.Pointer, value.Kind())
+
+	field := value.Elem().FieldByName("planner")
+	require.True(t, field.IsValid(), "expected planner field on query executor")
+	require.Equal(t, reflect.Pointer, field.Kind())
+
+	return !field.IsNil()
 }

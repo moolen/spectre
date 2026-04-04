@@ -63,8 +63,11 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		segmentReaders:    readers,
 		nextHighWaterMark: maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), checkpointHighWaterMark),
 	}
+	if !cfg.ProjectionHistoryFallback {
+		engine.queryExec.DisableProjectionHistoryFallback()
+	}
 	engine.queryExec.SetMetrics(metrics)
-	engine.queryExec.SetSharedCache(newQueryPlanner(engine.projection, engine.hot, engine.segmentReaders))
+	engine.refreshQueryPlanner()
 	engine.metrics.SetActiveSegments(len(engine.segmentReaders))
 	engine.ready.Store(true)
 
@@ -89,4 +92,17 @@ func (e *Engine) AnalysisStore() *Store {
 
 func (e *Engine) IsReady() bool {
 	return e != nil && e.ready.Load()
+}
+
+func (e *Engine) refreshQueryPlanner() {
+	if e == nil || e.queryExec == nil {
+		return
+	}
+
+	if e.config.ProjectionHistoryFallback {
+		e.queryExec.SetSharedCache((*QueryPlanner)(nil))
+		return
+	}
+
+	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
 }

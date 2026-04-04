@@ -111,6 +111,9 @@ func (qe *QueryExecutor) resourceEvents(
 	startTimeNs, endTimeNs int64,
 ) ([]models.Event, queryPlanStats, error) {
 	if qe.planner == nil {
+		if !qe.projectionHistoryFallbackEnabled {
+			return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")
+		}
 		return qe.collectResourceEvents(qe.projection.eventsByResourceUID[uid], startTimeNs, endTimeNs), queryPlanStats{projectionUsed: true}, nil
 	}
 

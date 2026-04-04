@@ -85,7 +85,7 @@ func (e *Engine) Compact(ctx context.Context) error {
 
 	e.manifest = updatedManifest
 	e.segmentReaders = []*segmentReader{newReader}
-	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
+	e.refreshQueryPlanner()
 	e.metrics.SetActiveSegments(len(e.segmentReaders))
 
 	segmentsRoot := filepath.Join(e.rootDir, segmentsDirName)

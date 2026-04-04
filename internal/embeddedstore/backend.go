@@ -12,14 +12,15 @@ import (
 )
 
 type Config struct {
-	DataDir                string
-	HotMaxEvents           int
-	HotMaxResourceVersions int
-	FlushInterval          time.Duration
-	CheckpointInterval     time.Duration
-	SegmentTargetBytes     int64
-	CompactionMinSegments  int
-	MetricsRegisterer      prometheus.Registerer
+	DataDir                   string
+	HotMaxEvents              int
+	HotMaxResourceVersions    int
+	FlushInterval             time.Duration
+	CheckpointInterval        time.Duration
+	SegmentTargetBytes        int64
+	CompactionMinSegments     int
+	MetricsRegisterer         prometheus.Registerer
+	ProjectionHistoryFallback bool
 }
 
 type Backend struct {
@@ -76,14 +77,15 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 	}
 
 	engineCfg := EngineConfig{
-		DataDir:                cfg.DataDir,
-		HotMaxEvents:           cfg.HotMaxEvents,
-		HotMaxResourceVersions: cfg.HotMaxResourceVersions,
-		FlushInterval:          cfg.FlushInterval,
-		CheckpointInterval:     cfg.CheckpointInterval,
-		SegmentTargetBytes:     cfg.SegmentTargetBytes,
-		CompactionMinSegments:  cfg.CompactionMinSegments,
-		MetricsRegisterer:      cfg.MetricsRegisterer,
+		DataDir:                   cfg.DataDir,
+		HotMaxEvents:              cfg.HotMaxEvents,
+		HotMaxResourceVersions:    cfg.HotMaxResourceVersions,
+		FlushInterval:             cfg.FlushInterval,
+		CheckpointInterval:        cfg.CheckpointInterval,
+		SegmentTargetBytes:        cfg.SegmentTargetBytes,
+		CompactionMinSegments:     cfg.CompactionMinSegments,
+		MetricsRegisterer:         cfg.MetricsRegisterer,
+		ProjectionHistoryFallback: cfg.ProjectionHistoryFallback,
 	}
 	if engineCfg.HotMaxEvents == 0 {
 		engineCfg.HotMaxEvents = defaultHotMaxEvents

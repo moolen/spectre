@@ -14,10 +14,11 @@ type filteredResource struct {
 
 // QueryExecutor executes embedded timeline queries against a shared projection.
 type QueryExecutor struct {
-	logger     *logging.Logger
-	projection *Projection
-	planner    *QueryPlanner
-	metrics    *Metrics
+	logger                           *logging.Logger
+	projection                       *Projection
+	planner                          *QueryPlanner
+	metrics                          *Metrics
+	projectionHistoryFallbackEnabled bool
 }
 
 func NewQueryExecutor(projection *Projection) *QueryExecutor {
@@ -26,8 +27,9 @@ func NewQueryExecutor(projection *Projection) *QueryExecutor {
 	}
 
 	return &QueryExecutor{
-		logger:     logging.GetLogger("embedded.query"),
-		projection: projection,
+		logger:                           logging.GetLogger("embedded.query"),
+		projection:                       projection,
+		projectionHistoryFallbackEnabled: true,
 	}
 }
 
@@ -47,4 +49,8 @@ func (qe *QueryExecutor) SetSharedCache(cache interface{}) {
 
 func (qe *QueryExecutor) SetMetrics(metrics *Metrics) {
 	qe.metrics = metrics
+}
+
+func (qe *QueryExecutor) DisableProjectionHistoryFallback() {
+	qe.projectionHistoryFallbackEnabled = false
 }

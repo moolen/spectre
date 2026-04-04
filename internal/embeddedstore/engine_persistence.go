@@ -76,7 +76,7 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 
 	e.manifest = updatedManifest
 	e.segmentReaders = append(e.segmentReaders, reader)
-	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
+	e.refreshQueryPlanner()
 	e.metrics.SetActiveSegments(len(e.segmentReaders))
 	return nil
 }
