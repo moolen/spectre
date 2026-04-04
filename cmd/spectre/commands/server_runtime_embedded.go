@@ -250,12 +250,11 @@ func hasUsableEmbeddedBackend(backend *embeddedstore.Backend) (bool, error) {
 }
 
 func shouldSkipEmbeddedInitialListReplay(backend *embeddedstore.Backend, logger *logging.Logger) bool {
-	usable, err := hasUsableEmbeddedBackend(backend)
-	if err != nil {
-		logger.Warn("Failed to determine whether embedded watcher should skip initial List replay: %v", err)
+	if backend == nil {
+		logger.Warn("Failed to determine whether embedded watcher should skip initial List replay: embedded backend is nil")
 		return false
 	}
-	return usable
+	return backend.HasUsableResourceState()
 }
 
 func embeddedImportSourceDescription(importPath, dataDir string) string {

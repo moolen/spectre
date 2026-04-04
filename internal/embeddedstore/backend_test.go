@@ -208,3 +208,60 @@ func TestBackend_ReadinessStaysFalseAfterProjectionApplyFailure(t *testing.T) {
 	})
 	require.True(t, reopened.IsReady())
 }
+
+func TestBackend_HasUsableResourceState(t *testing.T) {
+	t.Run("empty backend is not usable", func(t *testing.T) {
+		backend, err := Open(Config{DataDir: t.TempDir()})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = backend.Close()
+		})
+
+		require.False(t, backend.HasUsableResourceState())
+	})
+
+	t.Run("valid projected resource state is usable", func(t *testing.T) {
+		backend, err := Open(Config{DataDir: t.TempDir()})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = backend.Close()
+		})
+
+		require.NoError(t, backend.ProcessEvent(context.Background(), models.Event{
+			ID:        "pod-create",
+			Timestamp: 5,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Kind:      "Pod",
+				Version:   "v1",
+				Name:      "pod-live",
+				Namespace: "default",
+				UID:       "pod-live-uid",
+			},
+		}))
+
+		require.True(t, backend.HasUsableResourceState())
+	})
+
+	t.Run("invalid events without projected resources stay unusable", func(t *testing.T) {
+		backend, err := Open(Config{DataDir: t.TempDir()})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = backend.Close()
+		})
+
+		require.NoError(t, backend.ProcessEvent(context.Background(), models.Event{
+			ID:        "missing-uid",
+			Timestamp: 5,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Kind:      "Pod",
+				Version:   "v1",
+				Name:      "pod-invalid",
+				Namespace: "default",
+			},
+		}))
+
+		require.False(t, backend.HasUsableResourceState())
+	})
+}

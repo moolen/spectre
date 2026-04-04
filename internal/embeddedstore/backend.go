@@ -168,6 +168,17 @@ func (b *Backend) IsReady() bool {
 	return b != nil && b.engine != nil && b.engine.IsReady()
 }
 
+func (b *Backend) HasUsableResourceState() bool {
+	if b == nil || b.engine == nil || b.engine.projection == nil {
+		return false
+	}
+
+	b.engine.projection.mu.RLock()
+	defer b.engine.projection.mu.RUnlock()
+
+	return len(b.engine.projection.orderedResources) > 0
+}
+
 func (b *Backend) Name() string {
 	return "embedded-backend"
 }

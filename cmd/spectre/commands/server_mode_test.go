@@ -1,11 +1,13 @@
 package commands
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
 	"github.com/moolen/spectre/internal/embedded"
 	"github.com/moolen/spectre/internal/embeddedstore"
+	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -267,6 +269,35 @@ func TestServer_EmbeddedProjectionHistoryFallbackFlag(t *testing.T) {
 	})
 
 	require.True(t, queryExecutorPlannerInstalled(t, backendWithFallbackDisabled.QueryExecutor()))
+}
+
+func TestShouldSkipEmbeddedInitialListReplay(t *testing.T) {
+	backend, err := embeddedstore.Open(embeddedstore.Config{
+		DataDir:           t.TempDir(),
+		MetricsRegisterer: prometheus.NewRegistry(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, backend.Close())
+	})
+
+	logger := logging.GetLogger("server.test")
+	require.False(t, shouldSkipEmbeddedInitialListReplay(backend, logger))
+
+	require.NoError(t, backend.ProcessEvent(context.Background(), models.Event{
+		ID:        "pod-create",
+		Timestamp: 10,
+		Type:      models.EventTypeCreate,
+		Resource: models.ResourceMetadata{
+			Kind:      "Pod",
+			Version:   "v1",
+			Name:      "pod-1",
+			Namespace: "default",
+			UID:       "pod-uid",
+		},
+	}))
+
+	require.True(t, shouldSkipEmbeddedInitialListReplay(backend, logger))
 }
 
 func queryExecutorPlannerInstalled(t *testing.T, executor interface{}) bool {
