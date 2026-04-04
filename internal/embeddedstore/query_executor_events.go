@@ -1,41 +1,49 @@
 package embeddedstore
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"time"
 
 	"github.com/moolen/spectre/internal/models"
 )
 
-func (qe *QueryExecutor) collectK8sEventsForResources(resources []filteredResource, startTimeNs, endTimeNs int64) map[string][]models.K8sEvent {
+func (qe *QueryExecutor) collectK8sEventsForResources(
+	ctx context.Context,
+	resources []filteredResource,
+	startTimeNs, endTimeNs int64,
+) (map[string][]models.K8sEvent, queryPlanStats, error) {
 	if len(resources) == 0 {
-		return nil
+		return nil, queryPlanStats{}, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, queryPlanStats{}, err
 	}
 
-	k8sEventsByResource := make(map[string][]models.K8sEvent)
-	for _, resource := range resources {
-		events := qe.projection.k8sRawEventsByInvolvedUID[resource.uid]
-		if len(events) == 0 {
-			continue
+	involvedUIDs, namespaces := resourceLookupInputs(resources)
+	if len(involvedUIDs) == 0 {
+		return nil, queryPlanStats{}, nil
+	}
+
+	if qe.planner != nil {
+		associatedEvents, stats, err := qe.planner.collectAssociatedEvents(ctx, involvedUIDs, namespaces, startTimeNs, endTimeNs)
+		if err != nil {
+			return nil, stats, err
 		}
-		for _, event := range events {
-			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
-				continue
-			}
-			k8sEvent, ok := convertToK8sEvent(event)
-			if !ok {
-				continue
-			}
-			k8sEventsByResource[resource.uid] = append(k8sEventsByResource[resource.uid], k8sEvent)
-		}
+
+		return convertAssociatedEventsToK8sEvents(associatedEvents), stats, nil
+	}
+	if !qe.projectionHistoryFallbackEnabled {
+		return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")
 	}
 
-	if len(k8sEventsByResource) == 0 {
-		return nil
-	}
-
-	return k8sEventsByResource
+	associatedEvents := qe.collectAssociatedEventsFromProjection(involvedUIDs, namespaces, startTimeNs, endTimeNs)
+	return convertAssociatedEventsToK8sEvents(associatedEvents), queryPlanStats{projectionUsed: true}, nil
 }
 
 func convertToK8sEvent(event models.Event) (models.K8sEvent, bool) {
@@ -74,33 +82,48 @@ func convertToK8sEvent(event models.Event) (models.K8sEvent, bool) {
 	return k8sEvent, true
 }
 
-func (qe *QueryExecutor) executeEventQuery(startTimeNs, endTimeNs int64, filters models.QueryFilters, pagination *models.PaginationRequest, pageSize int, start time.Time) (*models.QueryResult, *models.PaginationResponse, error) {
+func (qe *QueryExecutor) executeEventQuery(
+	ctx context.Context,
+	startTimeNs, endTimeNs int64,
+	filters models.QueryFilters,
+	pagination *models.PaginationRequest,
+	pageSize int,
+	start time.Time,
+) (*models.QueryResult, *models.PaginationResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		qe.recordQueryMetrics(queryFamilyResourceEvents, queryPlanStats{}, start, err)
+		return nil, nil, err
+	}
+
+	eventTimeline, stats, err := qe.eventTimelineEvents(ctx, startTimeNs, endTimeNs, filters)
+	if err != nil {
+		qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, err)
+		return nil, nil, err
+	}
+
 	byUID := make(map[string][]models.Event)
 	metaByUID := make(map[string]models.ResourceMetadata)
 
-	for _, events := range qe.projection.k8sRawEventsByInvolvedUID {
-		for _, event := range events {
-			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
-				continue
-			}
-			if !filters.Matches(event.Resource) {
-				continue
-			}
-			uid := event.Resource.UID
-			if uid == "" {
-				continue
-			}
-			byUID[uid] = append(byUID[uid], cloneEvent(event))
-			if _, ok := metaByUID[uid]; !ok {
-				metaByUID[uid] = event.Resource
-			}
+	for i := range eventTimeline {
+		event := eventTimeline[i]
+		uid := event.Resource.UID
+		if uid == "" {
+			continue
+		}
+
+		byUID[uid] = append(byUID[uid], cloneEvent(event))
+		if _, ok := metaByUID[uid]; !ok {
+			metaByUID[uid] = event.Resource
 		}
 	}
 
 	eventResources := make([]filteredResource, 0, len(metaByUID))
 	for uid, meta := range metaByUID {
 		events := byUID[uid]
-		sort.Slice(events, func(i, j int) bool {
+		sort.SliceStable(events, func(i, j int) bool {
 			return compareEventOrder(events[i], events[j]) < 0
 		})
 		eventResources = append(eventResources, filteredResource{
@@ -114,7 +137,7 @@ func (qe *QueryExecutor) executeEventQuery(startTimeNs, endTimeNs int64, filters
 		})
 	}
 
-	sort.Slice(eventResources, func(i, j int) bool {
+	sort.SliceStable(eventResources, func(i, j int) bool {
 		return compareOrderedResourceKey(eventResources[i].orderedResourceKey, eventResources[j].orderedResourceKey) < 0
 	})
 
@@ -141,6 +164,164 @@ func (qe *QueryExecutor) executeEventQuery(startTimeNs, endTimeNs int64, filters
 		PageSize:   pageSize,
 	}
 
-	qe.recordQueryMetrics(queryFamilyResourceEvents, queryPlanStats{projectionUsed: true}, start, nil)
+	qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, nil)
 	return queryResult, paginationResp, nil
+}
+
+func (qe *QueryExecutor) eventTimelineEvents(
+	ctx context.Context,
+	startTimeNs, endTimeNs int64,
+	filters models.QueryFilters,
+) ([]models.Event, queryPlanStats, error) {
+	if qe.planner != nil {
+		return qe.planner.exportTimeRange(ctx, startTimeNs, endTimeNs, filters)
+	}
+	if !qe.projectionHistoryFallbackEnabled {
+		return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")
+	}
+
+	projectionEvents := qe.snapshotProjectionEvents()
+	var timeline []models.Event
+	for i := range projectionEvents {
+		event := projectionEvents[i]
+		if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+			continue
+		}
+		if !filters.Matches(event.Resource) {
+			continue
+		}
+		timeline = append(timeline, cloneEvent(event))
+	}
+
+	if len(timeline) == 0 {
+		return nil, queryPlanStats{projectionUsed: true}, nil
+	}
+
+	sort.SliceStable(timeline, func(i, j int) bool {
+		return compareEventOrder(timeline[i], timeline[j]) < 0
+	})
+
+	return dedupeEventsByID(timeline), queryPlanStats{projectionUsed: true}, nil
+}
+
+func resourceLookupInputs(resources []filteredResource) ([]string, []string) {
+	uidSet := make(map[string]struct{}, len(resources))
+	namespaceSet := make(map[string]struct{}, len(resources))
+	disableNamespaceFilter := false
+
+	for i := range resources {
+		if resources[i].uid != "" {
+			uidSet[resources[i].uid] = struct{}{}
+		}
+		if resources[i].namespace == "" {
+			disableNamespaceFilter = true
+			continue
+		}
+		namespaceSet[resources[i].namespace] = struct{}{}
+	}
+
+	involvedUIDs := make([]string, 0, len(uidSet))
+	for uid := range uidSet {
+		involvedUIDs = append(involvedUIDs, uid)
+	}
+
+	var namespaces []string
+	if !disableNamespaceFilter {
+		namespaces = make([]string, 0, len(namespaceSet))
+		for namespace := range namespaceSet {
+			namespaces = append(namespaces, namespace)
+		}
+	}
+
+	return involvedUIDs, namespaces
+}
+
+func (qe *QueryExecutor) collectAssociatedEventsFromProjection(
+	involvedUIDs []string,
+	namespaces []string,
+	startTimeNs, endTimeNs int64,
+) map[string][]models.Event {
+	if len(involvedUIDs) == 0 || endTimeNs < startTimeNs {
+		return nil
+	}
+
+	targetUIDs := make(map[string]struct{}, len(involvedUIDs))
+	for i := range involvedUIDs {
+		targetUIDs[involvedUIDs[i]] = struct{}{}
+	}
+
+	namespaceSet := make(map[string]struct{}, len(namespaces))
+	for i := range namespaces {
+		namespaceSet[namespaces[i]] = struct{}{}
+	}
+
+	projectionEvents := qe.snapshotProjectionEvents()
+	eventsByUID := make(map[string][]models.Event, len(targetUIDs))
+	for i := range projectionEvents {
+		event := projectionEvents[i]
+		if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+			continue
+		}
+		if event.Resource.Kind != "Event" {
+			continue
+		}
+		if len(namespaceSet) > 0 {
+			if _, ok := namespaceSet[event.Resource.Namespace]; !ok {
+				continue
+			}
+		}
+
+		involvedUID := event.Resource.InvolvedObjectUID
+		if _, ok := targetUIDs[involvedUID]; !ok {
+			continue
+		}
+
+		eventsByUID[involvedUID] = append(eventsByUID[involvedUID], cloneEvent(event))
+	}
+
+	if len(eventsByUID) == 0 {
+		return nil
+	}
+
+	for uid := range eventsByUID {
+		sort.SliceStable(eventsByUID[uid], func(i, j int) bool {
+			return compareEventOrder(eventsByUID[uid][i], eventsByUID[uid][j]) < 0
+		})
+		eventsByUID[uid] = dedupeEventsByID(eventsByUID[uid])
+	}
+
+	return eventsByUID
+}
+
+func (qe *QueryExecutor) snapshotProjectionEvents() []models.Event {
+	qe.projection.mu.RLock()
+	defer qe.projection.mu.RUnlock()
+
+	return append([]models.Event(nil), qe.projection.events...)
+}
+
+func convertAssociatedEventsToK8sEvents(eventsByUID map[string][]models.Event) map[string][]models.K8sEvent {
+	if len(eventsByUID) == 0 {
+		return nil
+	}
+
+	k8sEventsByResource := make(map[string][]models.K8sEvent, len(eventsByUID))
+	for uid, events := range eventsByUID {
+		for i := range events {
+			k8sEvent, ok := convertToK8sEvent(events[i])
+			if !ok {
+				continue
+			}
+			k8sEventsByResource[uid] = append(k8sEventsByResource[uid], k8sEvent)
+		}
+		if len(k8sEventsByResource[uid]) == 0 {
+			delete(k8sEventsByResource, uid)
+		}
+	}
+
+	if len(k8sEventsByResource) == 0 {
+		return nil
+	}
+
+	return k8sEventsByResource
 }

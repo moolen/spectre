@@ -41,6 +41,51 @@ func (p *QueryPlanner) relevantSegments(uid string, meta models.ResourceMetadata
 	return relevant
 }
 
+func (p *QueryPlanner) relevantResourceSegments(uid string, meta models.ResourceMetadata, startTimeNs, endTimeNs int64) []*segmentReader {
+	if p == nil || len(p.segments) == 0 {
+		return nil
+	}
+
+	relevant := make([]*segmentReader, 0, len(p.segments))
+	var latestPrior *segmentReader
+	for _, reader := range p.segments {
+		if reader == nil || reader.meta.EventCount == 0 {
+			continue
+		}
+		if reader.meta.MinTimestamp > endTimeNs {
+			continue
+		}
+		if !reader.MayContain(meta.Namespace, meta.Kind) {
+			continue
+		}
+		if !p.segmentContainsDimension(reader, meta.Namespace, meta.Kind) {
+			continue
+		}
+		if uid != "" {
+			if offsets := reader.resourceIndex[uid]; len(offsets) == 0 {
+				continue
+			}
+		}
+
+		if reader.meta.MaxTimestamp < startTimeNs {
+			if latestPrior == nil || reader.meta.MaxTimestamp > latestPrior.meta.MaxTimestamp {
+				latestPrior = reader
+			}
+			continue
+		}
+
+		if reader.meta.MinTimestamp <= endTimeNs && reader.meta.MaxTimestamp >= startTimeNs {
+			relevant = append(relevant, reader)
+		}
+	}
+
+	if latestPrior != nil {
+		relevant = append([]*segmentReader{latestPrior}, relevant...)
+	}
+
+	return relevant
+}
+
 func (p *QueryPlanner) relevantExportSegments(filters models.QueryFilters, startTimeNs, endTimeNs int64) []*segmentReader {
 	if p == nil || len(p.segments) == 0 {
 		return nil

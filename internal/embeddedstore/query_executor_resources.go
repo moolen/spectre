@@ -23,11 +23,8 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 		pageSize = pagination.GetPageSize()
 	}
 
-	qe.projection.mu.RLock()
-	defer qe.projection.mu.RUnlock()
-
 	if qe.isEventQuery(query.Filters) {
-		return qe.executeEventQuery(startTimeNs, endTimeNs, query.Filters, pagination, pageSize, start)
+		return qe.executeEventQuery(ctx, startTimeNs, endTimeNs, query.Filters, pagination, pageSize, start)
 	}
 
 	filteredResources, stats, err := qe.collectFilteredResources(ctx, startTimeNs, endTimeNs, query.Filters)
@@ -40,7 +37,12 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(filteredResources, startIdx, pageSize)
 
 	var resultEvents []models.Event
-	k8sEventsByResource := qe.collectK8sEventsForResources(filteredResources[startIdx:endIdx], startTimeNs, endTimeNs)
+	k8sEventsByResource, k8sEventStats, err := qe.collectK8sEventsForResources(ctx, filteredResources[startIdx:endIdx], startTimeNs, endTimeNs)
+	stats = stats.merge(k8sEventStats)
+	if err != nil {
+		qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, err)
+		return nil, nil, err
+	}
 	for _, resource := range filteredResources[startIdx:endIdx] {
 		resultEvents = append(resultEvents, resource.events...)
 	}
@@ -70,11 +72,12 @@ func (qe *QueryExecutor) collectFilteredResources(
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
 ) ([]filteredResource, queryPlanStats, error) {
-	filtered := make([]filteredResource, 0, len(qe.projection.orderedResources))
+	orderedResources, metaByUID := qe.snapshotResourceMetadata()
+	filtered := make([]filteredResource, 0, len(orderedResources))
 	stats := queryPlanStats{}
 
-	for _, key := range qe.projection.orderedResources {
-		meta, ok := qe.projection.resourceMetaByUID[key.uid]
+	for _, key := range orderedResources {
+		meta, ok := metaByUID[key.uid]
 		if !ok {
 			continue
 		}
@@ -114,7 +117,12 @@ func (qe *QueryExecutor) resourceEvents(
 		if !qe.projectionHistoryFallbackEnabled {
 			return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")
 		}
-		return qe.collectResourceEvents(qe.projection.eventsByResourceUID[uid], startTimeNs, endTimeNs), queryPlanStats{projectionUsed: true}, nil
+
+		qe.projection.mu.RLock()
+		projectionEvents := append([]models.Event(nil), qe.projection.eventsByResourceUID[uid]...)
+		qe.projection.mu.RUnlock()
+
+		return qe.collectResourceEvents(projectionEvents, startTimeNs, endTimeNs), queryPlanStats{projectionUsed: true}, nil
 	}
 
 	return qe.planner.planResourceEvents(ctx, uid, meta, startTimeNs, endTimeNs)

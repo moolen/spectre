@@ -80,6 +80,51 @@ func TestQueryPlanner_PrunesColdSegmentsOutsideRequestedTimeRange(t *testing.T) 
 	require.Empty(t, relevant)
 }
 
+func TestQueryPlanner_ResourceTimelinePrunesOldSegmentsButKeepsLatestPreWindowSegment(t *testing.T) {
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                t.TempDir(),
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 32,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	resource := models.ResourceMetadata{
+		Version:   "v1",
+		UID:       "pod-prune",
+		Namespace: "default",
+		Kind:      "Pod",
+		Name:      "pod-prune",
+	}
+
+	for _, sample := range []struct {
+		id string
+		ts int64
+	}{
+		{id: "cold-05", ts: 5},
+		{id: "cold-15", ts: 15},
+		{id: "cold-25", ts: 25},
+		{id: "cold-35", ts: 35},
+	} {
+		require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+			plannerParityEvent(sample.id, sample.ts, models.EventTypeUpdate, resource),
+		}))
+		require.NoError(t, engine.Flush(context.Background()))
+	}
+
+	planner := engine.QueryExecutor().planner
+	require.NotNil(t, planner)
+
+	events, stats, err := planner.planResourceEvents(context.Background(), resource.UID, resource, 30*1e9, 40*1e9)
+	require.NoError(t, err)
+	require.Equal(t, []string{"cold-25", "cold-35"}, eventIDs(events))
+	require.Equal(t, 2, stats.relevantSegments)
+	require.Equal(t, 2, stats.scannedSegments)
+	require.Equal(t, 2, stats.uidDiskLookups)
+}
+
 func TestQueryPlanner_QueryDistinctMetadataUsesProjectionState(t *testing.T) {
 	engine := newTestEngineWithEvents(t, []models.Event{{
 		ID:        "1",
