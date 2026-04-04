@@ -85,10 +85,11 @@ func TestEngine_OpenBuildsProjectionFromReplaySegmentsWithoutCheckpoint(t *testi
 	snapshot := engine.projection.SnapshotEvents()
 	require.Len(t, snapshot, 4)
 	require.Equal(t, []string{"a", "b", "c", "d"}, []string{snapshot[0].ID, snapshot[1].ID, snapshot[2].ID, snapshot[3].ID})
-	require.Equal(t, []string{"a"}, eventIDsForUID(engine.projection.eventsByResourceUID["uid-a"]))
-	require.Equal(t, []string{"b"}, eventIDsForUID(engine.projection.eventsByResourceUID["uid-b"]))
-	require.Equal(t, []string{"c"}, eventIDsForUID(engine.projection.eventsByResourceUID["uid-c"]))
-	require.Equal(t, []string{"d"}, eventIDsForUID(engine.projection.eventsByResourceUID["uid-d"]))
+	require.Empty(t, engine.projection.eventsByResourceUID)
+	require.Len(t, engine.projection.resourcesByUID["uid-a"].versions, 1)
+	require.Len(t, engine.projection.resourcesByUID["uid-b"].versions, 1)
+	require.Len(t, engine.projection.resourcesByUID["uid-c"].versions, 1)
+	require.Len(t, engine.projection.resourcesByUID["uid-d"].versions, 1)
 }
 
 func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {

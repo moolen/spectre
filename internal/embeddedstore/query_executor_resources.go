@@ -119,7 +119,7 @@ func (qe *QueryExecutor) resourceEvents(
 		}
 
 		qe.projection.mu.RLock()
-		projectionEvents := append([]models.Event(nil), qe.projection.eventsByResourceUID[uid]...)
+		projectionEvents := qe.projection.resourceEventsForUID(uid)
 		qe.projection.mu.RUnlock()
 
 		return qe.collectResourceEvents(projectionEvents, startTimeNs, endTimeNs), queryPlanStats{projectionUsed: true}, nil

@@ -1,24 +1,46 @@
 package embeddedstore
 
-import "github.com/moolen/spectre/internal/models"
+import (
+	"sort"
+
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
+	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/models"
+)
 
 func (p *Projection) SnapshotEvents() []models.Event {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return cloneEvents(p.events)
+	return p.snapshotEventsLocked()
 }
 
 func (p *Projection) ExportSnapshot() ProjectionSnapshot {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	resources := make([]ProjectionResourceSnapshot, 0, len(p.orderedResources))
+	for i := range p.orderedResources {
+		record := p.resourcesByUID[p.orderedResources[i].uid]
+		if record == nil {
+			continue
+		}
+		resources = append(resources, snapshotResourceRecord(record))
+	}
+
 	return ProjectionSnapshot{
-		Events: cloneEvents(p.events),
+		Resources:              resources,
+		K8sEventsByInvolvedUID: cloneK8sEventsByUID(p.k8sEventsByInvolvedUID),
+		MinTimestampNs:         p.minTimestampNs,
+		MaxTimestampNs:         p.maxTimestampNs,
 	}
 }
 
 func ProjectionFromSnapshot(snapshot ProjectionSnapshot) (*Projection, error) {
+	if len(snapshot.Resources) > 0 || len(snapshot.K8sEventsByInvolvedUID) > 0 {
+		return projectionFromCompactSnapshot(snapshot), nil
+	}
+
 	return BuildProjection(snapshot.Events)
 }
 
@@ -45,4 +67,153 @@ func (p *Projection) replaceStateLocked(other *Projection) {
 	p.orderedResources = other.orderedResources
 	p.minTimestampNs = other.minTimestampNs
 	p.maxTimestampNs = other.maxTimestampNs
+}
+
+func (p *Projection) snapshotEventsLocked() []models.Event {
+	if len(p.events) > 0 {
+		return cloneEvents(p.events)
+	}
+
+	events := make([]models.Event, 0)
+	for i := range p.orderedResources {
+		events = append(events, p.resourceEventsForUID(p.orderedResources[i].uid)...)
+	}
+	sortEventsIfNeeded(events)
+	return events
+}
+
+func projectionFromCompactSnapshot(snapshot ProjectionSnapshot) *Projection {
+	projection := NewProjection()
+	projection.minTimestampNs = snapshot.MinTimestampNs
+	projection.maxTimestampNs = snapshot.MaxTimestampNs
+	projection.k8sEventsByInvolvedUID = cloneK8sEventsByUID(snapshot.K8sEventsByInvolvedUID)
+
+	for i := range snapshot.Resources {
+		recordSnapshot := snapshot.Resources[i]
+		record := restoreResourceRecord(recordSnapshot)
+		if record == nil || len(record.versions) == 0 {
+			continue
+		}
+
+		latest := record.versions[len(record.versions)-1]
+		meta := resourceMetadataFromIdentity(latest.identity)
+		projection.resourcesByUID[record.uid] = record
+		projection.resourceMetaByUID[record.uid] = meta
+		key := resourceKey{
+			namespace: meta.Namespace,
+			kind:      meta.Kind,
+			name:      meta.Name,
+		}
+		projection.resourcesByKey[key] = append(projection.resourcesByKey[key], record)
+		projection.orderedResources = insertOrderedResourceKey(projection.orderedResources, orderedResourceKey{
+			kind:      meta.Kind,
+			namespace: meta.Namespace,
+			name:      meta.Name,
+			uid:       meta.UID,
+		})
+	}
+
+	return projection
+}
+
+func snapshotResourceRecord(record *resourceRecord) ProjectionResourceSnapshot {
+	if record == nil {
+		return ProjectionResourceSnapshot{}
+	}
+
+	versions := make([]ProjectionResourceVersionSnapshot, 0, len(record.versions))
+	for i := range record.versions {
+		version := record.versions[i]
+		versions = append(versions, ProjectionResourceVersionSnapshot{
+			EventID:     version.eventID,
+			Timestamp:   version.timestamp,
+			EventType:   version.eventType,
+			Identity:    copyIdentity(&version),
+			Data:        cloneBytes(version.data),
+			ChangeEvent: cloneChangeEventInfo(version.changeEvent),
+		})
+	}
+
+	return ProjectionResourceSnapshot{
+		UID:      record.uid,
+		Versions: versions,
+	}
+}
+
+func restoreResourceRecord(snapshot ProjectionResourceSnapshot) *resourceRecord {
+	if len(snapshot.Versions) == 0 {
+		return nil
+	}
+
+	record := &resourceRecord{
+		uid:      snapshot.UID,
+		versions: make([]resourceVersion, 0, len(snapshot.Versions)),
+	}
+	for i := range snapshot.Versions {
+		version := snapshot.Versions[i]
+		record.versions = append(record.versions, resourceVersion{
+			eventID:     version.EventID,
+			timestamp:   version.Timestamp,
+			eventType:   version.EventType,
+			identity:    cloneGraphIdentity(version.Identity),
+			data:        cloneBytes(version.Data),
+			changeEvent: cloneChangeEventInfo(version.ChangeEvent),
+		})
+	}
+
+	return record
+}
+
+func resourceMetadataFromIdentity(identity graph.ResourceIdentity) models.ResourceMetadata {
+	return models.ResourceMetadata{
+		Group:     identity.APIGroup,
+		Version:   identity.Version,
+		Kind:      identity.Kind,
+		Namespace: identity.Namespace,
+		Name:      identity.Name,
+		UID:       identity.UID,
+	}
+}
+
+func cloneK8sEventsByUID(input map[string][]analysisstore.K8sEventInfo) map[string][]analysisstore.K8sEventInfo {
+	if len(input) == 0 {
+		return make(map[string][]analysisstore.K8sEventInfo)
+	}
+
+	cloned := make(map[string][]analysisstore.K8sEventInfo, len(input))
+	for uid, events := range input {
+		items := make([]analysisstore.K8sEventInfo, len(events))
+		for i := range events {
+			items[i] = cloneK8sEventInfo(events[i])
+		}
+		cloned[uid] = items
+	}
+
+	return cloned
+}
+
+func cloneChangeEventInfo(input analysisstore.ChangeEventInfo) analysisstore.ChangeEventInfo {
+	cloned := input
+	cloned.Data = cloneBytes(input.Data)
+	return cloned
+}
+
+func cloneK8sEventInfo(input analysisstore.K8sEventInfo) analysisstore.K8sEventInfo {
+	return input
+}
+
+func cloneGraphIdentity(input graph.ResourceIdentity) graph.ResourceIdentity {
+	cloned := input
+	cloned.Labels = copyStringMap(input.Labels)
+	return cloned
+}
+
+func sortEventsIfNeeded(events []models.Event) {
+	if len(events) <= 1 {
+		return
+	}
+
+	sort.SliceStable(events, func(i, j int) bool {
+		return compareEventOrder(events[i], events[j]) < 0
+	})
 }

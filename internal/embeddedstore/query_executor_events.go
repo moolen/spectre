@@ -42,8 +42,7 @@ func (qe *QueryExecutor) collectK8sEventsForResources(
 		return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")
 	}
 
-	associatedEvents := qe.collectAssociatedEventsFromProjection(involvedUIDs, namespaces, startTimeNs, endTimeNs)
-	return convertAssociatedEventsToK8sEvents(associatedEvents), queryPlanStats{projectionUsed: true}, nil
+	return qe.collectAssociatedK8sEventsFromProjection(involvedUIDs, startTimeNs, endTimeNs), queryPlanStats{projectionUsed: true}, nil
 }
 
 func convertToK8sEvent(event models.Event) (models.K8sEvent, bool) {
@@ -294,10 +293,7 @@ func (qe *QueryExecutor) collectAssociatedEventsFromProjection(
 }
 
 func (qe *QueryExecutor) snapshotProjectionEvents() []models.Event {
-	qe.projection.mu.RLock()
-	defer qe.projection.mu.RUnlock()
-
-	return append([]models.Event(nil), qe.projection.events...)
+	return qe.projection.SnapshotEvents()
 }
 
 func convertAssociatedEventsToK8sEvents(eventsByUID map[string][]models.Event) map[string][]models.K8sEvent {
@@ -324,4 +320,48 @@ func convertAssociatedEventsToK8sEvents(eventsByUID map[string][]models.Event) m
 	}
 
 	return k8sEventsByResource
+}
+
+func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjection(
+	involvedUIDs []string,
+	startTimeNs, endTimeNs int64,
+) map[string][]models.K8sEvent {
+	if len(involvedUIDs) == 0 || endTimeNs < startTimeNs {
+		return nil
+	}
+
+	qe.projection.mu.RLock()
+	defer qe.projection.mu.RUnlock()
+
+	eventsByUID := make(map[string][]models.K8sEvent, len(involvedUIDs))
+	for i := range involvedUIDs {
+		uid := involvedUIDs[i]
+		events := qe.projection.k8sEventsByInvolvedUID[uid]
+		if len(events) == 0 {
+			continue
+		}
+
+		for j := len(events) - 1; j >= 0; j-- {
+			event := events[j]
+			timestampNs := event.Timestamp.UnixNano()
+			if timestampNs < startTimeNs || timestampNs > endTimeNs {
+				continue
+			}
+			eventsByUID[uid] = append(eventsByUID[uid], models.K8sEvent{
+				ID:        event.EventID,
+				Timestamp: timestampNs,
+				Reason:    event.Reason,
+				Message:   event.Message,
+				Type:      event.Type,
+				Count:     int32(event.Count),
+				Source:    event.Source,
+			})
+		}
+	}
+
+	if len(eventsByUID) == 0 {
+		return nil
+	}
+
+	return eventsByUID
 }

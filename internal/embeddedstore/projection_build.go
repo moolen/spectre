@@ -19,24 +19,7 @@ func BuildProjection(events []models.Event) (*Projection, error) {
 	for i := range sortedEvents {
 		projection.applyEventToIndexes(sortedEvents[i])
 	}
-
-	sort.Slice(projection.orderedResources, func(i, j int) bool {
-		return compareOrderedResourceKey(projection.orderedResources[i], projection.orderedResources[j]) < 0
-	})
-
-	for uid := range projection.resourcesByUID {
-		projection.rebuildRecord(uid)
-	}
-	for involvedUID := range projection.k8sEventsByInvolvedUID {
-		sort.Slice(projection.k8sEventsByInvolvedUID[involvedUID], func(i, j int) bool {
-			left := projection.k8sEventsByInvolvedUID[involvedUID][i]
-			right := projection.k8sEventsByInvolvedUID[involvedUID][j]
-			if left.Timestamp.Equal(right.Timestamp) {
-				return left.EventID > right.EventID
-			}
-			return left.Timestamp.After(right.Timestamp)
-		})
-	}
+	projection.finalizeReplayBuild()
 
 	return projection, nil
 }
@@ -65,6 +48,10 @@ func (p *Projection) finalizeReplayBuild() {
 			return left.Timestamp.After(right.Timestamp)
 		})
 	}
+
+	p.events = nil
+	clear(p.eventsByResourceUID)
+	clear(p.k8sRawEventsByInvolvedUID)
 }
 
 func (p *Projection) Apply(event models.Event) error {
@@ -86,8 +73,10 @@ func (p *Projection) Apply(event models.Event) error {
 
 	uid := cloned.Resource.UID
 	p.eventsByResourceUID[uid] = insertEventSorted(p.eventsByResourceUID[uid], cloned)
-	p.resourceMetaByUID[uid] = latestResourceMeta(p.eventsByResourceUID[uid])
-	p.rebuildRecord(uid)
+	history := p.resourceEventsForUID(uid)
+	history = insertEventSorted(history, cloned)
+	p.rebuildRecordFromEvents(uid, history)
+	p.resourceMetaByUID[uid] = latestResourceMeta(history)
 	p.updateTimestampBounds(cloned.Timestamp)
 
 	return nil
@@ -162,6 +151,66 @@ func latestResourceMeta(events []models.Event) models.ResourceMetadata {
 		return models.ResourceMetadata{}
 	}
 	return events[len(events)-1].Resource
+}
+
+func (p *Projection) resourceEventsForUID(uid string) []models.Event {
+	record := p.resourcesByUID[uid]
+	if record == nil || len(record.versions) == 0 {
+		return nil
+	}
+
+	events := make([]models.Event, 0, len(record.versions))
+	for i := range record.versions {
+		events = append(events, resourceVersionEvent(record.versions[i]))
+	}
+	return events
+}
+
+func (p *Projection) rebuildRecordFromEvents(uid string, events []models.Event) {
+	record := p.resourcesByUID[uid]
+	if record == nil {
+		return
+	}
+
+	versions := make([]resourceVersion, 0, len(events))
+	for i := range events {
+		event := events[i]
+		object := parseObject(event.Data)
+
+		var previousData []byte
+		if len(versions) > 0 {
+			previousData = versions[len(versions)-1].data
+		}
+
+		version := resourceVersion{
+			eventID:   event.ID,
+			timestamp: event.Timestamp,
+			eventType: event.Type,
+			data:      cloneBytes(event.Data),
+		}
+		version.identity = buildResourceIdentity(event, object, versions, previousData)
+		version.changeEvent = buildChangeEventInfo(event, version.data, previousData)
+		versions = append(versions, version)
+	}
+
+	record.versions = versions
+}
+
+func resourceVersionEvent(version resourceVersion) models.Event {
+	return models.Event{
+		ID:        version.eventID,
+		Timestamp: version.timestamp,
+		Type:      version.eventType,
+		Resource: models.ResourceMetadata{
+			Group:     version.identity.APIGroup,
+			Version:   version.identity.Version,
+			Kind:      version.identity.Kind,
+			Namespace: version.identity.Namespace,
+			Name:      version.identity.Name,
+			UID:       version.identity.UID,
+		},
+		Data: cloneBytes(version.data),
+	}
 }
 
 func insertK8sEventInfoDescending(events []analysisstore.K8sEventInfo, event analysisstore.K8sEventInfo) []analysisstore.K8sEventInfo {

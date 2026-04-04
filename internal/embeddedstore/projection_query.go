@@ -7,33 +7,7 @@ import (
 )
 
 func (p *Projection) rebuildRecord(uid string) {
-	record := p.resourcesByUID[uid]
-	if record == nil {
-		return
-	}
-
-	events := p.eventsByResourceUID[uid]
-	versions := make([]resourceVersion, 0, len(events))
-	for i := range events {
-		event := events[i]
-		object := parseObject(event.Data)
-
-		var previousData []byte
-		if len(versions) > 0 {
-			previousData = versions[len(versions)-1].data
-		}
-
-		version := resourceVersion{
-			timestamp: event.Timestamp,
-			eventType: event.Type,
-			data:      event.Data,
-		}
-		version.identity = buildResourceIdentity(event, object, versions, previousData)
-		version.changeEvent = buildChangeEventInfo(event, version.data, previousData)
-		versions = append(versions, version)
-	}
-
-	record.versions = versions
+	p.rebuildRecordFromEvents(uid, p.eventsByResourceUID[uid])
 }
 
 func (p *Projection) resolveByName(namespace, kind, name string, failureTimestampNs, windowStartNs int64) *resourceVersion {

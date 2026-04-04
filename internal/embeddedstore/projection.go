@@ -22,6 +22,7 @@ type orderedResourceKey struct {
 }
 
 type resourceVersion struct {
+	eventID     string
 	timestamp   int64
 	eventType   models.EventType
 	identity    graph.ResourceIdentity
@@ -38,6 +39,8 @@ type resourceRecord struct {
 type Projection struct {
 	mu sync.RWMutex
 
+	// Legacy history fields are kept only for compatibility with older helpers/tests.
+	// Compact projection state should leave them empty after build/import/apply.
 	events                    []models.Event
 	eventsByResourceUID       map[string][]models.Event
 	resourceMetaByUID         map[string]models.ResourceMetadata
@@ -51,7 +54,25 @@ type Projection struct {
 }
 
 type ProjectionSnapshot struct {
-	Events []models.Event `json:"events"`
+	Events                   []models.Event                           `json:"events,omitempty"`
+	Resources                []ProjectionResourceSnapshot             `json:"resources,omitempty"`
+	K8sEventsByInvolvedUID   map[string][]analysisstore.K8sEventInfo `json:"k8s_events_by_involved_uid,omitempty"`
+	MinTimestampNs           int64                                    `json:"min_timestamp_ns"`
+	MaxTimestampNs           int64                                    `json:"max_timestamp_ns"`
+}
+
+type ProjectionResourceSnapshot struct {
+	UID      string                              `json:"uid"`
+	Versions []ProjectionResourceVersionSnapshot `json:"versions"`
+}
+
+type ProjectionResourceVersionSnapshot struct {
+	EventID     string                        `json:"event_id"`
+	Timestamp   int64                         `json:"timestamp"`
+	EventType   models.EventType              `json:"event_type"`
+	Identity    graph.ResourceIdentity        `json:"identity"`
+	Data        []byte                        `json:"data,omitempty"`
+	ChangeEvent analysisstore.ChangeEventInfo `json:"change_event"`
 }
 
 func NewProjection() *Projection {
