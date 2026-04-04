@@ -27,7 +27,6 @@ func (p *Projection) rebuildRecord(uid string) {
 			timestamp: event.Timestamp,
 			eventType: event.Type,
 			data:      event.Data,
-			object:    object,
 		}
 		version.identity = buildResourceIdentity(event, object, versions, previousData)
 		version.changeEvent = buildChangeEventInfo(event, version.data, previousData)

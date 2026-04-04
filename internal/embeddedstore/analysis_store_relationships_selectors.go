@@ -88,7 +88,7 @@ func resourceUsesPodSelector(kind string) bool {
 }
 
 func selectorSpec(version *resourceVersion) map[string]any {
-	spec := getMap(version.object, "spec")
+	spec := getMap(parsedVersionObject(version), "spec")
 	switch version.identity.Kind {
 	case "Service":
 		selector := getMap(spec, "selector")

@@ -69,7 +69,7 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 			EventType:    string(version.eventType),
 			Status:       version.changeEvent.Status,
 			SpecChanges:  s.specDiffWithinLookback(version.identity.UID, query.TimestampNs, query.LookbackNs),
-			SpecReplicas: specReplicas(version.object),
+			SpecReplicas: specReplicasForVersion(version),
 		}
 		node.LatestEvent = &latestEvent
 		nodes = append(nodes, node)
@@ -302,7 +302,7 @@ func (s *Store) currentEdgesForVersions(versionsByUID map[string]*resourceVersio
 	}
 
 	for _, version := range versionsByUID {
-		for _, ownerUID := range ownerUIDs(version.object) {
+		for _, ownerUID := range ownerUIDs(parsedVersionObject(version)) {
 			add(ownerUID, version.identity.UID, "OWNS")
 		}
 		for _, ref := range directReferences(version) {

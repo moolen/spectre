@@ -27,6 +27,7 @@ func ownerUIDs(object map[string]any) []string {
 
 func directReferences(version *resourceVersion) []directRef {
 	result := make([]directRef, 0)
+	object := parsedVersionObject(version)
 	switch version.identity.Kind {
 	case "Pod":
 		result = append(result, podReferences(version)...)
@@ -42,12 +43,12 @@ func directReferences(version *resourceVersion) []directRef {
 		result = append(result, sourceRefReferences(version, "Gateway", "Service")...)
 	}
 	if version.identity.Kind == "Pod" {
-		if nodeName := getString(getMap(version.object, "spec"), "nodeName"); nodeName != "" {
+		if nodeName := getString(getMap(object, "spec"), "nodeName"); nodeName != "" {
 			result = append(result, directRef{kind: "Node", name: nodeName, relType: "SCHEDULED_ON"})
 		}
-		serviceAccountName := getString(getMap(version.object, "spec"), "serviceAccountName")
+		serviceAccountName := getString(getMap(object, "spec"), "serviceAccountName")
 		if serviceAccountName == "" {
-			serviceAccountName = getString(getMap(version.object, "spec"), "serviceAccount")
+			serviceAccountName = getString(getMap(object, "spec"), "serviceAccount")
 		}
 		if serviceAccountName != "" {
 			result = append(result, directRef{kind: "ServiceAccount", name: serviceAccountName, namespace: version.identity.Namespace, relType: "USES_SERVICE_ACCOUNT"})
@@ -58,7 +59,7 @@ func directReferences(version *resourceVersion) []directRef {
 }
 
 func podReferences(version *resourceVersion) []directRef {
-	spec := getMap(version.object, "spec")
+	spec := getMap(parsedVersionObject(version), "spec")
 	result := make([]directRef, 0)
 	for _, volumeItem := range getSlice(spec, "volumes") {
 		volume, _ := volumeItem.(map[string]any)
@@ -125,7 +126,7 @@ func podReferences(version *resourceVersion) []directRef {
 }
 
 func ingressReferences(version *resourceVersion) []directRef {
-	spec := getMap(version.object, "spec")
+	spec := getMap(parsedVersionObject(version), "spec")
 	result := make([]directRef, 0)
 	if backend := getMap(spec, "defaultBackend"); backend != nil {
 		if service := getMap(backend, "service"); service != nil {
@@ -152,13 +153,14 @@ func ingressReferences(version *resourceVersion) []directRef {
 
 func roleBindingReferences(version *resourceVersion) []directRef {
 	result := make([]directRef, 0)
-	roleRef := getMap(version.object, "roleRef")
+	object := parsedVersionObject(version)
+	roleRef := getMap(object, "roleRef")
 	roleKind := getString(roleRef, "kind")
 	roleName := getString(roleRef, "name")
 	if roleKind != "" && roleName != "" {
 		result = append(result, directRef{kind: roleKind, name: roleName, relType: "BINDS_ROLE"})
 	}
-	for _, subjectItem := range getSlice(version.object, "subjects") {
+	for _, subjectItem := range getSlice(object, "subjects") {
 		subject, _ := subjectItem.(map[string]any)
 		if getString(subject, "kind") != "ServiceAccount" {
 			continue
@@ -175,7 +177,7 @@ func roleBindingReferences(version *resourceVersion) []directRef {
 }
 
 func helmReleaseReferences(version *resourceVersion) []directRef {
-	spec := getMap(version.object, "spec")
+	spec := getMap(parsedVersionObject(version), "spec")
 	result := sourceRefReferences(version, "GitRepository", "Bucket", "OCIRepository")
 	for _, valueItem := range getSlice(spec, "valuesFrom") {
 		valueRef, _ := valueItem.(map[string]any)
@@ -195,7 +197,7 @@ func helmReleaseReferences(version *resourceVersion) []directRef {
 }
 
 func sourceRefReferences(version *resourceVersion, allowedKinds ...string) []directRef {
-	spec := getMap(version.object, "spec")
+	spec := getMap(parsedVersionObject(version), "spec")
 	sourceRef := getMap(spec, "sourceRef")
 	if len(sourceRef) == 0 {
 		chart := getMap(spec, "chart")

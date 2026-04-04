@@ -242,6 +242,14 @@ func parseObject(data []byte) map[string]any {
 	return object
 }
 
+func parsedVersionObject(version *resourceVersion) map[string]any {
+	if version == nil {
+		return nil
+	}
+
+	return parseObject(version.data)
+}
+
 func timeFromNs(value int64) time.Time {
 	return time.Unix(0, value)
 }

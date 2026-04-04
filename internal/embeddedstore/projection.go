@@ -26,7 +26,6 @@ type resourceVersion struct {
 	eventType   models.EventType
 	identity    graph.ResourceIdentity
 	data        []byte
-	object      map[string]any
 	changeEvent analysisstore.ChangeEventInfo
 }
 

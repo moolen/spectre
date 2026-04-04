@@ -35,3 +35,7 @@ func specReplicas(object map[string]any) *int {
 	replicas := int(value)
 	return &replicas
 }
+
+func specReplicasForVersion(version *resourceVersion) *int {
+	return specReplicas(parsedVersionObject(version))
+}

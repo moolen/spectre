@@ -81,7 +81,7 @@ func (s *Store) GetOwnershipChain(_ context.Context, uid string, atTimestampNs i
 	for depth := 1; depth <= maxDepth; depth++ {
 		var next []*resourceVersion
 		for _, version := range current {
-			for _, ownerUID := range ownerUIDs(version.object) {
+			for _, ownerUID := range ownerUIDs(parsedVersionObject(version)) {
 				if ownerUID == "" || seen[ownerUID] {
 					continue
 				}
