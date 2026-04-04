@@ -36,13 +36,12 @@ func (qe *QueryExecutor) ExportTimeRange(ctx context.Context, query *models.Quer
 		return nil, err
 	}
 
-	qe.projection.mu.RLock()
-	defer qe.projection.mu.RUnlock()
 	stats.projectionUsed = true
 
+	projectionEvents := qe.snapshotProjectionEvents()
 	exported := make([]models.Event, 0)
-	for i := range qe.projection.events {
-		event := qe.projection.events[i]
+	for i := range projectionEvents {
+		event := projectionEvents[i]
 		if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
 			continue
 		}
@@ -66,91 +65,39 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 		return nil, nil, 0, 0, err
 	}
 
-	if qe.planner != nil {
-		orderedResources, metaByUID := qe.snapshotResourceMetadata()
-		namespacesSet := make(map[string]struct{})
-		kindsSet := make(map[string]struct{})
-		minTime = -1
-		maxTime = -1
-		stats := queryPlanStats{projectionUsed: true}
-
-		for _, key := range orderedResources {
-			meta, ok := metaByUID[key.uid]
-			if !ok {
-				continue
-			}
-
-			resourceEvents, resourceStats, resourceErr := qe.resourceEvents(ctx, key.uid, meta, startTimeNs, endTimeNs)
-			stats = stats.merge(resourceStats)
-			if resourceErr != nil {
-				qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, resourceErr)
-				return nil, nil, 0, 0, resourceErr
-			}
-			if len(resourceEvents) == 0 {
-				continue
-			}
-
-			namespacesSet[meta.Namespace] = struct{}{}
-			kindsSet[meta.Kind] = struct{}{}
-			for i := range resourceEvents {
-				event := resourceEvents[i]
-				if minTime < 0 || event.Timestamp < minTime {
-					minTime = event.Timestamp
-				}
-				if maxTime < 0 || event.Timestamp > maxTime {
-					maxTime = event.Timestamp
-				}
-			}
-		}
-
-		if minTime < 0 {
-			minTime = 0
-		}
-		if maxTime < 0 {
-			maxTime = 0
-		}
-
-		for ns := range namespacesSet {
-			namespaces = append(namespaces, ns)
-		}
-		for kind := range kindsSet {
-			kinds = append(kinds, kind)
-		}
-
-		sort.Strings(namespaces)
-		sort.Strings(kinds)
-
-		qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, nil)
-		return namespaces, kinds, minTime, maxTime, nil
-	}
-	if !qe.projectionHistoryFallbackEnabled {
+	if qe.planner == nil && !qe.projectionHistoryFallbackEnabled {
 		err := fmt.Errorf("projection history fallback disabled")
 		qe.recordQueryMetrics(queryFamilyDistinctMeta, queryPlanStats{}, start, err)
 		return nil, nil, 0, 0, err
 	}
 
-	qe.projection.mu.RLock()
-	defer qe.projection.mu.RUnlock()
-
+	orderedResources, metaByUID := qe.snapshotResourceMetadata()
 	namespacesSet := make(map[string]struct{})
 	kindsSet := make(map[string]struct{})
 	minTime = -1
 	maxTime = -1
+	stats := queryPlanStats{}
 
-	for _, key := range qe.projection.orderedResources {
-		meta, ok := qe.projection.resourceMetaByUID[key.uid]
+	for _, key := range orderedResources {
+		meta, ok := metaByUID[key.uid]
 		if !ok {
 			continue
 		}
 
-		resourceEvents := qe.collectResourceEvents(qe.projection.eventsByResourceUID[key.uid], startTimeNs, endTimeNs)
+		resourceEvents, resourceStats, resourceErr := qe.resourceEvents(ctx, key.uid, meta, startTimeNs, endTimeNs)
+		stats = stats.merge(resourceStats)
+		if resourceErr != nil {
+			qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, resourceErr)
+			return nil, nil, 0, 0, resourceErr
+		}
 		if len(resourceEvents) == 0 {
 			continue
 		}
 
 		namespacesSet[meta.Namespace] = struct{}{}
 		kindsSet[meta.Kind] = struct{}{}
-		for _, event := range resourceEvents {
+		for i := range resourceEvents {
+			event := resourceEvents[i]
 			if minTime < 0 || event.Timestamp < minTime {
 				minTime = event.Timestamp
 			}
@@ -177,7 +124,7 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 	sort.Strings(namespaces)
 	sort.Strings(kinds)
 
-	qe.recordQueryMetrics(queryFamilyDistinctMeta, queryPlanStats{projectionUsed: true}, start, nil)
+	qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, nil)
 	return namespaces, kinds, minTime, maxTime, nil
 }
 
