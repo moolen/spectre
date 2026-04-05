@@ -89,3 +89,13 @@ func TestConfig_EffectiveEngineConfigAppliesTailDefaults(t *testing.T) {
 	require.Equal(t, defaultCheckpointInterval, cfg.CheckpointInterval)
 	require.Equal(t, 30*time.Second, cfg.FlushInterval)
 }
+
+func TestConfig_EffectiveEngineConfigPreservesExplicitCheckpointOnShutdownFalse(t *testing.T) {
+	cfg, err := Config{
+		DataDir:                 t.TempDir(),
+		CheckpointOnShutdown:    false,
+		CheckpointOnShutdownSet: true,
+	}.EffectiveEngineConfig()
+	require.NoError(t, err)
+	require.False(t, cfg.CheckpointOnShutdown)
+}

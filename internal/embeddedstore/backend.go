@@ -20,6 +20,7 @@ type Config struct {
 	CheckpointMaxTailEvents   int
 	CheckpointMaxTailBytes    int64
 	CheckpointOnShutdown      bool
+	CheckpointOnShutdownSet   bool
 	SegmentTargetBytes        int64
 	CompactionMinSegments     int
 	MetricsRegisterer         prometheus.Registerer
@@ -120,7 +121,7 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 	if engineCfg.CheckpointMaxTailBytes == 0 {
 		engineCfg.CheckpointMaxTailBytes = defaultCheckpointMaxTailBytes
 	}
-	if !cfg.CheckpointOnShutdown {
+	if !cfg.CheckpointOnShutdownSet {
 		engineCfg.CheckpointOnShutdown = defaultCheckpointOnShutdown
 	}
 	if engineCfg.SegmentTargetBytes == 0 {

@@ -68,6 +68,7 @@ func embeddedStoreConfig() embeddedstore.Config {
 		CheckpointMaxTailEvents:   embeddedCheckpointMaxTailEvents,
 		CheckpointMaxTailBytes:    embeddedCheckpointMaxTailBytes,
 		CheckpointOnShutdown:      embeddedCheckpointOnShutdown,
+		CheckpointOnShutdownSet:   !embeddedCheckpointOnShutdown,
 		MetricsRegisterer:         prometheus.DefaultRegisterer,
 		ProjectionHistoryFallback: embeddedProjectionHistoryFallback,
 	}

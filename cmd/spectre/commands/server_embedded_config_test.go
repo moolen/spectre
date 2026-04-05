@@ -63,19 +63,31 @@ func TestEmbeddedStoreConfigIncludesCheckpointIntervalOverride(t *testing.T) {
 	previousCheckpointMaxTailEvents := embeddedCheckpointMaxTailEvents
 	previousCheckpointMaxTailBytes := embeddedCheckpointMaxTailBytes
 	previousCheckpointOnShutdown := embeddedCheckpointOnShutdown
+	checkpointOnShutdownFlag := serverCmd.Flags().Lookup("embedded-checkpoint-on-shutdown")
+	if checkpointOnShutdownFlag == nil {
+		t.Fatal("embedded-checkpoint-on-shutdown flag not found")
+	}
+	previousCheckpointOnShutdownFlagValue := checkpointOnShutdownFlag.Value.String()
+	previousCheckpointOnShutdownFlagChanged := checkpointOnShutdownFlag.Changed
 	t.Cleanup(func() {
 		dataDir = previousDataDir
 		embeddedCheckpointInterval = previousCheckpointInterval
 		embeddedCheckpointMaxTailEvents = previousCheckpointMaxTailEvents
 		embeddedCheckpointMaxTailBytes = previousCheckpointMaxTailBytes
 		embeddedCheckpointOnShutdown = previousCheckpointOnShutdown
+		if err := serverCmd.Flags().Set("embedded-checkpoint-on-shutdown", previousCheckpointOnShutdownFlagValue); err != nil {
+			t.Fatalf("restore embedded-checkpoint-on-shutdown flag: %v", err)
+		}
+		checkpointOnShutdownFlag.Changed = previousCheckpointOnShutdownFlagChanged
 	})
 
 	dataDir = "/tmp/spectre"
 	embeddedCheckpointInterval = 15 * time.Minute
 	embeddedCheckpointMaxTailEvents = 128
 	embeddedCheckpointMaxTailBytes = 1 << 20
-	embeddedCheckpointOnShutdown = false
+	if err := serverCmd.Flags().Set("embedded-checkpoint-on-shutdown", "false"); err != nil {
+		t.Fatalf("set embedded-checkpoint-on-shutdown flag: %v", err)
+	}
 
 	cfg := embeddedStoreConfig()
 	if cfg.DataDir != dataDir {
@@ -92,5 +104,8 @@ func TestEmbeddedStoreConfigIncludesCheckpointIntervalOverride(t *testing.T) {
 	}
 	if cfg.CheckpointOnShutdown {
 		t.Fatal("expected checkpoint on shutdown to be false")
+	}
+	if !cfg.CheckpointOnShutdownSet {
+		t.Fatal("expected checkpoint on shutdown override to be marked as explicitly set")
 	}
 }
