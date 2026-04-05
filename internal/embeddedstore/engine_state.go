@@ -32,7 +32,10 @@ func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, *tail
 		readers = append(readers, reader)
 	}
 
-	checkpointProjection, checkpointHighWaterMark := loadStartupCheckpoint(rootDir, manifest)
+	checkpointProjection, checkpointHighWaterMark, err := loadStartupCheckpoint(rootDir, manifest)
+	if err != nil {
+		return nil, nil, 0, nil, nil, startupModeRepair, err
+	}
 	projection, tail, recoveredHot, recoveredHighWaterMark, ok, err := tryLoadFastStartupState(rootDir, manifest, checkpointProjection, checkpointHighWaterMark)
 	if err != nil {
 		return nil, nil, 0, nil, nil, startupModeRepair, err
@@ -49,21 +52,21 @@ func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, *tail
 	return readers, nil, recoveredHighWaterMark, projection, nil, startupModeRepair, nil
 }
 
-func loadStartupCheckpoint(rootDir string, manifest Manifest) (*Projection, uint64) {
+func loadStartupCheckpoint(rootDir string, manifest Manifest) (*Projection, uint64, error) {
 	checkpointMeta := manifest.ActiveCheckpoint
 	if checkpointMeta.ID == "" && len(manifest.Checkpoints) > 0 {
 		checkpointMeta = latestCheckpointMeta(manifest.Checkpoints)
 	}
 	if checkpointMeta.ID == "" {
-		return nil, 0
+		return nil, 0, nil
 	}
 
 	projection, checkpointHighWaterMark, err := loadCheckpoint(rootDir, checkpointMeta)
 	if err != nil {
-		return nil, 0
+		return nil, 0, err
 	}
 
-	return projection, checkpointHighWaterMark
+	return projection, checkpointHighWaterMark, nil
 }
 
 func tryLoadFastStartupState(

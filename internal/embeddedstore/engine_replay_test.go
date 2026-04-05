@@ -149,6 +149,27 @@ func TestEngine_OpenFallsBackToRepairReplayWhenTailStateIsStale(t *testing.T) {
 	require.Equal(t, uint64(1), manifest.ActiveTail.LastHighWaterMark)
 }
 
+func TestEngine_OpenFailsWhenCheckpointIsCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{testReplayEvent("checkpoint-corrupt", 1)}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	checkpointPath := filepath.Join(rootDir, checkpointsDirName, engine.manifest.ActiveCheckpoint.ID, checkpointStateFile)
+	require.NoError(t, os.WriteFile(checkpointPath, []byte("{not-json"), 0o600))
+	require.NoError(t, engine.tail.Close())
+
+	_, err = OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "load checkpoint")
+	require.ErrorContains(t, err, "decode state file")
+}
+
 func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {
 	dir := t.TempDir()
 	rootDir := embeddedRootDir(dir)
