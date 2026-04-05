@@ -42,7 +42,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		return nil, fmt.Errorf("open embedded engine: load manifest: %w", err)
 	}
 
-	readers, tail, recoveredHighWaterMark, projection, recoveredHot, mode, err := loadEngineState(rootDir, manifest)
+	readers, tail, recoveredHighWaterMark, projection, recoveredHot, mode, replayedTailEvents, err := loadEngineState(rootDir, manifest)
 	if err != nil {
 		return nil, fmt.Errorf("open embedded engine: load state: %w", err)
 	}
@@ -68,10 +68,12 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 
 	nextHighWaterMark := maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), recoveredHighWaterMark)
 	if mode == startupModeRepair {
-		if err := recoverTailState(projection, hot, tail, nextHighWaterMark); err != nil {
+		replayedOnRepair, err := recoverTailState(projection, hot, tail, nextHighWaterMark)
+		if err != nil {
 			_ = tail.Close()
 			return nil, fmt.Errorf("open embedded engine: recover tail journal: %w", err)
 		}
+		replayedTailEvents += replayedOnRepair
 	}
 	if tail != nil {
 		nextHighWaterMark = maxUint64(nextHighWaterMark, tail.meta.LastHighWaterMark)
@@ -97,7 +99,11 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	}
 	engine.queryExec.SetMetrics(metrics)
 	engine.refreshQueryPlanner()
+	engine.metrics.RecordStartupMode(mode.String())
+	engine.metrics.RecordTailReplay(replayedTailEvents)
 	engine.metrics.SetActiveSegments(len(engine.segmentReaders))
+	engine.setActiveTailMetrics()
+	engine.logStartup(mode, replayedTailEvents)
 	engine.ready.Store(true)
 
 	return engine, nil
@@ -130,18 +136,24 @@ func openOrCreateActiveTail(rootDir string, manifest Manifest) (Manifest, *tailJ
 	return manifest, tail, nil
 }
 
-func recoverTailState(projection *Projection, hot *hotStore, tail *tailJournal, afterHighWaterMark uint64) error {
+func recoverTailState(projection *Projection, hot *hotStore, tail *tailJournal, afterHighWaterMark uint64) (int, error) {
 	if projection == nil || hot == nil || tail == nil {
-		return nil
+		return 0, nil
 	}
 
-	return tail.ReplaySince(context.Background(), afterHighWaterMark, func(event models.Event, _ uint64) error {
+	replayedEvents := 0
+	err := tail.ReplaySince(context.Background(), afterHighWaterMark, func(event models.Event, _ uint64) error {
 		if err := projection.Apply(event); err != nil {
 			return err
 		}
 		hot.Append([]models.Event{event})
+		replayedEvents++
 		return nil
 	})
+	if err != nil {
+		return 0, err
+	}
+	return replayedEvents, nil
 }
 
 func (e *Engine) QueryExecutor() *QueryExecutor {
@@ -162,6 +174,46 @@ func (e *Engine) AnalysisStore() *Store {
 
 func (e *Engine) IsReady() bool {
 	return e != nil && e.ready.Load()
+}
+
+func (e *Engine) setActiveTailMetrics() {
+	if e == nil || e.metrics == nil {
+		return
+	}
+	if e.tail != nil {
+		e.metrics.SetActiveTail(e.tail.meta.EventCount, e.tail.meta.SizeBytes)
+		return
+	}
+	e.metrics.SetActiveTail(e.manifest.ActiveTail.EventCount, e.manifest.ActiveTail.SizeBytes)
+}
+
+func (e *Engine) setActiveTailMetricsLocked() {
+	if e == nil || e.metrics == nil {
+		return
+	}
+	if e.tail != nil {
+		e.metrics.SetActiveTail(e.tail.meta.EventCount, e.tail.meta.SizeBytes)
+		return
+	}
+	e.metrics.SetActiveTail(e.manifest.ActiveTail.EventCount, e.manifest.ActiveTail.SizeBytes)
+}
+
+func (e *Engine) logStartup(mode startupMode, replayedTailEvents int) {
+	if e == nil {
+		return
+	}
+	if e.logger == nil {
+		e.logger = logging.GetLogger("embedded.engine")
+	}
+
+	e.logger.InfoWithFields(
+		"embedded engine opened",
+		logging.Field("startup_mode", mode.String()),
+		logging.Field("replayed_tail_events", replayedTailEvents),
+		logging.Field("active_tail_events", e.manifest.ActiveTail.EventCount),
+		logging.Field("active_tail_bytes", e.manifest.ActiveTail.SizeBytes),
+		logging.Field("active_segments", len(e.segmentReaders)),
+	)
 }
 
 func (e *Engine) refreshQueryPlanner() {

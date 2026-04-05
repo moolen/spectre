@@ -72,8 +72,10 @@ func (e *Engine) Close() error {
 	if err := e.Flush(context.Background()); err != nil {
 		return err
 	}
-	if err := e.Checkpoint(context.Background()); err != nil {
-		return err
+	if e.config.CheckpointOnShutdown {
+		if err := e.Checkpoint(context.Background()); err != nil {
+			return err
+		}
 	}
 
 	e.mu.Lock()
@@ -134,6 +136,7 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		return fmt.Errorf("process embedded batch: append tail journal: %w", err)
 	}
 	e.manifest.ActiveTail = tailMeta
+	e.setActiveTailMetricsLocked()
 	for i := range events {
 		if err := applyProjectionEvent(e.projection, events[i]); err != nil {
 			e.ready.Store(false)
@@ -148,6 +151,11 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 	if e.shouldFlushHotBySizeLocked() {
 		if err := e.flushLocked(ctx); err != nil {
 			e.logAutoFlushError("size-triggered flush failed", err)
+		}
+	}
+	if e.shouldCheckpointTailLocked() {
+		if err := e.checkpointLocked(ctx); err != nil {
+			e.logAutoFlushError("tail-triggered checkpoint failed", err)
 		}
 	}
 
@@ -179,10 +187,6 @@ func (e *Engine) runPeriodicCheckpoint(ctx context.Context, interval time.Durati
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := e.Flush(context.Background()); err != nil {
-				e.logAutoFlushError("periodic checkpoint flush failed", err)
-				continue
-			}
 			if err := e.Checkpoint(context.Background()); err != nil {
 				e.logAutoFlushError("periodic checkpoint failed", err)
 			}

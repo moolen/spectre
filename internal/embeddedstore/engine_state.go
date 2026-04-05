@@ -21,35 +21,44 @@ const (
 	startupModeFast
 )
 
-func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, *tailJournal, uint64, *Projection, *hotStore, startupMode, error) {
+func (m startupMode) String() string {
+	switch m {
+	case startupModeFast:
+		return "fast"
+	default:
+		return "repair"
+	}
+}
+
+func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, *tailJournal, uint64, *Projection, *hotStore, startupMode, int, error) {
 	readers := make([]*segmentReader, 0, len(manifest.ActiveSegments))
 	for i := range manifest.ActiveSegments {
 		segmentMeta := manifest.ActiveSegments[i]
 		reader, err := openSegmentReader(rootDir, segmentBundleMeta{ID: segmentMeta.ID})
 		if err != nil {
-			return nil, nil, 0, nil, nil, startupModeRepair, fmt.Errorf("open active segment %q: %w", segmentMeta.ID, err)
+			return nil, nil, 0, nil, nil, startupModeRepair, 0, fmt.Errorf("open active segment %q: %w", segmentMeta.ID, err)
 		}
 		readers = append(readers, reader)
 	}
 
 	checkpointProjection, checkpointHighWaterMark, err := loadStartupCheckpoint(rootDir, manifest)
 	if err != nil {
-		return nil, nil, 0, nil, nil, startupModeRepair, err
+		return nil, nil, 0, nil, nil, startupModeRepair, 0, err
 	}
-	projection, tail, recoveredHot, recoveredHighWaterMark, ok, err := tryLoadFastStartupState(rootDir, manifest, checkpointProjection, checkpointHighWaterMark)
+	projection, tail, recoveredHot, recoveredHighWaterMark, replayedTailEvents, ok, err := tryLoadFastStartupState(rootDir, manifest, checkpointProjection, checkpointHighWaterMark)
 	if err != nil {
-		return nil, nil, 0, nil, nil, startupModeRepair, err
+		return nil, nil, 0, nil, nil, startupModeRepair, 0, err
 	}
 	if ok {
-		return readers, tail, recoveredHighWaterMark, projection, recoveredHot, startupModeFast, nil
+		return readers, tail, recoveredHighWaterMark, projection, recoveredHot, startupModeFast, replayedTailEvents, nil
 	}
 
 	projection, recoveredHighWaterMark, err = buildRepairProjection(readers, manifest.ActiveSegments, checkpointProjection, checkpointHighWaterMark)
 	if err != nil {
-		return nil, nil, 0, nil, nil, startupModeRepair, err
+		return nil, nil, 0, nil, nil, startupModeRepair, 0, err
 	}
 
-	return readers, nil, recoveredHighWaterMark, projection, nil, startupModeRepair, nil
+	return readers, nil, recoveredHighWaterMark, projection, nil, startupModeRepair, 0, nil
 }
 
 func loadStartupCheckpoint(rootDir string, manifest Manifest) (*Projection, uint64, error) {
@@ -74,33 +83,34 @@ func tryLoadFastStartupState(
 	manifest Manifest,
 	projection *Projection,
 	checkpointHighWaterMark uint64,
-) (*Projection, *tailJournal, *hotStore, uint64, bool, error) {
+) (*Projection, *tailJournal, *hotStore, uint64, int, bool, error) {
 	if projection == nil {
-		return nil, nil, nil, 0, false, nil
+		return nil, nil, nil, 0, 0, false, nil
 	}
 	maxSegmentHighWaterMark := maxSegmentHighWaterMark(manifest.ActiveSegments)
 
 	hot := newHotStore(HotStoreConfig{}, nil)
 	if manifest.ActiveTail.ID == "" {
 		if maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark) > checkpointHighWaterMark {
-			return nil, nil, nil, 0, false, nil
+			return nil, nil, nil, 0, 0, false, nil
 		}
-		return projection, nil, hot, checkpointHighWaterMark, true, nil
+		return projection, nil, hot, checkpointHighWaterMark, 0, true, nil
 	}
 	if maxSegmentHighWaterMark > maxUint64(checkpointHighWaterMark, manifest.ActiveTail.LastHighWaterMark) {
-		return nil, nil, nil, 0, false, nil
+		return nil, nil, nil, 0, 0, false, nil
 	}
 
 	tail, err := openTailJournal(rootDir, manifest.ActiveTail)
 	if err != nil {
-		return nil, nil, nil, 0, false, fmt.Errorf("open active tail journal %q: %w", manifest.ActiveTail.ID, err)
+		return nil, nil, nil, 0, 0, false, fmt.Errorf("open active tail journal %q: %w", manifest.ActiveTail.ID, err)
 	}
-	if err := recoverTailState(projection, hot, tail, checkpointHighWaterMark); err != nil {
+	replayedTailEvents, err := recoverTailState(projection, hot, tail, checkpointHighWaterMark)
+	if err != nil {
 		_ = tail.Close()
-		return nil, nil, nil, 0, false, err
+		return nil, nil, nil, 0, 0, false, err
 	}
 
-	return projection, tail, hot, maxUint64(checkpointHighWaterMark, tail.meta.LastHighWaterMark), true, nil
+	return projection, tail, hot, maxUint64(checkpointHighWaterMark, tail.meta.LastHighWaterMark), replayedTailEvents, true, nil
 }
 
 func buildRepairProjection(

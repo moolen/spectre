@@ -136,10 +136,24 @@ func (e *Engine) Checkpoint(ctx context.Context) error {
 		return nil
 	}
 
+	return e.checkpointLocked(ctx)
+}
+
+func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	start := time.Now()
+	defer func() {
+		e.metrics.RecordCheckpoint(time.Since(start), err)
+	}()
+
 	meta, err := writeCheckpoint(e.rootDir, e.projection, e.nextHighWaterMark)
 	if err != nil {
-		e.metrics.RecordCheckpoint(time.Since(start), err)
 		return fmt.Errorf("checkpoint embedded engine: write checkpoint: %w", err)
 	}
 
@@ -150,17 +164,15 @@ func (e *Engine) Checkpoint(ctx context.Context) error {
 		updatedManifest.ActiveTail = e.tail.meta
 	}
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
-		e.metrics.RecordCheckpoint(time.Since(start), err)
 		return fmt.Errorf("checkpoint embedded engine: store manifest: %w", err)
 	}
 
 	e.manifest = updatedManifest
 	if e.tail != nil {
 		previousMeta := e.tail.meta
-		nextTailMeta, err := e.tail.Rotate(e.nextHighWaterMark)
-		if err != nil {
-			e.metrics.RecordCheckpoint(time.Since(start), err)
-			return fmt.Errorf("checkpoint embedded engine: rotate tail journal: %w", err)
+		nextTailMeta, rotateErr := e.tail.Rotate(e.nextHighWaterMark)
+		if rotateErr != nil {
+			return fmt.Errorf("checkpoint embedded engine: rotate tail journal: %w", rotateErr)
 		}
 
 		updatedManifest.ActiveTail = nextTailMeta
@@ -170,11 +182,24 @@ func (e *Engine) Checkpoint(ctx context.Context) error {
 				_ = e.tail.Close()
 				e.tail = reopenedTail
 			}
-			e.metrics.RecordCheckpoint(time.Since(start), err)
 			return fmt.Errorf("checkpoint embedded engine: store rotated tail manifest: %w", err)
 		}
 		e.manifest = updatedManifest
 	}
-	e.metrics.RecordCheckpoint(time.Since(start), nil)
+
+	e.setActiveTailMetricsLocked()
 	return nil
+}
+
+func (e *Engine) shouldCheckpointTailLocked() bool {
+	if e == nil || e.tail == nil {
+		return false
+	}
+	if e.config.CheckpointMaxTailEvents > 0 && e.tail.meta.EventCount > e.config.CheckpointMaxTailEvents {
+		return true
+	}
+	if e.config.CheckpointMaxTailBytes > 0 && e.tail.meta.SizeBytes > e.config.CheckpointMaxTailBytes {
+		return true
+	}
+	return false
 }
