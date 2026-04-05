@@ -11,6 +11,7 @@ import (
 const (
 	checkpointsDirName      = "checkpoints"
 	checkpointStateFile     = "meta.json"
+	checkpointStateFileV0   = "checkpoint.json"
 	checkpointResourcesFile = "resources.ndjson"
 	checkpointK8sEventsFile = "k8s-events.json"
 	checkpointFormatVersion = 1
@@ -120,15 +121,9 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 	}
 
 	checkpointDir := filepath.Join(rootDir, checkpointsDirName, meta.ID)
-	statePath := filepath.Join(checkpointDir, checkpointStateFile)
-	payload, err := os.ReadFile(statePath)
-	if err != nil {
-		return nil, 0, fmt.Errorf("load checkpoint: read state file: %w", err)
-	}
-
 	var state checkpointState
-	if err := json.Unmarshal(payload, &state); err != nil {
-		return nil, 0, fmt.Errorf("load checkpoint: decode state file: %w", err)
+	if err := loadCheckpointState(checkpointDir, &state); err != nil {
+		return nil, 0, fmt.Errorf("load checkpoint: %w", err)
 	}
 	if state.FormatVersion != checkpointFormatVersion {
 		return nil, 0, fmt.Errorf(
@@ -202,6 +197,30 @@ func writeCheckpointResources(path string, projection *Projection) error {
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close file: %w", err)
+	}
+	return nil
+}
+
+func loadCheckpointState(checkpointDir string, state *checkpointState) error {
+	metaPath := filepath.Join(checkpointDir, checkpointStateFile)
+	payload, err := os.ReadFile(metaPath)
+	if err == nil {
+		if err := json.Unmarshal(payload, state); err != nil {
+			return fmt.Errorf("decode state file: %w", err)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("read state file: %w", err)
+	}
+
+	legacyPath := filepath.Join(checkpointDir, checkpointStateFileV0)
+	payload, err = os.ReadFile(legacyPath)
+	if err != nil {
+		return fmt.Errorf("read state file: %w", err)
+	}
+	if err := json.Unmarshal(payload, state); err != nil {
+		return fmt.Errorf("decode state file: %w", err)
 	}
 	return nil
 }

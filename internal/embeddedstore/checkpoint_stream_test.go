@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/moolen/spectre/internal/models"
 	"github.com/stretchr/testify/require"
@@ -58,6 +59,37 @@ func TestCheckpoint_StreamBundleMetaOmitsInlineSnapshot(t *testing.T) {
 	require.Contains(t, decoded, "min_timestamp_ns")
 	require.Contains(t, decoded, "max_timestamp_ns")
 	require.NotContains(t, decoded, "snapshot")
+}
+
+func TestProjection_StreamCheckpointResources_DoesNotHoldLockDuringEmit(t *testing.T) {
+	projection, err := BuildProjection(makeReplayHeavyEvents(1))
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- projection.StreamCheckpointResources(func(ProjectionResourceSnapshot) error {
+			return projection.Apply(models.Event{
+				ID:        "evt-extra",
+				Timestamp: 1000,
+				Type:      models.EventTypeCreate,
+				Resource: models.ResourceMetadata{
+					Version:   "v1",
+					UID:       "pod-extra",
+					Namespace: "default",
+					Kind:      "Pod",
+					Name:      "pod-extra",
+				},
+				Data: []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-extra","namespace":"default","uid":"pod-extra"}}`),
+			})
+		})
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("StreamCheckpointResources did not return; emit likely ran under projection lock")
+	}
 }
 
 func makeReplayHeavyEvents(count int) []models.Event {

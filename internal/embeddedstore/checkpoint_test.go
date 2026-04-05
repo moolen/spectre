@@ -64,3 +64,43 @@ func TestCheckpoint_LoadRejectsCorruptBundle(t *testing.T) {
 	_, _, err = loadCheckpoint(dir, meta)
 	require.Error(t, err)
 }
+
+func TestCheckpoint_LoadSupportsLegacyStateFile(t *testing.T) {
+	dir := t.TempDir()
+	projection, err := BuildProjection([]models.Event{
+		{
+			ID:        "1",
+			Timestamp: 10,
+			Resource: models.ResourceMetadata{
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	checkpointID := newCheckpointID(123)
+	checkpointDir := filepath.Join(dir, checkpointsDirName, checkpointID)
+	require.NoError(t, os.MkdirAll(checkpointDir, 0o755))
+
+	state := checkpointState{
+		FormatVersion: checkpointFormatVersion,
+		HighWaterMark: 123,
+		Snapshot:      projection.ExportSnapshot(),
+	}
+	require.NoError(t, writeJSONFile(filepath.Join(checkpointDir, checkpointStateFileV0), state))
+
+	restored, highWaterMark, err := loadCheckpoint(dir, CheckpointMeta{
+		ID:            checkpointID,
+		HighWaterMark: 123,
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), highWaterMark)
+
+	resource, err := NewAnalysisStore(restored).GetResource(context.Background(), "pod-1")
+	require.NoError(t, err)
+	require.NotNil(t, resource)
+	require.Equal(t, "pod-1", resource.UID)
+}

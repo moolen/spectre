@@ -46,15 +46,24 @@ func (p *Projection) StreamCheckpointResources(emit func(ProjectionResourceSnaps
 	}
 
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
+	orderedUIDs := make([]string, 0, len(p.orderedResources))
 	for i := range p.orderedResources {
-		record := p.resourcesByUID[p.orderedResources[i].uid]
+		orderedUIDs = append(orderedUIDs, p.orderedResources[i].uid)
+	}
+	p.mu.RUnlock()
+
+	for i := range orderedUIDs {
+		uid := orderedUIDs[i]
+		p.mu.RLock()
+		record := p.resourcesByUID[uid]
 		if record == nil {
+			p.mu.RUnlock()
 			continue
 		}
-		if err := emit(snapshotResourceRecord(record)); err != nil {
-			return fmt.Errorf("stream checkpoint resources: emit %q: %w", record.uid, err)
+		snapshot := snapshotResourceRecord(record)
+		p.mu.RUnlock()
+		if err := emit(snapshot); err != nil {
+			return fmt.Errorf("stream checkpoint resources: emit %q: %w", uid, err)
 		}
 	}
 	return nil
