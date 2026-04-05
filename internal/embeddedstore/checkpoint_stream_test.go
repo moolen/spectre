@@ -1,7 +1,9 @@
 package embeddedstore
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -35,6 +37,27 @@ func TestCheckpoint_WritesStreamBundleFiles(t *testing.T) {
 	require.FileExists(t, filepath.Join(checkpointDir, "meta.json"))
 	require.FileExists(t, filepath.Join(checkpointDir, "resources.ndjson"))
 	require.FileExists(t, filepath.Join(checkpointDir, "k8s-events.json"))
+}
+
+func TestCheckpoint_StreamBundleMetaOmitsInlineSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	projection, err := BuildProjection(makeReplayHeavyEvents(25))
+	require.NoError(t, err)
+
+	meta, err := writeCheckpoint(dir, projection, 25)
+	require.NoError(t, err)
+
+	metaPath := filepath.Join(dir, checkpointsDirName, meta.ID, "meta.json")
+	payload, err := os.ReadFile(metaPath)
+	require.NoError(t, err)
+
+	var decoded map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	require.Contains(t, decoded, "format_version")
+	require.Contains(t, decoded, "high_water_mark")
+	require.Contains(t, decoded, "min_timestamp_ns")
+	require.Contains(t, decoded, "max_timestamp_ns")
+	require.NotContains(t, decoded, "snapshot")
 }
 
 func makeReplayHeavyEvents(count int) []models.Event {

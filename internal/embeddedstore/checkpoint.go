@@ -24,6 +24,28 @@ type checkpointState struct {
 	Snapshot       ProjectionSnapshot `json:"snapshot,omitempty"`
 }
 
+func (s checkpointState) MarshalJSON() ([]byte, error) {
+	type checkpointStateAlias struct {
+		FormatVersion  int                 `json:"format_version"`
+		HighWaterMark  uint64              `json:"high_water_mark"`
+		MinTimestampNs int64               `json:"min_timestamp_ns"`
+		MaxTimestampNs int64               `json:"max_timestamp_ns"`
+		Snapshot       *ProjectionSnapshot `json:"snapshot,omitempty"`
+	}
+
+	encoded := checkpointStateAlias{
+		FormatVersion:  s.FormatVersion,
+		HighWaterMark:  s.HighWaterMark,
+		MinTimestampNs: s.MinTimestampNs,
+		MaxTimestampNs: s.MaxTimestampNs,
+	}
+	if len(s.Snapshot.Events) > 0 || len(s.Snapshot.Resources) > 0 || len(s.Snapshot.K8sEventsByInvolvedUID) > 0 {
+		snapshot := s.Snapshot
+		encoded.Snapshot = &snapshot
+	}
+	return json.Marshal(encoded)
+}
+
 func writeCheckpoint(rootDir string, projection *Projection, highWaterMark uint64) (CheckpointMeta, error) {
 	if rootDir == "" {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: root dir is empty")
