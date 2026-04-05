@@ -145,12 +145,36 @@ func (e *Engine) Checkpoint(ctx context.Context) error {
 
 	updatedManifest := e.manifest
 	updatedManifest.Checkpoints = append(updatedManifest.Checkpoints, meta)
+	updatedManifest.ActiveCheckpoint = meta
+	if e.tail != nil {
+		updatedManifest.ActiveTail = e.tail.meta
+	}
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
 		e.metrics.RecordCheckpoint(time.Since(start), err)
 		return fmt.Errorf("checkpoint embedded engine: store manifest: %w", err)
 	}
 
 	e.manifest = updatedManifest
+	if e.tail != nil {
+		previousMeta := e.tail.meta
+		nextTailMeta, err := e.tail.Rotate(e.nextHighWaterMark)
+		if err != nil {
+			e.metrics.RecordCheckpoint(time.Since(start), err)
+			return fmt.Errorf("checkpoint embedded engine: rotate tail journal: %w", err)
+		}
+
+		updatedManifest.ActiveTail = nextTailMeta
+		if err := storeManifest(e.rootDir, updatedManifest); err != nil {
+			reopenedTail, reopenErr := openTailJournal(e.rootDir, previousMeta)
+			if reopenErr == nil {
+				_ = e.tail.Close()
+				e.tail = reopenedTail
+			}
+			e.metrics.RecordCheckpoint(time.Since(start), err)
+			return fmt.Errorf("checkpoint embedded engine: store rotated tail manifest: %w", err)
+		}
+		e.manifest = updatedManifest
+	}
 	e.metrics.RecordCheckpoint(time.Since(start), nil)
 	return nil
 }

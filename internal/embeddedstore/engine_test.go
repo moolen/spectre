@@ -1,9 +1,11 @@
 package embeddedstore
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -329,15 +331,21 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	require.NoError(t, err)
 	checkpointMeta := latestCheckpointMeta(manifest.Checkpoints)
 
-	checkpointPath := filepath.Join(rootDir, checkpointsDirName, checkpointMeta.ID, checkpointStateFile)
-	var state checkpointState
-	payload, err := os.ReadFile(checkpointPath)
+	resourcesPath := filepath.Join(rootDir, checkpointsDirName, checkpointMeta.ID, checkpointResourcesFile)
+	payload, err := os.ReadFile(resourcesPath)
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal(payload, &state))
-	require.Len(t, state.Snapshot.Resources, 1)
-	require.Len(t, state.Snapshot.Resources[0].Versions, 2)
-	state.Snapshot.Resources[0].Versions[0].ChangeEvent.Description = "checkpoint-sentinel"
-	require.NoError(t, writeJSONFile(checkpointPath, state))
+
+	lines := bytes.Split(bytes.TrimSpace(payload), []byte{'\n'})
+	require.Len(t, lines, 1)
+
+	var snapshot ProjectionResourceSnapshot
+	require.NoError(t, json.Unmarshal(lines[0], &snapshot))
+	require.Len(t, snapshot.Versions, 2)
+	snapshot.Versions[0].ChangeEvent.Description = "checkpoint-sentinel"
+
+	updatedPayload, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(resourcesPath, append(updatedPayload, '\n'), 0o600))
 
 	tailSegment, err := writeSegment(rootDir, "seg-tail", []models.Event{
 		{
@@ -375,6 +383,33 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	require.Equal(t, "checkpoint-sentinel", record.versions[0].changeEvent.Description)
 }
 
+func TestEngine_ReopenRestoresTailEventsWithoutColdReplay(t *testing.T) {
+	dir := t.TempDir()
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, CheckpointMaxTailEvents: 32})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeReplayHeavyEvents(20)))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeReplayHeavyEventsFrom(21, 5)))
+
+	restore := setApplyProjectionEventFnForTest(func(*Projection, models.Event) error {
+		t.Fatal("normal restart must not rebuild head state from cold replay")
+		return nil
+	})
+	t.Cleanup(restore)
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	require.Equal(t, uint64(25), reopened.nextHighWaterMark)
+}
+
 func newFlushedTestEngine(t *testing.T, events []models.Event) *Engine {
 	t.Helper()
 
@@ -387,4 +422,30 @@ func newFlushedTestEngine(t *testing.T, events []models.Event) *Engine {
 	require.NoError(t, engine.ProcessBatch(context.Background(), events))
 	require.NoError(t, engine.Flush(context.Background()))
 	return engine
+}
+
+func makeReplayHeavyEventsFrom(start, count int) []models.Event {
+	events := make([]models.Event, 0, count)
+	for i := 0; i < count; i++ {
+		index := start + i - 1
+		uid := fmt.Sprintf("pod-%04d", index)
+		events = append(events, models.Event{
+			ID:        fmt.Sprintf("evt-%04d", index),
+			Timestamp: int64(index + 1),
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       uid,
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      uid,
+			},
+			Data: []byte(fmt.Sprintf(
+				`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"%s","namespace":"default","uid":"%s"}}`,
+				uid,
+				uid,
+			)),
+		})
+	}
+	return events
 }

@@ -83,6 +83,11 @@ func (e *Engine) Close() error {
 	}
 	e.closed = true
 	e.ready.Store(false)
+	if e.tail != nil {
+		if err := e.tail.Close(); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -119,8 +124,16 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 	if e.closed {
 		return fmt.Errorf("process embedded batch: engine is closed")
 	}
+	if e.tail == nil {
+		return fmt.Errorf("process embedded batch: tail journal is nil")
+	}
 
 	wasReady := e.ready.Load()
+	tailMeta, err := e.tail.AppendBatch(ctx, e.nextHighWaterMark+1, events)
+	if err != nil {
+		return fmt.Errorf("process embedded batch: append tail journal: %w", err)
+	}
+	e.manifest.ActiveTail = tailMeta
 	for i := range events {
 		if err := ctx.Err(); err != nil {
 			return err

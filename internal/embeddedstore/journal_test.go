@@ -1,6 +1,7 @@
 package embeddedstore
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/moolen/spectre/internal/models"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOpenJournal_SyncsParentAndRootOnFirstCreate(t *testing.T) {
@@ -167,6 +169,32 @@ func TestJournal_AppendBatchEmptyNoop(t *testing.T) {
 	if info.Size() != 0 {
 		t.Fatalf("expected empty journal file, got size %d", info.Size())
 	}
+}
+
+func TestJournal_AppendPayloadBatchReplayPayloads(t *testing.T) {
+	t.Parallel()
+
+	journal := openTestJournal(t)
+
+	payloads := [][]byte{
+		[]byte(`{"record":1}`),
+		[]byte(`{"record":2}`),
+	}
+	require.NoError(t, journal.appendPayloadBatch(context.Background(), payloads))
+
+	replayed := make([][]byte, 0, len(payloads))
+	require.NoError(t, journal.replayPayloads(context.Background(), func(payload []byte) error {
+		replayed = append(replayed, append([]byte(nil), payload...))
+		return nil
+	}))
+	require.Len(t, replayed, len(payloads))
+	for i := range payloads {
+		require.True(t, bytes.Equal(payloads[i], replayed[i]))
+	}
+
+	sizeBytes, err := journal.sizeBytes()
+	require.NoError(t, err)
+	require.Greater(t, sizeBytes, int64(0))
 }
 
 func TestJournal_ReplayCorruptOrTruncatedReturnsError(t *testing.T) {

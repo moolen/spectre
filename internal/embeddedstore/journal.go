@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/moolen/spectre/internal/models"
@@ -102,10 +103,23 @@ func (j *Journal) Append(ctx context.Context, event models.Event) error {
 
 // AppendBatch appends events durably in order.
 func (j *Journal) AppendBatch(ctx context.Context, events []models.Event) error {
+	payloads := make([][]byte, 0, len(events))
+	for i := range events {
+		payload, err := json.Marshal(events[i])
+		if err != nil {
+			return fmt.Errorf("append journal entry: marshal event: %w", err)
+		}
+		payloads = append(payloads, payload)
+	}
+
+	return j.appendPayloadBatch(ctx, payloads)
+}
+
+func (j *Journal) appendPayloadBatch(ctx context.Context, payloads [][]byte) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if len(events) == 0 {
+	if len(payloads) == 0 {
 		return nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -119,15 +133,12 @@ func (j *Journal) AppendBatch(ctx context.Context, events []models.Event) error 
 	}
 
 	var writeBuf bytes.Buffer
-	for i := range events {
+	for i := range payloads {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		payload, err := json.Marshal(events[i])
-		if err != nil {
-			return fmt.Errorf("append journal entry: marshal event: %w", err)
-		}
+		payload := payloads[i]
 		if len(payload) > maxJournalRecordSize {
 			return fmt.Errorf("append journal entry: payload size %d exceeds max %d", len(payload), maxJournalRecordSize)
 		}
@@ -154,33 +165,48 @@ func (j *Journal) AppendBatch(ctx context.Context, events []models.Event) error 
 
 // Replay replays all events in append order.
 func (j *Journal) Replay(ctx context.Context) ([]models.Event, error) {
+	events := make([]models.Event, 0)
+	if err := j.replayPayloads(ctx, func(payload []byte) error {
+		var event models.Event
+		if err := json.Unmarshal(payload, &event); err != nil {
+			return fmt.Errorf("corrupt journal entry: %w", err)
+		}
+		events = append(events, event)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return events, nil
+}
+
+func (j *Journal) replayPayloads(ctx context.Context, apply func([]byte) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
 
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.file == nil {
-		return nil, errJournalClosed
+		return errJournalClosed
 	}
 
 	readFile, err := os.Open(j.path)
 	if err != nil {
-		return nil, fmt.Errorf("replay journal: open file: %w", err)
+		return fmt.Errorf("replay journal: open file: %w", err)
 	}
 	defer func() {
 		_ = readFile.Close()
 	}()
 
-	events := make([]models.Event, 0)
 	recordIndex := 0
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 
 		var header [4]byte
@@ -188,33 +214,48 @@ func (j *Journal) Replay(ctx context.Context) ([]models.Event, error) {
 		if err == nil {
 			// continue parsing below
 		} else if errors.Is(err, io.EOF) {
-			return events, nil
+			return nil
 		} else if errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, fmt.Errorf("truncated journal entry header at record %d: %w", recordIndex, err)
+			return fmt.Errorf("truncated journal entry header at record %d: %w", recordIndex, err)
 		} else {
-			return nil, fmt.Errorf("replay journal: read entry header at record %d: %w", recordIndex, err)
+			return fmt.Errorf("replay journal: read entry header at record %d: %w", recordIndex, err)
 		}
 
 		length := binary.BigEndian.Uint32(header[:])
 		if length > uint32(maxJournalRecordSize) {
-			return nil, fmt.Errorf("oversized journal entry payload at record %d: size %d exceeds max %d", recordIndex, length, maxJournalRecordSize)
+			return fmt.Errorf("oversized journal entry payload at record %d: size %d exceeds max %d", recordIndex, length, maxJournalRecordSize)
 		}
 		payload := make([]byte, int(length))
 		if _, err := io.ReadFull(readFile, payload); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil, fmt.Errorf("truncated journal entry payload at record %d: %w", recordIndex, err)
+				return fmt.Errorf("truncated journal entry payload at record %d: %w", recordIndex, err)
 			}
-			return nil, fmt.Errorf("replay journal: read entry payload at record %d: %w", recordIndex, err)
+			return fmt.Errorf("replay journal: read entry payload at record %d: %w", recordIndex, err)
 		}
 
-		var event models.Event
-		if err := json.Unmarshal(payload, &event); err != nil {
-			return nil, fmt.Errorf("corrupt journal entry at record %d: %w", recordIndex, err)
+		if err := apply(payload); err != nil {
+			if strings.Contains(err.Error(), "corrupt journal entry") {
+				return fmt.Errorf("%s at record %d", err.Error(), recordIndex)
+			}
+			return fmt.Errorf("replay journal: apply entry at record %d: %w", recordIndex, err)
 		}
-
-		events = append(events, event)
 		recordIndex++
 	}
+}
+
+func (j *Journal) sizeBytes() (int64, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.file == nil {
+		return 0, errJournalClosed
+	}
+
+	info, err := j.file.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("stat journal: %w", err)
+	}
+
+	return info.Size(), nil
 }
 
 func pathCreated(path string) (bool, error) {
