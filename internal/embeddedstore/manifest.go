@@ -19,6 +19,8 @@ const manifestFileName = "manifest.json"
 type Manifest struct {
 	FormatVersion      int              `json:"format_version"`
 	ActiveSegments     []SegmentMeta    `json:"active_segments"`
+	ActiveCheckpoint   CheckpointMeta   `json:"active_checkpoint"`
+	ActiveTail         TailJournalMeta  `json:"active_tail"`
 	Checkpoints        []CheckpointMeta `json:"checkpoints"`
 	FlushHighWaterMark uint64           `json:"flush_high_water_mark"`
 }
@@ -31,6 +33,14 @@ type SegmentMeta struct {
 type CheckpointMeta struct {
 	ID            string `json:"id"`
 	HighWaterMark uint64 `json:"high_water_mark"`
+}
+
+type TailJournalMeta struct {
+	ID                string `json:"id"`
+	BaseHighWaterMark uint64 `json:"base_high_water_mark"`
+	LastHighWaterMark uint64 `json:"last_high_water_mark"`
+	EventCount        int    `json:"event_count"`
+	SizeBytes         int64  `json:"size_bytes"`
 }
 
 func loadOrCreateManifest(dir string) (Manifest, error) {
@@ -159,6 +169,13 @@ func normalizeManifest(manifest Manifest) Manifest {
 	}
 	if manifest.Checkpoints == nil {
 		manifest.Checkpoints = []CheckpointMeta{}
+	}
+	if manifest.ActiveCheckpoint.ID == "" && len(manifest.Checkpoints) > 0 {
+		manifest.ActiveCheckpoint = latestCheckpointMeta(manifest.Checkpoints)
+	}
+	if manifest.ActiveTail == (TailJournalMeta{}) {
+		manifest.ActiveTail.BaseHighWaterMark = manifest.ActiveCheckpoint.HighWaterMark
+		manifest.ActiveTail.LastHighWaterMark = manifest.ActiveCheckpoint.HighWaterMark
 	}
 	return manifest
 }

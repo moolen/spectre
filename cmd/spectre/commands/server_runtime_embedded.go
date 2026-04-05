@@ -65,6 +65,9 @@ func embeddedStoreConfig() embeddedstore.Config {
 	return embeddedstore.Config{
 		DataDir:                   dataDir,
 		CheckpointInterval:        embeddedCheckpointInterval,
+		CheckpointMaxTailEvents:   embeddedCheckpointMaxTailEvents,
+		CheckpointMaxTailBytes:    embeddedCheckpointMaxTailBytes,
+		CheckpointOnShutdown:      embeddedCheckpointOnShutdown,
 		MetricsRegisterer:         prometheus.DefaultRegisterer,
 		ProjectionHistoryFallback: embeddedProjectionHistoryFallback,
 	}
@@ -225,11 +228,14 @@ func describeEmbeddedEngineConfig(cfg embeddedstore.EngineConfig) string {
 	}
 
 	return fmt.Sprintf(
-		"hot_max_events=%d hot_max_resource_versions=%d flush_interval=%s %s segment_target_bytes=%d compaction_min_segments=%d",
+		"hot_max_events=%d hot_max_resource_versions=%d flush_interval=%s %s checkpoint_max_tail_events=%d checkpoint_max_tail_bytes=%d checkpoint_on_shutdown=%t segment_target_bytes=%d compaction_min_segments=%d",
 		cfg.HotMaxEvents,
 		cfg.HotMaxResourceVersions,
 		cfg.FlushInterval,
 		checkpointValue,
+		cfg.CheckpointMaxTailEvents,
+		cfg.CheckpointMaxTailBytes,
+		cfg.CheckpointOnShutdown,
 		cfg.SegmentTargetBytes,
 		cfg.CompactionMinSegments,
 	)

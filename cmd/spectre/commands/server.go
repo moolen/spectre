@@ -28,6 +28,9 @@ var (
 	embeddedMode                      bool
 	embeddedProjectionHistoryFallback bool
 	embeddedCheckpointInterval        time.Duration
+	embeddedCheckpointMaxTailEvents   int
+	embeddedCheckpointMaxTailBytes    int64
+	embeddedCheckpointOnShutdown      bool
 	dataDir                           string
 	pprofEnabled                      bool
 	pprofPort                         int
@@ -89,6 +92,24 @@ func init() {
 		"embedded-checkpoint-interval",
 		15*time.Minute,
 		"Interval between durable embedded checkpoints; set to 0 to disable periodic checkpoints",
+	)
+	serverCmd.Flags().IntVar(
+		&embeddedCheckpointMaxTailEvents,
+		"embedded-checkpoint-max-tail-events",
+		2048,
+		"Maximum embedded tail events before forcing checkpoint compaction",
+	)
+	serverCmd.Flags().Int64Var(
+		&embeddedCheckpointMaxTailBytes,
+		"embedded-checkpoint-max-tail-bytes",
+		16<<20,
+		"Maximum embedded tail bytes before forcing checkpoint compaction",
+	)
+	serverCmd.Flags().BoolVar(
+		&embeddedCheckpointOnShutdown,
+		"embedded-checkpoint-on-shutdown",
+		true,
+		"Write an embedded checkpoint during graceful shutdown",
 	)
 	serverCmd.Flags().StringVar(&dataDir, "data-dir", "./data", "Directory for embedded persistent state")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")

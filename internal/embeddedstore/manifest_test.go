@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -59,4 +60,32 @@ func TestManifestStore_StoreManifestRejectsVersionMismatch(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "unsupported manifest format version")
+}
+
+func TestManifest_LoadLegacyManifestWithoutTailMetadata(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, storeManifest(dir, Manifest{
+		FormatVersion: storageFormatVersion,
+		ActiveSegments: []SegmentMeta{
+			{ID: "seg-001", HighWaterMark: 42},
+		},
+		Checkpoints: []CheckpointMeta{
+			{ID: "chk-00000000000000000042-1", HighWaterMark: 42},
+		},
+	}))
+
+	manifest, err := loadOrCreateManifest(dir)
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), manifest.ActiveCheckpoint.HighWaterMark)
+	require.Equal(t, uint64(42), manifest.ActiveTail.BaseHighWaterMark)
+}
+
+func TestConfig_EffectiveEngineConfigAppliesTailDefaults(t *testing.T) {
+	cfg, err := Config{DataDir: t.TempDir()}.EffectiveEngineConfig()
+	require.NoError(t, err)
+	require.Equal(t, 2048, cfg.CheckpointMaxTailEvents)
+	require.Equal(t, int64(16<<20), cfg.CheckpointMaxTailBytes)
+	require.True(t, cfg.CheckpointOnShutdown)
+	require.Equal(t, defaultCheckpointInterval, cfg.CheckpointInterval)
+	require.Equal(t, 30*time.Second, cfg.FlushInterval)
 }

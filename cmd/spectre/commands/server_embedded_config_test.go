@@ -9,15 +9,18 @@ import (
 
 func TestDescribeEmbeddedEngineConfig_ExplicitCheckpointMode(t *testing.T) {
 	description := describeEmbeddedEngineConfig(embeddedstore.EngineConfig{
-		HotMaxEvents:           50000,
-		HotMaxResourceVersions: 32,
-		FlushInterval:          30 * time.Second,
-		CheckpointInterval:     0,
-		SegmentTargetBytes:     16 << 20,
-		CompactionMinSegments:  4,
+		HotMaxEvents:            50000,
+		HotMaxResourceVersions:  32,
+		FlushInterval:           30 * time.Second,
+		CheckpointInterval:      0,
+		CheckpointMaxTailEvents: 2048,
+		CheckpointMaxTailBytes:  16 << 20,
+		CheckpointOnShutdown:    true,
+		SegmentTargetBytes:      16 << 20,
+		CompactionMinSegments:   4,
 	})
 
-	expected := "hot_max_events=50000 hot_max_resource_versions=32 flush_interval=30s checkpoint_strategy=explicit+shutdown segment_target_bytes=16777216 compaction_min_segments=4"
+	expected := "hot_max_events=50000 hot_max_resource_versions=32 flush_interval=30s checkpoint_strategy=explicit+shutdown checkpoint_max_tail_events=2048 checkpoint_max_tail_bytes=16777216 checkpoint_on_shutdown=true segment_target_bytes=16777216 compaction_min_segments=4"
 	if description != expected {
 		t.Fatalf("unexpected description:\nwant: %s\ngot:  %s", expected, description)
 	}
@@ -25,15 +28,18 @@ func TestDescribeEmbeddedEngineConfig_ExplicitCheckpointMode(t *testing.T) {
 
 func TestDescribeEmbeddedEngineConfig_PeriodicCheckpointMode(t *testing.T) {
 	description := describeEmbeddedEngineConfig(embeddedstore.EngineConfig{
-		HotMaxEvents:           100,
-		HotMaxResourceVersions: 8,
-		FlushInterval:          15 * time.Second,
-		CheckpointInterval:     2 * time.Minute,
-		SegmentTargetBytes:     1024,
-		CompactionMinSegments:  3,
+		HotMaxEvents:            100,
+		HotMaxResourceVersions:  8,
+		FlushInterval:           15 * time.Second,
+		CheckpointInterval:      2 * time.Minute,
+		CheckpointMaxTailEvents: 128,
+		CheckpointMaxTailBytes:  4096,
+		CheckpointOnShutdown:    false,
+		SegmentTargetBytes:      1024,
+		CompactionMinSegments:   3,
 	})
 
-	expected := "hot_max_events=100 hot_max_resource_versions=8 flush_interval=15s checkpoint_interval=2m0s segment_target_bytes=1024 compaction_min_segments=3"
+	expected := "hot_max_events=100 hot_max_resource_versions=8 flush_interval=15s checkpoint_interval=2m0s checkpoint_max_tail_events=128 checkpoint_max_tail_bytes=4096 checkpoint_on_shutdown=false segment_target_bytes=1024 compaction_min_segments=3"
 	if description != expected {
 		t.Fatalf("unexpected description:\nwant: %s\ngot:  %s", expected, description)
 	}
@@ -54,13 +60,22 @@ func TestEmbeddedImportAPIEnabled(t *testing.T) {
 func TestEmbeddedStoreConfigIncludesCheckpointIntervalOverride(t *testing.T) {
 	previousDataDir := dataDir
 	previousCheckpointInterval := embeddedCheckpointInterval
+	previousCheckpointMaxTailEvents := embeddedCheckpointMaxTailEvents
+	previousCheckpointMaxTailBytes := embeddedCheckpointMaxTailBytes
+	previousCheckpointOnShutdown := embeddedCheckpointOnShutdown
 	t.Cleanup(func() {
 		dataDir = previousDataDir
 		embeddedCheckpointInterval = previousCheckpointInterval
+		embeddedCheckpointMaxTailEvents = previousCheckpointMaxTailEvents
+		embeddedCheckpointMaxTailBytes = previousCheckpointMaxTailBytes
+		embeddedCheckpointOnShutdown = previousCheckpointOnShutdown
 	})
 
 	dataDir = "/tmp/spectre"
 	embeddedCheckpointInterval = 15 * time.Minute
+	embeddedCheckpointMaxTailEvents = 128
+	embeddedCheckpointMaxTailBytes = 1 << 20
+	embeddedCheckpointOnShutdown = false
 
 	cfg := embeddedStoreConfig()
 	if cfg.DataDir != dataDir {
@@ -68,5 +83,14 @@ func TestEmbeddedStoreConfigIncludesCheckpointIntervalOverride(t *testing.T) {
 	}
 	if cfg.CheckpointInterval != 15*time.Minute {
 		t.Fatalf("expected checkpoint interval 15m, got %s", cfg.CheckpointInterval)
+	}
+	if cfg.CheckpointMaxTailEvents != 128 {
+		t.Fatalf("expected checkpoint max tail events 128, got %d", cfg.CheckpointMaxTailEvents)
+	}
+	if cfg.CheckpointMaxTailBytes != 1<<20 {
+		t.Fatalf("expected checkpoint max tail bytes %d, got %d", 1<<20, cfg.CheckpointMaxTailBytes)
+	}
+	if cfg.CheckpointOnShutdown {
+		t.Fatal("expected checkpoint on shutdown to be false")
 	}
 }
