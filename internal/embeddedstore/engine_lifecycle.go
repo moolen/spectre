@@ -24,13 +24,16 @@ func (e *Engine) Start(ctx context.Context) error {
 	if e.closed {
 		return fmt.Errorf("start embedded engine: engine is closed")
 	}
-	if e.config.FlushInterval <= 0 || e.periodicFlushStop != nil {
-		return nil
+	if e.config.FlushInterval > 0 && e.periodicFlushStop == nil {
+		runCtx, cancel := context.WithCancel(ctx)
+		e.periodicFlushStop = cancel
+		go e.runPeriodicFlush(runCtx, e.config.FlushInterval)
 	}
-
-	runCtx, cancel := context.WithCancel(ctx)
-	e.periodicFlushStop = cancel
-	go e.runPeriodicFlush(runCtx, e.config.FlushInterval)
+	if e.config.CheckpointInterval > 0 && e.periodicCheckpointStop == nil {
+		runCtx, cancel := context.WithCancel(ctx)
+		e.periodicCheckpointStop = cancel
+		go e.runPeriodicCheckpoint(runCtx, e.config.CheckpointInterval)
+	}
 
 	return nil
 }
@@ -59,6 +62,10 @@ func (e *Engine) Close() error {
 	if e.periodicFlushStop != nil {
 		e.periodicFlushStop()
 		e.periodicFlushStop = nil
+	}
+	if e.periodicCheckpointStop != nil {
+		e.periodicCheckpointStop()
+		e.periodicCheckpointStop = nil
 	}
 	e.mu.Unlock()
 
@@ -148,6 +155,26 @@ func (e *Engine) runPeriodicFlush(ctx context.Context, interval time.Duration) {
 		case <-ticker.C:
 			if err := e.Flush(context.Background()); err != nil {
 				e.logAutoFlushError("periodic flush failed", err)
+			}
+		}
+	}
+}
+
+func (e *Engine) runPeriodicCheckpoint(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := e.Flush(context.Background()); err != nil {
+				e.logAutoFlushError("periodic checkpoint flush failed", err)
+				continue
+			}
+			if err := e.Checkpoint(context.Background()); err != nil {
+				e.logAutoFlushError("periodic checkpoint failed", err)
 			}
 		}
 	}

@@ -50,3 +50,23 @@ func TestEmbeddedImportAPIEnabled(t *testing.T) {
 		t.Fatal("expected non-embedded mode helper to stay false")
 	}
 }
+
+func TestEmbeddedStoreConfigIncludesCheckpointIntervalOverride(t *testing.T) {
+	previousDataDir := dataDir
+	previousCheckpointInterval := embeddedCheckpointInterval
+	t.Cleanup(func() {
+		dataDir = previousDataDir
+		embeddedCheckpointInterval = previousCheckpointInterval
+	})
+
+	dataDir = "/tmp/spectre"
+	embeddedCheckpointInterval = 15 * time.Minute
+
+	cfg := embeddedStoreConfig()
+	if cfg.DataDir != dataDir {
+		t.Fatalf("expected data dir %q, got %q", dataDir, cfg.DataDir)
+	}
+	if cfg.CheckpointInterval != 15*time.Minute {
+		t.Fatalf("expected checkpoint interval 15m, got %s", cfg.CheckpointInterval)
+	}
+}

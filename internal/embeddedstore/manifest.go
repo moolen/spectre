@@ -7,6 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 )
 
 const storageFormatVersion = 1
@@ -60,6 +63,10 @@ func loadOrCreateManifest(dir string) (Manifest, error) {
 
 	manifest = normalizeManifest(manifest)
 	if err := validateManifestVersion(manifest, "load manifest"); err != nil {
+		return Manifest{}, err
+	}
+	manifest, err = reconcileManifestCheckpoints(dir, manifest)
+	if err != nil {
 		return Manifest{}, err
 	}
 
@@ -166,4 +173,86 @@ func validateManifestVersion(manifest Manifest, operation string) error {
 		)
 	}
 	return nil
+}
+
+func reconcileManifestCheckpoints(dir string, manifest Manifest) (Manifest, error) {
+	checkpointsRoot := filepath.Join(dir, checkpointsDirName)
+	entries, err := os.ReadDir(checkpointsRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return manifest, nil
+		}
+		return Manifest{}, fmt.Errorf("load manifest: list checkpoints: %w", err)
+	}
+
+	known := make(map[string]struct{}, len(manifest.Checkpoints))
+	for i := range manifest.Checkpoints {
+		known[manifest.Checkpoints[i].ID] = struct{}{}
+	}
+
+	changed := false
+	for i := range entries {
+		if !entries[i].IsDir() {
+			continue
+		}
+		checkpointID := entries[i].Name()
+		if _, exists := known[checkpointID]; exists {
+			continue
+		}
+
+		highWaterMark, ok := parseCheckpointHighWaterMark(checkpointID)
+		if !ok {
+			continue
+		}
+
+		manifest.Checkpoints = append(manifest.Checkpoints, CheckpointMeta{
+			ID:            checkpointID,
+			HighWaterMark: highWaterMark,
+		})
+		known[checkpointID] = struct{}{}
+		changed = true
+	}
+
+	if !changed {
+		return manifest, nil
+	}
+
+	slices.SortFunc(manifest.Checkpoints, func(a, b CheckpointMeta) int {
+		switch {
+		case a.HighWaterMark < b.HighWaterMark:
+			return -1
+		case a.HighWaterMark > b.HighWaterMark:
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	if err := storeManifest(dir, manifest); err != nil {
+		return Manifest{}, err
+	}
+
+	return manifest, nil
+}
+
+func parseCheckpointHighWaterMark(checkpointID string) (uint64, bool) {
+	if !strings.HasPrefix(checkpointID, "chk-") {
+		return 0, false
+	}
+
+	rest := strings.TrimPrefix(checkpointID, "chk-")
+	parts := strings.SplitN(rest, "-", 2)
+	if len(parts) != 2 || parts[0] == "" {
+		return 0, false
+	}
+
+	highWaterMark, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return highWaterMark, true
 }

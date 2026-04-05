@@ -24,6 +24,7 @@ type Engine struct {
 	nextHighWaterMark uint64
 	ready             atomic.Bool
 	periodicFlushStop func()
+	periodicCheckpointStop func()
 	closed            bool
 }
 

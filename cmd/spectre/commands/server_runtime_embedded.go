@@ -64,6 +64,7 @@ func runEmbeddedServerRuntime(cfg *config.Config, mode serverRuntimeMode, manage
 func embeddedStoreConfig() embeddedstore.Config {
 	return embeddedstore.Config{
 		DataDir:                   dataDir,
+		CheckpointInterval:        embeddedCheckpointInterval,
 		MetricsRegisterer:         prometheus.DefaultRegisterer,
 		ProjectionHistoryFallback: embeddedProjectionHistoryFallback,
 	}

@@ -27,6 +27,7 @@ var (
 	startupImportTimelineOnly         bool
 	embeddedMode                      bool
 	embeddedProjectionHistoryFallback bool
+	embeddedCheckpointInterval        time.Duration
 	dataDir                           string
 	pprofEnabled                      bool
 	pprofPort                         int
@@ -83,6 +84,12 @@ func init() {
 	serverCmd.Flags().BoolVar(&startupImportTimelineOnly, "startup-import-timeline-only", false, "Import only timeline-critical graph data during startup import")
 	serverCmd.Flags().BoolVar(&embeddedMode, "embedded", false, "Run with the persistent embedded backend instead of FalkorDB")
 	serverCmd.Flags().BoolVar(&embeddedProjectionHistoryFallback, "embedded-projection-history-fallback", false, "Temporarily enable projection history fallback in embedded mode (rollback switch)")
+	serverCmd.Flags().DurationVar(
+		&embeddedCheckpointInterval,
+		"embedded-checkpoint-interval",
+		15*time.Minute,
+		"Interval between durable embedded checkpoints; set to 0 to disable periodic checkpoints",
+	)
 	serverCmd.Flags().StringVar(&dataDir, "data-dir", "./data", "Directory for embedded persistent state")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")
 	serverCmd.Flags().IntVar(&pprofPort, "pprof-port", 9999, "Port the pprof server listens on (default: 9999)")

@@ -2,6 +2,7 @@ package embeddedstore
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -43,6 +44,82 @@ func TestEngine_OpenLoadsCheckpointAndReplaysNewerSegments(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Events, 1)
+}
+
+func TestEngine_OpenRecoversCheckpointDiscoveredOnDiskWhenManifestLags(t *testing.T) {
+	dir := t.TempDir()
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "checkpoint-one",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"}}`),
+		},
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "checkpoint-two",
+			Timestamp: 20,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-2",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-2",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-2","namespace":"default","uid":"pod-2"}}`),
+		},
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	rootDir := embeddedRootDir(dir)
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	require.Len(t, manifest.Checkpoints, 2)
+
+	olderCheckpoint := manifest.Checkpoints[0]
+	newerCheckpoint := latestCheckpointMeta(manifest.Checkpoints)
+	require.Greater(t, newerCheckpoint.HighWaterMark, olderCheckpoint.HighWaterMark)
+
+	manifest.Checkpoints = []CheckpointMeta{olderCheckpoint}
+	require.NoError(t, storeManifest(rootDir, manifest))
+
+	restoreApplyFn := setApplyProjectionEventFnForTest(func(projection *Projection, event models.Event) error {
+		if event.ID == "checkpoint-two" {
+			return errors.New("forced replay failure")
+		}
+		return projection.Apply(event)
+	})
+	t.Cleanup(restoreApplyFn)
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	healedManifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	require.Contains(t, healedManifest.Checkpoints, newerCheckpoint)
 }
 
 func TestEngine_ExportReadsFlushedColdSegment(t *testing.T) {
@@ -142,6 +219,69 @@ func TestEngine_AnalysisReadsSurviveFlushCheckpointRestart(t *testing.T) {
 	changeEvents, err := engine2.AnalysisStore().GetChangeEvents(context.Background(), []string{"pod-1"}, window)
 	require.NoError(t, err)
 	require.NotEmpty(t, changeEvents["pod-1"])
+}
+
+func TestEngine_StartPeriodicCheckpointFlushesBeforePersisting(t *testing.T) {
+	dir := t.TempDir()
+
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                dir,
+		HotMaxEvents:           100,
+		HotMaxResourceVersions: 4,
+		FlushInterval:          time.Hour,
+		CheckpointInterval:     20 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.NoError(t, engine.Start(context.Background()))
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "periodic-checkpoint",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-periodic",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-periodic",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-periodic","namespace":"default","uid":"pod-periodic"}}`),
+		},
+	}))
+
+	rootDir := embeddedRootDir(dir)
+	require.Eventually(t, func() bool {
+		manifest, err := loadOrCreateManifest(rootDir)
+		if err != nil {
+			return false
+		}
+		return len(manifest.ActiveSegments) == 1 && len(manifest.Checkpoints) >= 1
+	}, time.Second, 10*time.Millisecond)
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	require.Len(t, manifest.ActiveSegments, 1)
+	require.NotEmpty(t, manifest.Checkpoints)
+	require.Equal(t, manifest.FlushHighWaterMark, latestCheckpointMeta(manifest.Checkpoints).HighWaterMark)
+
+	require.NoError(t, engine.Close())
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	exported, err := reopened.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{
+		StartTimestamp: 0,
+		EndTimestamp:   100,
+	})
+	require.NoError(t, err)
+	require.Len(t, exported, 1)
 }
 
 func newFlushedTestEngine(t *testing.T, events []models.Event) *Engine {
