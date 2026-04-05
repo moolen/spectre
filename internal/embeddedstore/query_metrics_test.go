@@ -106,7 +106,7 @@ func TestQueryMetrics_ExportTimeRangeRecordsStoreScans(t *testing.T) {
 	}))
 }
 
-func TestQueryMetrics_DistinctMetadataMergesPlannerStats(t *testing.T) {
+func TestQueryMetrics_DistinctMetadataUsesProjectionFastPathForFullRange(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	engine := newMetricsTestEngine(t, reg)
 	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
@@ -122,11 +122,8 @@ func TestQueryMetrics_DistinctMetadataMergesPlannerStats(t *testing.T) {
 	require.NoError(t, gatherErr)
 	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_query_total"), map[string]string{
 		"query_family": "distinct_metadata",
-		"store_mix":    "hot_only",
+		"store_mix":    "projection_only",
 		"result":       "success",
-	}))
-	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_hot_scans_total"), map[string]string{
-		"query_family": "distinct_metadata",
 	}))
 }
 

@@ -72,7 +72,7 @@ func (qe *QueryExecutor) collectFilteredResources(
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
 ) ([]filteredResource, queryPlanStats, error) {
-	orderedResources, metaByUID := qe.snapshotResourceMetadata()
+	orderedResources, metaByUID, _, _ := qe.snapshotResourceMetadata()
 	filtered := make([]filteredResource, 0, len(orderedResources))
 	stats := queryPlanStats{}
 
