@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -410,6 +411,36 @@ func TestEngine_ReopenRestoresTailEventsWithoutColdReplay(t *testing.T) {
 	require.Equal(t, uint64(25), reopened.nextHighWaterMark)
 }
 
+func TestEngine_ProcessBatchCancellationAfterTailAppendDoesNotWedgeIngest(t *testing.T) {
+	engine, err := OpenEngine(EngineConfig{DataDir: t.TempDir(), HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	event := makeReplayHeavyEventsFrom(1, 1)[0]
+	ctx := &cancelAfterNErrChecksContext{
+		Context:   context.Background(),
+		remaining: 3,
+		cancelErr: context.Canceled,
+	}
+
+	err = engine.ProcessBatch(ctx, []models.Event{event})
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), engine.nextHighWaterMark)
+	require.Equal(t, uint64(1), engine.tail.meta.LastHighWaterMark)
+
+	record := engine.projection.resourcesByUID[event.Resource.UID]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 1)
+	require.Len(t, engine.hot.ScanTimeRange(event.Timestamp, event.Timestamp), 1)
+
+	nextEvent := makeReplayHeavyEventsFrom(2, 1)[0]
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{nextEvent}))
+	require.Equal(t, uint64(2), engine.nextHighWaterMark)
+	require.Equal(t, uint64(2), engine.tail.meta.LastHighWaterMark)
+}
+
 func newFlushedTestEngine(t *testing.T, events []models.Event) *Engine {
 	t.Helper()
 
@@ -448,4 +479,22 @@ func makeReplayHeavyEventsFrom(start, count int) []models.Event {
 		})
 	}
 	return events
+}
+
+type cancelAfterNErrChecksContext struct {
+	context.Context
+
+	mu        sync.Mutex
+	remaining int
+	cancelErr error
+}
+
+func (c *cancelAfterNErrChecksContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.remaining > 0 {
+		c.remaining--
+		return nil
+	}
+	return c.cancelErr
 }

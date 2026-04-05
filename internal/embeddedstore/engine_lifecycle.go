@@ -135,9 +135,6 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 	}
 	e.manifest.ActiveTail = tailMeta
 	for i := range events {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		if err := applyProjectionEvent(e.projection, events[i]); err != nil {
 			e.ready.Store(false)
 			return fmt.Errorf("process embedded batch: apply event %d: %w", i, err)
