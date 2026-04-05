@@ -1,6 +1,7 @@
 package embeddedstore
 
 import (
+	"bytes"
 	"sync"
 
 	"github.com/moolen/spectre/internal/models"
@@ -106,15 +107,107 @@ func dedupeEventsByID(events []models.Event) []models.Event {
 		return events
 	}
 
-	deduped := make([]models.Event, 0, len(events))
-	seen := make(map[string]struct{}, len(events))
+	dedupedIDs := make([]string, 0, len(events))
+	bestByID := make(map[string]models.Event, len(events))
 	for i := range events {
-		if _, ok := seen[events[i].ID]; ok {
+		existing, ok := bestByID[events[i].ID]
+		if !ok {
+			dedupedIDs = append(dedupedIDs, events[i].ID)
+			bestByID[events[i].ID] = events[i]
 			continue
 		}
-		seen[events[i].ID] = struct{}{}
-		deduped = append(deduped, events[i])
+		if compareDuplicateEventPreference(events[i], existing) < 0 {
+			bestByID[events[i].ID] = events[i]
+		}
+	}
+
+	deduped := make([]models.Event, 0, len(dedupedIDs))
+	for i := range dedupedIDs {
+		deduped = append(deduped, bestByID[dedupedIDs[i]])
 	}
 
 	return deduped
+}
+
+func compareDuplicateEventPreference(left, right models.Event) int {
+	if cmp := compareEventOrder(left, right); cmp != 0 {
+		return cmp
+	}
+	if left.PreExisting != right.PreExisting {
+		if !left.PreExisting {
+			return -1
+		}
+		return 1
+	}
+	if cmp := compareResourceMetadata(left.Resource, right.Resource); cmp != 0 {
+		return cmp
+	}
+	if left.Type != right.Type {
+		if left.Type < right.Type {
+			return -1
+		}
+		return 1
+	}
+	if cmp := bytes.Compare(left.Data, right.Data); cmp != 0 {
+		return cmp
+	}
+	if left.DataSize != right.DataSize {
+		if left.DataSize < right.DataSize {
+			return -1
+		}
+		return 1
+	}
+	if left.CompressedSize != right.CompressedSize {
+		if left.CompressedSize < right.CompressedSize {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+func compareResourceMetadata(left, right models.ResourceMetadata) int {
+	if left.Group != right.Group {
+		if left.Group < right.Group {
+			return -1
+		}
+		return 1
+	}
+	if left.Version != right.Version {
+		if left.Version < right.Version {
+			return -1
+		}
+		return 1
+	}
+	if left.Kind != right.Kind {
+		if left.Kind < right.Kind {
+			return -1
+		}
+		return 1
+	}
+	if left.Namespace != right.Namespace {
+		if left.Namespace < right.Namespace {
+			return -1
+		}
+		return 1
+	}
+	if left.Name != right.Name {
+		if left.Name < right.Name {
+			return -1
+		}
+		return 1
+	}
+	if left.UID != right.UID {
+		if left.UID < right.UID {
+			return -1
+		}
+		return 1
+	}
+	if left.InvolvedObjectUID < right.InvolvedObjectUID {
+		return -1
+	}
+	if left.InvolvedObjectUID > right.InvolvedObjectUID {
+		return 1
+	}
+	return 0
 }

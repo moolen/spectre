@@ -21,11 +21,19 @@ type replaySegmentReader struct {
 type segmentReplayCursor struct {
 	source     replaySegmentReader
 	nextOffset int64
+	file       *os.File
+	exhausted  bool
 }
 
 func newSegmentReplayCursor(source replaySegmentReader) *segmentReplayCursor {
 	startOffset := int64(0)
 	if source.reader != nil {
+		if source.startTimestamp == 0 {
+			source.startTimestamp = source.reader.meta.MinTimestamp
+		}
+		if source.endTimestamp == 0 {
+			source.endTimestamp = source.reader.meta.MaxTimestamp
+		}
 		startOffset = source.reader.startOffsetForTime(source.startTimestamp)
 	}
 
@@ -39,6 +47,9 @@ func (c *segmentReplayCursor) next(ctx context.Context) (models.Event, bool, err
 	if c == nil || c.source.reader == nil {
 		return models.Event{}, false, fmt.Errorf("replay cursor reader is nil")
 	}
+	if c.exhausted {
+		return models.Event{}, false, nil
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -46,16 +57,8 @@ func (c *segmentReplayCursor) next(ctx context.Context) (models.Event, bool, err
 		return models.Event{}, false, err
 	}
 
-	file, err := os.Open(c.source.reader.eventsPath)
-	if err != nil {
-		return models.Event{}, false, fmt.Errorf("open events file: %w", err)
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	if _, err := file.Seek(c.nextOffset, io.SeekStart); err != nil {
-		return models.Event{}, false, fmt.Errorf("seek next offset: %w", err)
+	if err := c.ensureOpen(); err != nil {
+		return models.Event{}, false, err
 	}
 
 	for {
@@ -63,12 +66,15 @@ func (c *segmentReplayCursor) next(ctx context.Context) (models.Event, bool, err
 			return models.Event{}, false, err
 		}
 
-		event, size, err := decodeFramedEvent(file)
+		event, size, err := decodeFramedEvent(c.file)
 		if err == nil {
 			// Continue below.
 		} else if errors.Is(err, io.EOF) {
+			c.exhausted = true
+			_ = c.close()
 			return models.Event{}, false, nil
 		} else {
+			_ = c.close()
 			return models.Event{}, false, fmt.Errorf("decode event: %w", err)
 		}
 
@@ -77,11 +83,44 @@ func (c *segmentReplayCursor) next(ctx context.Context) (models.Event, bool, err
 			continue
 		}
 		if event.Timestamp > c.source.endTimestamp {
+			c.exhausted = true
+			_ = c.close()
 			return models.Event{}, false, nil
 		}
 
 		return event, true, nil
 	}
+}
+
+func (c *segmentReplayCursor) ensureOpen() error {
+	if c == nil || c.source.reader == nil {
+		return fmt.Errorf("replay cursor reader is nil")
+	}
+	if c.file != nil {
+		return nil
+	}
+
+	file, err := os.Open(c.source.reader.eventsPath)
+	if err != nil {
+		return fmt.Errorf("open events file: %w", err)
+	}
+	if _, err := file.Seek(c.nextOffset, io.SeekStart); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("seek next offset: %w", err)
+	}
+
+	c.file = file
+	return nil
+}
+
+func (c *segmentReplayCursor) close() error {
+	if c == nil || c.file == nil {
+		return nil
+	}
+
+	err := c.file.Close()
+	c.file = nil
+	return err
 }
 
 type replayEventHeapItem struct {
@@ -120,12 +159,19 @@ func consumeReplaySegmentReaders(ctx context.Context, sources []replaySegmentRea
 		return fmt.Errorf("replay sink is nil")
 	}
 	queue := make(replayEventHeap, 0, len(sources))
+	cursors := make([]*segmentReplayCursor, 0, len(sources))
+	defer func() {
+		for i := range cursors {
+			_ = cursors[i].close()
+		}
+	}()
 	for i := range sources {
 		if sources[i].reader == nil || sources[i].reader.meta.EventCount == 0 {
 			continue
 		}
 
 		cursor := newSegmentReplayCursor(sources[i])
+		cursors = append(cursors, cursor)
 		event, ok, err := cursor.next(ctx)
 		if err != nil {
 			return fmt.Errorf("prime active segment %q: %w", sources[i].segmentID, err)

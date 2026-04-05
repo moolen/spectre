@@ -42,7 +42,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		return nil, fmt.Errorf("open embedded engine: load manifest: %w", err)
 	}
 
-	readers, checkpointHighWaterMark, projection, err := loadEngineState(rootDir, manifest)
+	readers, tail, recoveredHighWaterMark, projection, recoveredHot, mode, err := loadEngineState(rootDir, manifest)
 	if err != nil {
 		return nil, fmt.Errorf("open embedded engine: load state: %w", err)
 	}
@@ -53,18 +53,30 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 
 	metrics := NewMetrics(cfg.MetricsRegisterer)
 	hot := newHotStore(HotStoreConfig{MaxEvents: cfg.HotMaxEvents, MaxResourceVersions: cfg.HotMaxResourceVersions}, metrics)
-	manifest, tail, err := openOrCreateActiveTail(rootDir, manifest)
-	if err != nil {
-		return nil, fmt.Errorf("open embedded engine: open tail journal: %w", err)
+	if recoveredHot != nil {
+		hot.Append(recoveredHot.ExtractFlushBatch(0).Events)
 	}
 
-	nextHighWaterMark := maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), checkpointHighWaterMark)
-	if err := recoverTailState(projection, hot, tail, nextHighWaterMark); err != nil {
-		_ = tail.Close()
-		return nil, fmt.Errorf("open embedded engine: recover tail journal: %w", err)
+	if tail == nil {
+		manifest, tail, err = openOrCreateActiveTail(rootDir, manifest)
+		if err != nil {
+			return nil, fmt.Errorf("open embedded engine: open tail journal: %w", err)
+		}
+	} else {
+		manifest.ActiveTail = tail.meta
 	}
-	nextHighWaterMark = maxUint64(nextHighWaterMark, tail.meta.LastHighWaterMark)
-	manifest.ActiveTail = tail.meta
+
+	nextHighWaterMark := maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), recoveredHighWaterMark)
+	if mode == startupModeRepair {
+		if err := recoverTailState(projection, hot, tail, nextHighWaterMark); err != nil {
+			_ = tail.Close()
+			return nil, fmt.Errorf("open embedded engine: recover tail journal: %w", err)
+		}
+	}
+	if tail != nil {
+		nextHighWaterMark = maxUint64(nextHighWaterMark, tail.meta.LastHighWaterMark)
+		manifest.ActiveTail = tail.meta
+	}
 
 	engine := &Engine{
 		logger:            logging.GetLogger("embedded.engine"),

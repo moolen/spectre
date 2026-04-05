@@ -1,6 +1,7 @@
 package embeddedstore
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -92,6 +93,30 @@ func TestEngine_OpenBuildsProjectionFromReplaySegmentsWithoutCheckpoint(t *testi
 	require.Len(t, engine.projection.resourcesByUID["uid-d"].versions, 1)
 }
 
+func TestEngine_OpenUsesCheckpointAndTailOnNormalRestart(t *testing.T) {
+	dir := t.TempDir()
+	expectedEvent := seedStoreWithCheckpointAndTail(t, dir)
+
+	restore := setApplyProjectionEventFnForTest(func(*Projection, models.Event) error {
+		t.Fatal("normal restart should not apply cold segment replay")
+		return nil
+	})
+	t.Cleanup(restore)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.True(t, engine.IsReady())
+	record := engine.projection.resourcesByUID[expectedEvent.Resource.UID]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 1)
+	require.Equal(t, expectedEvent.ID, record.versions[0].eventID)
+	require.Equal(t, []string{expectedEvent.ID}, replayTestEventIDs(engine.hot.ScanTimeRange(expectedEvent.Timestamp, expectedEvent.Timestamp)))
+}
+
 func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {
 	dir := t.TempDir()
 	rootDir := embeddedRootDir(dir)
@@ -134,6 +159,22 @@ func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {
 	require.ErrorContains(t, err, "boom")
 }
 
+func TestSegmentReplayCursor_KeepsFileOpenAcrossSequentialReads(t *testing.T) {
+	reader := writeReplayTestSegment(t)
+	cursor := newSegmentReplayCursor(replaySegmentReader{segmentID: "seg-1", reader: reader})
+
+	first, ok, err := cursor.next(context.Background())
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, os.Remove(reader.eventsPath))
+
+	second, ok, err := cursor.next(context.Background())
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotEqual(t, first.ID, second.ID)
+}
+
 func testReplayEvent(id string, timestamp int64) models.Event {
 	return models.Event{
 		ID:        id,
@@ -156,4 +197,45 @@ func eventIDsForUID(events []models.Event) []string {
 		ids = append(ids, events[i].ID)
 	}
 	return ids
+}
+
+func replayTestEventIDs(events []models.Event) []string {
+	ids := make([]string, 0, len(events))
+	for i := range events {
+		ids = append(ids, events[i].ID)
+	}
+	return ids
+}
+
+func seedStoreWithCheckpointAndTail(t *testing.T, dataDir string) models.Event {
+	t.Helper()
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	checkpointed := testReplayEvent("checkpointed", 1)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{checkpointed}))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	tailEvent := testReplayEvent("tail-overlap", 2)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{tailEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.tail.Close())
+
+	return tailEvent
+}
+
+func writeReplayTestSegment(t *testing.T) *segmentReader {
+	t.Helper()
+
+	rootDir := t.TempDir()
+	segment, err := writeSegment(rootDir, "seg-replay", []models.Event{
+		testReplayEvent("first", 10),
+		testReplayEvent("second", 20),
+	})
+	require.NoError(t, err)
+
+	reader, err := openSegmentReader(rootDir, segment)
+	require.NoError(t, err)
+	return reader
 }
