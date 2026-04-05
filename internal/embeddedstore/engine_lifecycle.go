@@ -69,12 +69,15 @@ func (e *Engine) Close() error {
 	}
 	e.mu.Unlock()
 
-	if err := e.Flush(context.Background()); err != nil {
-		return err
-	}
-	if e.config.CheckpointOnShutdown {
-		if err := e.Checkpoint(context.Background()); err != nil {
+	shouldPersistOnClose := e.IsReady()
+	if shouldPersistOnClose {
+		if err := e.Flush(context.Background()); err != nil {
 			return err
+		}
+		if e.config.CheckpointOnShutdown {
+			if err := e.Checkpoint(context.Background()); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -136,6 +139,7 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		return fmt.Errorf("process embedded batch: append tail journal: %w", err)
 	}
 	e.manifest.ActiveTail = tailMeta
+	e.nextHighWaterMark = tailMeta.LastHighWaterMark
 	e.setActiveTailMetricsLocked()
 	for i := range events {
 		if err := applyProjectionEvent(e.projection, events[i]); err != nil {
@@ -143,17 +147,16 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 			return fmt.Errorf("process embedded batch: apply event %d: %w", i, err)
 		}
 		e.hot.Append([]models.Event{events[i]})
-		e.nextHighWaterMark++
 	}
 	if wasReady {
 		e.ready.Store(true)
 	}
-	if e.shouldFlushHotBySizeLocked() {
+	if e.ready.Load() && e.shouldFlushHotBySizeLocked() {
 		if err := e.flushLocked(ctx); err != nil {
 			e.logAutoFlushError("size-triggered flush failed", err)
 		}
 	}
-	if e.shouldCheckpointTailLocked() {
+	if e.ready.Load() && e.shouldCheckpointTailLocked() {
 		if err := e.checkpointLocked(ctx); err != nil {
 			e.logAutoFlushError("tail-triggered checkpoint failed", err)
 		}
@@ -171,6 +174,9 @@ func (e *Engine) runPeriodicFlush(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !e.IsReady() {
+				continue
+			}
 			if err := e.Flush(context.Background()); err != nil {
 				e.logAutoFlushError("periodic flush failed", err)
 			}
@@ -187,6 +193,9 @@ func (e *Engine) runPeriodicCheckpoint(ctx context.Context, interval time.Durati
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !e.IsReady() {
+				continue
+			}
 			if err := e.Checkpoint(context.Background()); err != nil {
 				e.logAutoFlushError("periodic checkpoint failed", err)
 			}

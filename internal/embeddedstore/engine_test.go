@@ -227,7 +227,7 @@ func TestEngine_AnalysisReadsSurviveFlushCheckpointRestart(t *testing.T) {
 	require.NotEmpty(t, changeEvents["pod-1"])
 }
 
-func TestEngine_StartPeriodicCheckpointFlushesBeforePersisting(t *testing.T) {
+func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *testing.T) {
 	dir := t.TempDir()
 
 	engine, err := OpenEngine(EngineConfig{
@@ -265,14 +265,17 @@ func TestEngine_StartPeriodicCheckpointFlushesBeforePersisting(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		return len(manifest.ActiveSegments) == 1 && len(manifest.Checkpoints) >= 1
+		return len(manifest.Checkpoints) >= 1
 	}, time.Second, 10*time.Millisecond)
 
 	manifest, err := loadOrCreateManifest(rootDir)
 	require.NoError(t, err)
-	require.Len(t, manifest.ActiveSegments, 1)
+	require.Empty(t, manifest.ActiveSegments)
 	require.NotEmpty(t, manifest.Checkpoints)
-	require.Equal(t, manifest.FlushHighWaterMark, latestCheckpointMeta(manifest.Checkpoints).HighWaterMark)
+	require.Equal(t, uint64(0), manifest.FlushHighWaterMark)
+	require.Equal(t, uint64(1), latestCheckpointMeta(manifest.Checkpoints).HighWaterMark)
+	require.Equal(t, latestCheckpointMeta(manifest.Checkpoints).HighWaterMark, manifest.ActiveTail.BaseHighWaterMark)
+	require.Zero(t, manifest.ActiveTail.EventCount)
 
 	require.NoError(t, engine.Close())
 
@@ -288,6 +291,76 @@ func TestEngine_StartPeriodicCheckpointFlushesBeforePersisting(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, exported, 1)
+}
+
+func TestEngine_CloseSkipsCheckpointWhenProjectionStateIsNotReady(t *testing.T) {
+	dir := t.TempDir()
+
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                dir,
+		HotMaxEvents:           100,
+		HotMaxResourceVersions: 4,
+		CheckpointOnShutdown:   true,
+	})
+	require.NoError(t, err)
+
+	restoreApplyFn := setApplyProjectionEventFnForTest(func(projection *Projection, event models.Event) error {
+		if event.ID == "fail-apply" {
+			return errors.New("boom")
+		}
+		return projection.Apply(event)
+	})
+	t.Cleanup(restoreApplyFn)
+
+	require.Error(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "fail-apply",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-fail",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-fail",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-fail","namespace":"default","uid":"pod-fail"}}`),
+		},
+	}))
+	require.False(t, engine.IsReady())
+
+	restoreApplyFn()
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "ok-after-fail",
+			Timestamp: 20,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-ok",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-ok",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-ok","namespace":"default","uid":"pod-ok"}}`),
+		},
+	}))
+	require.False(t, engine.IsReady())
+
+	require.NoError(t, engine.Close())
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	exported, err := reopened.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{
+		StartTimestamp: 0,
+		EndTimestamp:   100,
+	})
+	require.NoError(t, err)
+	require.Len(t, exported, 2)
 }
 
 func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T) {
