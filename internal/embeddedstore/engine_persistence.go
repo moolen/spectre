@@ -36,6 +36,9 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if !e.ready.Load() {
+		return nil
+	}
 
 	batch := e.hot.ExtractFlushBatch(0)
 	if len(batch.Events) == 0 {
@@ -145,6 +148,9 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if !e.ready.Load() {
+		return nil
 	}
 
 	start := time.Now()
