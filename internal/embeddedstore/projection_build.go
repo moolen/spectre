@@ -82,6 +82,52 @@ func (p *Projection) Apply(event models.Event) error {
 	return nil
 }
 
+func (p *Projection) ApplyReplayEvent(event models.Event) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	cloned := cloneEvent(event)
+	p.events = insertEventSorted(p.events, cloned)
+
+	if cloned.Resource.Kind == "Event" {
+		p.applyK8sEvent(cloned)
+		return nil
+	}
+	if cloned.Resource.UID == "" {
+		return nil
+	}
+
+	p.ensureResourceRecord(cloned)
+
+	uid := cloned.Resource.UID
+	p.eventsByResourceUID[uid] = insertEventSorted(p.eventsByResourceUID[uid], cloned)
+
+	record := p.resourcesByUID[uid]
+	if record == nil {
+		return nil
+	}
+
+	var previousData []byte
+	if len(record.versions) > 0 {
+		previousData = record.versions[len(record.versions)-1].data
+	}
+
+	version := resourceVersion{
+		eventID:   cloned.ID,
+		timestamp: cloned.Timestamp,
+		eventType: cloned.Type,
+		data:      cloneBytes(cloned.Data),
+	}
+	version.identity = buildResourceIdentity(cloned, parseObject(cloned.Data), record.versions, previousData)
+	version.changeEvent = buildChangeEventInfo(cloned, version.data, previousData)
+	record.versions = append(record.versions, version)
+
+	p.resourceMetaByUID[uid] = cloned.Resource
+	p.updateTimestampBounds(cloned.Timestamp)
+
+	return nil
+}
+
 func (p *Projection) applyEventToIndexes(event models.Event) {
 	if event.Resource.Kind == "Event" {
 		if event.Resource.InvolvedObjectUID == "" {

@@ -2,7 +2,10 @@ package embeddedstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -282,6 +285,94 @@ func TestEngine_StartPeriodicCheckpointFlushesBeforePersisting(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, exported, 1)
+}
+
+func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T) {
+	dir := t.TempDir()
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "v1",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"}}`),
+		},
+		{
+			ID:        "v2",
+			Timestamp: 20,
+			Type:      models.EventTypeUpdate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"},"spec":{"replicas":1}}`),
+		},
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.NoError(t, engine.Close())
+
+	rootDir := embeddedRootDir(dir)
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	checkpointMeta := latestCheckpointMeta(manifest.Checkpoints)
+
+	checkpointPath := filepath.Join(rootDir, checkpointsDirName, checkpointMeta.ID, checkpointStateFile)
+	var state checkpointState
+	payload, err := os.ReadFile(checkpointPath)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(payload, &state))
+	require.Len(t, state.Snapshot.Resources, 1)
+	require.Len(t, state.Snapshot.Resources[0].Versions, 2)
+	state.Snapshot.Resources[0].Versions[0].ChangeEvent.Description = "checkpoint-sentinel"
+	require.NoError(t, writeJSONFile(checkpointPath, state))
+
+	tailSegment, err := writeSegment(rootDir, "seg-tail", []models.Event{
+		{
+			ID:        "v3",
+			Timestamp: 30,
+			Type:      models.EventTypeUpdate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"},"spec":{"replicas":2}}`),
+		},
+	})
+	require.NoError(t, err)
+
+	manifest.ActiveSegments = append(manifest.ActiveSegments, SegmentMeta{
+		ID:            tailSegment.ID,
+		HighWaterMark: 3,
+	})
+	manifest.FlushHighWaterMark = 3
+	require.NoError(t, storeManifest(rootDir, manifest))
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	record := reopened.projection.resourcesByUID["pod-1"]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 3)
+	require.Equal(t, "checkpoint-sentinel", record.versions[0].changeEvent.Description)
 }
 
 func newFlushedTestEngine(t *testing.T, events []models.Event) *Engine {

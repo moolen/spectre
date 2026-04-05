@@ -170,6 +170,9 @@ func replaySegmentReaders(ctx context.Context, projection *Projection, sources [
 	}
 
 	if err := consumeReplaySegmentReaders(ctx, sources, func(event models.Event) error {
+		if applyProjectionEventUsesDefaultImplementation() {
+			return projection.ApplyReplayEvent(event)
+		}
 		return applyProjectionEvent(projection, event)
 	}); err != nil {
 		return fmt.Errorf("open embedded engine: %w", err)
