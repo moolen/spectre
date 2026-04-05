@@ -82,3 +82,20 @@ tests:
       - equal:
           path: spec.strategy.rollingUpdate.maxSurge
           value: 0
+
+  - it: should not append an integrations data-dir override in embedded mode
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--data-dir=/var/lib/spectre-data"
+      - equal:
+          path: spec.template.spec.containers[0].args[7]
+          value: "--integrations-config=/var/lib/spectre/config/integrations.yaml"
+      - isNull:
+          path: spec.template.spec.containers[0].args[8]

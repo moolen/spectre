@@ -129,7 +129,7 @@ spec:
         {{- if .Values.integrations.enabled }}
         - --integrations-config={{ .Values.integrations.configPath }}
         {{- end }}
-        {{- if .Values.integrations.persistence.enabled }}
+        {{- if and .Values.integrations.persistence.enabled (not .Values.embedded.enabled) }}
         - --data-dir={{ .Values.integrations.persistence.mountPath }}/data
         {{- end }}
         {{- range .Values.extraArgs }}
