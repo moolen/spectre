@@ -58,7 +58,7 @@ func TestCheckpoint_LoadRejectsCorruptBundle(t *testing.T) {
 	meta, err := writeCheckpoint(dir, projection, 123)
 	require.NoError(t, err)
 
-	checkpointPath := filepath.Join(dir, checkpointsDirName, meta.ID, checkpointStateFile)
+	checkpointPath := filepath.Join(dir, checkpointsDirName, meta.ID, "meta.json")
 	require.NoError(t, os.WriteFile(checkpointPath, []byte("{not-json"), 0o600))
 
 	_, _, err = loadCheckpoint(dir, meta)

@@ -54,11 +54,11 @@ type Projection struct {
 }
 
 type ProjectionSnapshot struct {
-	Events                   []models.Event                           `json:"events,omitempty"`
-	Resources                []ProjectionResourceSnapshot             `json:"resources,omitempty"`
-	K8sEventsByInvolvedUID   map[string][]analysisstore.K8sEventInfo `json:"k8s_events_by_involved_uid,omitempty"`
-	MinTimestampNs           int64                                    `json:"min_timestamp_ns"`
-	MaxTimestampNs           int64                                    `json:"max_timestamp_ns"`
+	Events                 []models.Event                          `json:"events,omitempty"`
+	Resources              []ProjectionResourceSnapshot            `json:"resources,omitempty"`
+	K8sEventsByInvolvedUID map[string][]analysisstore.K8sEventInfo `json:"k8s_events_by_involved_uid,omitempty"`
+	MinTimestampNs         int64                                   `json:"min_timestamp_ns"`
+	MaxTimestampNs         int64                                   `json:"max_timestamp_ns"`
 }
 
 type ProjectionResourceSnapshot struct {
@@ -86,4 +86,10 @@ func NewProjection() *Projection {
 		minTimestampNs:            -1,
 		maxTimestampNs:            -1,
 	}
+}
+
+func (p *Projection) ResourceCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.resourcesByUID)
 }

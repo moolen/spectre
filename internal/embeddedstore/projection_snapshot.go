@@ -1,6 +1,10 @@
 package embeddedstore
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"sort"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
@@ -36,12 +40,88 @@ func (p *Projection) ExportSnapshot() ProjectionSnapshot {
 	}
 }
 
+func (p *Projection) StreamCheckpointResources(emit func(ProjectionResourceSnapshot) error) error {
+	if emit == nil {
+		return fmt.Errorf("stream checkpoint resources: emit func is nil")
+	}
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	for i := range p.orderedResources {
+		record := p.resourcesByUID[p.orderedResources[i].uid]
+		if record == nil {
+			continue
+		}
+		if err := emit(snapshotResourceRecord(record)); err != nil {
+			return fmt.Errorf("stream checkpoint resources: emit %q: %w", record.uid, err)
+		}
+	}
+	return nil
+}
+
+func (p *Projection) CheckpointState(highWaterMark uint64) checkpointState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return checkpointState{
+		FormatVersion:  checkpointFormatVersion,
+		HighWaterMark:  highWaterMark,
+		MinTimestampNs: p.minTimestampNs,
+		MaxTimestampNs: p.maxTimestampNs,
+	}
+}
+
+func (p *Projection) CheckpointK8sEvents() map[string][]analysisstore.K8sEventInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return cloneK8sEventsByUID(p.k8sEventsByInvolvedUID)
+}
+
 func ProjectionFromSnapshot(snapshot ProjectionSnapshot) (*Projection, error) {
 	if len(snapshot.Resources) > 0 || len(snapshot.K8sEventsByInvolvedUID) > 0 {
 		return projectionFromCompactSnapshot(snapshot), nil
 	}
 
 	return BuildProjection(snapshot.Events)
+}
+
+func ProjectionFromCheckpointStream(state checkpointState, resources io.Reader, k8s io.Reader) (*Projection, error) {
+	if resources == nil {
+		return nil, fmt.Errorf("projection checkpoint stream: resources reader is nil")
+	}
+	if k8s == nil {
+		return nil, fmt.Errorf("projection checkpoint stream: k8s reader is nil")
+	}
+
+	k8sEvents, err := decodeCheckpointK8sEvents(k8s)
+	if err != nil {
+		return nil, err
+	}
+
+	projection := NewProjection()
+	projection.minTimestampNs = state.MinTimestampNs
+	projection.maxTimestampNs = state.MaxTimestampNs
+	projection.k8sEventsByInvolvedUID = k8sEvents
+
+	decoder := json.NewDecoder(resources)
+	for {
+		var snapshot ProjectionResourceSnapshot
+		if err := decoder.Decode(&snapshot); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("projection checkpoint stream: decode resources stream: %w", err)
+		}
+
+		record := restoreResourceRecord(snapshot)
+		if record == nil || len(record.versions) == 0 {
+			continue
+		}
+		restoreProjectionResourceRecord(projection, record)
+	}
+
+	return projection, nil
 }
 
 func (p *Projection) ImportSnapshot(snapshot ProjectionSnapshot) error {
@@ -89,31 +169,48 @@ func projectionFromCompactSnapshot(snapshot ProjectionSnapshot) *Projection {
 	projection.k8sEventsByInvolvedUID = cloneK8sEventsByUID(snapshot.K8sEventsByInvolvedUID)
 
 	for i := range snapshot.Resources {
-		recordSnapshot := snapshot.Resources[i]
-		record := restoreResourceRecord(recordSnapshot)
+		record := restoreResourceRecord(snapshot.Resources[i])
 		if record == nil || len(record.versions) == 0 {
 			continue
 		}
-
-		latest := record.versions[len(record.versions)-1]
-		meta := resourceMetadataFromIdentity(latest.identity)
-		projection.resourcesByUID[record.uid] = record
-		projection.resourceMetaByUID[record.uid] = meta
-		key := resourceKey{
-			namespace: meta.Namespace,
-			kind:      meta.Kind,
-			name:      meta.Name,
-		}
-		projection.resourcesByKey[key] = append(projection.resourcesByKey[key], record)
-		projection.orderedResources = insertOrderedResourceKey(projection.orderedResources, orderedResourceKey{
-			kind:      meta.Kind,
-			namespace: meta.Namespace,
-			name:      meta.Name,
-			uid:       meta.UID,
-		})
+		restoreProjectionResourceRecord(projection, record)
 	}
 
 	return projection
+}
+
+func decodeCheckpointK8sEvents(reader io.Reader) (map[string][]analysisstore.K8sEventInfo, error) {
+	decoder := json.NewDecoder(reader)
+	var eventsByUID map[string][]analysisstore.K8sEventInfo
+	if err := decoder.Decode(&eventsByUID); err != nil {
+		if errors.Is(err, io.EOF) {
+			return make(map[string][]analysisstore.K8sEventInfo), nil
+		}
+		return nil, fmt.Errorf("projection checkpoint stream: decode k8s events: %w", err)
+	}
+	if eventsByUID == nil {
+		return make(map[string][]analysisstore.K8sEventInfo), nil
+	}
+	return cloneK8sEventsByUID(eventsByUID), nil
+}
+
+func restoreProjectionResourceRecord(projection *Projection, record *resourceRecord) {
+	latest := record.versions[len(record.versions)-1]
+	meta := resourceMetadataFromIdentity(latest.identity)
+	projection.resourcesByUID[record.uid] = record
+	projection.resourceMetaByUID[record.uid] = meta
+	key := resourceKey{
+		namespace: meta.Namespace,
+		kind:      meta.Kind,
+		name:      meta.Name,
+	}
+	projection.resourcesByKey[key] = append(projection.resourcesByKey[key], record)
+	projection.orderedResources = insertOrderedResourceKey(projection.orderedResources, orderedResourceKey{
+		kind:      meta.Kind,
+		namespace: meta.Namespace,
+		name:      meta.Name,
+		uid:       meta.UID,
+	})
 }
 
 func snapshotResourceRecord(record *resourceRecord) ProjectionResourceSnapshot {
