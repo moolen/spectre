@@ -31,6 +31,7 @@ var (
 	embeddedCheckpointMaxTailEvents   int
 	embeddedCheckpointMaxTailBytes    int64
 	embeddedCheckpointOnShutdown      bool
+	embeddedCheckpointOnShutdownSet   bool
 	dataDir                           string
 	pprofEnabled                      bool
 	pprofPort                         int
@@ -165,6 +166,8 @@ func init() {
 }
 
 func runServer(cmd *cobra.Command, args []string) {
+	syncEmbeddedCheckpointOnShutdownFlagState(cmd)
+
 	cfg := config.LoadConfig(
 		apiPort,
 		logLevelFlags,
@@ -214,4 +217,12 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	runGraphServerRuntime(cfg, mode, manager, tracingProvider, logger)
+}
+
+func syncEmbeddedCheckpointOnShutdownFlagState(cmd *cobra.Command) {
+	if cmd == nil {
+		embeddedCheckpointOnShutdownSet = false
+		return
+	}
+	embeddedCheckpointOnShutdownSet = cmd.Flags().Changed("embedded-checkpoint-on-shutdown")
 }

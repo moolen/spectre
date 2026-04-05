@@ -64,20 +64,33 @@ func TestManifestStore_StoreManifestRejectsVersionMismatch(t *testing.T) {
 
 func TestManifest_LoadLegacyManifestWithoutTailMetadata(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, storeManifest(dir, Manifest{
-		FormatVersion: storageFormatVersion,
-		ActiveSegments: []SegmentMeta{
-			{ID: "seg-001", HighWaterMark: 42},
-		},
-		Checkpoints: []CheckpointMeta{
-			{ID: "chk-00000000000000000042-1", HighWaterMark: 42},
-		},
-	}))
+	manifestPath := filepath.Join(dir, manifestFileName)
+	require.NoError(t, os.WriteFile(manifestPath, []byte(
+		`{"format_version":1,"active_segments":[{"id":"seg-001","high_water_mark":42}],"checkpoints":[{"id":"chk-00000000000000000042-1","high_water_mark":42}]}`,
+	), 0o600))
 
 	manifest, err := loadOrCreateManifest(dir)
 	require.NoError(t, err)
 	require.Equal(t, uint64(42), manifest.ActiveCheckpoint.HighWaterMark)
 	require.Equal(t, uint64(42), manifest.ActiveTail.BaseHighWaterMark)
+}
+
+func TestManifest_LoadLegacyManifestReconcilesCheckpointMetadataToActiveState(t *testing.T) {
+	dir := t.TempDir()
+	checkpointID := "chk-00000000000000000077-1"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, checkpointsDirName, checkpointID), 0o755))
+
+	manifestPath := filepath.Join(dir, manifestFileName)
+	require.NoError(t, os.WriteFile(manifestPath, []byte(
+		`{"format_version":1,"active_segments":[],"checkpoints":[]}`,
+	), 0o600))
+
+	manifest, err := loadOrCreateManifest(dir)
+	require.NoError(t, err)
+	require.Equal(t, checkpointID, manifest.ActiveCheckpoint.ID)
+	require.Equal(t, uint64(77), manifest.ActiveCheckpoint.HighWaterMark)
+	require.Equal(t, uint64(77), manifest.ActiveTail.BaseHighWaterMark)
+	require.Equal(t, uint64(77), manifest.ActiveTail.LastHighWaterMark)
 }
 
 func TestConfig_EffectiveEngineConfigAppliesTailDefaults(t *testing.T) {

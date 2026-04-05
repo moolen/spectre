@@ -79,6 +79,7 @@ func loadOrCreateManifest(dir string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	manifest = normalizeManifest(manifest)
 
 	return manifest, nil
 }
