@@ -363,6 +363,45 @@ func TestEngine_CloseSkipsCheckpointWhenProjectionStateIsNotReady(t *testing.T) 
 	require.Len(t, exported, 2)
 }
 
+func TestEngine_AutoCheckpointWhenTailExceedsByteBudget(t *testing.T) {
+	dir := t.TempDir()
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                 dir,
+		HotMaxEvents:            100,
+		HotMaxResourceVersions:  4,
+		CheckpointMaxTailEvents: 1024,
+		CheckpointMaxTailBytes:  1,
+		CheckpointOnShutdown:    true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "tail-byte-budget",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-byte-budget",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-byte-budget",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-byte-budget","namespace":"default","uid":"pod-byte-budget"},"spec":{"containers":[{"name":"app","image":"demo:v1"}]}}`),
+		},
+	}))
+
+	require.NotEmpty(t, engine.manifest.Checkpoints)
+	require.Equal(t, uint64(1), engine.manifest.ActiveCheckpoint.HighWaterMark)
+	require.Equal(t, uint64(1), engine.manifest.ActiveTail.BaseHighWaterMark)
+	require.Equal(t, uint64(1), engine.manifest.ActiveTail.LastHighWaterMark)
+	require.Zero(t, engine.manifest.ActiveTail.EventCount)
+	require.Zero(t, engine.tail.meta.EventCount)
+}
+
 func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T) {
 	dir := t.TempDir()
 
