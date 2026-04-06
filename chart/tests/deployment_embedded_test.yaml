@@ -60,6 +60,9 @@ tests:
       - equal:
           path: spec.strategy.type
           value: Recreate
+      - equal:
+          path: spec.template.spec.securityContext.fsGroupChangePolicy
+          value: OnRootMismatch
 
   - it: should keep an explicit embedded rolling update override
     set:

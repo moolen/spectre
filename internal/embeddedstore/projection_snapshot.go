@@ -1,6 +1,8 @@
 package embeddedstore
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +31,7 @@ func (p *Projection) ExportSnapshot() ProjectionSnapshot {
 		if record == nil {
 			continue
 		}
-		resources = append(resources, snapshotResourceRecord(record))
+		resources = append(resources, snapshotResourceRecord(record, p.maxTimestampNs))
 	}
 
 	return ProjectionSnapshot{
@@ -50,6 +52,7 @@ func (p *Projection) StreamCheckpointResources(emit func(ProjectionResourceSnaps
 	for i := range p.orderedResources {
 		orderedUIDs = append(orderedUIDs, p.orderedResources[i].uid)
 	}
+	checkpointMaxTimestamp := p.maxTimestampNs
 	p.mu.RUnlock()
 
 	for i := range orderedUIDs {
@@ -60,7 +63,7 @@ func (p *Projection) StreamCheckpointResources(emit func(ProjectionResourceSnaps
 			p.mu.RUnlock()
 			continue
 		}
-		snapshot := snapshotResourceRecord(record)
+		snapshot := snapshotResourceRecord(record, checkpointMaxTimestamp)
 		p.mu.RUnlock()
 		if err := emit(snapshot); err != nil {
 			return fmt.Errorf("stream checkpoint resources: emit %q: %w", uid, err)
@@ -121,6 +124,44 @@ func ProjectionFromCheckpointStream(state checkpointState, resources io.Reader, 
 				break
 			}
 			return nil, fmt.Errorf("projection checkpoint stream: decode resources stream: %w", err)
+		}
+
+		record := restoreResourceRecord(snapshot)
+		if record == nil || len(record.versions) == 0 {
+			continue
+		}
+		restoreProjectionResourceRecord(projection, record)
+	}
+
+	return projection, nil
+}
+
+func ProjectionFromCheckpointBinaryStream(state checkpointState, resources io.Reader, k8s io.Reader) (*Projection, error) {
+	if resources == nil {
+		return nil, fmt.Errorf("projection checkpoint binary stream: resources reader is nil")
+	}
+	if k8s == nil {
+		return nil, fmt.Errorf("projection checkpoint binary stream: k8s reader is nil")
+	}
+
+	k8sEvents, err := decodeCheckpointK8sEventsGob(k8s)
+	if err != nil {
+		return nil, err
+	}
+
+	projection := NewProjection()
+	projection.minTimestampNs = state.MinTimestampNs
+	projection.maxTimestampNs = state.MaxTimestampNs
+	projection.k8sEventsByInvolvedUID = k8sEvents
+
+	decoder := gob.NewDecoder(resources)
+	for {
+		var snapshot ProjectionResourceSnapshot
+		if err := decoder.Decode(&snapshot); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("projection checkpoint binary stream: decode resources stream: %w", err)
 		}
 
 		record := restoreResourceRecord(snapshot)
@@ -200,7 +241,22 @@ func decodeCheckpointK8sEvents(reader io.Reader) (map[string][]analysisstore.K8s
 	if eventsByUID == nil {
 		return make(map[string][]analysisstore.K8sEventInfo), nil
 	}
-	return cloneK8sEventsByUID(eventsByUID), nil
+	return eventsByUID, nil
+}
+
+func decodeCheckpointK8sEventsGob(reader io.Reader) (map[string][]analysisstore.K8sEventInfo, error) {
+	decoder := gob.NewDecoder(reader)
+	var eventsByUID map[string][]analysisstore.K8sEventInfo
+	if err := decoder.Decode(&eventsByUID); err != nil {
+		if errors.Is(err, io.EOF) {
+			return make(map[string][]analysisstore.K8sEventInfo), nil
+		}
+		return nil, fmt.Errorf("projection checkpoint binary stream: decode k8s events: %w", err)
+	}
+	if eventsByUID == nil {
+		return make(map[string][]analysisstore.K8sEventInfo), nil
+	}
+	return eventsByUID, nil
 }
 
 func restoreProjectionResourceRecord(projection *Projection, record *resourceRecord) {
@@ -222,28 +278,63 @@ func restoreProjectionResourceRecord(projection *Projection, record *resourceRec
 	})
 }
 
-func snapshotResourceRecord(record *resourceRecord) ProjectionResourceSnapshot {
+func snapshotResourceRecord(record *resourceRecord, checkpointMaxTimestamp int64) ProjectionResourceSnapshot {
 	if record == nil {
 		return ProjectionResourceSnapshot{}
 	}
 
 	versions := make([]ProjectionResourceVersionSnapshot, 0, len(record.versions))
+	var lastCheckpointVersion *resourceVersion
+	var retainedWindowSentinel *ProjectionResourceVersionSnapshot
+	retentionWindowStart, retainRecentWindow := checkpointRetentionWindowStart(checkpointMaxTimestamp)
 	for i := range record.versions {
 		version := record.versions[i]
-		versions = append(versions, ProjectionResourceVersionSnapshot{
+		if lastCheckpointVersion != nil && checkpointEquivalentState(*lastCheckpointVersion, version) {
+			continue
+		}
+
+		snapshotVersion := ProjectionResourceVersionSnapshot{
 			EventID:     version.eventID,
 			Timestamp:   version.timestamp,
 			EventType:   version.eventType,
 			Identity:    copyIdentity(&version),
 			Data:        cloneBytes(version.data),
 			ChangeEvent: cloneChangeEventInfo(version.changeEvent),
-		})
+		}
+		if retainRecentWindow && version.timestamp < retentionWindowStart {
+			snapshotCopy := snapshotVersion
+			retainedWindowSentinel = &snapshotCopy
+			copied := version
+			lastCheckpointVersion = &copied
+			continue
+		}
+
+		if retainedWindowSentinel != nil {
+			versions = append(versions, *retainedWindowSentinel)
+			retainedWindowSentinel = nil
+		}
+		versions = append(versions, snapshotVersion)
+		copied := version
+		lastCheckpointVersion = &copied
+	}
+	if len(versions) == 0 && retainedWindowSentinel != nil {
+		versions = append(versions, *retainedWindowSentinel)
 	}
 
 	return ProjectionResourceSnapshot{
 		UID:      record.uid,
 		Versions: versions,
 	}
+}
+
+func checkpointRetentionWindowStart(checkpointMaxTimestamp int64) (int64, bool) {
+	if checkpointMaxTimestamp <= 0 {
+		return 0, false
+	}
+	if checkpointMaxTimestamp <= maxLookbackNs {
+		return 0, true
+	}
+	return checkpointMaxTimestamp - maxLookbackNs, true
 }
 
 func restoreResourceRecord(snapshot ProjectionResourceSnapshot) *resourceRecord {
@@ -255,19 +346,36 @@ func restoreResourceRecord(snapshot ProjectionResourceSnapshot) *resourceRecord 
 		uid:      snapshot.UID,
 		versions: make([]resourceVersion, 0, len(snapshot.Versions)),
 	}
+	var lastCheckpointVersion *resourceVersion
 	for i := range snapshot.Versions {
 		version := snapshot.Versions[i]
-		record.versions = append(record.versions, resourceVersion{
+		restoredVersion := resourceVersion{
 			eventID:     version.EventID,
 			timestamp:   version.Timestamp,
 			eventType:   version.EventType,
-			identity:    cloneGraphIdentity(version.Identity),
-			data:        cloneBytes(version.Data),
-			changeEvent: cloneChangeEventInfo(version.ChangeEvent),
-		})
+			identity:    version.Identity,
+			data:        version.Data,
+			changeEvent: version.ChangeEvent,
+		}
+		if lastCheckpointVersion != nil && checkpointEquivalentState(*lastCheckpointVersion, restoredVersion) {
+			continue
+		}
+
+		record.versions = append(record.versions, restoredVersion)
+		lastCheckpointVersion = &record.versions[len(record.versions)-1]
 	}
 
 	return record
+}
+
+func checkpointEquivalentState(previous, current resourceVersion) bool {
+	previousDeleted := previous.eventType == models.EventTypeDelete
+	currentDeleted := current.eventType == models.EventTypeDelete
+	if previousDeleted != currentDeleted {
+		return false
+	}
+
+	return bytes.Equal(previous.data, current.data)
 }
 
 func resourceMetadataFromIdentity(identity graph.ResourceIdentity) models.ResourceMetadata {

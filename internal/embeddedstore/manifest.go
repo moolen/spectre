@@ -26,8 +26,12 @@ type Manifest struct {
 }
 
 type SegmentMeta struct {
-	ID            string `json:"id"`
-	HighWaterMark uint64 `json:"high_water_mark"`
+	ID             string              `json:"id"`
+	HighWaterMark  uint64              `json:"high_water_mark"`
+	EventCount     int                 `json:"event_count,omitempty"`
+	MinTimestamp   int64               `json:"min_timestamp,omitempty"`
+	MaxTimestamp   int64               `json:"max_timestamp,omitempty"`
+	NamespaceKinds map[string][]string `json:"namespace_kinds,omitempty"`
 }
 
 type CheckpointMeta struct {
@@ -168,10 +172,13 @@ func normalizeManifest(manifest Manifest) Manifest {
 	if manifest.ActiveSegments == nil {
 		manifest.ActiveSegments = []SegmentMeta{}
 	}
+	for i := range manifest.ActiveSegments {
+		manifest.ActiveSegments[i].NamespaceKinds = normalizeNamespaceKinds(manifest.ActiveSegments[i].NamespaceKinds)
+	}
 	if manifest.Checkpoints == nil {
 		manifest.Checkpoints = []CheckpointMeta{}
 	}
-	if manifest.ActiveCheckpoint.ID == "" && len(manifest.Checkpoints) > 0 {
+	if len(manifest.Checkpoints) > 0 {
 		manifest.ActiveCheckpoint = latestCheckpointMeta(manifest.Checkpoints)
 	}
 	if manifest.ActiveTail == (TailJournalMeta{}) {
@@ -179,6 +186,31 @@ func normalizeManifest(manifest Manifest) Manifest {
 		manifest.ActiveTail.LastHighWaterMark = manifest.ActiveCheckpoint.HighWaterMark
 	}
 	return manifest
+}
+
+func (m SegmentMeta) bundleMeta() segmentBundleMeta {
+	return segmentBundleMeta{
+		ID:             m.ID,
+		EventCount:     m.EventCount,
+		MinTimestamp:   m.MinTimestamp,
+		MaxTimestamp:   m.MaxTimestamp,
+		NamespaceKinds: normalizeNamespaceKinds(m.NamespaceKinds),
+	}
+}
+
+func (m SegmentMeta) hasBundleMeta() bool {
+	return m.EventCount > 0 || m.MinTimestamp != 0 || m.MaxTimestamp != 0 || len(m.NamespaceKinds) > 0
+}
+
+func segmentMetaFromBundle(meta segmentBundleMeta, highWaterMark uint64) SegmentMeta {
+	return SegmentMeta{
+		ID:             meta.ID,
+		HighWaterMark:  highWaterMark,
+		EventCount:     meta.EventCount,
+		MinTimestamp:   meta.MinTimestamp,
+		MaxTimestamp:   meta.MaxTimestamp,
+		NamespaceKinds: normalizeNamespaceKinds(meta.NamespaceKinds),
+	}
 }
 
 func validateManifestVersion(manifest Manifest, operation string) error {

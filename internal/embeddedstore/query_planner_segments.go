@@ -15,13 +15,17 @@ func (p *QueryPlanner) relevantSegments(uid string, meta models.ResourceMetadata
 
 	relevant := make([]*segmentReader, 0, len(p.segments))
 	for _, reader := range p.segments {
-		if reader == nil || reader.meta.EventCount == 0 {
+		if reader == nil {
 			continue
 		}
-		if reader.meta.MinTimestamp > endTimeNs {
+		segmentMeta, metaKnown := queryPlannerSegmentMeta(reader)
+		if metaKnown && segmentMeta.EventCount == 0 {
 			continue
 		}
-		if reader.meta.MaxTimestamp < startTimeNs {
+		if metaKnown && segmentMeta.MinTimestamp > endTimeNs {
+			continue
+		}
+		if metaKnown && segmentMeta.MaxTimestamp < startTimeNs {
 			continue
 		}
 		if !reader.MayContain(meta.Namespace, meta.Kind) {
@@ -31,7 +35,7 @@ func (p *QueryPlanner) relevantSegments(uid string, meta models.ResourceMetadata
 			continue
 		}
 		if uid != "" {
-			if offsets := reader.resourceIndex[uid]; len(offsets) == 0 {
+			if !reader.MayContainUID(uid) {
 				continue
 			}
 		}
@@ -49,10 +53,14 @@ func (p *QueryPlanner) relevantResourceSegments(uid string, meta models.Resource
 	relevant := make([]*segmentReader, 0, len(p.segments))
 	var latestPrior *segmentReader
 	for _, reader := range p.segments {
-		if reader == nil || reader.meta.EventCount == 0 {
+		if reader == nil {
 			continue
 		}
-		if reader.meta.MinTimestamp > endTimeNs {
+		segmentMeta, metaKnown := queryPlannerSegmentMeta(reader)
+		if metaKnown && segmentMeta.EventCount == 0 {
+			continue
+		}
+		if metaKnown && segmentMeta.MinTimestamp > endTimeNs {
 			continue
 		}
 		if !reader.MayContain(meta.Namespace, meta.Kind) {
@@ -62,19 +70,20 @@ func (p *QueryPlanner) relevantResourceSegments(uid string, meta models.Resource
 			continue
 		}
 		if uid != "" {
-			if offsets := reader.resourceIndex[uid]; len(offsets) == 0 {
+			if !reader.MayContainUID(uid) {
 				continue
 			}
 		}
 
-		if reader.meta.MaxTimestamp < startTimeNs {
-			if latestPrior == nil || reader.meta.MaxTimestamp > latestPrior.meta.MaxTimestamp {
+		if metaKnown && segmentMeta.MaxTimestamp < startTimeNs {
+			latestPriorMeta, latestPriorKnown := queryPlannerSegmentMeta(latestPrior)
+			if latestPrior == nil || !latestPriorKnown || segmentMeta.MaxTimestamp > latestPriorMeta.MaxTimestamp {
 				latestPrior = reader
 			}
 			continue
 		}
 
-		if reader.meta.MinTimestamp <= endTimeNs && reader.meta.MaxTimestamp >= startTimeNs {
+		if !metaKnown || (segmentMeta.MinTimestamp <= endTimeNs && segmentMeta.MaxTimestamp >= startTimeNs) {
 			relevant = append(relevant, reader)
 		}
 	}
@@ -93,10 +102,14 @@ func (p *QueryPlanner) relevantExportSegments(filters models.QueryFilters, start
 
 	relevant := make([]*segmentReader, 0, len(p.segments))
 	for _, reader := range p.segments {
-		if reader == nil || reader.meta.EventCount == 0 {
+		if reader == nil {
 			continue
 		}
-		if reader.meta.MinTimestamp > endTimeNs || reader.meta.MaxTimestamp < startTimeNs {
+		segmentMeta, metaKnown := queryPlannerSegmentMeta(reader)
+		if metaKnown && segmentMeta.EventCount == 0 {
+			continue
+		}
+		if metaKnown && (segmentMeta.MinTimestamp > endTimeNs || segmentMeta.MaxTimestamp < startTimeNs) {
 			continue
 		}
 		if !p.segmentMayMatchFilters(reader, filters) {
@@ -106,6 +119,23 @@ func (p *QueryPlanner) relevantExportSegments(filters models.QueryFilters, start
 	}
 
 	return relevant
+}
+
+func queryPlannerSegmentMeta(reader *segmentReader) (segmentBundleMeta, bool) {
+	if reader == nil {
+		return segmentBundleMeta{}, false
+	}
+
+	meta, loaded := reader.bundleMeta()
+	if loaded {
+		return meta, true
+	}
+
+	meta, err := reader.EnsureBundleMeta()
+	if err != nil {
+		return meta, false
+	}
+	return meta, true
 }
 
 func (p *QueryPlanner) segmentContainsDimension(reader *segmentReader, namespace, kind string) bool {
@@ -154,7 +184,7 @@ func (p *QueryPlanner) segmentDimensions(reader *segmentReader) (map[segmentDime
 	}
 
 	p.mu.RLock()
-	dimensions, ok := p.segmentDimCache[reader.meta.ID]
+	dimensions, ok := p.segmentDimCache[reader.ID()]
 	p.mu.RUnlock()
 	if ok {
 		return dimensions, true
@@ -177,7 +207,7 @@ func (p *QueryPlanner) segmentDimensions(reader *segmentReader) (map[segmentDime
 	}
 
 	p.mu.Lock()
-	p.segmentDimCache[reader.meta.ID] = dimensions
+	p.segmentDimCache[reader.ID()] = dimensions
 	p.mu.Unlock()
 	return dimensions, true
 }

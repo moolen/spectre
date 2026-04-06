@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -31,32 +32,62 @@ func (m startupMode) String() string {
 }
 
 func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, *tailJournal, uint64, *Projection, *hotStore, startupMode, int, error) {
+	logger := logging.GetLogger("embedded.engine")
+
+	segmentLoadStart := time.Now()
 	readers := make([]*segmentReader, 0, len(manifest.ActiveSegments))
 	for i := range manifest.ActiveSegments {
 		segmentMeta := manifest.ActiveSegments[i]
-		reader, err := openSegmentReader(rootDir, segmentBundleMeta{ID: segmentMeta.ID})
+		reader, err := openSegmentReader(rootDir, segmentMeta.bundleMeta())
 		if err != nil {
 			return nil, nil, 0, nil, nil, startupModeRepair, 0, fmt.Errorf("open active segment %q: %w", segmentMeta.ID, err)
 		}
 		readers = append(readers, reader)
 	}
+	logger.DebugWithFields(
+		"embedded startup segments loaded",
+		logging.Field("active_segments", len(readers)),
+		logging.Field("duration_ms", time.Since(segmentLoadStart).Milliseconds()),
+	)
 
+	checkpointLoadStart := time.Now()
 	checkpointProjection, checkpointHighWaterMark, err := loadStartupCheckpoint(rootDir, manifest)
 	if err != nil {
 		return nil, nil, 0, nil, nil, startupModeRepair, 0, err
 	}
+	logger.DebugWithFields(
+		"embedded startup checkpoint loaded",
+		logging.Field("checkpoint_id", manifest.ActiveCheckpoint.ID),
+		logging.Field("checkpoint_high_water_mark", checkpointHighWaterMark),
+		logging.Field("duration_ms", time.Since(checkpointLoadStart).Milliseconds()),
+	)
+
+	fastPathStart := time.Now()
 	projection, tail, recoveredHot, recoveredHighWaterMark, replayedTailEvents, ok, err := tryLoadFastStartupState(rootDir, manifest, checkpointProjection, checkpointHighWaterMark)
 	if err != nil {
 		return nil, nil, 0, nil, nil, startupModeRepair, 0, err
 	}
+	logger.DebugWithFields(
+		"embedded startup fast-path recovery attempted",
+		logging.Field("ok", ok),
+		logging.Field("replayed_tail_events", replayedTailEvents),
+		logging.Field("duration_ms", time.Since(fastPathStart).Milliseconds()),
+	)
 	if ok {
 		return readers, tail, recoveredHighWaterMark, projection, recoveredHot, startupModeFast, replayedTailEvents, nil
 	}
 
+	repairBuildStart := time.Now()
 	projection, recoveredHighWaterMark, err = buildRepairProjection(readers, manifest.ActiveSegments, checkpointProjection, checkpointHighWaterMark)
 	if err != nil {
 		return nil, nil, 0, nil, nil, startupModeRepair, 0, err
 	}
+	logger.InfoWithFields(
+		"embedded startup repair projection built",
+		logging.Field("duration_ms", time.Since(repairBuildStart).Milliseconds()),
+		logging.Field("checkpoint_high_water_mark", checkpointHighWaterMark),
+		logging.Field("recovered_high_water_mark", recoveredHighWaterMark),
+	)
 
 	return readers, nil, recoveredHighWaterMark, projection, nil, startupModeRepair, 0, nil
 }
@@ -121,18 +152,22 @@ func buildRepairProjection(
 ) (*Projection, uint64, error) {
 	replayReaders := make([]replaySegmentReader, 0, len(readers))
 	for i := range readers {
+		meta, err := readers[i].EnsureBundleMeta()
+		if err != nil {
+			return nil, 0, fmt.Errorf("load active segment %q metadata: %w", segments[i].ID, err)
+		}
 		if i < len(segments) && segments[i].HighWaterMark <= checkpointHighWaterMark {
 			continue
 		}
-		if readers[i].meta.EventCount == 0 {
+		if meta.EventCount == 0 {
 			continue
 		}
 
 		replayReaders = append(replayReaders, replaySegmentReader{
-			segmentID:      readers[i].meta.ID,
+			segmentID:      meta.ID,
 			reader:         readers[i],
-			startTimestamp: readers[i].meta.MinTimestamp,
-			endTimestamp:   readers[i].meta.MaxTimestamp,
+			startTimestamp: meta.MinTimestamp,
+			endTimestamp:   meta.MaxTimestamp,
 		})
 	}
 

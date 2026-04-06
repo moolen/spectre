@@ -28,11 +28,15 @@ type segmentReplayCursor struct {
 func newSegmentReplayCursor(source replaySegmentReader) *segmentReplayCursor {
 	startOffset := int64(0)
 	if source.reader != nil {
-		if source.startTimestamp == 0 {
-			source.startTimestamp = source.reader.meta.MinTimestamp
-		}
-		if source.endTimestamp == 0 {
-			source.endTimestamp = source.reader.meta.MaxTimestamp
+		if source.startTimestamp == 0 || source.endTimestamp == 0 {
+			if meta, err := source.reader.EnsureBundleMeta(); err == nil {
+				if source.startTimestamp == 0 {
+					source.startTimestamp = meta.MinTimestamp
+				}
+				if source.endTimestamp == 0 {
+					source.endTimestamp = meta.MaxTimestamp
+				}
+			}
 		}
 		startOffset = source.reader.startOffsetForTime(source.startTimestamp)
 	}
@@ -166,8 +170,21 @@ func consumeReplaySegmentReaders(ctx context.Context, sources []replaySegmentRea
 		}
 	}()
 	for i := range sources {
-		if sources[i].reader == nil || sources[i].reader.meta.EventCount == 0 {
+		if sources[i].reader == nil {
 			continue
+		}
+		meta, err := sources[i].reader.EnsureBundleMeta()
+		if err != nil {
+			return fmt.Errorf("load active segment %q metadata: %w", sources[i].segmentID, err)
+		}
+		if meta.EventCount == 0 {
+			continue
+		}
+		if sources[i].startTimestamp == 0 {
+			sources[i].startTimestamp = meta.MinTimestamp
+		}
+		if sources[i].endTimestamp == 0 {
+			sources[i].endTimestamp = meta.MaxTimestamp
 		}
 
 		cursor := newSegmentReplayCursor(sources[i])

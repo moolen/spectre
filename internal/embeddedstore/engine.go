@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
@@ -98,7 +99,12 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		engine.queryExec.DisableProjectionHistoryFallback()
 	}
 	engine.queryExec.SetMetrics(metrics)
+	plannerStart := time.Now()
 	engine.refreshQueryPlanner()
+	engine.logger.DebugWithFields(
+		"embedded startup planner refreshed",
+		logging.Field("duration_ms", time.Since(plannerStart).Milliseconds()),
+	)
 	engine.metrics.RecordStartupMode(mode.String())
 	engine.metrics.RecordTailReplay(replayedTailEvents)
 	engine.metrics.SetActiveSegments(len(engine.segmentReaders))
@@ -142,17 +148,19 @@ func recoverTailState(projection *Projection, hot *hotStore, tail *tailJournal, 
 	}
 
 	replayedEvents := 0
+	recoveredHotEvents := make([]models.Event, 0)
 	err := tail.ReplaySince(context.Background(), afterHighWaterMark, func(event models.Event, _ uint64) error {
-		if err := projection.Apply(event); err != nil {
+		if err := recoverTailProjectionEvent(projection, event); err != nil {
 			return err
 		}
-		hot.Append([]models.Event{event})
+		recoveredHotEvents = append(recoveredHotEvents, event)
 		replayedEvents++
 		return nil
 	})
 	if err != nil {
 		return 0, err
 	}
+	hot.Append(recoveredHotEvents)
 	return replayedEvents, nil
 }
 

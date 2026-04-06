@@ -1,10 +1,13 @@
 package embeddedstore
 
 import (
+	"encoding/base64"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,8 +39,8 @@ func TestCheckpoint_WritesStreamBundleFiles(t *testing.T) {
 
 	checkpointDir := filepath.Join(dir, checkpointsDirName, meta.ID)
 	require.FileExists(t, filepath.Join(checkpointDir, "meta.json"))
-	require.FileExists(t, filepath.Join(checkpointDir, "resources.ndjson"))
-	require.FileExists(t, filepath.Join(checkpointDir, "k8s-events.json"))
+	require.FileExists(t, filepath.Join(checkpointDir, "resources.gob"))
+	require.FileExists(t, filepath.Join(checkpointDir, "k8s-events.gob"))
 }
 
 func TestCheckpoint_StreamBundleMetaOmitsInlineSnapshot(t *testing.T) {
@@ -59,6 +62,70 @@ func TestCheckpoint_StreamBundleMetaOmitsInlineSnapshot(t *testing.T) {
 	require.Contains(t, decoded, "min_timestamp_ns")
 	require.Contains(t, decoded, "max_timestamp_ns")
 	require.NotContains(t, decoded, "snapshot")
+}
+
+func TestCheckpoint_WritesRawJSONResourcePayloads(t *testing.T) {
+	dir := t.TempDir()
+	projection, err := BuildProjection([]models.Event{
+		{
+			ID:        "pod-create",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+			Data: []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"},"spec":{"containers":[{"name":"app","image":"nginx:1.29"}]}}`),
+		},
+	})
+	require.NoError(t, err)
+
+	meta, err := writeCheckpoint(dir, projection, 10)
+	require.NoError(t, err)
+
+	resourcesPath := filepath.Join(dir, checkpointsDirName, meta.ID, checkpointResourcesFile)
+	file, err := os.Open(resourcesPath)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, file.Close())
+	}()
+
+	var snapshot ProjectionResourceSnapshot
+	require.NoError(t, gob.NewDecoder(file).Decode(&snapshot))
+	require.Len(t, snapshot.Versions, 1)
+	require.JSONEq(
+		t,
+		`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"},"spec":{"containers":[{"name":"app","image":"nginx:1.29"}]}}`,
+		string(snapshot.Versions[0].Data),
+	)
+}
+
+func TestProjectionFromCheckpointStream_LoadsLegacyBase64Payloads(t *testing.T) {
+	resourceJSON := []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"}}`)
+	resourcesPayload := fmt.Sprintf(
+		`{"uid":"pod-1","versions":[{"event_id":"pod-create","timestamp":10,"event_type":"CREATE","identity":{"uid":"pod-1","kind":"Pod","apiGroup":"","version":"v1","namespace":"default","name":"pod-1","labels":{"app":"demo"},"firstSeen":10,"lastSeen":10,"deleted":false,"deletedAt":0},"data":"%s","change_event":{"event_id":"pod-create","timestamp":"1970-01-01T00:00:00.000000010Z","event_type":"CREATE","description":"CREATE event"}}]}`+"\n",
+		base64.StdEncoding.EncodeToString(resourceJSON),
+	)
+
+	projection, err := ProjectionFromCheckpointStream(
+		checkpointState{
+			FormatVersion:  checkpointFormatVersionV1,
+			HighWaterMark:  10,
+			MinTimestampNs: 10,
+			MaxTimestampNs: 10,
+		},
+		strings.NewReader(resourcesPayload),
+		strings.NewReader(`{}`),
+	)
+	require.NoError(t, err)
+
+	record := projection.resourcesByUID["pod-1"]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 1)
+	require.JSONEq(t, string(resourceJSON), string(record.versions[0].data))
 }
 
 func TestProjection_StreamCheckpointResources_DoesNotHoldLockDuringEmit(t *testing.T) {

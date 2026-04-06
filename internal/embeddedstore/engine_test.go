@@ -3,7 +3,7 @@ package embeddedstore
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"os"
@@ -541,17 +541,15 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	payload, err := os.ReadFile(resourcesPath)
 	require.NoError(t, err)
 
-	lines := bytes.Split(bytes.TrimSpace(payload), []byte{'\n'})
-	require.Len(t, lines, 1)
-
 	var snapshot ProjectionResourceSnapshot
-	require.NoError(t, json.Unmarshal(lines[0], &snapshot))
+	require.NoError(t, gob.NewDecoder(bytes.NewReader(payload)).Decode(&snapshot))
 	require.Len(t, snapshot.Versions, 2)
 	snapshot.Versions[0].ChangeEvent.Description = "checkpoint-sentinel"
 
-	updatedPayload, err := json.Marshal(snapshot)
+	file, err := os.OpenFile(resourcesPath, os.O_WRONLY|os.O_TRUNC, 0o600)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(resourcesPath, append(updatedPayload, '\n'), 0o600))
+	require.NoError(t, gob.NewEncoder(file).Encode(&snapshot))
+	require.NoError(t, file.Close())
 
 	tailSegment, err := writeSegment(rootDir, "seg-tail", []models.Event{
 		{

@@ -43,14 +43,19 @@ func (e *Engine) Compact(ctx context.Context) error {
 		if reader == nil {
 			continue
 		}
-		oldSegmentIDs = append(oldSegmentIDs, reader.meta.ID)
-		if reader.meta.EventCount == 0 {
-			continue
-		}
-		events, err := reader.ScanTimeRange(ctx, reader.meta.MinTimestamp, reader.meta.MaxTimestamp)
+		meta, err := reader.EnsureBundleMeta()
 		if err != nil {
 			e.metrics.RecordCompaction(time.Since(start), err)
-			return fmt.Errorf("compact embedded engine: scan segment %q: %w", reader.meta.ID, err)
+			return fmt.Errorf("compact embedded engine: load segment %d metadata: %w", i, err)
+		}
+		oldSegmentIDs = append(oldSegmentIDs, meta.ID)
+		if meta.EventCount == 0 {
+			continue
+		}
+		events, err := reader.ScanTimeRange(ctx, meta.MinTimestamp, meta.MaxTimestamp)
+		if err != nil {
+			e.metrics.RecordCompaction(time.Since(start), err)
+			return fmt.Errorf("compact embedded engine: scan segment %q: %w", meta.ID, err)
 		}
 		mergedEvents = append(mergedEvents, events...)
 	}
@@ -73,10 +78,7 @@ func (e *Engine) Compact(ctx context.Context) error {
 
 	updatedManifest := e.manifest
 	updatedManifest.ActiveSegments = []SegmentMeta{
-		{
-			ID:            meta.ID,
-			HighWaterMark: newSegmentHighWaterMark,
-		},
+		segmentMetaFromBundle(meta, newSegmentHighWaterMark),
 	}
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
 		e.metrics.RecordCompaction(time.Since(start), err)

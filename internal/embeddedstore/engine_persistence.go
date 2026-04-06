@@ -63,10 +63,7 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 	}
 
 	updatedManifest := e.manifest
-	updatedManifest.ActiveSegments = append(updatedManifest.ActiveSegments, SegmentMeta{
-		ID:            meta.ID,
-		HighWaterMark: e.nextHighWaterMark,
-	})
+	updatedManifest.ActiveSegments = append(updatedManifest.ActiveSegments, segmentMetaFromBundle(meta, e.nextHighWaterMark))
 	updatedManifest.FlushHighWaterMark = e.nextHighWaterMark
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
 		return fmt.Errorf("flush embedded engine: store manifest: %w", err)

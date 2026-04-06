@@ -42,7 +42,7 @@ func (p *QueryPlanner) exportTimeRange(
 		}
 		events, err := reader.ScanTimeRange(ctx, startTimeNs, endTimeNs)
 		if err != nil {
-			return nil, stats, fmt.Errorf("scan segment %q by time: %w", reader.meta.ID, err)
+			return nil, stats, fmt.Errorf("scan segment %q by time: %w", reader.ID(), err)
 		}
 		for i := range events {
 			if !filters.Matches(events[i].Resource) {

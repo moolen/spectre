@@ -93,6 +93,22 @@ func TestManifest_LoadLegacyManifestReconcilesCheckpointMetadataToActiveState(t 
 	require.Equal(t, uint64(77), manifest.ActiveTail.LastHighWaterMark)
 }
 
+func TestManifest_LoadOrCreatePromotesStaleActiveCheckpointToLatest(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, manifestFileName)
+	require.NoError(t, os.WriteFile(manifestPath, []byte(
+		`{"format_version":1,"active_segments":[],"active_checkpoint":{"id":"chk-00000000000000000042-1","high_water_mark":42},"active_tail":{"id":"tail-42","base_high_water_mark":42,"last_high_water_mark":100,"event_count":58,"size_bytes":1024},"checkpoints":[{"id":"chk-00000000000000000042-1","high_water_mark":42},{"id":"chk-00000000000000000100-1","high_water_mark":100}]}`,
+	), 0o600))
+
+	manifest, err := loadOrCreateManifest(dir)
+	require.NoError(t, err)
+	require.Equal(t, "chk-00000000000000000100-1", manifest.ActiveCheckpoint.ID)
+	require.Equal(t, uint64(100), manifest.ActiveCheckpoint.HighWaterMark)
+	require.Equal(t, "tail-42", manifest.ActiveTail.ID)
+	require.Equal(t, uint64(42), manifest.ActiveTail.BaseHighWaterMark)
+	require.Equal(t, uint64(100), manifest.ActiveTail.LastHighWaterMark)
+}
+
 func TestConfig_EffectiveEngineConfigAppliesTailDefaults(t *testing.T) {
 	cfg, err := Config{DataDir: t.TempDir()}.EffectiveEngineConfig()
 	require.NoError(t, err)

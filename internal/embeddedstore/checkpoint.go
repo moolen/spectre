@@ -1,20 +1,27 @@
 package embeddedstore
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 )
 
 const (
-	checkpointsDirName      = "checkpoints"
-	checkpointStateFile     = "meta.json"
-	checkpointStateFileV0   = "checkpoint.json"
-	checkpointResourcesFile = "resources.ndjson"
-	checkpointK8sEventsFile = "k8s-events.json"
-	checkpointFormatVersion = 1
+	checkpointsDirName        = "checkpoints"
+	checkpointStateFile       = "meta.json"
+	checkpointStateFileV0     = "checkpoint.json"
+	checkpointResourcesFile   = "resources.gob"
+	checkpointK8sEventsFile   = "k8s-events.gob"
+	checkpointResourcesFileV1 = "resources.ndjson"
+	checkpointK8sEventsFileV1 = "k8s-events.json"
+	checkpointFormatVersionV1 = 1
+	checkpointFormatVersionV2 = 2
+	checkpointFormatVersion   = checkpointFormatVersionV2
 )
 
 type checkpointState struct {
@@ -89,10 +96,10 @@ func writeCheckpoint(rootDir string, projection *Projection, highWaterMark uint6
 	if err := writeJSONFile(filepath.Join(tmpCheckpointDir, checkpointStateFile), state); err != nil {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: state file: %w", err)
 	}
-	if err := writeCheckpointResources(filepath.Join(tmpCheckpointDir, checkpointResourcesFile), projection); err != nil {
+	if err := writeCheckpointResourcesGob(filepath.Join(tmpCheckpointDir, checkpointResourcesFile), projection); err != nil {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: resources stream: %w", err)
 	}
-	if err := writeJSONFile(filepath.Join(tmpCheckpointDir, checkpointK8sEventsFile), projection.CheckpointK8sEvents()); err != nil {
+	if err := writeCheckpointK8sEventsGob(filepath.Join(tmpCheckpointDir, checkpointK8sEventsFile), projection.CheckpointK8sEvents()); err != nil {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: k8s events file: %w", err)
 	}
 	if err := syncPath(tmpCheckpointDir); err != nil {
@@ -125,13 +132,6 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 	if err := loadCheckpointState(checkpointDir, &state); err != nil {
 		return nil, 0, fmt.Errorf("load checkpoint: %w", err)
 	}
-	if state.FormatVersion != checkpointFormatVersion {
-		return nil, 0, fmt.Errorf(
-			"load checkpoint: unsupported checkpoint format version %d (expected %d)",
-			state.FormatVersion,
-			checkpointFormatVersion,
-		)
-	}
 	if meta.HighWaterMark != 0 && meta.HighWaterMark != state.HighWaterMark {
 		return nil, 0, fmt.Errorf(
 			"load checkpoint: high water mark mismatch for %q: manifest=%d checkpoint=%d",
@@ -149,23 +149,21 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 		return projection, state.HighWaterMark, nil
 	}
 
-	resourcesFile, err := os.Open(filepath.Join(checkpointDir, checkpointResourcesFile))
-	if err != nil {
-		return nil, 0, fmt.Errorf("load checkpoint: open resources stream: %w", err)
+	var (
+		projection *Projection
+		err        error
+	)
+	switch state.FormatVersion {
+	case checkpointFormatVersionV1:
+		projection, err = loadCheckpointV1(state, checkpointDir)
+	case checkpointFormatVersionV2:
+		projection, err = loadCheckpointV2(state, checkpointDir)
+	default:
+		return nil, 0, fmt.Errorf(
+			"load checkpoint: unsupported checkpoint format version %d",
+			state.FormatVersion,
+		)
 	}
-	defer func() {
-		_ = resourcesFile.Close()
-	}()
-
-	k8sEventsFile, err := os.Open(filepath.Join(checkpointDir, checkpointK8sEventsFile))
-	if err != nil {
-		return nil, 0, fmt.Errorf("load checkpoint: open k8s events file: %w", err)
-	}
-	defer func() {
-		_ = k8sEventsFile.Close()
-	}()
-
-	projection, err := ProjectionFromCheckpointStream(state, resourcesFile, k8sEventsFile)
 	if err != nil {
 		return nil, 0, fmt.Errorf("load checkpoint: restore projection: %w", err)
 	}
@@ -176,7 +174,32 @@ func newCheckpointID(highWaterMark uint64) string {
 	return fmt.Sprintf("chk-%020d-%d", highWaterMark, time.Now().UTC().UnixNano())
 }
 
-func writeCheckpointResources(path string, projection *Projection) error {
+func writeCheckpointResourcesGob(path string, projection *Projection) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	encoder := gob.NewEncoder(file)
+	if err := projection.StreamCheckpointResources(func(snapshot ProjectionResourceSnapshot) error {
+		return encoder.Encode(&snapshot)
+	}); err != nil {
+		return fmt.Errorf("encode resources: %w", err)
+	}
+
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close file: %w", err)
+	}
+	return nil
+}
+
+func writeCheckpointResourcesJSON(path string, projection *Projection) error {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
@@ -199,6 +222,71 @@ func writeCheckpointResources(path string, projection *Projection) error {
 		return fmt.Errorf("close file: %w", err)
 	}
 	return nil
+}
+
+func writeCheckpointK8sEventsGob(path string, events map[string][]analysisstore.K8sEventInfo) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	if err := gob.NewEncoder(file).Encode(events); err != nil {
+		return fmt.Errorf("encode k8s events: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close file: %w", err)
+	}
+	return nil
+}
+
+func writeCheckpointK8sEventsJSON(path string, events map[string][]analysisstore.K8sEventInfo) error {
+	return writeJSONFile(path, events)
+}
+
+func loadCheckpointV1(state checkpointState, checkpointDir string) (*Projection, error) {
+	resourcesFile, err := os.Open(filepath.Join(checkpointDir, checkpointResourcesFileV1))
+	if err != nil {
+		return nil, fmt.Errorf("open resources stream: %w", err)
+	}
+	defer func() {
+		_ = resourcesFile.Close()
+	}()
+
+	k8sEventsFile, err := os.Open(filepath.Join(checkpointDir, checkpointK8sEventsFileV1))
+	if err != nil {
+		return nil, fmt.Errorf("open k8s events file: %w", err)
+	}
+	defer func() {
+		_ = k8sEventsFile.Close()
+	}()
+
+	return ProjectionFromCheckpointStream(state, resourcesFile, k8sEventsFile)
+}
+
+func loadCheckpointV2(state checkpointState, checkpointDir string) (*Projection, error) {
+	resourcesFile, err := os.Open(filepath.Join(checkpointDir, checkpointResourcesFile))
+	if err != nil {
+		return nil, fmt.Errorf("open resources stream: %w", err)
+	}
+	defer func() {
+		_ = resourcesFile.Close()
+	}()
+
+	k8sEventsFile, err := os.Open(filepath.Join(checkpointDir, checkpointK8sEventsFile))
+	if err != nil {
+		return nil, fmt.Errorf("open k8s events file: %w", err)
+	}
+	defer func() {
+		_ = k8sEventsFile.Close()
+	}()
+
+	return ProjectionFromCheckpointBinaryStream(state, resourcesFile, k8sEventsFile)
 }
 
 func loadCheckpointState(checkpointDir string, state *checkpointState) error {

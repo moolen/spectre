@@ -71,7 +71,7 @@ func (p *QueryPlanner) collectMergedResourceEvents(
 		}
 		events, err := reader.ScanUID(ctx, uid)
 		if err != nil {
-			return nil, stats, fmt.Errorf("scan segment %q for uid %q: %w", reader.meta.ID, uid, err)
+			return nil, stats, fmt.Errorf("scan segment %q for uid %q: %w", reader.ID(), uid, err)
 		}
 		for i := range events {
 			merged = append(merged, cloneEvent(events[i]))
@@ -135,7 +135,7 @@ func (p *QueryPlanner) collectAssociatedEvents(
 		}
 		events, err := reader.ScanTimeRange(ctx, startTimeNs, endTimeNs)
 		if err != nil {
-			return nil, stats, fmt.Errorf("scan segment %q for associated events: %w", reader.meta.ID, err)
+			return nil, stats, fmt.Errorf("scan segment %q for associated events: %w", reader.ID(), err)
 		}
 		for i := range events {
 			event := events[i]

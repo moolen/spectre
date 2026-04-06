@@ -118,6 +118,89 @@ func TestEngine_OpenUsesCheckpointAndTailOnNormalRestart(t *testing.T) {
 	require.Equal(t, []string{expectedEvent.ID}, replayTestEventIDs(engine.hot.ScanTimeRange(expectedEvent.Timestamp, expectedEvent.Timestamp)))
 }
 
+func TestEngine_OpenFastPathUsesReplayProjectionApplyForTailRecovery(t *testing.T) {
+	dir := t.TempDir()
+	expectedEvent := seedStoreWithCheckpointAndTail(t, dir)
+
+	appliedIDs := make([]string, 0, 1)
+	restore := setRecoverTailProjectionEventFnForTest(func(projection *Projection, event models.Event) error {
+		appliedIDs = append(appliedIDs, event.ID)
+		return projection.ApplyReplayEvent(event)
+	})
+	t.Cleanup(restore)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.Equal(t, []string{expectedEvent.ID}, appliedIDs)
+}
+
+func TestEngine_OpenFastPathDoesNotRequireSegmentSidecars(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	event := testReplayEvent("segment-sidecar", 1)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{event}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.NoError(t, engine.Close())
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	require.Len(t, manifest.ActiveSegments, 1)
+
+	segmentDir := filepath.Join(rootDir, segmentsDirName, manifest.ActiveSegments[0].ID)
+	require.NoError(t, os.Remove(filepath.Join(segmentDir, segmentStatsFile)))
+	require.NoError(t, os.Remove(filepath.Join(segmentDir, segmentTimeIndexFile)))
+	require.NoError(t, os.Remove(filepath.Join(segmentDir, segmentUIDIndexFile)))
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+}
+
+func TestEngine_OpenFastPathLegacyManifestDoesNotRequireSegmentStatsAtStartup(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	event := testReplayEvent("legacy-manifest-fast-open", 1)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{event}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.NoError(t, engine.Close())
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	require.Len(t, manifest.ActiveSegments, 1)
+
+	legacyManifest := manifest
+	legacyManifest.ActiveSegments = []SegmentMeta{{
+		ID:            manifest.ActiveSegments[0].ID,
+		HighWaterMark: manifest.ActiveSegments[0].HighWaterMark,
+	}}
+	require.NoError(t, storeManifest(rootDir, legacyManifest))
+
+	segmentDir := filepath.Join(rootDir, segmentsDirName, manifest.ActiveSegments[0].ID)
+	require.NoError(t, os.Remove(filepath.Join(segmentDir, segmentStatsFile)))
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+}
+
 func TestEngine_OpenFallsBackToRepairReplayWhenTailStateIsStale(t *testing.T) {
 	dir := t.TempDir()
 	rootDir := embeddedRootDir(dir)

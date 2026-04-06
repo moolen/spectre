@@ -46,6 +46,9 @@ const (
 var (
 	applyProjectionEventFnMu sync.RWMutex
 	applyProjectionEventFn   = applyProjectionEventDirect
+
+	recoverTailProjectionEventFnMu sync.RWMutex
+	recoverTailProjectionEventFn   = recoverTailProjectionEventDirect
 )
 
 func Open(cfg Config) (*Backend, error) {
@@ -239,4 +242,29 @@ func applyProjectionEventUsesDefaultImplementation() bool {
 	applyProjectionEventFnMu.RUnlock()
 
 	return reflect.ValueOf(fn).Pointer() == reflect.ValueOf(applyProjectionEventDirect).Pointer()
+}
+
+func recoverTailProjectionEvent(projection *Projection, event models.Event) error {
+	recoverTailProjectionEventFnMu.RLock()
+	fn := recoverTailProjectionEventFn
+	recoverTailProjectionEventFnMu.RUnlock()
+
+	return fn(projection, event)
+}
+
+func recoverTailProjectionEventDirect(projection *Projection, event models.Event) error {
+	return projection.ApplyReplayEvent(event)
+}
+
+func setRecoverTailProjectionEventFnForTest(fn func(*Projection, models.Event) error) func() {
+	recoverTailProjectionEventFnMu.Lock()
+	previous := recoverTailProjectionEventFn
+	recoverTailProjectionEventFn = fn
+	recoverTailProjectionEventFnMu.Unlock()
+
+	return func() {
+		recoverTailProjectionEventFnMu.Lock()
+		recoverTailProjectionEventFn = previous
+		recoverTailProjectionEventFnMu.Unlock()
+	}
 }
