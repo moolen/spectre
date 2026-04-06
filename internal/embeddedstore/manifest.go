@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 const storageFormatVersion = 1
@@ -109,6 +110,9 @@ func storeManifest(dir string, manifest Manifest) error {
 	manifestPath := filepath.Join(dir, manifestFileName)
 	tmpFile, err := os.CreateTemp(dir, manifestFileName+".tmp-*")
 	if err != nil {
+		if manifestErr := fallbackManifestRewriteInPlace(manifestPath, payload, err); manifestErr == nil {
+			return nil
+		}
 		return fmt.Errorf("store manifest: create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
@@ -121,6 +125,9 @@ func storeManifest(dir string, manifest Manifest) error {
 		n, err := tmpFile.Write(payload[written:])
 		if err != nil {
 			_ = tmpFile.Close()
+			if manifestErr := fallbackManifestRewriteInPlace(manifestPath, payload, err); manifestErr == nil {
+				return nil
+			}
 			return fmt.Errorf("store manifest: write temp file: %w", err)
 		}
 		if n == 0 {
@@ -145,6 +152,48 @@ func storeManifest(dir string, manifest Manifest) error {
 	}
 
 	return nil
+}
+
+func fallbackManifestRewriteInPlace(path string, payload []byte, cause error) error {
+	if !errors.Is(cause, syscall.ENOSPC) {
+		return cause
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if int64(len(payload)) > info.Size() {
+		return fmt.Errorf("payload size %d exceeds existing manifest size %d", len(payload), info.Size())
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	written := 0
+	for written < len(payload) {
+		n, err := file.Write(payload[written:])
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		written += n
+	}
+
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return syncPath(filepath.Dir(path))
 }
 
 func ensureManifestDir(dir string) error {
