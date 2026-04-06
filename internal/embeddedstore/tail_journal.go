@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -174,6 +175,41 @@ func (t *tailJournal) Rotate(newBaseHighWaterMark uint64) (TailJournalMeta, erro
 
 	t.meta = next.meta
 	t.journal = next.journal
+	return t.meta, nil
+}
+
+func (t *tailJournal) Reset(newBaseHighWaterMark uint64) (TailJournalMeta, error) {
+	if t == nil || t.journal == nil {
+		return TailJournalMeta{}, fmt.Errorf("reset tail journal: tail journal is nil")
+	}
+
+	journalRoot := filepath.Join(t.root, tailDirName, t.meta.ID)
+	if err := t.journal.Close(); err != nil {
+		return TailJournalMeta{}, fmt.Errorf("reset tail journal: close journal: %w", err)
+	}
+
+	file, err := os.OpenFile(filepath.Join(journalRoot, journalFileName), os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return TailJournalMeta{}, fmt.Errorf("reset tail journal: truncate journal file: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return TailJournalMeta{}, fmt.Errorf("reset tail journal: sync truncated journal file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return TailJournalMeta{}, fmt.Errorf("reset tail journal: close truncated journal file: %w", err)
+	}
+
+	journal, err := OpenJournal(journalRoot)
+	if err != nil {
+		return TailJournalMeta{}, fmt.Errorf("reset tail journal: reopen journal: %w", err)
+	}
+
+	t.journal = journal
+	t.meta.BaseHighWaterMark = newBaseHighWaterMark
+	t.meta.LastHighWaterMark = newBaseHighWaterMark
+	t.meta.EventCount = 0
+	t.meta.SizeBytes = 0
 	return t.meta, nil
 }
 

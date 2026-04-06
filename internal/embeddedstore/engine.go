@@ -78,12 +78,22 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 				logging.Field("error", err.Error()),
 			)
 			if tail != nil {
-				_ = tail.Close()
-			}
-			manifest.ActiveTail = TailJournalMeta{}
-			manifest, tail, err = openOrCreateActiveTail(rootDir, manifest, nextHighWaterMark)
-			if err != nil {
-				return nil, fmt.Errorf("open embedded engine: recreate tail journal after repair fallback: %w", err)
+				updatedMeta, resetErr := tail.Reset(nextHighWaterMark)
+				if resetErr != nil {
+					_ = tail.Close()
+					return nil, fmt.Errorf("open embedded engine: reset inconsistent tail journal: %w", resetErr)
+				}
+				manifest.ActiveTail = updatedMeta
+				if err := storeManifest(rootDir, manifest); err != nil {
+					_ = tail.Close()
+					return nil, fmt.Errorf("open embedded engine: persist reset tail journal: %w", err)
+				}
+			} else {
+				manifest.ActiveTail = TailJournalMeta{}
+				manifest, tail, err = openOrCreateActiveTail(rootDir, manifest, nextHighWaterMark)
+				if err != nil {
+					return nil, fmt.Errorf("open embedded engine: recreate tail journal after repair fallback: %w", err)
+				}
 			}
 		} else {
 			replayedTailEvents += replayedOnRepair
