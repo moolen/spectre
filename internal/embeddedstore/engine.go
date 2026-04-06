@@ -57,8 +57,9 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		hot.Append(recoveredHot.ExtractFlushBatch(0).Events)
 	}
 
+	nextHighWaterMark := maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), recoveredHighWaterMark)
 	if tail == nil {
-		manifest, tail, err = openOrCreateActiveTail(rootDir, manifest)
+		manifest, tail, err = openOrCreateActiveTail(rootDir, manifest, nextHighWaterMark)
 		if err != nil {
 			return nil, fmt.Errorf("open embedded engine: open tail journal: %w", err)
 		}
@@ -66,7 +67,6 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		manifest.ActiveTail = tail.meta
 	}
 
-	nextHighWaterMark := maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), recoveredHighWaterMark)
 	if mode == startupModeRepair {
 		replayedOnRepair, err := recoverTailState(projection, hot, tail, nextHighWaterMark)
 		if err != nil {
@@ -109,14 +109,14 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	return engine, nil
 }
 
-func openOrCreateActiveTail(rootDir string, manifest Manifest) (Manifest, *tailJournal, error) {
+func openOrCreateActiveTail(rootDir string, manifest Manifest, baseHighWaterMark uint64) (Manifest, *tailJournal, error) {
 	originalMeta := manifest.ActiveTail
 	meta := originalMeta
 	if meta.ID == "" {
 		meta = TailJournalMeta{
-			ID:                newTailJournalID(manifest.ActiveCheckpoint.HighWaterMark),
-			BaseHighWaterMark: manifest.ActiveCheckpoint.HighWaterMark,
-			LastHighWaterMark: manifest.ActiveCheckpoint.HighWaterMark,
+			ID:                newTailJournalID(baseHighWaterMark),
+			BaseHighWaterMark: baseHighWaterMark,
+			LastHighWaterMark: baseHighWaterMark,
 		}
 	}
 

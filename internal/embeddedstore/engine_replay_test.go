@@ -2,6 +2,7 @@ package embeddedstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -168,6 +169,60 @@ func TestEngine_OpenFailsWhenCheckpointIsCorrupt(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "load checkpoint")
 	require.ErrorContains(t, err, "decode state file")
+}
+
+func TestEngine_OpenRepairFromLegacyManifestCreatesTailAtRecoveredHighWaterMark(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	checkpointEvent := testReplayEvent("legacy-checkpoint", 1)
+	checkpointEvent.Resource.UID = "legacy-shared"
+	checkpointEvent.Resource.Name = "legacy-shared"
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{checkpointEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	repairEvent := testReplayEvent("legacy-repair", 2)
+	repairEvent.Resource.UID = checkpointEvent.Resource.UID
+	repairEvent.Resource.Name = checkpointEvent.Resource.Name
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{repairEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Close())
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+
+	legacyPayload, err := json.Marshal(struct {
+		FormatVersion      int              `json:"format_version"`
+		ActiveSegments     []SegmentMeta    `json:"active_segments"`
+		Checkpoints        []CheckpointMeta `json:"checkpoints"`
+		FlushHighWaterMark uint64           `json:"flush_high_water_mark"`
+	}{
+		FormatVersion:      storageFormatVersion,
+		ActiveSegments:     manifest.ActiveSegments,
+		Checkpoints:        manifest.Checkpoints,
+		FlushHighWaterMark: manifest.FlushHighWaterMark,
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(rootDir, manifestFileName), legacyPayload, 0o600))
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	require.Equal(t, uint64(2), reopened.manifest.ActiveTail.BaseHighWaterMark)
+	require.Equal(t, uint64(2), reopened.manifest.ActiveTail.LastHighWaterMark)
+
+	newEvent := testReplayEvent("legacy-new", 3)
+	newEvent.Resource.UID = checkpointEvent.Resource.UID
+	newEvent.Resource.Name = checkpointEvent.Resource.Name
+	require.NoError(t, reopened.ProcessBatch(context.Background(), []models.Event{newEvent}))
+	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.LastHighWaterMark)
 }
 
 func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {
