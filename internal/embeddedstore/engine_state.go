@@ -115,6 +115,7 @@ func tryLoadFastStartupState(
 	projection *Projection,
 	checkpointHighWaterMark uint64,
 ) (*Projection, *tailJournal, *hotStore, uint64, int, bool, error) {
+	logger := logging.GetLogger("embedded.engine")
 	if projection == nil {
 		return nil, nil, nil, 0, 0, false, nil
 	}
@@ -133,12 +134,23 @@ func tryLoadFastStartupState(
 
 	tail, err := openTailJournal(rootDir, manifest.ActiveTail)
 	if err != nil {
-		return nil, nil, nil, 0, 0, false, fmt.Errorf("open active tail journal %q: %w", manifest.ActiveTail.ID, err)
+		logger.WarnWithFields(
+			"embedded startup fast path falling back to repair after tail journal open failure",
+			logging.Field("tail_id", manifest.ActiveTail.ID),
+			logging.Field("error", err.Error()),
+		)
+		return nil, nil, nil, 0, 0, false, nil
 	}
 	replayedTailEvents, err := recoverTailState(projection, hot, tail, checkpointHighWaterMark)
 	if err != nil {
 		_ = tail.Close()
-		return nil, nil, nil, 0, 0, false, err
+		logger.WarnWithFields(
+			"embedded startup fast path falling back to repair after tail replay failure",
+			logging.Field("tail_id", manifest.ActiveTail.ID),
+			logging.Field("checkpoint_high_water_mark", checkpointHighWaterMark),
+			logging.Field("error", err.Error()),
+		)
+		return nil, nil, nil, 0, 0, false, nil
 	}
 
 	return projection, tail, hot, maxUint64(checkpointHighWaterMark, tail.meta.LastHighWaterMark), replayedTailEvents, true, nil

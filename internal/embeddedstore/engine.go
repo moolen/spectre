@@ -71,10 +71,23 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	if mode == startupModeRepair {
 		replayedOnRepair, err := recoverTailState(projection, hot, tail, nextHighWaterMark)
 		if err != nil {
-			_ = tail.Close()
-			return nil, fmt.Errorf("open embedded engine: recover tail journal: %w", err)
+			logging.GetLogger("embedded.engine").WarnWithFields(
+				"embedded repair startup discarding inconsistent tail journal",
+				logging.Field("tail_id", manifest.ActiveTail.ID),
+				logging.Field("recovered_high_water_mark", nextHighWaterMark),
+				logging.Field("error", err.Error()),
+			)
+			if tail != nil {
+				_ = tail.Close()
+			}
+			manifest.ActiveTail = TailJournalMeta{}
+			manifest, tail, err = openOrCreateActiveTail(rootDir, manifest, nextHighWaterMark)
+			if err != nil {
+				return nil, fmt.Errorf("open embedded engine: recreate tail journal after repair fallback: %w", err)
+			}
+		} else {
+			replayedTailEvents += replayedOnRepair
 		}
-		replayedTailEvents += replayedOnRepair
 	}
 	if tail != nil {
 		nextHighWaterMark = maxUint64(nextHighWaterMark, tail.meta.LastHighWaterMark)

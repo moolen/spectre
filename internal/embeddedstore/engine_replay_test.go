@@ -233,6 +233,53 @@ func TestEngine_OpenFallsBackToRepairReplayWhenTailStateIsStale(t *testing.T) {
 	require.Equal(t, uint64(1), manifest.ActiveTail.LastHighWaterMark)
 }
 
+func TestEngine_OpenFallsBackToRepairReplayWhenTailJournalIsTruncated(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+	checkpointEvent, repairEvent := seedStoreWithCheckpointAndTail(t, dir), testReplayEvent("repair-after-truncated-tail", 3)
+	repairEvent.Resource.UID = checkpointEvent.Resource.UID
+	repairEvent.Resource.Name = checkpointEvent.Resource.Name
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{repairEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Close())
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	tailPath := filepath.Join(rootDir, tailDirName, manifest.ActiveTail.ID, journalFileName)
+	info, err := os.Stat(tailPath)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(8))
+	require.NoError(t, os.Truncate(tailPath, info.Size()-8))
+
+	appliedIDs := make([]string, 0, 2)
+	restore := setApplyProjectionEventFnForTest(func(projection *Projection, event models.Event) error {
+		appliedIDs = append(appliedIDs, event.ID)
+		return projection.Apply(event)
+	})
+	t.Cleanup(restore)
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	require.True(t, reopened.IsReady())
+	require.Contains(t, appliedIDs, repairEvent.ID)
+
+	record := reopened.projection.resourcesByUID[checkpointEvent.Resource.UID]
+	require.NotNil(t, record)
+	require.GreaterOrEqual(t, len(record.versions), 2)
+	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID)
+	require.Equal(t, repairEvent.ID, record.versions[len(record.versions)-1].eventID)
+	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.BaseHighWaterMark)
+	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.LastHighWaterMark)
+	require.Zero(t, reopened.manifest.ActiveTail.EventCount)
+}
+
 func TestEngine_OpenFailsWhenCheckpointIsCorrupt(t *testing.T) {
 	dir := t.TempDir()
 	rootDir := embeddedRootDir(dir)
