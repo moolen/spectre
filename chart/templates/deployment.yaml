@@ -121,6 +121,10 @@ spec:
         {{- if .Values.embedded.checkpointMaxTailEvents }}
         - --embedded-checkpoint-max-tail-events={{ .Values.embedded.checkpointMaxTailEvents }}
         {{- end }}
+        {{- if .Values.embedded.checkpointMaxTailBytes }}
+        - --embedded-checkpoint-max-tail-bytes={{ int64 .Values.embedded.checkpointMaxTailBytes }}
+        {{- end }}
+        - --embedded-checkpoint-on-shutdown={{ .Values.embedded.checkpointOnShutdown }}
         {{- end }}
         {{- if and .Values.graph.enabled (not .Values.embedded.enabled) }}
         - --graph-enabled=true

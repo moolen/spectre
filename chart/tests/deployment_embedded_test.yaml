@@ -97,11 +97,12 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--data-dir=/var/lib/spectre-data"
-      - equal:
-          path: spec.template.spec.containers[0].args[9]
-          value: "--integrations-config=/var/lib/spectre/config/integrations.yaml"
-      - isNull:
-          path: spec.template.spec.containers[0].args[10]
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--integrations-config=/var/lib/spectre/config/integrations.yaml"
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--data-dir=/var/lib/spectre/data"
 
   - it: should pass embedded checkpoint interval when configured
     set:
@@ -128,3 +129,29 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--embedded-checkpoint-max-tail-events=2048"
+
+  - it: should pass embedded checkpoint tail byte budget when embedded mode is enabled
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        checkpointMaxTailBytes: 16777216
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-checkpoint-max-tail-bytes=16777216"
+
+  - it: should pass embedded checkpoint shutdown behavior when embedded mode is enabled
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        checkpointOnShutdown: false
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-checkpoint-on-shutdown=false"
