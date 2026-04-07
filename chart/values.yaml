@@ -159,6 +159,7 @@ embedded:
   enabled: false
   dataDir: /var/lib/spectre-data
   checkpointInterval: 15m
+  checkpointRetentionCount: 3
   checkpointMaxTailEvents: 2048
   checkpointMaxTailBytes: 16777216
   checkpointOnShutdown: true

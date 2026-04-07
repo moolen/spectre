@@ -30,19 +30,9 @@ func (qe *QueryExecutor) collectK8sEventsForResources(
 		return nil, queryPlanStats{}, nil
 	}
 
-	if qe.planner != nil {
-		associatedEvents, stats, err := qe.planner.collectAssociatedEvents(ctx, involvedUIDs, namespaces, startTimeNs, endTimeNs)
-		if err != nil {
-			return nil, stats, err
-		}
+	_ = namespaces
 
-		return convertAssociatedEventsToK8sEvents(associatedEvents), stats, nil
-	}
-	if !qe.projectionHistoryFallbackEnabled {
-		return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")
-	}
-
-	return qe.collectAssociatedK8sEventsFromProjection(involvedUIDs, startTimeNs, endTimeNs), queryPlanStats{projectionUsed: true}, nil
+	return qe.collectAssociatedK8sEventsFromProjection(involvedUIDs, startTimeNs, endTimeNs), queryPlanStats{}, nil
 }
 
 func convertToK8sEvent(event models.Event) (models.K8sEvent, bool) {
@@ -322,6 +312,40 @@ func convertAssociatedEventsToK8sEvents(eventsByUID map[string][]models.Event) m
 	return k8sEventsByResource
 }
 
+func compareK8sEventOrder(left, right models.K8sEvent) int {
+	if left.Timestamp != right.Timestamp {
+		if left.Timestamp < right.Timestamp {
+			return -1
+		}
+		return 1
+	}
+	if left.ID < right.ID {
+		return -1
+	}
+	if left.ID > right.ID {
+		return 1
+	}
+	return 0
+}
+
+func dedupeK8sEventsByID(events []models.K8sEvent) []models.K8sEvent {
+	if len(events) <= 1 {
+		return events
+	}
+
+	deduped := events[:0]
+	var lastID string
+	for i := range events {
+		if len(deduped) > 0 && events[i].ID == lastID {
+			continue
+		}
+		deduped = append(deduped, events[i])
+		lastID = events[i].ID
+	}
+
+	return deduped
+}
+
 func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjection(
 	involvedUIDs []string,
 	startTimeNs, endTimeNs int64,
@@ -356,6 +380,13 @@ func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjection(
 				Count:     int32(event.Count),
 				Source:    event.Source,
 			})
+		}
+		sort.SliceStable(eventsByUID[uid], func(i, j int) bool {
+			return compareK8sEventOrder(eventsByUID[uid][i], eventsByUID[uid][j]) < 0
+		})
+		eventsByUID[uid] = dedupeK8sEventsByID(eventsByUID[uid])
+		if len(eventsByUID[uid]) == 0 {
+			delete(eventsByUID, uid)
 		}
 	}
 

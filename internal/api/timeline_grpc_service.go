@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/moolen/spectre/internal/api/pb"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/attribute"
@@ -73,28 +74,26 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 	// Log query results for debugging
 	s.service.Logger().Debug("gRPC query completed: resources=%d, events=%d", resourceResult.Count, eventResult.Count)
 
-	// Build timeline response
-	timelineResponse := s.service.BuildTimelineResponse(resourceResult, eventResult)
+	timelineIndex := s.service.BuildTimelineIndex(resourceResult, eventResult)
 
 	span.SetAttributes(
-		attribute.Int("result.resource_count", timelineResponse.Count),
-		attribute.Int64("result.execution_time_ms", timelineResponse.ExecutionTimeMs),
+		attribute.Int("result.resource_count", timelineIndex.Count()),
+		attribute.Int64("result.execution_time_ms", timelineIndex.ExecutionTimeMs()),
 	)
 
 	// Stream metadata first
-	err = s.sendMetadata(stream, resourceResult, timelineResponse.Count)
+	err = s.sendMetadata(stream, resourceResult, timelineIndex.Count())
 	if err != nil {
 		span.RecordError(err)
 		s.service.Logger().Error("Failed to send metadata: %v", err)
 		return err
 	}
 
-	// Group and sort resources
-	groupedResources := groupAndSortResources(timelineResponse.Resources)
+	groupedEntries := groupAndSortTimelineEntries(timelineIndex.Entries())
 
 	// Stream resources in batches
 	// If no resources, send an empty batch to signal completion
-	if len(groupedResources) == 0 {
+	if len(groupedEntries) == 0 {
 		emptyBatch := &pb.TimelineChunk{
 			ChunkType: &pb.TimelineChunk_Batch{
 				Batch: &pb.ResourceBatch{
@@ -110,7 +109,7 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 			return err
 		}
 	} else {
-		err = s.streamResourceBatches(stream, groupedResources)
+		err = s.streamEntryBatches(stream, timelineIndex, groupedEntries)
 		if err != nil {
 			span.RecordError(err)
 			s.service.Logger().Error("Failed to stream resources: %v", err)
@@ -119,7 +118,7 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 	}
 
 	span.SetStatus(codes.Ok, "Streaming completed successfully")
-	s.service.Logger().Debug("gRPC streaming completed: %d resources in %d groups", timelineResponse.Count, len(groupedResources))
+	s.service.Logger().Debug("gRPC streaming completed: %d resources in %d groups", timelineIndex.Count(), len(groupedEntries))
 
 	return nil
 }
@@ -154,6 +153,34 @@ func (s *TimelineGRPCService) streamResourceBatches(stream pb.TimelineService_Ge
 		pbResources := make([]*pb.TimelineResource, len(group.Resources))
 		for i, res := range group.Resources {
 			pbResources[i] = s.service.ResourceToProto(&res)
+		}
+
+		chunk := &pb.TimelineChunk{
+			ChunkType: &pb.TimelineChunk_Batch{
+				Batch: &pb.ResourceBatch{
+					Kind:         group.Kind,
+					Resources:    pbResources,
+					IsFinalBatch: isLastGroup,
+				},
+			},
+		}
+
+		if err := stream.Send(chunk); err != nil {
+			return fmt.Errorf("failed to send batch: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *TimelineGRPCService) streamEntryBatches(stream pb.TimelineService_GetTimelineServer, index *apptimeline.TimelineIndex, groups []*GroupedTimelineEntries) error {
+	for groupIdx, group := range groups {
+		isLastGroup := groupIdx == len(groups)-1
+
+		resources := s.service.BuildTimelineResources(index, group.Entries)
+		pbResources := make([]*pb.TimelineResource, len(resources))
+		for i := range resources {
+			pbResources[i] = s.service.ResourceToProto(&resources[i])
 		}
 
 		chunk := &pb.TimelineChunk{

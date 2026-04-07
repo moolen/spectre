@@ -15,33 +15,35 @@ import (
 )
 
 var (
-	apiPort                           int
-	watcherConfigPath                 string
-	watcherEnabled                    bool
-	maxConcurrentRequests             int
-	importPath                        string
-	importChunkSize                   int
-	importBenchmarkLog                string
-	importMode                        bool
-	startupImportDisableCausality     bool
-	startupImportTimelineOnly         bool
-	embeddedMode                      bool
-	embeddedProjectionHistoryFallback bool
-	embeddedCheckpointInterval        time.Duration
-	embeddedCheckpointMaxTailEvents   int
-	embeddedCheckpointMaxTailBytes    int64
-	embeddedCheckpointOnShutdown      bool
-	embeddedCheckpointOnShutdownSet   bool
-	dataDir                           string
-	pprofEnabled                      bool
-	pprofPort                         int
-	pprofReadTimeout                  time.Duration
-	pprofWriteTimeout                 time.Duration
-	pprofIdleTimeout                  time.Duration
-	tracingEnabled                    bool
-	tracingEndpoint                   string
-	tracingTLSCAPath                  string
-	tracingTLSInsecure                bool
+	apiPort                             int
+	watcherConfigPath                   string
+	watcherEnabled                      bool
+	maxConcurrentRequests               int
+	importPath                          string
+	importChunkSize                     int
+	importBenchmarkLog                  string
+	importMode                          bool
+	startupImportDisableCausality       bool
+	startupImportTimelineOnly           bool
+	embeddedMode                        bool
+	embeddedProjectionHistoryFallback   bool
+	embeddedCheckpointInterval          time.Duration
+	embeddedCheckpointRetentionCount    int
+	embeddedCheckpointRetentionCountSet bool
+	embeddedCheckpointMaxTailEvents     int
+	embeddedCheckpointMaxTailBytes      int64
+	embeddedCheckpointOnShutdown        bool
+	embeddedCheckpointOnShutdownSet     bool
+	dataDir                             string
+	pprofEnabled                        bool
+	pprofPort                           int
+	pprofReadTimeout                    time.Duration
+	pprofWriteTimeout                   time.Duration
+	pprofIdleTimeout                    time.Duration
+	tracingEnabled                      bool
+	tracingEndpoint                     string
+	tracingTLSCAPath                    string
+	tracingTLSInsecure                  bool
 	// Graph reasoning layer flags
 	graphEnabled        bool
 	graphHost           string
@@ -93,6 +95,12 @@ func init() {
 		"embedded-checkpoint-interval",
 		15*time.Minute,
 		"Interval between durable embedded checkpoints; set to 0 to disable periodic checkpoints",
+	)
+	serverCmd.Flags().IntVar(
+		&embeddedCheckpointRetentionCount,
+		"embedded-checkpoint-retention-count",
+		3,
+		"Number of embedded checkpoints to retain; set to 0 to disable checkpoint pruning",
 	)
 	serverCmd.Flags().IntVar(
 		&embeddedCheckpointMaxTailEvents,
@@ -221,8 +229,10 @@ func runServer(cmd *cobra.Command, args []string) {
 
 func syncEmbeddedCheckpointOnShutdownFlagState(cmd *cobra.Command) {
 	if cmd == nil {
+		embeddedCheckpointRetentionCountSet = false
 		embeddedCheckpointOnShutdownSet = false
 		return
 	}
+	embeddedCheckpointRetentionCountSet = cmd.Flags().Changed("embedded-checkpoint-retention-count")
 	embeddedCheckpointOnShutdownSet = cmd.Flags().Changed("embedded-checkpoint-on-shutdown")
 }

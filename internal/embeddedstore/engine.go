@@ -51,6 +51,9 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	if projection == nil {
 		projection = NewProjection()
 	}
+	if cfg.ProjectionHistoryFallback {
+		projection.EnableHistoricalEventRetention()
+	}
 
 	metrics := NewMetrics(cfg.MetricsRegisterer)
 	hot := newHotStore(HotStoreConfig{MaxEvents: cfg.HotMaxEvents, MaxResourceVersions: cfg.HotMaxResourceVersions}, metrics)

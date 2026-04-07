@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/moolen/spectre/internal/api/pb"
 	"github.com/moolen/spectre/internal/api/pb/pbconnect"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/attribute"
@@ -144,19 +145,15 @@ func (s *TimelineConnectService) GetTimeline(
 
 	s.service.Logger().Debug("Query completed: resources=%d events=%d", resourceResult.Count, len(eventResult.Events))
 
-	// Build timeline response
-	timelineResponse := s.service.BuildTimelineResponse(resourceResult, eventResult)
+	timelineIndex := s.service.BuildTimelineIndex(resourceResult, eventResult)
 
 	span.SetAttributes(
-		attribute.Int("result.resource_count", timelineResponse.Count),
-		attribute.Int64("result.execution_time_ms", timelineResponse.ExecutionTimeMs),
+		attribute.Int("result.resource_count", timelineIndex.Count()),
+		attribute.Int64("result.execution_time_ms", timelineIndex.ExecutionTimeMs()),
 	)
 
-	s.service.Logger().Debug("Timeline response built: %d total resources from %d events",
-		timelineResponse.Count, resourceResult.Count)
-
-	// Group and sort resources
-	groupedResources := groupAndSortResources(timelineResponse.Resources)
+	s.service.Logger().Debug("Timeline response indexed: %d total resources from %d events",
+		timelineIndex.Count(), resourceResult.Count)
 
 	// Check if executor already did resource-based pagination
 	// If so, use its pagination response directly (it has the correct cursor)
@@ -174,33 +171,30 @@ func (s *TimelineConnectService) GetTimeline(
 
 	// If executor already did resource-based pagination and returned a cursor, use it directly
 	// Otherwise, apply client-side pagination (for storage executor or when no cursor)
-	var paginatedResources []*GroupedResources
+	var paginatedEntries []*apptimeline.TimelineResourceEntry
 	var paginatedCount int
 
 	if executorPaginationResp != nil && executorNextCursor != "" {
 		// Executor already did resource-based pagination, use its results directly
 		s.service.Logger().Debug("Using executor's resource-based pagination (cursor=%q)", executorNextCursor)
-		paginatedResources = groupedResources
-		paginatedCount = timelineResponse.Count
+		paginatedEntries = timelineIndex.Entries()
+		paginatedCount = timelineIndex.Count()
 		// Keep executor's pagination response (hasMore and nextCursor are already correct)
 		paginationResp = executorPaginationResp
 	} else if pagination != nil {
 		// Pagination was requested - apply client-side pagination
 		s.service.Logger().Debug("Applying client-side resource pagination: %d resources available, pageSize=%d, cursor=%q",
-			timelineResponse.Count, pagination.GetPageSize(), pagination.Cursor)
+			timelineIndex.Count(), pagination.GetPageSize(), pagination.Cursor)
 
 		var paginationErr error
-		paginatedResources, paginationResp, paginationErr = s.applyPagination(groupedResources, pagination)
+		paginatedEntries, paginationResp, paginationErr = s.applyEntryPagination(timelineIndex.Entries(), pagination)
 		if paginationErr != nil {
 			span.RecordError(paginationErr)
 			s.service.Logger().Error("Failed to apply pagination: %v", paginationErr)
 			return connect.NewError(connect.CodeInternal, paginationErr)
 		}
 
-		// Count paginated resources
-		for _, group := range paginatedResources {
-			paginatedCount += len(group.Resources)
-		}
+		paginatedCount = len(paginatedEntries)
 
 		// Adjust hasMore: The executor's hasMore is authoritative about whether there's more data in the database
 		// applyPagination's hasMore only checks the current result set, which may be incomplete
@@ -212,7 +206,7 @@ func (s *TimelineConnectService) GetTimeline(
 				paginationResp.NextCursor = executorNextCursor
 			}
 			s.service.Logger().Debug("Executor indicated more data available in DB, overriding hasMore=true, nextCursor=%q (got %d resources from %d total)",
-				executorNextCursor, paginatedCount, timelineResponse.Count)
+				executorNextCursor, paginatedCount, timelineIndex.Count())
 		} else {
 			// Executor says no more data in database
 			// Use applyPagination's hasMore (which checks if there are more resources in current result set)
@@ -228,9 +222,9 @@ func (s *TimelineConnectService) GetTimeline(
 		}
 	} else {
 		// No pagination requested - return all resources
-		s.service.Logger().Debug("No pagination requested, returning all %d resources", timelineResponse.Count)
-		paginatedResources = groupedResources
-		paginatedCount = timelineResponse.Count
+		s.service.Logger().Debug("No pagination requested, returning all %d resources", timelineIndex.Count())
+		paginatedEntries = timelineIndex.Entries()
+		paginatedCount = timelineIndex.Count()
 		// Create a pagination response indicating no pagination
 		paginationResp = &models.PaginationResponse{
 			HasMore:    false,
@@ -251,7 +245,7 @@ func (s *TimelineConnectService) GetTimeline(
 
 	// Stream resources in batches
 	// If no resources, send an empty batch to signal completion
-	if len(paginatedResources) == 0 {
+	if len(paginatedEntries) == 0 {
 		emptyBatch := &pb.TimelineChunk{
 			ChunkType: &pb.TimelineChunk_Batch{
 				Batch: &pb.ResourceBatch{
@@ -267,7 +261,8 @@ func (s *TimelineConnectService) GetTimeline(
 			return connect.NewError(connect.CodeInternal, err)
 		}
 	} else {
-		if err := s.streamResourceBatches(stream, paginatedResources); err != nil {
+		groupedEntries := groupAndSortTimelineEntries(paginatedEntries)
+		if err := s.streamEntryBatches(stream, timelineIndex, groupedEntries); err != nil {
 			span.RecordError(err)
 			s.service.Logger().Error("Failed to stream resources: %v", err)
 			return connect.NewError(connect.CodeInternal, err)
@@ -275,7 +270,7 @@ func (s *TimelineConnectService) GetTimeline(
 	}
 
 	span.SetStatus(codes.Ok, "Streaming completed successfully")
-	s.service.Logger().Debug("Connect streaming completed: %d paginated resources in %d groups (hasMore=%v)", paginatedCount, len(paginatedResources), paginationResp.HasMore)
+	s.service.Logger().Debug("Connect streaming completed: %d paginated resources (hasMore=%v)", paginatedCount, paginationResp.HasMore)
 
 	return nil
 }
@@ -321,6 +316,34 @@ func (s *TimelineConnectService) streamResourceBatches(stream *connect.ServerStr
 		pbResources := make([]*pb.TimelineResource, len(group.Resources))
 		for i, res := range group.Resources {
 			pbResources[i] = s.service.ResourceToProto(&res)
+		}
+
+		chunk := &pb.TimelineChunk{
+			ChunkType: &pb.TimelineChunk_Batch{
+				Batch: &pb.ResourceBatch{
+					Kind:         group.Kind,
+					Resources:    pbResources,
+					IsFinalBatch: isLastGroup,
+				},
+			},
+		}
+
+		if err := stream.Send(chunk); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *TimelineConnectService) streamEntryBatches(stream *connect.ServerStream[pb.TimelineChunk], index *apptimeline.TimelineIndex, groups []*GroupedTimelineEntries) error {
+	for groupIdx, group := range groups {
+		isLastGroup := groupIdx == len(groups)-1
+
+		resources := s.service.BuildTimelineResources(index, group.Entries)
+		pbResources := make([]*pb.TimelineResource, len(resources))
+		for i := range resources {
+			pbResources[i] = s.service.ResourceToProto(&resources[i])
 		}
 
 		chunk := &pb.TimelineChunk{
@@ -396,7 +419,6 @@ func (s *TimelineConnectService) protoToQueryRequest(req *pb.TimelineRequest) (*
 
 	return queryRequest, pagination, nil
 }
-
 
 // applyPagination applies cursor-based pagination to grouped resources
 // Returns paginated resources, pagination response, and error
@@ -480,4 +502,56 @@ func (s *TimelineConnectService) applyPagination(groups []*GroupedResources, pag
 	}
 
 	return paginatedGroups, paginationResp, nil
+}
+
+func (s *TimelineConnectService) applyEntryPagination(entries []*apptimeline.TimelineResourceEntry, pagination *models.PaginationRequest) ([]*apptimeline.TimelineResourceEntry, *models.PaginationResponse, error) {
+	pageSize := pagination.GetPageSize()
+
+	cursor, err := models.DecodeCursor(pagination.Cursor)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid cursor: %w", err)
+	}
+
+	sortedEntries := append([]*apptimeline.TimelineResourceEntry(nil), entries...)
+	sortTimelineEntries(sortedEntries)
+
+	startIdx := 0
+	if cursor != nil {
+		for i, entry := range sortedEntries {
+			if resourceIdentityLess(entry.Kind, entry.Namespace, entry.Name, cursor.Kind, cursor.Namespace, cursor.Name) {
+				continue
+			}
+			if entry.Kind == cursor.Kind && entry.Namespace == cursor.Namespace && entry.Name == cursor.Name {
+				continue
+			}
+			startIdx = i
+			break
+		}
+		if len(sortedEntries) > 0 {
+			lastEntry := sortedEntries[len(sortedEntries)-1]
+			if !resourceIdentityLess(cursor.Kind, cursor.Namespace, cursor.Name, lastEntry.Kind, lastEntry.Namespace, lastEntry.Name) {
+				startIdx = len(sortedEntries)
+			}
+		}
+	}
+
+	endIdx := startIdx + pageSize
+	hasMore := endIdx < len(sortedEntries)
+	if endIdx > len(sortedEntries) {
+		endIdx = len(sortedEntries)
+	}
+
+	pageEntries := sortedEntries[startIdx:endIdx]
+
+	var nextCursor string
+	if hasMore && len(pageEntries) > 0 {
+		lastEntry := pageEntries[len(pageEntries)-1]
+		nextCursor = models.NewResourceCursor(lastEntry.Kind, lastEntry.Namespace, lastEntry.Name).Encode()
+	}
+
+	return pageEntries, &models.PaginationResponse{
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
+		PageSize:   pageSize,
+	}, nil
 }

@@ -34,13 +34,9 @@ func TestQueryExecutor_MetadataPlannerParity(t *testing.T) {
 		plannerParityEvent("deploy-40", 40, models.EventTypeCreate, boundaryDeploy),
 	}))
 
-	engine.projection.mu.Lock()
-	deletedHistory := append([]models.Event(nil), engine.projection.eventsByResourceUID[deletedPod.UID]...)
-	require.Len(t, deletedHistory, 2)
-	// Mixed-state parity case: projection keeps only in-window delete, while planner
-	// still has cold history containing the pre-window create event.
-	engine.projection.eventsByResourceUID[deletedPod.UID] = deletedHistory[1:]
-	engine.projection.mu.Unlock()
+	engine.projection.mu.RLock()
+	require.Empty(t, engine.projection.eventsByResourceUID)
+	engine.projection.mu.RUnlock()
 
 	namespaces, kinds, minTime, maxTime, err := engine.QueryExecutor().QueryDistinctMetadata(context.Background(), 20*1e9, 40*1e9)
 	require.NoError(t, err)

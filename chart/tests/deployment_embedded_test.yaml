@@ -130,6 +130,19 @@ tests:
           path: spec.template.spec.containers[0].args
           content: "--embedded-checkpoint-max-tail-events=2048"
 
+  - it: should pass embedded checkpoint retention count when embedded mode is enabled
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        checkpointRetentionCount: 3
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-checkpoint-retention-count=3"
+
   - it: should pass embedded checkpoint tail byte budget when embedded mode is enabled
     set:
       embedded:

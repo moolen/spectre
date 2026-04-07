@@ -3,6 +3,9 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
@@ -189,9 +192,88 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 		}
 		e.manifest = updatedManifest
 	}
+	if err := e.pruneCheckpointHistoryLocked(); err != nil {
+		return fmt.Errorf("checkpoint embedded engine: prune checkpoint history: %w", err)
+	}
 
 	e.setActiveTailMetricsLocked()
 	return nil
+}
+
+func (e *Engine) pruneCheckpointHistoryLocked() error {
+	if e == nil {
+		return nil
+	}
+
+	updatedManifest, err := pruneCheckpointHistory(e.rootDir, e.manifest, e.config.CheckpointRetentionCount)
+	if err != nil {
+		return err
+	}
+	e.manifest = updatedManifest
+	return nil
+}
+
+func pruneCheckpointHistory(rootDir string, manifest Manifest, retentionCount int) (Manifest, error) {
+	if retentionCount <= 0 || len(manifest.Checkpoints) <= retentionCount {
+		return manifest, nil
+	}
+
+	sortedCheckpoints := append([]CheckpointMeta(nil), manifest.Checkpoints...)
+	sort.Slice(sortedCheckpoints, func(i, j int) bool {
+		if sortedCheckpoints[i].HighWaterMark != sortedCheckpoints[j].HighWaterMark {
+			return sortedCheckpoints[i].HighWaterMark < sortedCheckpoints[j].HighWaterMark
+		}
+		return sortedCheckpoints[i].ID < sortedCheckpoints[j].ID
+	})
+
+	keptCheckpoints := append([]CheckpointMeta(nil), sortedCheckpoints[len(sortedCheckpoints)-retentionCount:]...)
+	keptCheckpointIDs := make(map[string]struct{}, len(keptCheckpoints))
+	for _, checkpoint := range keptCheckpoints {
+		keptCheckpointIDs[checkpoint.ID] = struct{}{}
+	}
+
+	if manifest.ActiveCheckpoint.ID != "" {
+		if _, exists := keptCheckpointIDs[manifest.ActiveCheckpoint.ID]; !exists {
+			for i := range sortedCheckpoints {
+				if sortedCheckpoints[i].ID != manifest.ActiveCheckpoint.ID {
+					continue
+				}
+				keptCheckpoints = append(keptCheckpoints[1:], sortedCheckpoints[i])
+				keptCheckpointIDs = make(map[string]struct{}, len(keptCheckpoints))
+				for _, checkpoint := range keptCheckpoints {
+					keptCheckpointIDs[checkpoint.ID] = struct{}{}
+				}
+				break
+			}
+		}
+	}
+
+	for _, checkpoint := range sortedCheckpoints {
+		if _, keep := keptCheckpointIDs[checkpoint.ID]; keep {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(rootDir, checkpointsDirName, checkpoint.ID)); err != nil {
+			return manifest, fmt.Errorf("remove checkpoint %q: %w", checkpoint.ID, err)
+		}
+	}
+
+	sort.Slice(keptCheckpoints, func(i, j int) bool {
+		if keptCheckpoints[i].HighWaterMark != keptCheckpoints[j].HighWaterMark {
+			return keptCheckpoints[i].HighWaterMark < keptCheckpoints[j].HighWaterMark
+		}
+		return keptCheckpoints[i].ID < keptCheckpoints[j].ID
+	})
+
+	updatedManifest := manifest
+	updatedManifest.Checkpoints = keptCheckpoints
+	if len(keptCheckpoints) > 0 {
+		updatedManifest.ActiveCheckpoint = latestCheckpointMeta(keptCheckpoints)
+	}
+	if err := storeManifest(rootDir, updatedManifest); err != nil {
+		return manifest, err
+	}
+
+	return updatedManifest, nil
 }
 
 func (e *Engine) shouldCheckpointTailLocked() bool {

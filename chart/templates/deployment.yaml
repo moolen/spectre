@@ -118,6 +118,7 @@ spec:
         {{- if .Values.embedded.checkpointInterval }}
         - --embedded-checkpoint-interval={{ .Values.embedded.checkpointInterval }}
         {{- end }}
+        - --embedded-checkpoint-retention-count={{ .Values.embedded.checkpointRetentionCount }}
         {{- if .Values.embedded.checkpointMaxTailEvents }}
         - --embedded-checkpoint-max-tail-events={{ .Values.embedded.checkpointMaxTailEvents }}
         {{- end }}

@@ -307,6 +307,105 @@ func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *t
 	require.Len(t, exported, 1)
 }
 
+func TestEngine_CheckpointPrunesOlderCheckpointsBeyondRetentionCount(t *testing.T) {
+	dir := t.TempDir()
+
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                  dir,
+		HotMaxEvents:             100,
+		HotMaxResourceVersions:   4,
+		CheckpointRetentionCount: 3,
+		CheckpointOnShutdown:     false,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	for i := 1; i <= 5; i++ {
+		require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+			{
+				ID:        fmt.Sprintf("checkpoint-%d", i),
+				Timestamp: int64(i),
+				Type:      models.EventTypeCreate,
+				Resource: models.ResourceMetadata{
+					Version:   "v1",
+					UID:       fmt.Sprintf("pod-%d", i),
+					Namespace: "default",
+					Kind:      "Pod",
+					Name:      fmt.Sprintf("pod-%d", i),
+				},
+				Data: []byte(fmt.Sprintf(`{"kind":"Pod","metadata":{"name":"pod-%d","namespace":"default","uid":"pod-%d"}}`, i, i)),
+			},
+		}))
+		require.NoError(t, engine.Checkpoint(context.Background()))
+	}
+
+	manifest, err := loadOrCreateManifest(embeddedRootDir(dir))
+	require.NoError(t, err)
+	require.Len(t, manifest.Checkpoints, 3)
+	require.Equal(t, latestCheckpointMeta(manifest.Checkpoints), manifest.ActiveCheckpoint)
+
+	entries, err := os.ReadDir(filepath.Join(embeddedRootDir(dir), checkpointsDirName))
+	require.NoError(t, err)
+	require.Len(t, entries, 3)
+
+	actualCheckpointIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			actualCheckpointIDs = append(actualCheckpointIDs, entry.Name())
+		}
+	}
+	require.ElementsMatch(t, []string{
+		manifest.Checkpoints[0].ID,
+		manifest.Checkpoints[1].ID,
+		manifest.Checkpoints[2].ID,
+	}, actualCheckpointIDs)
+}
+
+func TestEngine_CheckpointRetentionCountZeroKeepsAllCheckpoints(t *testing.T) {
+	dir := t.TempDir()
+
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                  dir,
+		HotMaxEvents:             100,
+		HotMaxResourceVersions:   4,
+		CheckpointRetentionCount: 0,
+		CheckpointOnShutdown:     false,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	for i := 1; i <= 4; i++ {
+		require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+			{
+				ID:        fmt.Sprintf("keep-all-%d", i),
+				Timestamp: int64(i),
+				Type:      models.EventTypeCreate,
+				Resource: models.ResourceMetadata{
+					Version:   "v1",
+					UID:       fmt.Sprintf("keep-all-pod-%d", i),
+					Namespace: "default",
+					Kind:      "Pod",
+					Name:      fmt.Sprintf("keep-all-pod-%d", i),
+				},
+				Data: []byte(fmt.Sprintf(`{"kind":"Pod","metadata":{"name":"keep-all-pod-%d","namespace":"default","uid":"keep-all-pod-%d"}}`, i, i)),
+			},
+		}))
+		require.NoError(t, engine.Checkpoint(context.Background()))
+	}
+
+	manifest, err := loadOrCreateManifest(embeddedRootDir(dir))
+	require.NoError(t, err)
+	require.Len(t, manifest.Checkpoints, 4)
+
+	entries, err := os.ReadDir(filepath.Join(embeddedRootDir(dir), checkpointsDirName))
+	require.NoError(t, err)
+	require.Len(t, entries, 4)
+}
+
 func TestEngine_CheckpointDoesNotPersistWhenProjectionStateIsNotReady(t *testing.T) {
 	dir := t.TempDir()
 

@@ -187,6 +187,7 @@ func (p *Projection) ImportSnapshot(snapshot ProjectionSnapshot) error {
 }
 
 func (p *Projection) replaceStateLocked(other *Projection) {
+	retainHistoricalEventArrays := p.retainHistoricalEventArrays
 	p.events = other.events
 	p.eventsByResourceUID = other.eventsByResourceUID
 	p.resourceMetaByUID = other.resourceMetaByUID
@@ -197,6 +198,7 @@ func (p *Projection) replaceStateLocked(other *Projection) {
 	p.orderedResources = other.orderedResources
 	p.minTimestampNs = other.minTimestampNs
 	p.maxTimestampNs = other.maxTimestampNs
+	p.retainHistoricalEventArrays = retainHistoricalEventArrays || other.retainHistoricalEventArrays
 }
 
 func (p *Projection) snapshotEventsLocked() []models.Event {

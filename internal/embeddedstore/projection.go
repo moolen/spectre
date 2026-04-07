@@ -39,6 +39,8 @@ type resourceRecord struct {
 type Projection struct {
 	mu sync.RWMutex
 
+	retainHistoricalEventArrays bool
+
 	// Legacy history fields are kept only for compatibility with older helpers/tests.
 	// Compact projection state should leave them empty after build/import/apply.
 	events                    []models.Event
@@ -86,6 +88,16 @@ func NewProjection() *Projection {
 		minTimestampNs:            -1,
 		maxTimestampNs:            -1,
 	}
+}
+
+func (p *Projection) EnableHistoricalEventRetention() {
+	if p == nil {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.retainHistoricalEventArrays = true
 }
 
 func (p *Projection) ResourceCount() int {
