@@ -82,14 +82,19 @@ func (e *Engine) Close() error {
 	}
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.closed {
+		e.mu.Unlock()
 		return nil
 	}
 	e.closed = true
 	e.ready.Store(false)
-	if e.tail != nil {
-		if err := e.tail.Close(); err != nil {
+	tail := e.tail
+	e.mu.Unlock()
+
+	e.backgroundTasks.Wait()
+
+	if tail != nil {
+		if err := tail.Close(); err != nil {
 			return err
 		}
 	}
@@ -148,6 +153,7 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		}
 		e.hot.Append([]models.Event{events[i]})
 	}
+	e.queryExec.AppendRecentEventTimelineCache(events)
 	if wasReady {
 		e.ready.Store(true)
 	}

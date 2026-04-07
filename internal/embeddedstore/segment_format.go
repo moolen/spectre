@@ -11,13 +11,14 @@ import (
 )
 
 const (
-	segmentsDirName      = "segments"
-	segmentTempDirName   = "tmp"
-	segmentEventsFile    = "events.bin"
-	segmentTimeIndexFile = "time.idx"
-	segmentUIDIndexFile  = "resource.idx"
-	segmentDimIndexFile  = "dim.idx"
-	segmentStatsFile     = "stats.json"
+	segmentsDirName               = "segments"
+	segmentTempDirName            = "tmp"
+	segmentEventsFile             = "events.bin"
+	segmentTimeIndexFile          = "time.idx"
+	segmentUIDIndexFile           = "resource.idx"
+	segmentAssociatedUIDIndexFile = "associated.idx"
+	segmentDimIndexFile           = "dim.idx"
+	segmentStatsFile              = "stats.json"
 
 	segmentIndexStride   = 32
 	maxSegmentRecordSize = 8 * 1024 * 1024 // 8 MiB
@@ -53,6 +54,10 @@ type segmentTimeIndexEntry struct {
 
 type segmentResourceIndex struct {
 	UIDOffsets map[string][]int64 `json:"uid_offsets"`
+}
+
+type segmentAssociatedIndex struct {
+	InvolvedUIDOffsets map[string][]int64 `json:"involved_uid_offsets"`
 }
 
 type segmentDimensionEntry struct {

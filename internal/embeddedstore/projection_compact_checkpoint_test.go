@@ -1,8 +1,12 @@
 package embeddedstore
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
@@ -114,6 +118,157 @@ func TestCheckpoint_RoundTripCompactProjectionState(t *testing.T) {
 	require.Equal(t, namespaceGraphEdgeKeys(expectedGraph.Graph.Edges), namespaceGraphEdgeKeys(actualGraph.Graph.Edges))
 	require.Equal(t, relatedResourceKeys(expectedRelated["pod-1"]), relatedResourceKeys(actualRelated["pod-1"]))
 	require.Equal(t, k8sEventKeys(expectedK8sEvents["pod-1"]), k8sEventKeys(actualK8sEvents["pod-1"]))
+}
+
+func TestCheckpoint_WritesCompressedBinaryStreamsAndReopens(t *testing.T) {
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                t.TempDir(),
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 32,
+	})
+	require.NoError(t, err)
+
+	pod := models.ResourceMetadata{
+		Version:   "v1",
+		Kind:      "Pod",
+		Namespace: "default",
+		Name:      "pod-1",
+		UID:       "pod-1",
+	}
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "pod-create",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource:  pod,
+			Data:      []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"}}`),
+		},
+		{
+			ID:        "pod-k8s-event",
+			Timestamp: 20,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:           "v1",
+				Kind:              "Event",
+				Namespace:         "default",
+				Name:              "pod-1.warning",
+				UID:               "evt-1",
+				InvolvedObjectUID: "pod-1",
+			},
+			Data: []byte(`{"reason":"BackOff","message":"container restart backoff","type":"Warning","count":2}`),
+		},
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	checkpointMeta := latestCheckpointMeta(engine.manifest.Checkpoints)
+	checkpointDir := filepath.Join(embeddedRootDir(engine.config.DataDir), checkpointsDirName, checkpointMeta.ID)
+
+	resourcesPayload, err := os.ReadFile(filepath.Join(checkpointDir, checkpointResourcesFile))
+	require.NoError(t, err)
+	k8sPayload, err := os.ReadFile(filepath.Join(checkpointDir, checkpointK8sEventsFile))
+	require.NoError(t, err)
+
+	require.True(t, bytes.HasPrefix(resourcesPayload, []byte{0x28, 0xb5, 0x2f, 0xfd}))
+	require.True(t, bytes.HasPrefix(k8sPayload, []byte{0x28, 0xb5, 0x2f, 0xfd}))
+
+	require.NoError(t, engine.Close())
+
+	reopened, err := OpenEngine(EngineConfig{
+		DataDir:                engine.config.DataDir,
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 32,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	record := reopened.projection.resourcesByUID["pod-1"]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 1)
+
+	k8sEvents, err := reopened.AnalysisStore().GetK8sEvents(context.Background(), []string{"pod-1"}, analysisstore.ResourceWindow{
+		FailureTimestampNs: 30,
+		LookbackNs:         30,
+	})
+	require.NoError(t, err)
+	require.Len(t, k8sEvents["pod-1"], 1)
+	require.Equal(t, "pod-k8s-event", k8sEvents["pod-1"][0].EventID)
+}
+
+func TestCheckpoint_LoadCheckpointAcceptsLegacyUncompressedV2Streams(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "embedded")
+	require.NoError(t, os.MkdirAll(filepath.Join(rootDir, checkpointsDirName), 0o755))
+
+	pod := models.ResourceMetadata{
+		Version:   "v1",
+		Kind:      "Pod",
+		Namespace: "default",
+		Name:      "pod-1",
+		UID:       "pod-1",
+	}
+	events := []models.Event{
+		{
+			ID:        "pod-create",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource:  pod,
+			Data:      []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"}}`),
+		},
+		{
+			ID:        "pod-k8s-event",
+			Timestamp: 20,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:           "v1",
+				Kind:              "Event",
+				Namespace:         "default",
+				Name:              "pod-1.warning",
+				UID:               "evt-1",
+				InvolvedObjectUID: "pod-1",
+			},
+			Data: []byte(`{"reason":"BackOff","message":"container restart backoff","type":"Warning","count":2}`),
+		},
+	}
+
+	projection, err := BuildProjection(events)
+	require.NoError(t, err)
+
+	checkpointMeta := CheckpointMeta{
+		ID:            "chk-00000000000000000002-legacy",
+		HighWaterMark: 2,
+	}
+	checkpointDir := filepath.Join(rootDir, checkpointsDirName, checkpointMeta.ID)
+	require.NoError(t, os.MkdirAll(checkpointDir, 0o755))
+	require.NoError(t, writeJSONFile(filepath.Join(checkpointDir, checkpointStateFile), projection.CheckpointState(checkpointMeta.HighWaterMark)))
+
+	resourcesFile, err := os.OpenFile(filepath.Join(checkpointDir, checkpointResourcesFile), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	require.NoError(t, err)
+	resourceEncoder := gob.NewEncoder(resourcesFile)
+	require.NoError(t, projection.StreamCheckpointResources(func(snapshot ProjectionResourceSnapshot) error {
+		return resourceEncoder.Encode(&snapshot)
+	}))
+	require.NoError(t, resourcesFile.Close())
+
+	k8sFile, err := os.OpenFile(filepath.Join(checkpointDir, checkpointK8sEventsFile), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, gob.NewEncoder(k8sFile).Encode(projection.CheckpointK8sEvents()))
+	require.NoError(t, k8sFile.Close())
+
+	loaded, highWaterMark, err := loadCheckpoint(rootDir, checkpointMeta)
+	require.NoError(t, err)
+	require.Equal(t, checkpointMeta.HighWaterMark, highWaterMark)
+
+	record := loaded.resourcesByUID["pod-1"]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 1)
+	require.Equal(t, "pod-create", record.versions[0].eventID)
+
+	k8sEvents := loaded.k8sEventsByInvolvedUID["pod-1"]
+	require.Len(t, k8sEvents, 1)
+	require.Equal(t, "pod-k8s-event", k8sEvents[0].EventID)
 }
 
 func TestCheckpoint_RoundTripCompactsRedundantResourceVersionsWhilePreservingHistory(t *testing.T) {

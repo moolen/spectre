@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/moolen/spectre/internal/models"
 )
@@ -50,9 +51,10 @@ func (p *QueryPlanner) relevantResourceSegments(uid string, meta models.Resource
 		return nil
 	}
 
-	relevant := make([]*segmentReader, 0, len(p.segments))
+	candidates := p.resourceSegmentCandidates(uid)
+	relevant := make([]*segmentReader, 0, len(candidates))
 	var latestPrior *segmentReader
-	for _, reader := range p.segments {
+	for _, reader := range candidates {
 		if reader == nil {
 			continue
 		}
@@ -95,6 +97,58 @@ func (p *QueryPlanner) relevantResourceSegments(uid string, meta models.Resource
 	return relevant
 }
 
+func (p *QueryPlanner) resourceSegmentCandidates(uid string) []*segmentReader {
+	if p == nil || len(p.segments) == 0 || uid == "" {
+		return p.segments
+	}
+
+	p.mu.RLock()
+	routed := append([]*segmentReader(nil), p.uidSegmentRoute[uid]...)
+	hasFallback := len(p.uidRouteFallbackByID) > 0
+	hasPending := len(p.uidRoutePendingByID) > 0
+	if !hasFallback && !hasPending {
+		p.mu.RUnlock()
+		return routed
+	}
+
+	routedByID := make(map[string]struct{}, len(routed))
+	for _, reader := range routed {
+		if reader == nil {
+			continue
+		}
+		routedByID[reader.ID()] = struct{}{}
+	}
+	fallbackByID := make(map[string]struct{}, len(p.uidRouteFallbackByID))
+	for segmentID := range p.uidRouteFallbackByID {
+		fallbackByID[segmentID] = struct{}{}
+	}
+	pendingByID := make(map[string]struct{}, len(p.uidRoutePendingByID))
+	for segmentID := range p.uidRoutePendingByID {
+		pendingByID[segmentID] = struct{}{}
+	}
+	p.mu.RUnlock()
+
+	candidates := make([]*segmentReader, 0, len(routed)+len(fallbackByID)+len(pendingByID))
+	for _, reader := range p.segments {
+		if reader == nil {
+			continue
+		}
+		readerID := reader.ID()
+		if _, ok := routedByID[readerID]; ok {
+			candidates = append(candidates, reader)
+			continue
+		}
+		if _, ok := fallbackByID[readerID]; ok {
+			candidates = append(candidates, reader)
+			continue
+		}
+		if _, ok := pendingByID[readerID]; ok {
+			candidates = append(candidates, reader)
+		}
+	}
+	return candidates
+}
+
 func (p *QueryPlanner) relevantExportSegments(filters models.QueryFilters, startTimeNs, endTimeNs int64) []*segmentReader {
 	if p == nil || len(p.segments) == 0 {
 		return nil
@@ -118,6 +172,34 @@ func (p *QueryPlanner) relevantExportSegments(filters models.QueryFilters, start
 		relevant = append(relevant, reader)
 	}
 
+	return relevant
+}
+
+func (p *QueryPlanner) recentAssociatedEventSegments(startTimeNs, endTimeNs int64) []*segmentReader {
+	if p == nil || endTimeNs < startTimeNs {
+		return nil
+	}
+
+	relevant := p.relevantExportSegments(models.QueryFilters{Kinds: []string{"Event"}}, startTimeNs, endTimeNs)
+	sort.SliceStable(relevant, func(i, j int) bool {
+		leftMeta, leftKnown := queryPlannerSegmentMeta(relevant[i])
+		rightMeta, rightKnown := queryPlannerSegmentMeta(relevant[j])
+		switch {
+		case leftKnown && rightKnown:
+			if leftMeta.MaxTimestamp != rightMeta.MaxTimestamp {
+				return leftMeta.MaxTimestamp > rightMeta.MaxTimestamp
+			}
+			if leftMeta.MinTimestamp != rightMeta.MinTimestamp {
+				return leftMeta.MinTimestamp > rightMeta.MinTimestamp
+			}
+		case leftKnown:
+			return true
+		case rightKnown:
+			return false
+		}
+
+		return relevant[i].ID() > relevant[j].ID()
+	})
 	return relevant
 }
 

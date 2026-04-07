@@ -18,12 +18,13 @@ const storageFormatVersion = 1
 const manifestFileName = "manifest.json"
 
 type Manifest struct {
-	FormatVersion      int              `json:"format_version"`
-	ActiveSegments     []SegmentMeta    `json:"active_segments"`
-	ActiveCheckpoint   CheckpointMeta   `json:"active_checkpoint"`
-	ActiveTail         TailJournalMeta  `json:"active_tail"`
-	Checkpoints        []CheckpointMeta `json:"checkpoints"`
-	FlushHighWaterMark uint64           `json:"flush_high_water_mark"`
+	FormatVersion          int              `json:"format_version"`
+	SegmentIndexGeneration int              `json:"segment_index_generation,omitempty"`
+	ActiveSegments         []SegmentMeta    `json:"active_segments"`
+	ActiveCheckpoint       CheckpointMeta   `json:"active_checkpoint"`
+	ActiveTail             TailJournalMeta  `json:"active_tail"`
+	Checkpoints            []CheckpointMeta `json:"checkpoints"`
+	FlushHighWaterMark     uint64           `json:"flush_high_water_mark"`
 }
 
 type SegmentMeta struct {

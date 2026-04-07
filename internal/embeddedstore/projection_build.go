@@ -36,6 +36,9 @@ func (p *Projection) finalizeReplayBuild() {
 	sort.Slice(p.orderedResources, func(i, j int) bool {
 		return compareOrderedResourceKey(p.orderedResources[i], p.orderedResources[j]) < 0
 	})
+	sort.Slice(p.activeOrderedResources, func(i, j int) bool {
+		return compareOrderedResourceKey(p.activeOrderedResources[i], p.activeOrderedResources[j]) < 0
+	})
 
 	if p.retainHistoricalEventArrays {
 		for uid := range p.resourcesByUID {
@@ -58,6 +61,7 @@ func (p *Projection) finalizeReplayBuild() {
 		clear(p.eventsByResourceUID)
 		clear(p.k8sRawEventsByInvolvedUID)
 	}
+	p.pruneRecentResourceChanges()
 }
 
 func (p *Projection) Apply(event models.Event) error {
@@ -83,11 +87,14 @@ func (p *Projection) Apply(event models.Event) error {
 	history := p.resourceEventsForUID(uid)
 	history = insertEventSorted(history, cloned)
 	p.rebuildRecordFromEvents(uid, history)
+	p.updateActiveResourceIndex(p.resourcesByUID[uid])
+	p.appendRecentResourceChange(uid, cloned.Timestamp)
 	if p.retainHistoricalEventArrays {
 		p.eventsByResourceUID[uid] = insertEventSorted(p.eventsByResourceUID[uid], cloned)
 	}
 	p.resourceMetaByUID[uid] = latestResourceMeta(history)
 	p.updateTimestampBounds(cloned.Timestamp)
+	p.pruneRecentResourceChanges()
 
 	return nil
 }
@@ -135,9 +142,12 @@ func (p *Projection) ApplyReplayEvent(event models.Event) error {
 	version.identity = buildResourceIdentity(cloned, parseObject(cloned.Data), record.versions, previousData)
 	version.changeEvent = buildChangeEventInfo(cloned, version.data, previousData)
 	record.versions = append(record.versions, version)
+	p.updateActiveResourceIndex(record)
+	p.appendRecentResourceChange(uid, cloned.Timestamp)
 
 	p.resourceMetaByUID[uid] = cloned.Resource
 	p.updateTimestampBounds(cloned.Timestamp)
+	p.pruneRecentResourceChanges()
 
 	return nil
 }
@@ -180,11 +190,14 @@ func (p *Projection) applyEventToIndexes(event models.Event) {
 	version.identity = buildResourceIdentity(event, parseObject(event.Data), record.versions, previousData)
 	version.changeEvent = buildChangeEventInfo(event, version.data, previousData)
 	record.versions = append(record.versions, version)
+	p.updateActiveResourceIndex(record)
+	p.appendRecentResourceChange(uid, event.Timestamp)
 	if p.retainHistoricalEventArrays {
 		p.eventsByResourceUID[uid] = append(p.eventsByResourceUID[uid], event)
 	}
 	p.resourceMetaByUID[uid] = event.Resource
 	p.updateTimestampBounds(event.Timestamp)
+	p.pruneRecentResourceChanges()
 }
 
 func (p *Projection) applyK8sEvent(event models.Event) {
@@ -237,6 +250,64 @@ func latestResourceMeta(events []models.Event) models.ResourceMetadata {
 		return models.ResourceMetadata{}
 	}
 	return events[len(events)-1].Resource
+}
+
+func (p *Projection) updateActiveResourceIndex(record *resourceRecord) {
+	if p == nil || record == nil {
+		return
+	}
+
+	if existing, ok := p.activeResourceKeyByUID[record.uid]; ok {
+		p.activeOrderedResources = removeOrderedResourceKey(p.activeOrderedResources, existing)
+		delete(p.activeResourceKeyByUID, record.uid)
+	}
+
+	latest := record.latestVersion()
+	if latest == nil || latest.eventType == models.EventTypeDelete {
+		return
+	}
+
+	key := orderedResourceKey{
+		kind:      latest.identity.Kind,
+		namespace: latest.identity.Namespace,
+		name:      latest.identity.Name,
+		uid:       latest.identity.UID,
+	}
+	p.activeOrderedResources = insertOrderedResourceKey(p.activeOrderedResources, key)
+	p.activeResourceKeyByUID[record.uid] = key
+}
+
+func (p *Projection) appendRecentResourceChange(uid string, timestamp int64) {
+	if p == nil || uid == "" || timestamp <= 0 {
+		return
+	}
+	p.recentResourceChanges = append(p.recentResourceChanges, recentResourceChange{
+		timestamp: timestamp,
+		uid:       uid,
+	})
+}
+
+func (p *Projection) pruneRecentResourceChanges() {
+	if p == nil || len(p.recentResourceChanges) == 0 || p.maxTimestampNs <= 0 {
+		return
+	}
+
+	cutoff := p.maxTimestampNs - maxLookbackNs
+	if cutoff <= 0 {
+		return
+	}
+
+	pruneIdx := sort.Search(len(p.recentResourceChanges), func(i int) bool {
+		return p.recentResourceChanges[i].timestamp >= cutoff
+	})
+	if pruneIdx <= 0 {
+		return
+	}
+	if pruneIdx >= len(p.recentResourceChanges) {
+		p.recentResourceChanges = nil
+		return
+	}
+	p.recentResourceChanges = append([]recentResourceChange(nil), p.recentResourceChanges[pruneIdx:]...)
 }
 
 func (p *Projection) resourceEventsForUID(uid string) []models.Event {

@@ -75,6 +75,83 @@ func TestQueryExecutor_ResourceTimelinePlannerParity(t *testing.T) {
 	require.Empty(t, page2Pagination.NextCursor)
 }
 
+func TestQueryExecutor_ResourceTimelineRecentWindowParity(t *testing.T) {
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                t.TempDir(),
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 32,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	stable := plannerParityResource("uid-stable", "Pod", "ns-a", "pod-a-stable")
+	deletedInWindow := plannerParityResource("uid-deleted-window", "Pod", "ns-a", "pod-b-deleted")
+	createdInWindow := plannerParityResource("uid-created-window", "Pod", "ns-a", "pod-c-created")
+	updatedInWindow := plannerParityResource("uid-updated-window", "Pod", "ns-a", "pod-d-updated")
+	deletedBeforeWindow := plannerParityResource("uid-deleted-before", "Pod", "ns-a", "pod-e-old")
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		plannerParityEvent("a-create", 10, models.EventTypeCreate, stable),
+		plannerParityEvent("b-create", 10, models.EventTypeCreate, deletedInWindow),
+		plannerParityEvent("d-create", 10, models.EventTypeCreate, updatedInWindow),
+		plannerParityEvent("e-create", 10, models.EventTypeCreate, deletedBeforeWindow),
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		plannerParityEvent("e-delete", 30, models.EventTypeDelete, deletedBeforeWindow),
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		plannerParityEvent("c-create", 60, models.EventTypeCreate, createdInWindow),
+		plannerParityEvent("d-update", 65, models.EventTypeUpdate, updatedInWindow),
+		plannerParityEvent("b-delete", 70, models.EventTypeDelete, deletedInWindow),
+	}))
+
+	resources, pagination, stats, ok, err := engine.QueryExecutor().collectPaginatedRecentWindowResources(
+		context.Background(),
+		50*1e9,
+		80*1e9,
+		models.QueryFilters{
+			Namespace: "ns-a",
+			Kind:      "Pod",
+		},
+		nil,
+		10,
+	)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, stats.projectionUsed)
+	require.NotNil(t, pagination)
+	require.False(t, pagination.HasMore)
+	require.Empty(t, pagination.NextCursor)
+
+	var resultEvents []models.Event
+	for i := range resources {
+		resultEvents = append(resultEvents, resources[i].events...)
+	}
+
+	require.Equal(t, []string{
+		"a-create",
+		"b-create",
+		"b-delete",
+		"c-create",
+		"d-create",
+		"d-update",
+	}, eventIDs(resultEvents))
+	require.Equal(t, []bool{
+		true,
+		true,
+		false,
+		false,
+		true,
+		false,
+	}, plannerParityPreExistingFlags(resultEvents))
+}
+
 func plannerParityResource(uid, kind, namespace, name string) models.ResourceMetadata {
 	return models.ResourceMetadata{
 		Version:   "v1",

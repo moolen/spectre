@@ -3,6 +3,7 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,8 +30,20 @@ type Engine struct {
 	ready                  atomic.Bool
 	periodicFlushStop      func()
 	periodicCheckpointStop func()
+	backgroundTasks        sync.WaitGroup
 	closed                 bool
 }
+
+var (
+	defaultTimelineWarmupWindows                  = []time.Duration{time.Hour, 4 * time.Hour}
+	defaultTimelineWarmupTimeout                  = 15 * time.Minute
+	defaultAssociatedIndexWarmupHorizon           = 6 * time.Hour
+	defaultAssociatedIndexWarmupTimeout           = 5 * time.Minute
+	defaultAssociatedIndexWarmupMaxSegments       = 64
+	defaultAssociatedIndexWarmupMaxBytes    int64 = 64 << 20
+	defaultRecentEventTimelineCacheHorizon        = 4 * time.Hour
+	defaultRecentEventTimelineCacheTimeout        = 5 * time.Minute
+)
 
 func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	if cfg.DataDir == "" {
@@ -42,6 +55,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open embedded engine: load manifest: %w", err)
 	}
+	needsSegmentIndexMigration := manifest.SegmentIndexGeneration < associatedIndexGeneration && len(manifest.ActiveSegments) > 0
 
 	readers, tail, recoveredHighWaterMark, projection, recoveredHot, mode, replayedTailEvents, err := loadEngineState(rootDir, manifest)
 	if err != nil {
@@ -123,6 +137,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	}
 	if !cfg.ProjectionHistoryFallback {
 		engine.queryExec.DisableProjectionHistoryFallback()
+		engine.queryExec.ConfigureRecentEventTimelineCache(defaultRecentEventTimelineCacheHorizon)
 	}
 	engine.queryExec.SetMetrics(metrics)
 	plannerStart := time.Now()
@@ -137,6 +152,11 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	engine.setActiveTailMetrics()
 	engine.logStartup(mode, replayedTailEvents)
 	engine.ready.Store(true)
+	engine.startBackgroundRecentEventTimelineCacheSeed()
+	if needsSegmentIndexMigration {
+		engine.startBackgroundSegmentIndexMigration()
+	}
+	engine.startBackgroundAssociatedIndexWarmup()
 
 	return engine, nil
 }
@@ -260,5 +280,236 @@ func (e *Engine) refreshQueryPlanner() {
 		return
 	}
 
-	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders))
+	previous := e.queryExec.sharedPlanner()
+	e.queryExec.SetSharedCache(newQueryPlanner(e.projection, e.hot, e.segmentReaders, previous))
+}
+
+func (e *Engine) beginBackgroundTask() bool {
+	if e == nil {
+		return false
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return false
+	}
+	e.backgroundTasks.Add(1)
+	return true
+}
+
+func (e *Engine) startBackgroundSegmentIndexMigration() {
+	if !e.beginBackgroundTask() {
+		return
+	}
+
+	go func() {
+		defer e.backgroundTasks.Done()
+
+		e.mu.Lock()
+		if e.closed || e.manifest.SegmentIndexGeneration >= associatedIndexGeneration {
+			e.mu.Unlock()
+			return
+		}
+		snapshotManifest := e.manifest
+		e.mu.Unlock()
+
+		updatedManifest, updatedReaders, rewrittenCount, err := migrateSegmentIndexGeneration(e.rootDir, snapshotManifest, e.logger)
+		if err != nil {
+			e.logger.WarnWithFields(
+				"embedded startup segment index migration failed; will retry on next startup",
+				logging.Field("error", err.Error()),
+				logging.Field("active_segments", len(snapshotManifest.ActiveSegments)),
+			)
+			return
+		}
+
+		e.mu.Lock()
+
+		if e.closed || e.manifest.SegmentIndexGeneration >= associatedIndexGeneration {
+			e.mu.Unlock()
+			return
+		}
+		if !reflect.DeepEqual(e.manifest.ActiveSegments, snapshotManifest.ActiveSegments) {
+			e.logger.WarnWithFields(
+				"embedded startup segment index migration discarded stale rewrite after active segment change",
+				logging.Field("snapshot_active_segments", len(snapshotManifest.ActiveSegments)),
+				logging.Field("current_active_segments", len(e.manifest.ActiveSegments)),
+			)
+			e.mu.Unlock()
+			return
+		}
+
+		mergedManifest := e.manifest
+		mergedManifest.ActiveSegments = updatedManifest.ActiveSegments
+		mergedManifest.SegmentIndexGeneration = updatedManifest.SegmentIndexGeneration
+		if err := storeManifest(e.rootDir, mergedManifest); err != nil {
+			e.logger.WarnWithFields(
+				"embedded startup segment index migration failed to publish manifest; will retry on next startup",
+				logging.Field("error", err.Error()),
+				logging.Field("active_segments", len(snapshotManifest.ActiveSegments)),
+			)
+			e.mu.Unlock()
+			return
+		}
+
+		e.manifest = mergedManifest
+		if updatedReaders != nil {
+			e.segmentReaders = updatedReaders
+		}
+		e.refreshQueryPlanner()
+		e.metrics.SetActiveSegments(len(e.segmentReaders))
+		e.logger.InfoWithFields(
+			"embedded startup segment index migration published new planner state",
+			logging.Field("rewritten_segments", rewrittenCount),
+			logging.Field("active_segments", len(e.segmentReaders)),
+		)
+		e.mu.Unlock()
+		e.startBackgroundAssociatedIndexWarmup()
+	}()
+}
+
+func (e *Engine) startBackgroundAssociatedIndexWarmup() {
+	if e == nil || e.queryExec == nil || !e.beginBackgroundTask() {
+		return
+	}
+
+	go func() {
+		defer e.backgroundTasks.Done()
+
+		e.mu.Lock()
+		if e.closed {
+			e.mu.Unlock()
+			return
+		}
+		e.mu.Unlock()
+
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), defaultAssociatedIndexWarmupTimeout)
+		defer cancel()
+
+		loadedSegments, err := e.queryExec.warmRecentAssociatedEventIndexes(
+			ctx,
+			start.UnixNano(),
+			defaultAssociatedIndexWarmupHorizon,
+			defaultAssociatedIndexWarmupMaxSegments,
+			defaultAssociatedIndexWarmupMaxBytes,
+		)
+		if err != nil {
+			if ctx.Err() != nil {
+				e.logger.WarnWithFields(
+					"embedded startup associated-index warmup timed out",
+					logging.Field("error", err.Error()),
+					logging.Field("duration_ms", time.Since(start).Milliseconds()),
+				)
+				return
+			}
+			e.logger.WarnWithFields(
+				"embedded startup associated-index warmup failed",
+				logging.Field("error", err.Error()),
+				logging.Field("duration_ms", time.Since(start).Milliseconds()),
+			)
+			return
+		}
+
+		e.logger.InfoWithFields(
+			"embedded startup associated-index warmup completed",
+			logging.Field("loaded_segments", loadedSegments),
+			logging.Field("duration_ms", time.Since(start).Milliseconds()),
+		)
+	}()
+}
+
+func (e *Engine) startBackgroundRecentEventTimelineCacheSeed() {
+	if e == nil || e.queryExec == nil || e.config.ProjectionHistoryFallback ||
+		defaultRecentEventTimelineCacheHorizon <= 0 || !e.beginBackgroundTask() {
+		return
+	}
+
+	go func() {
+		defer e.backgroundTasks.Done()
+
+		e.mu.Lock()
+		if e.closed {
+			e.mu.Unlock()
+			return
+		}
+		e.mu.Unlock()
+
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), defaultRecentEventTimelineCacheTimeout)
+		defer cancel()
+
+		if err := seedRecentEventTimelineCache(e.queryExec, ctx, start.UnixNano(), defaultRecentEventTimelineCacheHorizon); err != nil {
+			if ctx.Err() != nil {
+				e.logger.WarnWithFields(
+					"embedded startup recent event timeline cache seed timed out",
+					logging.Field("error", err.Error()),
+					logging.Field("duration_ms", time.Since(start).Milliseconds()),
+				)
+				return
+			}
+			e.logger.WarnWithFields(
+				"embedded startup recent event timeline cache seed failed",
+				logging.Field("error", err.Error()),
+				logging.Field("duration_ms", time.Since(start).Milliseconds()),
+			)
+			return
+		}
+
+		e.queryExec.recentEventCacheMu.RLock()
+		cachedEvents := len(e.queryExec.recentEventCache)
+		e.queryExec.recentEventCacheMu.RUnlock()
+		e.logger.InfoWithFields(
+			"embedded startup recent event timeline cache seeded",
+			logging.Field("horizon", defaultRecentEventTimelineCacheHorizon.String()),
+			logging.Field("events", cachedEvents),
+			logging.Field("duration_ms", time.Since(start).Milliseconds()),
+		)
+	}()
+}
+
+func (e *Engine) startBackgroundTimelineWarmup() {
+	if e == nil || e.queryExec == nil || e.config.ProjectionHistoryFallback || !e.beginBackgroundTask() {
+		return
+	}
+
+	go func() {
+		defer e.backgroundTasks.Done()
+
+		e.mu.Lock()
+		if e.closed {
+			e.mu.Unlock()
+			return
+		}
+		e.mu.Unlock()
+
+		start := time.Now()
+		endTimeNs := start.UnixNano()
+		ctx, cancel := context.WithTimeout(context.Background(), defaultTimelineWarmupTimeout)
+		defer cancel()
+
+		if err := e.queryExec.warmTimelineCaches(ctx, endTimeNs, defaultTimelineWarmupWindows, models.DefaultPageSize); err != nil {
+			if ctx.Err() != nil {
+				e.logger.WarnWithFields(
+					"embedded startup timeline warmup timed out",
+					logging.Field("error", err.Error()),
+					logging.Field("duration_ms", time.Since(start).Milliseconds()),
+				)
+				return
+			}
+			e.logger.WarnWithFields(
+				"embedded startup timeline warmup failed",
+				logging.Field("error", err.Error()),
+				logging.Field("duration_ms", time.Since(start).Milliseconds()),
+			)
+			return
+		}
+
+		e.logger.InfoWithFields(
+			"embedded startup timeline warmup completed",
+			logging.Field("windows", len(defaultTimelineWarmupWindows)),
+			logging.Field("duration_ms", time.Since(start).Milliseconds()),
+		)
+	}()
 }

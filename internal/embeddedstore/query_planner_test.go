@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/moolen/spectre/internal/models"
 	"github.com/stretchr/testify/require"
@@ -123,6 +125,219 @@ func TestQueryPlanner_ResourceTimelinePrunesOldSegmentsButKeepsLatestPreWindowSe
 	require.Equal(t, 2, stats.relevantSegments)
 	require.Equal(t, 2, stats.scannedSegments)
 	require.Equal(t, 2, stats.uidDiskLookups)
+}
+
+func TestQueryPlanner_ResourceTimelineUsesPlannerUIDRoutingAfterRefresh(t *testing.T) {
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                t.TempDir(),
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 32,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	resource := models.ResourceMetadata{
+		Version:   "v1",
+		UID:       "pod-routed",
+		Namespace: "default",
+		Kind:      "Pod",
+		Name:      "pod-routed",
+	}
+	unrelated := models.ResourceMetadata{
+		Version:   "v1",
+		UID:       "pod-other",
+		Namespace: "default",
+		Kind:      "Pod",
+		Name:      "pod-other",
+	}
+
+	for _, sample := range []struct {
+		event models.Event
+	}{
+		{event: plannerParityEvent("cold-10", 10, models.EventTypeUpdate, resource)},
+		{event: plannerParityEvent("other-15", 15, models.EventTypeUpdate, unrelated)},
+		{event: plannerParityEvent("cold-20", 20, models.EventTypeUpdate, resource)},
+	} {
+		require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+			sample.event,
+		}))
+		require.NoError(t, engine.Flush(context.Background()))
+	}
+
+	planner := engine.QueryExecutor().planner
+	require.NotNil(t, planner)
+	require.Len(t, engine.segmentReaders, 3)
+
+	for _, reader := range engine.segmentReaders {
+		readerEvents, err := reader.ScanTimeRange(context.Background(), 0, 30*1e9)
+		require.NoError(t, err)
+		require.Len(t, readerEvents, 1)
+		if readerEvents[0].Resource.UID != unrelated.UID {
+			continue
+		}
+		require.NoError(t, os.Remove(filepath.Join(filepath.Dir(reader.eventsPath), segmentUIDIndexFile)))
+	}
+
+	events, stats, err := planner.planResourceEvents(context.Background(), resource.UID, resource, 0, 30*1e9)
+	require.NoError(t, err)
+	require.Equal(t, []string{"cold-10", "cold-20"}, eventIDs(events))
+	require.Equal(t, 2, stats.relevantSegments)
+	require.Equal(t, 2, stats.uidDiskLookups)
+}
+
+func TestQueryPlanner_OpenEngineDoesNotWaitForUIDRouteWarmup(t *testing.T) {
+	dataDir := t.TempDir()
+
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                dataDir,
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 32,
+	})
+	require.NoError(t, err)
+
+	resource := models.ResourceMetadata{
+		Version:   "v1",
+		UID:       "pod-async-route",
+		Namespace: "default",
+		Kind:      "Pod",
+		Name:      "pod-async-route",
+	}
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		plannerParityEvent("cold-10", 10, models.EventTypeUpdate, resource),
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Close())
+
+	started := make(chan struct{}, 1)
+	unblock := make(chan struct{})
+	restoreUIDRead := setReadResourceIndexUIDsFnForTest(func(path string) ([]string, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-unblock
+		return readResourceIndexUIDsDirect(path)
+	})
+	defer restoreUIDRead()
+
+	type openResult struct {
+		engine *Engine
+		err    error
+	}
+	openDone := make(chan openResult, 1)
+	go func() {
+		reopened, openErr := OpenEngine(EngineConfig{
+			DataDir:                dataDir,
+			HotMaxEvents:           128,
+			HotMaxResourceVersions: 32,
+		})
+		openDone <- openResult{engine: reopened, err: openErr}
+	}()
+
+	var reopened *Engine
+	select {
+	case result := <-openDone:
+		require.NoError(t, result.err)
+		reopened = result.engine
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("OpenEngine blocked on planner UID route warmup")
+	}
+
+	released := false
+	defer func() {
+		if !released {
+			close(unblock)
+		}
+		require.NoError(t, reopened.Close())
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("planner UID route warmup did not start")
+	}
+
+	result, err := reopened.QueryExecutor().Execute(context.Background(), &models.QueryRequest{
+		StartTimestamp: 0,
+		EndTimestamp:   20,
+		Filters: models.QueryFilters{
+			Namespace: "default",
+			Kind:      "Pod",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"cold-10"}, eventIDs(result.Events))
+
+	close(unblock)
+	released = true
+}
+
+func TestQueryPlanner_UIDRouteWarmupBuildsPendingSegmentsConcurrently(t *testing.T) {
+	rootDir := t.TempDir()
+	resource := models.ResourceMetadata{
+		Version:   "v1",
+		UID:       "pod-concurrent-route",
+		Namespace: "default",
+		Kind:      "Pod",
+		Name:      "pod-concurrent-route",
+	}
+	readers := make([]*segmentReader, 0, 4)
+	for i := 0; i < 4; i++ {
+		segmentID := newSegmentID(uint64(i + 1))
+		meta, err := writeSegment(rootDir, segmentID, []models.Event{
+			plannerParityEvent(
+				time.Unix(int64(10+i), 0).UTC().Format(time.RFC3339Nano),
+				int64(10+i),
+				models.EventTypeUpdate,
+				resource,
+			),
+		})
+		require.NoError(t, err)
+		reader, err := openSegmentReader(rootDir, meta)
+		require.NoError(t, err)
+		readers = append(readers, reader)
+	}
+
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	started := make(chan struct{}, 8)
+	unblock := make(chan struct{})
+	restoreUIDRead := setReadResourceIndexUIDsFnForTest(func(path string) ([]string, error) {
+		current := inFlight.Add(1)
+		for {
+			previous := maxInFlight.Load()
+			if current <= previous {
+				break
+			}
+			if maxInFlight.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-unblock
+		inFlight.Add(-1)
+		return readResourceIndexUIDsDirect(path)
+	})
+	defer restoreUIDRead()
+
+	planner := newQueryPlanner(NewProjection(), nil, readers, nil)
+	require.NotNil(t, planner)
+	defer close(unblock)
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("planner UID route warmup did not fan out across pending segments")
+		}
+	}
+
+	require.GreaterOrEqual(t, maxInFlight.Load(), int32(2))
 }
 
 func TestQueryPlanner_QueryDistinctMetadataUsesProjectionState(t *testing.T) {

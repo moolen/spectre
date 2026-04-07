@@ -119,6 +119,7 @@ func writeSegmentBundle(segmentDir, segmentID string, events []models.Event) (se
 
 	timeIndexEntries := make([]segmentTimeIndexEntry, 0, len(records)/segmentIndexStride+1)
 	resourceIndex := segmentResourceIndex{UIDOffsets: make(map[string][]int64)}
+	associatedIndex := segmentAssociatedIndex{InvolvedUIDOffsets: make(map[string][]int64)}
 	dimensionSet := make(map[segmentDimensionEntry]struct{})
 	namespaceKindSet := make(map[string]map[string]struct{})
 	recordOffsets := make([]int64, 0, len(records))
@@ -156,6 +157,12 @@ func writeSegmentBundle(segmentDir, segmentID string, events []models.Event) (se
 		uid := record.event.Resource.UID
 		if uid != "" {
 			resourceIndex.UIDOffsets[uid] = append(resourceIndex.UIDOffsets[uid], recordOffsets[len(recordOffsets)-1])
+		}
+		if record.event.Resource.Kind == "Event" && record.event.Resource.InvolvedObjectUID != "" {
+			associatedIndex.InvolvedUIDOffsets[record.event.Resource.InvolvedObjectUID] = append(
+				associatedIndex.InvolvedUIDOffsets[record.event.Resource.InvolvedObjectUID],
+				recordOffsets[len(recordOffsets)-1],
+			)
 		}
 
 		dimension := segmentDimensionEntry{
@@ -223,6 +230,9 @@ func writeSegmentBundle(segmentDir, segmentID string, events []models.Event) (se
 	}
 	if err := writeJSONFile(filepath.Join(segmentDir, segmentUIDIndexFile), resourceIndex); err != nil {
 		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: uid index: %w", err)
+	}
+	if err := writeJSONFile(filepath.Join(segmentDir, segmentAssociatedUIDIndexFile), associatedIndex); err != nil {
+		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: associated uid index: %w", err)
 	}
 	if err := writeJSONFile(filepath.Join(segmentDir, segmentDimIndexFile), segmentDimensionIndex{Entries: dimensions}); err != nil {
 		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: dimension index: %w", err)

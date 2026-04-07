@@ -21,6 +21,11 @@ type orderedResourceKey struct {
 	uid       string
 }
 
+type recentResourceChange struct {
+	timestamp int64
+	uid       string
+}
+
 type resourceVersion struct {
 	eventID     string
 	timestamp   int64
@@ -51,6 +56,9 @@ type Projection struct {
 	k8sRawEventsByInvolvedUID map[string][]models.Event
 	k8sEventsByInvolvedUID    map[string][]analysisstore.K8sEventInfo
 	orderedResources          []orderedResourceKey
+	activeOrderedResources    []orderedResourceKey
+	activeResourceKeyByUID    map[string]orderedResourceKey
+	recentResourceChanges     []recentResourceChange
 	minTimestampNs            int64
 	maxTimestampNs            int64
 }
@@ -85,6 +93,7 @@ func NewProjection() *Projection {
 		resourcesByKey:            make(map[resourceKey][]*resourceRecord),
 		k8sRawEventsByInvolvedUID: make(map[string][]models.Event),
 		k8sEventsByInvolvedUID:    make(map[string][]analysisstore.K8sEventInfo),
+		activeResourceKeyByUID:    make(map[string]orderedResourceKey),
 		minTimestampNs:            -1,
 		maxTimestampNs:            -1,
 	}

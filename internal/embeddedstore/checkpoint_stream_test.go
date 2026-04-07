@@ -87,7 +87,7 @@ func TestCheckpoint_WritesRawJSONResourcePayloads(t *testing.T) {
 	require.NoError(t, err)
 
 	resourcesPath := filepath.Join(dir, checkpointsDirName, meta.ID, checkpointResourcesFile)
-	file, err := os.Open(resourcesPath)
+	file, err := openCheckpointStream(resourcesPath)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, file.Close())

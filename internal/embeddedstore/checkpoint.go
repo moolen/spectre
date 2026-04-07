@@ -3,11 +3,14 @@ package embeddedstore
 import (
 	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 )
 
@@ -23,6 +26,8 @@ const (
 	checkpointFormatVersionV2 = 2
 	checkpointFormatVersion   = checkpointFormatVersionV2
 )
+
+var checkpointZstdMagic = [4]byte{0x28, 0xb5, 0x2f, 0xfd}
 
 type checkpointState struct {
 	FormatVersion  int                `json:"format_version"`
@@ -175,20 +180,29 @@ func newCheckpointID(highWaterMark uint64) string {
 }
 
 func writeCheckpointResourcesGob(path string, projection *Projection) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	file, encoder, err := openCompressedCheckpointWriter(path)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
 	defer func() {
-		_ = file.Close()
+		if encoder != nil {
+			_ = encoder.Close()
+		}
+		if file != nil {
+			_ = file.Close()
+		}
 	}()
 
-	encoder := gob.NewEncoder(file)
+	gobEncoder := gob.NewEncoder(encoder)
 	if err := projection.StreamCheckpointResources(func(snapshot ProjectionResourceSnapshot) error {
-		return encoder.Encode(&snapshot)
+		return gobEncoder.Encode(&snapshot)
 	}); err != nil {
 		return fmt.Errorf("encode resources: %w", err)
 	}
+	if err := encoder.Close(); err != nil {
+		return fmt.Errorf("close compressed stream: %w", err)
+	}
+	encoder = nil
 
 	if err := file.Sync(); err != nil {
 		return fmt.Errorf("sync file: %w", err)
@@ -196,6 +210,7 @@ func writeCheckpointResourcesGob(path string, projection *Projection) error {
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close file: %w", err)
 	}
+	file = nil
 	return nil
 }
 
@@ -225,23 +240,33 @@ func writeCheckpointResourcesJSON(path string, projection *Projection) error {
 }
 
 func writeCheckpointK8sEventsGob(path string, events map[string][]analysisstore.K8sEventInfo) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	file, encoder, err := openCompressedCheckpointWriter(path)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
 	defer func() {
-		_ = file.Close()
+		if encoder != nil {
+			_ = encoder.Close()
+		}
+		if file != nil {
+			_ = file.Close()
+		}
 	}()
 
-	if err := gob.NewEncoder(file).Encode(events); err != nil {
+	if err := gob.NewEncoder(encoder).Encode(events); err != nil {
 		return fmt.Errorf("encode k8s events: %w", err)
 	}
+	if err := encoder.Close(); err != nil {
+		return fmt.Errorf("close compressed stream: %w", err)
+	}
+	encoder = nil
 	if err := file.Sync(); err != nil {
 		return fmt.Errorf("sync file: %w", err)
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close file: %w", err)
 	}
+	file = nil
 	return nil
 }
 
@@ -270,7 +295,7 @@ func loadCheckpointV1(state checkpointState, checkpointDir string) (*Projection,
 }
 
 func loadCheckpointV2(state checkpointState, checkpointDir string) (*Projection, error) {
-	resourcesFile, err := os.Open(filepath.Join(checkpointDir, checkpointResourcesFile))
+	resourcesFile, err := openCheckpointStream(filepath.Join(checkpointDir, checkpointResourcesFile))
 	if err != nil {
 		return nil, fmt.Errorf("open resources stream: %w", err)
 	}
@@ -278,7 +303,7 @@ func loadCheckpointV2(state checkpointState, checkpointDir string) (*Projection,
 		_ = resourcesFile.Close()
 	}()
 
-	k8sEventsFile, err := os.Open(filepath.Join(checkpointDir, checkpointK8sEventsFile))
+	k8sEventsFile, err := openCheckpointStream(filepath.Join(checkpointDir, checkpointK8sEventsFile))
 	if err != nil {
 		return nil, fmt.Errorf("open k8s events file: %w", err)
 	}
@@ -311,4 +336,66 @@ func loadCheckpointState(checkpointDir string, state *checkpointState) error {
 		return fmt.Errorf("decode state file: %w", err)
 	}
 	return nil
+}
+
+func openCompressedCheckpointWriter(path string) (*os.File, *zstd.Encoder, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	encoder, err := zstd.NewWriter(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+
+	return file, encoder, nil
+}
+
+func openCheckpointStream(path string) (io.ReadCloser, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var header [4]byte
+	n, readErr := io.ReadFull(file, header[:])
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		_ = file.Close()
+		return nil, readErr
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("rewind file: %w", err)
+	}
+
+	if n == len(header) && header == checkpointZstdMagic {
+		decoder, err := zstd.NewReader(file)
+		if err != nil {
+			_ = file.Close()
+			return nil, err
+		}
+		return &checkpointStream{
+			Reader: decoder,
+			close: func() error {
+				decoder.Close()
+				return file.Close()
+			},
+		}, nil
+	}
+
+	return file, nil
+}
+
+type checkpointStream struct {
+	io.Reader
+	close func() error
+}
+
+func (s *checkpointStream) Close() error {
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }

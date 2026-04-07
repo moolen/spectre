@@ -25,8 +25,9 @@ func (qe *QueryExecutor) ExportTimeRange(ctx context.Context, query *models.Quer
 	endTimeNs := query.EndTimestamp * 1e9
 
 	stats := queryPlanStats{}
-	if qe.planner != nil {
-		events, planStats, err := qe.planner.exportTimeRange(ctx, startTimeNs, endTimeNs, query.Filters)
+	planner := qe.sharedPlanner()
+	if planner != nil {
+		events, planStats, err := planner.exportTimeRange(ctx, startTimeNs, endTimeNs, query.Filters)
 		qe.recordQueryMetrics(queryFamilyExportTimeRange, planStats, start, err)
 		return events, err
 	}
@@ -71,6 +72,7 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 	minTime = -1
 	maxTime = -1
 	stats := queryPlanStats{}
+	planner := qe.sharedPlanner()
 
 	// Full-range metadata warmups only need projection state: scanning per-resource
 	// history is unnecessary when the caller asks for the entire persisted range.
@@ -87,7 +89,7 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 		minTime = projectionMinTime
 		maxTime = projectionMaxTime
 	} else {
-		if qe.planner == nil && !qe.projectionHistoryFallbackEnabled {
+		if planner == nil && !qe.projectionHistoryFallbackEnabled {
 			err := fmt.Errorf("projection history fallback disabled")
 			qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, err)
 			return nil, nil, 0, 0, err

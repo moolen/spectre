@@ -132,6 +132,7 @@ func ProjectionFromCheckpointStream(state checkpointState, resources io.Reader, 
 		}
 		restoreProjectionResourceRecord(projection, record)
 	}
+	sortRecentResourceChanges(projection.recentResourceChanges)
 
 	return projection, nil
 }
@@ -170,6 +171,7 @@ func ProjectionFromCheckpointBinaryStream(state checkpointState, resources io.Re
 		}
 		restoreProjectionResourceRecord(projection, record)
 	}
+	sortRecentResourceChanges(projection.recentResourceChanges)
 
 	return projection, nil
 }
@@ -196,6 +198,9 @@ func (p *Projection) replaceStateLocked(other *Projection) {
 	p.k8sRawEventsByInvolvedUID = other.k8sRawEventsByInvolvedUID
 	p.k8sEventsByInvolvedUID = other.k8sEventsByInvolvedUID
 	p.orderedResources = other.orderedResources
+	p.activeOrderedResources = other.activeOrderedResources
+	p.activeResourceKeyByUID = other.activeResourceKeyByUID
+	p.recentResourceChanges = other.recentResourceChanges
 	p.minTimestampNs = other.minTimestampNs
 	p.maxTimestampNs = other.maxTimestampNs
 	p.retainHistoricalEventArrays = retainHistoricalEventArrays || other.retainHistoricalEventArrays
@@ -227,6 +232,7 @@ func projectionFromCompactSnapshot(snapshot ProjectionSnapshot) *Projection {
 		}
 		restoreProjectionResourceRecord(projection, record)
 	}
+	sortRecentResourceChanges(projection.recentResourceChanges)
 
 	return projection
 }
@@ -277,6 +283,23 @@ func restoreProjectionResourceRecord(projection *Projection, record *resourceRec
 		namespace: meta.Namespace,
 		name:      meta.Name,
 		uid:       meta.UID,
+	})
+	projection.updateActiveResourceIndex(record)
+	retentionStart, retainRecentWindow := checkpointRetentionWindowStart(projection.maxTimestampNs)
+	for i := range record.versions {
+		if retainRecentWindow && record.versions[i].timestamp < retentionStart {
+			continue
+		}
+		projection.appendRecentResourceChange(record.uid, record.versions[i].timestamp)
+	}
+}
+
+func sortRecentResourceChanges(changes []recentResourceChange) {
+	sort.SliceStable(changes, func(i, j int) bool {
+		if changes[i].timestamp != changes[j].timestamp {
+			return changes[i].timestamp < changes[j].timestamp
+		}
+		return changes[i].uid < changes[j].uid
 	})
 }
 

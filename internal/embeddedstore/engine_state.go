@@ -22,6 +22,8 @@ const (
 	startupModeFast
 )
 
+const associatedIndexGeneration = 1
+
 func (m startupMode) String() string {
 	switch m {
 	case startupModeFast:
@@ -35,14 +37,9 @@ func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, *tail
 	logger := logging.GetLogger("embedded.engine")
 
 	segmentLoadStart := time.Now()
-	readers := make([]*segmentReader, 0, len(manifest.ActiveSegments))
-	for i := range manifest.ActiveSegments {
-		segmentMeta := manifest.ActiveSegments[i]
-		reader, err := openSegmentReader(rootDir, segmentMeta.bundleMeta())
-		if err != nil {
-			return nil, nil, 0, nil, nil, startupModeRepair, 0, fmt.Errorf("open active segment %q: %w", segmentMeta.ID, err)
-		}
-		readers = append(readers, reader)
+	readers, err := openActiveSegmentReaders(rootDir, manifest.ActiveSegments)
+	if err != nil {
+		return nil, nil, 0, nil, nil, startupModeRepair, 0, err
 	}
 	logger.DebugWithFields(
 		"embedded startup segments loaded",
@@ -90,6 +87,106 @@ func loadEngineState(rootDir string, manifest Manifest) ([]*segmentReader, *tail
 	)
 
 	return readers, nil, recoveredHighWaterMark, projection, nil, startupModeRepair, 0, nil
+}
+
+func openActiveSegmentReaders(rootDir string, segments []SegmentMeta) ([]*segmentReader, error) {
+	readers := make([]*segmentReader, 0, len(segments))
+	for i := range segments {
+		segmentMeta := segments[i]
+		reader, err := openSegmentReader(rootDir, segmentMeta.bundleMeta())
+		if err != nil {
+			return nil, fmt.Errorf("open active segment %q: %w", segmentMeta.ID, err)
+		}
+		readers = append(readers, reader)
+	}
+	return readers, nil
+}
+
+func migrateSegmentIndexGeneration(rootDir string, manifest Manifest, logger *logging.Logger) (Manifest, []*segmentReader, int, error) {
+	if manifest.SegmentIndexGeneration >= associatedIndexGeneration || len(manifest.ActiveSegments) == 0 {
+		return manifest, nil, 0, nil
+	}
+	if logger == nil {
+		logger = logging.GetLogger("embedded.engine")
+	}
+
+	logger.InfoWithFields(
+		"embedded startup segment index migration started in background",
+		logging.Field("active_segments", len(manifest.ActiveSegments)),
+	)
+
+	readers, err := openActiveSegmentReaders(rootDir, manifest.ActiveSegments)
+	if err != nil {
+		return manifest, nil, 0, fmt.Errorf("open startup migration segments: %w", err)
+	}
+
+	start := time.Now()
+	migratedSegments := make([]SegmentMeta, 0, len(manifest.ActiveSegments))
+	rewrittenCount := 0
+
+	for i := range manifest.ActiveSegments {
+		currentMeta := manifest.ActiveSegments[i]
+		reader := readers[i]
+
+		hasAssociatedIndex, err := reader.HasAssociatedIndex()
+		if err != nil {
+			return manifest, nil, 0, fmt.Errorf("inspect startup migration segment %q: %w", currentMeta.ID, err)
+		}
+		if hasAssociatedIndex {
+			migratedSegments = append(migratedSegments, currentMeta)
+			continue
+		}
+
+		bundleMeta, err := reader.EnsureBundleMeta()
+		if err != nil {
+			return manifest, nil, 0, fmt.Errorf("load startup migration segment %q metadata: %w", currentMeta.ID, err)
+		}
+
+		events, err := reader.ScanTimeRange(context.Background(), bundleMeta.MinTimestamp, bundleMeta.MaxTimestamp)
+		if err != nil {
+			return manifest, nil, 0, fmt.Errorf("scan startup migration segment %q: %w", currentMeta.ID, err)
+		}
+
+		replacementID := newSegmentID(currentMeta.HighWaterMark)
+		replacementMeta, err := writeSegment(rootDir, replacementID, events)
+		if err != nil {
+			return manifest, nil, 0, fmt.Errorf("rewrite startup migration segment %q: %w", currentMeta.ID, err)
+		}
+
+		migratedSegments = append(migratedSegments, segmentMetaFromBundle(replacementMeta, currentMeta.HighWaterMark))
+		rewrittenCount++
+	}
+
+	if rewrittenCount == 0 {
+		manifest.SegmentIndexGeneration = associatedIndexGeneration
+		updatedReaders, err := openActiveSegmentReaders(rootDir, manifest.ActiveSegments)
+		if err != nil {
+			return manifest, nil, 0, fmt.Errorf("open startup migration current readers: %w", err)
+		}
+		logger.InfoWithFields(
+			"embedded startup segment index migration skipped rewrite and marked current generation",
+			logging.Field("active_segments", len(manifest.ActiveSegments)),
+			logging.Field("duration_ms", time.Since(start).Milliseconds()),
+		)
+		return manifest, updatedReaders, 0, nil
+	}
+
+	updatedManifest := manifest
+	updatedManifest.ActiveSegments = migratedSegments
+	updatedManifest.SegmentIndexGeneration = associatedIndexGeneration
+	updatedReaders, err := openActiveSegmentReaders(rootDir, updatedManifest.ActiveSegments)
+	if err != nil {
+		return manifest, nil, 0, fmt.Errorf("open startup migration replacement readers: %w", err)
+	}
+
+	logger.InfoWithFields(
+		"embedded startup segment index migration completed",
+		logging.Field("rewritten_segments", rewrittenCount),
+		logging.Field("active_segments", len(updatedManifest.ActiveSegments)),
+		logging.Field("legacy_segments_retained", rewrittenCount),
+		logging.Field("duration_ms", time.Since(start).Milliseconds()),
+	)
+	return updatedManifest, updatedReaders, rewrittenCount, nil
 }
 
 func loadStartupCheckpoint(rootDir string, manifest Manifest) (*Projection, uint64, error) {

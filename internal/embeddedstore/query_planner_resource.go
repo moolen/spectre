@@ -127,18 +127,31 @@ func (p *QueryPlanner) collectAssociatedEvents(
 	stats.relevantSegments = len(relevant)
 	if len(relevant) > 0 {
 		stats.coldUsed = true
-		stats.scannedSegments += len(relevant)
 	}
 	for _, reader := range relevant {
 		if err := ctx.Err(); err != nil {
 			return nil, stats, err
 		}
-		events, err := reader.ScanTimeRange(ctx, startTimeNs, endTimeNs)
+
+		events, indexed, err := reader.ScanAssociatedUIDs(ctx, involvedUIDs)
 		if err != nil {
 			return nil, stats, fmt.Errorf("scan segment %q for associated events: %w", reader.ID(), err)
 		}
+		if indexed {
+			stats.uidDiskLookups++
+		} else {
+			stats.scannedSegments++
+			events, err = reader.ScanTimeRange(ctx, startTimeNs, endTimeNs)
+			if err != nil {
+				return nil, stats, fmt.Errorf("scan segment %q for associated events: %w", reader.ID(), err)
+			}
+		}
+
 		for i := range events {
 			event := events[i]
+			if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+				continue
+			}
 			if event.Resource.Kind != "Event" || !filters.Matches(event.Resource) {
 				continue
 			}

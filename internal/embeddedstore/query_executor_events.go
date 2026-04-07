@@ -30,7 +30,18 @@ func (qe *QueryExecutor) collectK8sEventsForResources(
 		return nil, queryPlanStats{}, nil
 	}
 
-	_ = namespaces
+	if projectionEvents := qe.collectAssociatedK8sEventsFromProjection(involvedUIDs, startTimeNs, endTimeNs); projectionEvents != nil {
+		return projectionEvents, queryPlanStats{projectionUsed: true}, nil
+	}
+
+	planner := qe.sharedPlanner()
+	if planner != nil {
+		eventsByUID, stats, err := planner.collectAssociatedEvents(ctx, involvedUIDs, namespaces, startTimeNs, endTimeNs)
+		if err != nil {
+			return nil, stats, err
+		}
+		return convertAssociatedEventsToK8sEvents(eventsByUID), stats, nil
+	}
 
 	return qe.collectAssociatedK8sEventsFromProjection(involvedUIDs, startTimeNs, endTimeNs), queryPlanStats{}, nil
 }
@@ -162,8 +173,13 @@ func (qe *QueryExecutor) eventTimelineEvents(
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
 ) ([]models.Event, queryPlanStats, error) {
-	if qe.planner != nil {
-		return qe.planner.exportTimeRange(ctx, startTimeNs, endTimeNs, filters)
+	if cached, stats, ok := qe.recentEventTimelineEvents(startTimeNs, endTimeNs, filters); ok {
+		return cached, stats, nil
+	}
+
+	planner := qe.sharedPlanner()
+	if planner != nil {
+		return planner.exportTimeRange(ctx, startTimeNs, endTimeNs, filters)
 	}
 	if !qe.projectionHistoryFallbackEnabled {
 		return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")

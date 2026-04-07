@@ -38,7 +38,7 @@ func TestSegment_WriteReadRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	segmentDir := filepath.Join(dir, "segments", "seg-001")
-	for _, name := range []string{"events.bin", "time.idx", "resource.idx", "dim.idx", "stats.json"} {
+	for _, name := range []string{"events.bin", "time.idx", "resource.idx", "associated.idx", "dim.idx", "stats.json"} {
 		_, err := os.Stat(filepath.Join(segmentDir, name))
 		require.NoError(t, err)
 	}
@@ -157,4 +157,44 @@ func TestSegment_ScanUIDPreservesWriteOrderForSameTimestamp(t *testing.T) {
 	require.Equal(t, "uid-z", got[0].ID)
 	require.Equal(t, "uid-a", got[1].ID)
 	require.Equal(t, "uid-m", got[2].ID)
+}
+
+func TestSegment_MayContainUIDDoesNotHydrateFullResourceIndex(t *testing.T) {
+	dir := t.TempDir()
+	events := []models.Event{
+		{
+			ID:        "uid-1",
+			Timestamp: 10,
+			Resource: models.ResourceMetadata{
+				Namespace: "default",
+				Kind:      "Pod",
+				UID:       "pod-1",
+			},
+		},
+		{
+			ID:        "uid-2",
+			Timestamp: 20,
+			Resource: models.ResourceMetadata{
+				Namespace: "default",
+				Kind:      "Pod",
+				UID:       "pod-2",
+			},
+		},
+	}
+
+	meta, err := writeSegment(dir, "seg-001", events)
+	require.NoError(t, err)
+
+	reader, err := openSegmentReader(dir, meta)
+	require.NoError(t, err)
+	require.Nil(t, reader.resourceIndex)
+
+	require.True(t, reader.MayContainUID("pod-1"))
+	require.Nil(t, reader.resourceIndex)
+
+	got, err := reader.ScanUID(context.Background(), "pod-1")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "uid-1", got[0].ID)
+	require.NotNil(t, reader.resourceIndex)
 }

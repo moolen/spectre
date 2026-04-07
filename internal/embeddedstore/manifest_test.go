@@ -93,6 +93,33 @@ func TestManifest_LoadLegacyManifestReconcilesCheckpointMetadataToActiveState(t 
 	require.Equal(t, uint64(77), manifest.ActiveTail.LastHighWaterMark)
 }
 
+func TestManifest_LoadLegacyManifestDefaultsSegmentIndexGeneration(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, manifestFileName)
+	require.NoError(t, os.WriteFile(manifestPath, []byte(
+		`{"format_version":1,"active_segments":[],"checkpoints":[]}`,
+	), 0o600))
+
+	manifest, err := loadOrCreateManifest(dir)
+	require.NoError(t, err)
+	require.Equal(t, 0, manifest.SegmentIndexGeneration)
+}
+
+func TestManifest_StoresSegmentIndexGeneration(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, storeManifest(dir, Manifest{
+		FormatVersion:           storageFormatVersion,
+		SegmentIndexGeneration:  1,
+		ActiveSegments:          []SegmentMeta{},
+		Checkpoints:             []CheckpointMeta{},
+	}))
+
+	reloaded, err := loadOrCreateManifest(dir)
+	require.NoError(t, err)
+	require.Equal(t, 1, reloaded.SegmentIndexGeneration)
+}
+
 func TestManifest_LoadOrCreatePromotesStaleActiveCheckpointToLatest(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, manifestFileName)

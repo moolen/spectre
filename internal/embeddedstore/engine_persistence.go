@@ -79,6 +79,15 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 
 	e.manifest = updatedManifest
 	e.segmentReaders = append(e.segmentReaders, reader)
+	if reader.MayContainKind("Event") {
+		if warmErr := reader.ensureAssociatedIndexLoaded(); warmErr != nil && e.logger != nil {
+			e.logger.WarnWithFields(
+				"embedded flush warmup failed to load associated index",
+				logging.Field("segment_id", reader.ID()),
+				logging.Field("error", warmErr.Error()),
+			)
+		}
+	}
 	e.refreshQueryPlanner()
 	e.metrics.SetActiveSegments(len(e.segmentReaders))
 	return nil

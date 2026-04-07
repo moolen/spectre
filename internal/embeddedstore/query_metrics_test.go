@@ -24,7 +24,7 @@ func TestQueryMetrics_ResourceEventStoreMixes(t *testing.T) {
 		require.NoError(t, gatherErr)
 		require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_query_total"), map[string]string{
 			"query_family": "resource_events",
-			"store_mix":    "hot_only",
+			"store_mix":    "projection_only",
 			"result":       "success",
 		}))
 	})
@@ -44,10 +44,10 @@ func TestQueryMetrics_ResourceEventStoreMixes(t *testing.T) {
 		require.NoError(t, gatherErr)
 		require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_query_total"), map[string]string{
 			"query_family": "resource_events",
-			"store_mix":    "cold_only",
+			"store_mix":    "projection_only",
 			"result":       "success",
 		}))
-		require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_uid_disk_lookups_total"), map[string]string{
+		require.Equal(t, 0.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_uid_disk_lookups_total"), map[string]string{
 			"query_family": "resource_events",
 		}))
 	})
@@ -70,10 +70,36 @@ func TestQueryMetrics_ResourceEventStoreMixes(t *testing.T) {
 		require.NoError(t, gatherErr)
 		require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_query_total"), map[string]string{
 			"query_family": "resource_events",
-			"store_mix":    "mixed",
+			"store_mix":    "projection_only",
 			"result":       "success",
 		}))
 	})
+}
+
+func TestQueryMetrics_ResourceTimelineUsesProjectionStateForColdData(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	engine := newMetricsTestEngine(t, reg)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		testMetricsEvent("pod-projection", "cold-1", 10),
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+
+	_, err := engine.QueryExecutor().Execute(context.Background(), testMetricsQuery("default", "Pod", 0, 20))
+	require.NoError(t, err)
+
+	families, gatherErr := reg.Gather()
+	require.NoError(t, gatherErr)
+	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_query_total"), map[string]string{
+		"query_family": "resource_events",
+		"store_mix":    "projection_only",
+		"result":       "success",
+	}))
+	require.Equal(t, 0.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_uid_disk_lookups_total"), map[string]string{
+		"query_family": "resource_events",
+	}))
+	require.Equal(t, 0.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_segment_scans_total"), map[string]string{
+		"query_family": "resource_events",
+	}))
 }
 
 func TestQueryMetrics_ResourcePaginationStopsAfterPageWindow(t *testing.T) {
@@ -100,10 +126,10 @@ func TestQueryMetrics_ResourcePaginationStopsAfterPageWindow(t *testing.T) {
 
 	families, gatherErr := reg.Gather()
 	require.NoError(t, gatherErr)
-	require.Equal(t, 2.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_uid_disk_lookups_total"), map[string]string{
+	require.Equal(t, 0.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_uid_disk_lookups_total"), map[string]string{
 		"query_family": "resource_events",
 	}))
-	require.Equal(t, 2.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_segment_scans_total"), map[string]string{
+	require.Equal(t, 0.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_segment_scans_total"), map[string]string{
 		"query_family": "resource_events",
 	}))
 }
@@ -145,10 +171,10 @@ func TestQueryMetrics_ResourceAttachmentsUseProjectionSummaries(t *testing.T) {
 
 	families, gatherErr := reg.Gather()
 	require.NoError(t, gatherErr)
-	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_uid_disk_lookups_total"), map[string]string{
+	require.Equal(t, 0.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_uid_disk_lookups_total"), map[string]string{
 		"query_family": "resource_events",
 	}))
-	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_segment_scans_total"), map[string]string{
+	require.Equal(t, 0.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_segment_scans_total"), map[string]string{
 		"query_family": "resource_events",
 	}))
 }

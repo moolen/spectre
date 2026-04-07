@@ -1,7 +1,6 @@
 package embeddedstore
 
 import (
-	"bytes"
 	"context"
 	"encoding/gob"
 	"errors"
@@ -50,6 +49,50 @@ func TestEngine_OpenLoadsCheckpointAndReplaysNewerSegments(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Events, 1)
+}
+
+func TestEngine_OpenDoesNotBlockOnRecentEventTimelineCacheSeed(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	restoreSeed := setRecentEventTimelineCacheSeedFnForTest(
+		func(_ *QueryExecutor, _ context.Context, _ int64, _ time.Duration) error {
+			close(started)
+			<-release
+			return nil
+		},
+	)
+	t.Cleanup(restoreSeed)
+
+	type openResult struct {
+		engine *Engine
+		err    error
+	}
+
+	done := make(chan openResult, 1)
+	go func() {
+		engine, err := OpenEngine(EngineConfig{DataDir: t.TempDir(), HotMaxEvents: 100, HotMaxResourceVersions: 4})
+		done <- openResult{engine: engine, err: err}
+	}()
+
+	var result openResult
+	select {
+	case result = <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("OpenEngine blocked on recent event timeline cache seed")
+	}
+
+	require.NoError(t, result.err)
+	require.NotNil(t, result.engine)
+	require.True(t, result.engine.IsReady())
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("recent event timeline cache seed did not start in background")
+	}
+
+	close(release)
+	require.NoError(t, result.engine.Close())
 }
 
 func TestEngine_OpenRecoversCheckpointDiscoveredOnDiskWhenManifestLags(t *testing.T) {
@@ -637,17 +680,21 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	checkpointMeta := latestCheckpointMeta(manifest.Checkpoints)
 
 	resourcesPath := filepath.Join(rootDir, checkpointsDirName, checkpointMeta.ID, checkpointResourcesFile)
-	payload, err := os.ReadFile(resourcesPath)
+	stream, err := openCheckpointStream(resourcesPath)
 	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, stream.Close())
+	}()
 
 	var snapshot ProjectionResourceSnapshot
-	require.NoError(t, gob.NewDecoder(bytes.NewReader(payload)).Decode(&snapshot))
+	require.NoError(t, gob.NewDecoder(stream).Decode(&snapshot))
 	require.Len(t, snapshot.Versions, 2)
 	snapshot.Versions[0].ChangeEvent.Description = "checkpoint-sentinel"
 
-	file, err := os.OpenFile(resourcesPath, os.O_WRONLY|os.O_TRUNC, 0o600)
+	file, encoder, err := openCompressedCheckpointWriter(resourcesPath)
 	require.NoError(t, err)
-	require.NoError(t, gob.NewEncoder(file).Encode(&snapshot))
+	require.NoError(t, gob.NewEncoder(encoder).Encode(&snapshot))
+	require.NoError(t, encoder.Close())
 	require.NoError(t, file.Close())
 
 	tailSegment, err := writeSegment(rootDir, "seg-tail", []models.Event{
