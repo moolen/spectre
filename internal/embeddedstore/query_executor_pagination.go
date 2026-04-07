@@ -3,12 +3,8 @@ package embeddedstore
 import "github.com/moolen/spectre/internal/models"
 
 func (qe *QueryExecutor) cursorStartIndex(resources []filteredResource, pagination *models.PaginationRequest) int {
-	if pagination == nil || pagination.Cursor == "" {
-		return 0
-	}
-
-	cursor, err := models.DecodeCursor(pagination.Cursor)
-	if err != nil || cursor == nil {
+	cursor := decodePaginationCursor(pagination)
+	if cursor == nil {
 		return 0
 	}
 
@@ -19,6 +15,19 @@ func (qe *QueryExecutor) cursorStartIndex(resources []filteredResource, paginati
 	}
 
 	return len(resources)
+}
+
+func decodePaginationCursor(pagination *models.PaginationRequest) *models.ResourceCursor {
+	if pagination == nil || pagination.Cursor == "" {
+		return nil
+	}
+
+	cursor, err := models.DecodeCursor(pagination.Cursor)
+	if err != nil {
+		return nil
+	}
+
+	return cursor
 }
 
 func (qe *QueryExecutor) pageBoundsWithCursor(resources []filteredResource, startIdx, pageSize int) (endIdx int, hasMore bool, nextCursor string) {
@@ -58,6 +67,10 @@ func (qe *QueryExecutor) pageBoundsWithCursor(resources []filteredResource, star
 }
 
 func compareCursorKey(resource filteredResource, cursor *models.ResourceCursor) int {
+	return compareOrderedResourceKeyToCursor(resource.orderedResourceKey, cursor)
+}
+
+func compareOrderedResourceKeyToCursor(resource orderedResourceKey, cursor *models.ResourceCursor) int {
 	if resource.kind != cursor.Kind {
 		if resource.kind < cursor.Kind {
 			return -1

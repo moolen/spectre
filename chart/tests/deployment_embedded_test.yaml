@@ -60,6 +60,9 @@ tests:
       - equal:
           path: spec.strategy.type
           value: Recreate
+      - equal:
+          path: spec.template.spec.securityContext.fsGroupChangePolicy
+          value: OnRootMismatch
 
   - it: should keep an explicit embedded rolling update override
     set:
@@ -82,3 +85,86 @@ tests:
       - equal:
           path: spec.strategy.rollingUpdate.maxSurge
           value: 0
+
+  - it: should not append an integrations data-dir override in embedded mode
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--data-dir=/var/lib/spectre-data"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--integrations-config=/var/lib/spectre/config/integrations.yaml"
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--data-dir=/var/lib/spectre/data"
+
+  - it: should pass embedded checkpoint interval when configured
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        checkpointInterval: 15m
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-checkpoint-interval=15m"
+
+  - it: should pass embedded checkpoint tail event budget when embedded mode is enabled
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        checkpointMaxTailEvents: 2048
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-checkpoint-max-tail-events=2048"
+
+  - it: should pass embedded checkpoint retention count when embedded mode is enabled
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        checkpointRetentionCount: 3
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-checkpoint-retention-count=3"
+
+  - it: should pass embedded checkpoint tail byte budget when embedded mode is enabled
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        checkpointMaxTailBytes: 16777216
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-checkpoint-max-tail-bytes=16777216"
+
+  - it: should pass embedded checkpoint shutdown behavior when embedded mode is enabled
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        checkpointOnShutdown: false
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-checkpoint-on-shutdown=false"

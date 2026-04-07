@@ -20,8 +20,21 @@ func TestConfig_EffectiveEngineConfigAppliesDefaults(t *testing.T) {
 	require.Equal(t, defaultHotMaxResourceVersions, engineCfg.HotMaxResourceVersions)
 	require.Equal(t, defaultFlushInterval, engineCfg.FlushInterval)
 	require.Equal(t, defaultCheckpointInterval, engineCfg.CheckpointInterval)
+	require.Equal(t, defaultCheckpointRetentionCount, engineCfg.CheckpointRetentionCount)
 	require.Equal(t, defaultSegmentTargetBytes, engineCfg.SegmentTargetBytes)
 	require.Equal(t, defaultCompactionMinSegments, engineCfg.CompactionMinSegments)
+}
+
+func TestConfig_EffectiveEngineConfigPreservesExplicitCheckpointRetentionOverride(t *testing.T) {
+	cfg := Config{
+		DataDir:                     t.TempDir(),
+		CheckpointRetentionCount:    0,
+		CheckpointRetentionCountSet: true,
+	}
+
+	engineCfg, err := cfg.EffectiveEngineConfig()
+	require.NoError(t, err)
+	require.Equal(t, 0, engineCfg.CheckpointRetentionCount)
 }
 
 func TestConfig_EffectiveEngineConfigRejectsInvalidValues(t *testing.T) {

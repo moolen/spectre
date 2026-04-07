@@ -3,6 +3,9 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
@@ -36,6 +39,9 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if !e.ready.Load() {
+		return nil
+	}
 
 	batch := e.hot.ExtractFlushBatch(0)
 	if len(batch.Events) == 0 {
@@ -60,10 +66,7 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 	}
 
 	updatedManifest := e.manifest
-	updatedManifest.ActiveSegments = append(updatedManifest.ActiveSegments, SegmentMeta{
-		ID:            meta.ID,
-		HighWaterMark: e.nextHighWaterMark,
-	})
+	updatedManifest.ActiveSegments = append(updatedManifest.ActiveSegments, segmentMetaFromBundle(meta, e.nextHighWaterMark))
 	updatedManifest.FlushHighWaterMark = e.nextHighWaterMark
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
 		return fmt.Errorf("flush embedded engine: store manifest: %w", err)
@@ -136,21 +139,152 @@ func (e *Engine) Checkpoint(ctx context.Context) error {
 		return nil
 	}
 
+	return e.checkpointLocked(ctx)
+}
+
+func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !e.ready.Load() {
+		return nil
+	}
+
 	start := time.Now()
+	defer func() {
+		e.metrics.RecordCheckpoint(time.Since(start), err)
+	}()
+
 	meta, err := writeCheckpoint(e.rootDir, e.projection, e.nextHighWaterMark)
 	if err != nil {
-		e.metrics.RecordCheckpoint(time.Since(start), err)
 		return fmt.Errorf("checkpoint embedded engine: write checkpoint: %w", err)
 	}
 
 	updatedManifest := e.manifest
 	updatedManifest.Checkpoints = append(updatedManifest.Checkpoints, meta)
+	updatedManifest.ActiveCheckpoint = meta
+	if e.tail != nil {
+		updatedManifest.ActiveTail = e.tail.meta
+	}
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
-		e.metrics.RecordCheckpoint(time.Since(start), err)
 		return fmt.Errorf("checkpoint embedded engine: store manifest: %w", err)
 	}
 
 	e.manifest = updatedManifest
-	e.metrics.RecordCheckpoint(time.Since(start), nil)
+	if e.tail != nil {
+		previousMeta := e.tail.meta
+		nextTailMeta, rotateErr := e.tail.Rotate(e.nextHighWaterMark)
+		if rotateErr != nil {
+			return fmt.Errorf("checkpoint embedded engine: rotate tail journal: %w", rotateErr)
+		}
+
+		updatedManifest.ActiveTail = nextTailMeta
+		if err := storeManifest(e.rootDir, updatedManifest); err != nil {
+			reopenedTail, reopenErr := openTailJournal(e.rootDir, previousMeta)
+			if reopenErr == nil {
+				_ = e.tail.Close()
+				e.tail = reopenedTail
+			}
+			return fmt.Errorf("checkpoint embedded engine: store rotated tail manifest: %w", err)
+		}
+		e.manifest = updatedManifest
+	}
+	if err := e.pruneCheckpointHistoryLocked(); err != nil {
+		return fmt.Errorf("checkpoint embedded engine: prune checkpoint history: %w", err)
+	}
+
+	e.setActiveTailMetricsLocked()
 	return nil
+}
+
+func (e *Engine) pruneCheckpointHistoryLocked() error {
+	if e == nil {
+		return nil
+	}
+
+	updatedManifest, err := pruneCheckpointHistory(e.rootDir, e.manifest, e.config.CheckpointRetentionCount)
+	if err != nil {
+		return err
+	}
+	e.manifest = updatedManifest
+	return nil
+}
+
+func pruneCheckpointHistory(rootDir string, manifest Manifest, retentionCount int) (Manifest, error) {
+	if retentionCount <= 0 || len(manifest.Checkpoints) <= retentionCount {
+		return manifest, nil
+	}
+
+	sortedCheckpoints := append([]CheckpointMeta(nil), manifest.Checkpoints...)
+	sort.Slice(sortedCheckpoints, func(i, j int) bool {
+		if sortedCheckpoints[i].HighWaterMark != sortedCheckpoints[j].HighWaterMark {
+			return sortedCheckpoints[i].HighWaterMark < sortedCheckpoints[j].HighWaterMark
+		}
+		return sortedCheckpoints[i].ID < sortedCheckpoints[j].ID
+	})
+
+	keptCheckpoints := append([]CheckpointMeta(nil), sortedCheckpoints[len(sortedCheckpoints)-retentionCount:]...)
+	keptCheckpointIDs := make(map[string]struct{}, len(keptCheckpoints))
+	for _, checkpoint := range keptCheckpoints {
+		keptCheckpointIDs[checkpoint.ID] = struct{}{}
+	}
+
+	if manifest.ActiveCheckpoint.ID != "" {
+		if _, exists := keptCheckpointIDs[manifest.ActiveCheckpoint.ID]; !exists {
+			for i := range sortedCheckpoints {
+				if sortedCheckpoints[i].ID != manifest.ActiveCheckpoint.ID {
+					continue
+				}
+				keptCheckpoints = append(keptCheckpoints[1:], sortedCheckpoints[i])
+				keptCheckpointIDs = make(map[string]struct{}, len(keptCheckpoints))
+				for _, checkpoint := range keptCheckpoints {
+					keptCheckpointIDs[checkpoint.ID] = struct{}{}
+				}
+				break
+			}
+		}
+	}
+
+	for _, checkpoint := range sortedCheckpoints {
+		if _, keep := keptCheckpointIDs[checkpoint.ID]; keep {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(rootDir, checkpointsDirName, checkpoint.ID)); err != nil {
+			return manifest, fmt.Errorf("remove checkpoint %q: %w", checkpoint.ID, err)
+		}
+	}
+
+	sort.Slice(keptCheckpoints, func(i, j int) bool {
+		if keptCheckpoints[i].HighWaterMark != keptCheckpoints[j].HighWaterMark {
+			return keptCheckpoints[i].HighWaterMark < keptCheckpoints[j].HighWaterMark
+		}
+		return keptCheckpoints[i].ID < keptCheckpoints[j].ID
+	})
+
+	updatedManifest := manifest
+	updatedManifest.Checkpoints = keptCheckpoints
+	if len(keptCheckpoints) > 0 {
+		updatedManifest.ActiveCheckpoint = latestCheckpointMeta(keptCheckpoints)
+	}
+	if err := storeManifest(rootDir, updatedManifest); err != nil {
+		return manifest, err
+	}
+
+	return updatedManifest, nil
+}
+
+func (e *Engine) shouldCheckpointTailLocked() bool {
+	if e == nil || e.tail == nil {
+		return false
+	}
+	if e.config.CheckpointMaxTailEvents > 0 && e.tail.meta.EventCount > e.config.CheckpointMaxTailEvents {
+		return true
+	}
+	if e.config.CheckpointMaxTailBytes > 0 && e.tail.meta.SizeBytes > e.config.CheckpointMaxTailBytes {
+		return true
+	}
+	return false
 }

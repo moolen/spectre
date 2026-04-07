@@ -10,13 +10,19 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/moolen/spectre/internal/models"
 )
 
 type segmentReader struct {
-	meta          segmentBundleMeta
-	eventsPath    string
+	meta              segmentBundleMeta
+	eventsPath        string
+	timeIndexPath     string
+	resourceIndexPath string
+
+	metaLoaded bool
+	mu            sync.Mutex
 	timeIndex     []segmentTimeIndexEntry
 	resourceIndex map[string][]int64
 }
@@ -30,26 +36,14 @@ func openSegmentReader(rootDir string, meta segmentBundleMeta) (*segmentReader, 
 	}
 
 	segmentDir := filepath.Join(rootDir, segmentsDirName, meta.ID)
-	statsMeta, err := readSegmentStats(filepath.Join(segmentDir, segmentStatsFile))
-	if err != nil {
-		return nil, fmt.Errorf("open segment reader: read stats: %w", err)
-	}
-
-	timeIndex, err := readTimeIndex(filepath.Join(segmentDir, segmentTimeIndexFile))
-	if err != nil {
-		return nil, fmt.Errorf("open segment reader: read time index: %w", err)
-	}
-
-	resourceIndex, err := readResourceIndex(filepath.Join(segmentDir, segmentUIDIndexFile))
-	if err != nil {
-		return nil, fmt.Errorf("open segment reader: read resource index: %w", err)
-	}
+	meta.NamespaceKinds = normalizeNamespaceKinds(meta.NamespaceKinds)
 
 	return &segmentReader{
-		meta:          statsMeta,
-		eventsPath:    filepath.Join(segmentDir, segmentEventsFile),
-		timeIndex:     timeIndex,
-		resourceIndex: resourceIndex.UIDOffsets,
+		meta:              meta,
+		eventsPath:        filepath.Join(segmentDir, segmentEventsFile),
+		timeIndexPath:     filepath.Join(segmentDir, segmentTimeIndexFile),
+		resourceIndexPath: filepath.Join(segmentDir, segmentUIDIndexFile),
+		metaLoaded:        segmentBundleMetaComplete(meta),
 	}, nil
 }
 
@@ -57,7 +51,37 @@ func (r *segmentReader) MayContain(namespace, kind string) bool {
 	if r == nil {
 		return false
 	}
-	return r.meta.MayContain(namespace, kind)
+	if namespace == "" && kind == "" {
+		return true
+	}
+
+	meta, loaded := r.bundleMeta()
+	if !loaded {
+		return true
+	}
+	return meta.MayContain(namespace, kind)
+}
+
+func (r *segmentReader) ID() string {
+	if r == nil {
+		return ""
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.meta.ID
+}
+
+func (r *segmentReader) MayContainUID(uid string) bool {
+	if r == nil || uid == "" {
+		return false
+	}
+	if err := r.ensureResourceIndexLoaded(); err != nil {
+		return true
+	}
+
+	offsets := r.resourceIndex[uid]
+	return len(offsets) > 0
 }
 
 func (r *segmentReader) ScanTimeRange(ctx context.Context, startTimestamp, endTimestamp int64) ([]models.Event, error) {
@@ -73,11 +97,17 @@ func (r *segmentReader) ScanTimeRange(ctx context.Context, startTimestamp, endTi
 	if startTimestamp > endTimestamp {
 		return []models.Event{}, nil
 	}
-	if r.meta.EventCount == 0 {
-		return []models.Event{}, nil
+	meta, loaded := r.bundleMeta()
+	if loaded {
+		if meta.EventCount == 0 {
+			return []models.Event{}, nil
+		}
+		if endTimestamp < meta.MinTimestamp || startTimestamp > meta.MaxTimestamp {
+			return []models.Event{}, nil
+		}
 	}
-	if endTimestamp < r.meta.MinTimestamp || startTimestamp > r.meta.MaxTimestamp {
-		return []models.Event{}, nil
+	if err := r.ensureTimeIndexLoaded(); err != nil {
+		return nil, fmt.Errorf("scan segment by time: load time index: %w", err)
 	}
 
 	file, err := os.Open(r.eventsPath)
@@ -132,6 +162,9 @@ func (r *segmentReader) ScanUID(ctx context.Context, uid string) ([]models.Event
 	if uid == "" {
 		return []models.Event{}, nil
 	}
+	if err := r.ensureResourceIndexLoaded(); err != nil {
+		return nil, fmt.Errorf("scan segment by uid: load resource index: %w", err)
+	}
 
 	offsets := r.resourceIndex[uid]
 	if len(offsets) == 0 {
@@ -182,6 +215,95 @@ func (r *segmentReader) startOffsetForTime(timestamp int64) int64 {
 	}
 
 	return r.timeIndex[indexPos-1].Offset
+}
+
+func (r *segmentReader) ensureTimeIndexLoaded() error {
+	if r == nil {
+		return fmt.Errorf("reader is nil")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.timeIndex != nil {
+		return nil
+	}
+
+	timeIndex, err := readTimeIndex(r.timeIndexPath)
+	if err != nil {
+		return err
+	}
+	if timeIndex == nil {
+		timeIndex = []segmentTimeIndexEntry{}
+	}
+	r.timeIndex = timeIndex
+	return nil
+}
+
+func (r *segmentReader) bundleMeta() (segmentBundleMeta, bool) {
+	if r == nil {
+		return segmentBundleMeta{}, false
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return cloneSegmentBundleMeta(r.meta), r.metaLoaded
+}
+
+func (r *segmentReader) EnsureBundleMeta() (segmentBundleMeta, error) {
+	if r == nil {
+		return segmentBundleMeta{}, fmt.Errorf("reader is nil")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.metaLoaded {
+		return cloneSegmentBundleMeta(r.meta), nil
+	}
+
+	meta, err := readSegmentStats(filepath.Join(filepath.Dir(r.eventsPath), segmentStatsFile))
+	if err != nil {
+		return segmentBundleMeta{}, fmt.Errorf("read stats: %w", err)
+	}
+	if meta.ID == "" {
+		meta.ID = r.meta.ID
+	}
+
+	r.meta = meta
+	r.metaLoaded = true
+	return cloneSegmentBundleMeta(r.meta), nil
+}
+
+func (r *segmentReader) ensureResourceIndexLoaded() error {
+	if r == nil {
+		return fmt.Errorf("reader is nil")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.resourceIndex != nil {
+		return nil
+	}
+
+	resourceIndex, err := readResourceIndex(r.resourceIndexPath)
+	if err != nil {
+		return err
+	}
+	r.resourceIndex = resourceIndex.UIDOffsets
+	return nil
+}
+
+func segmentBundleMetaComplete(meta segmentBundleMeta) bool {
+	return meta.EventCount > 0 || meta.MinTimestamp != 0 || meta.MaxTimestamp != 0 || len(meta.NamespaceKinds) > 0
+}
+
+func cloneSegmentBundleMeta(meta segmentBundleMeta) segmentBundleMeta {
+	return segmentBundleMeta{
+		ID:             meta.ID,
+		EventCount:     meta.EventCount,
+		MinTimestamp:   meta.MinTimestamp,
+		MaxTimestamp:   meta.MaxTimestamp,
+		NamespaceKinds: normalizeNamespaceKinds(meta.NamespaceKinds),
+	}
 }
 
 func readSegmentStats(path string) (segmentBundleMeta, error) {

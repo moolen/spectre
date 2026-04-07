@@ -1,6 +1,7 @@
 package embeddedstore
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -28,7 +29,10 @@ func TestMetrics_RecordsWritePathState(t *testing.T) {
 
 	metrics.RecordIngest(3, 25*time.Millisecond, nil)
 	metrics.RecordIngest(0, 10*time.Millisecond, assertiveError("boom"))
+	metrics.RecordStartupMode("fast")
+	metrics.RecordTailReplay(4)
 	metrics.SetHotEvents(7)
+	metrics.SetActiveTail(4, 1024)
 	metrics.RecordHotEvictions("global", 2)
 	metrics.RecordHotEvictions("uid", 1)
 	metrics.RecordFlush(12*time.Millisecond, 5, 2048, nil)
@@ -42,7 +46,12 @@ func TestMetrics_RecordsWritePathState(t *testing.T) {
 	require.Equal(t, 2.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_ingest_batches_total"), nil))
 	require.Equal(t, 3.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_ingest_events_total"), nil))
 	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_ingest_errors_total"), nil))
+	require.Equal(t, 1.0, gaugeValue(t, findMetricFamily(t, families, "spectre_embedded_startup_mode"), map[string]string{"mode": "fast"}))
+	require.Equal(t, 0.0, gaugeValue(t, findMetricFamily(t, families, "spectre_embedded_startup_mode"), map[string]string{"mode": "repair"}))
+	require.Equal(t, 4.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_tail_replayed_events_total"), nil))
 	require.Equal(t, 7.0, gaugeValue(t, findMetricFamily(t, families, "spectre_embedded_hot_events"), nil))
+	require.Equal(t, 4.0, gaugeValue(t, findMetricFamily(t, families, "spectre_embedded_active_tail_events"), nil))
+	require.Equal(t, 1024.0, gaugeValue(t, findMetricFamily(t, families, "spectre_embedded_active_tail_bytes"), nil))
 	require.Equal(t, 2.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_hot_evictions_total"), map[string]string{"scope": "global"}))
 	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_hot_evictions_total"), map[string]string{"scope": "uid"}))
 	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_flush_total"), nil))
@@ -53,6 +62,24 @@ func TestMetrics_RecordsWritePathState(t *testing.T) {
 	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_compaction_total"), nil))
 	require.Equal(t, uint64(2), histogramCount(t, findMetricFamily(t, families, "spectre_embedded_ingest_duration_seconds"), nil))
 	require.Equal(t, uint64(1), histogramCount(t, findMetricFamily(t, families, "spectre_embedded_flush_duration_seconds"), nil))
+}
+
+func TestEngine_AutoCheckpointWhenTailExceedsEventBudget(t *testing.T) {
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                 t.TempDir(),
+		CheckpointMaxTailEvents: 4,
+		CheckpointOnShutdown:    true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeReplayHeavyEvents(5)))
+
+	require.NotEmpty(t, engine.manifest.Checkpoints)
+	require.Equal(t, uint64(5), engine.manifest.ActiveCheckpoint.HighWaterMark)
+	require.LessOrEqual(t, engine.manifest.ActiveTail.EventCount, 1)
 }
 
 func TestMetrics_RecordsReadPathState(t *testing.T) {

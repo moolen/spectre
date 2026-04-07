@@ -24,13 +24,16 @@ func (e *Engine) Start(ctx context.Context) error {
 	if e.closed {
 		return fmt.Errorf("start embedded engine: engine is closed")
 	}
-	if e.config.FlushInterval <= 0 || e.periodicFlushStop != nil {
-		return nil
+	if e.config.FlushInterval > 0 && e.periodicFlushStop == nil {
+		runCtx, cancel := context.WithCancel(ctx)
+		e.periodicFlushStop = cancel
+		go e.runPeriodicFlush(runCtx, e.config.FlushInterval)
 	}
-
-	runCtx, cancel := context.WithCancel(ctx)
-	e.periodicFlushStop = cancel
-	go e.runPeriodicFlush(runCtx, e.config.FlushInterval)
+	if e.config.CheckpointInterval > 0 && e.periodicCheckpointStop == nil {
+		runCtx, cancel := context.WithCancel(ctx)
+		e.periodicCheckpointStop = cancel
+		go e.runPeriodicCheckpoint(runCtx, e.config.CheckpointInterval)
+	}
 
 	return nil
 }
@@ -60,13 +63,22 @@ func (e *Engine) Close() error {
 		e.periodicFlushStop()
 		e.periodicFlushStop = nil
 	}
+	if e.periodicCheckpointStop != nil {
+		e.periodicCheckpointStop()
+		e.periodicCheckpointStop = nil
+	}
 	e.mu.Unlock()
 
-	if err := e.Flush(context.Background()); err != nil {
-		return err
-	}
-	if err := e.Checkpoint(context.Background()); err != nil {
-		return err
+	shouldPersistOnClose := e.IsReady()
+	if shouldPersistOnClose {
+		if err := e.Flush(context.Background()); err != nil {
+			return err
+		}
+		if e.config.CheckpointOnShutdown {
+			if err := e.Checkpoint(context.Background()); err != nil {
+				return err
+			}
+		}
 	}
 
 	e.mu.Lock()
@@ -76,6 +88,11 @@ func (e *Engine) Close() error {
 	}
 	e.closed = true
 	e.ready.Store(false)
+	if e.tail != nil {
+		if err := e.tail.Close(); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -112,25 +129,36 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 	if e.closed {
 		return fmt.Errorf("process embedded batch: engine is closed")
 	}
+	if e.tail == nil {
+		return fmt.Errorf("process embedded batch: tail journal is nil")
+	}
 
 	wasReady := e.ready.Load()
+	tailMeta, err := e.tail.AppendBatch(ctx, e.nextHighWaterMark+1, events)
+	if err != nil {
+		return fmt.Errorf("process embedded batch: append tail journal: %w", err)
+	}
+	e.manifest.ActiveTail = tailMeta
+	e.nextHighWaterMark = tailMeta.LastHighWaterMark
+	e.setActiveTailMetricsLocked()
 	for i := range events {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 		if err := applyProjectionEvent(e.projection, events[i]); err != nil {
 			e.ready.Store(false)
 			return fmt.Errorf("process embedded batch: apply event %d: %w", i, err)
 		}
 		e.hot.Append([]models.Event{events[i]})
-		e.nextHighWaterMark++
 	}
 	if wasReady {
 		e.ready.Store(true)
 	}
-	if e.shouldFlushHotBySizeLocked() {
+	if e.ready.Load() && e.shouldFlushHotBySizeLocked() {
 		if err := e.flushLocked(ctx); err != nil {
 			e.logAutoFlushError("size-triggered flush failed", err)
+		}
+	}
+	if e.ready.Load() && e.shouldCheckpointTailLocked() {
+		if err := e.checkpointLocked(ctx); err != nil {
+			e.logAutoFlushError("tail-triggered checkpoint failed", err)
 		}
 	}
 
@@ -146,8 +174,30 @@ func (e *Engine) runPeriodicFlush(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !e.IsReady() {
+				continue
+			}
 			if err := e.Flush(context.Background()); err != nil {
 				e.logAutoFlushError("periodic flush failed", err)
+			}
+		}
+	}
+}
+
+func (e *Engine) runPeriodicCheckpoint(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !e.IsReady() {
+				continue
+			}
+			if err := e.Checkpoint(context.Background()); err != nil {
+				e.logAutoFlushError("periodic checkpoint failed", err)
 			}
 		}
 	}

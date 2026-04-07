@@ -12,15 +12,21 @@ import (
 )
 
 type Config struct {
-	DataDir                   string
-	HotMaxEvents              int
-	HotMaxResourceVersions    int
-	FlushInterval             time.Duration
-	CheckpointInterval        time.Duration
-	SegmentTargetBytes        int64
-	CompactionMinSegments     int
-	MetricsRegisterer         prometheus.Registerer
-	ProjectionHistoryFallback bool
+	DataDir                     string
+	HotMaxEvents                int
+	HotMaxResourceVersions      int
+	FlushInterval               time.Duration
+	CheckpointInterval          time.Duration
+	CheckpointRetentionCount    int
+	CheckpointRetentionCountSet bool
+	CheckpointMaxTailEvents     int
+	CheckpointMaxTailBytes      int64
+	CheckpointOnShutdown        bool
+	CheckpointOnShutdownSet     bool
+	SegmentTargetBytes          int64
+	CompactionMinSegments       int
+	MetricsRegisterer           prometheus.Registerer
+	ProjectionHistoryFallback   bool
 }
 
 type Backend struct {
@@ -28,17 +34,24 @@ type Backend struct {
 }
 
 const (
-	defaultHotMaxEvents           int           = 50000
-	defaultHotMaxResourceVersions int           = 32
-	defaultFlushInterval          time.Duration = 30 * time.Second
-	defaultCheckpointInterval     time.Duration = 0
-	defaultSegmentTargetBytes     int64         = 16 << 20
-	defaultCompactionMinSegments  int           = 4
+	defaultHotMaxEvents             int           = 50000
+	defaultHotMaxResourceVersions   int           = 32
+	defaultFlushInterval            time.Duration = 30 * time.Second
+	defaultCheckpointInterval       time.Duration = 0
+	defaultCheckpointRetentionCount int           = 3
+	defaultCheckpointMaxTailEvents  int           = 2048
+	defaultCheckpointMaxTailBytes   int64         = 16 << 20
+	defaultCheckpointOnShutdown     bool          = true
+	defaultSegmentTargetBytes       int64         = 16 << 20
+	defaultCompactionMinSegments    int           = 4
 )
 
 var (
 	applyProjectionEventFnMu sync.RWMutex
 	applyProjectionEventFn   = applyProjectionEventDirect
+
+	recoverTailProjectionEventFnMu sync.RWMutex
+	recoverTailProjectionEventFn   = recoverTailProjectionEventDirect
 )
 
 func Open(cfg Config) (*Backend, error) {
@@ -69,6 +82,12 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 	if cfg.CheckpointInterval < 0 {
 		return EngineConfig{}, fmt.Errorf("checkpoint interval must be positive")
 	}
+	if cfg.CheckpointMaxTailEvents < 0 {
+		return EngineConfig{}, fmt.Errorf("checkpoint max tail events must be positive")
+	}
+	if cfg.CheckpointMaxTailBytes < 0 {
+		return EngineConfig{}, fmt.Errorf("checkpoint max tail bytes must be positive")
+	}
 	if cfg.SegmentTargetBytes < 0 {
 		return EngineConfig{}, fmt.Errorf("segment target bytes must be positive")
 	}
@@ -82,6 +101,10 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 		HotMaxResourceVersions:    cfg.HotMaxResourceVersions,
 		FlushInterval:             cfg.FlushInterval,
 		CheckpointInterval:        cfg.CheckpointInterval,
+		CheckpointRetentionCount:  cfg.CheckpointRetentionCount,
+		CheckpointMaxTailEvents:   cfg.CheckpointMaxTailEvents,
+		CheckpointMaxTailBytes:    cfg.CheckpointMaxTailBytes,
+		CheckpointOnShutdown:      cfg.CheckpointOnShutdown,
 		SegmentTargetBytes:        cfg.SegmentTargetBytes,
 		CompactionMinSegments:     cfg.CompactionMinSegments,
 		MetricsRegisterer:         cfg.MetricsRegisterer,
@@ -98,6 +121,18 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 	}
 	if engineCfg.CheckpointInterval == 0 {
 		engineCfg.CheckpointInterval = defaultCheckpointInterval
+	}
+	if !cfg.CheckpointRetentionCountSet && engineCfg.CheckpointRetentionCount == 0 {
+		engineCfg.CheckpointRetentionCount = defaultCheckpointRetentionCount
+	}
+	if engineCfg.CheckpointMaxTailEvents == 0 {
+		engineCfg.CheckpointMaxTailEvents = defaultCheckpointMaxTailEvents
+	}
+	if engineCfg.CheckpointMaxTailBytes == 0 {
+		engineCfg.CheckpointMaxTailBytes = defaultCheckpointMaxTailBytes
+	}
+	if !cfg.CheckpointOnShutdownSet {
+		engineCfg.CheckpointOnShutdown = defaultCheckpointOnShutdown
 	}
 	if engineCfg.SegmentTargetBytes == 0 {
 		engineCfg.SegmentTargetBytes = defaultSegmentTargetBytes
@@ -214,4 +249,29 @@ func applyProjectionEventUsesDefaultImplementation() bool {
 	applyProjectionEventFnMu.RUnlock()
 
 	return reflect.ValueOf(fn).Pointer() == reflect.ValueOf(applyProjectionEventDirect).Pointer()
+}
+
+func recoverTailProjectionEvent(projection *Projection, event models.Event) error {
+	recoverTailProjectionEventFnMu.RLock()
+	fn := recoverTailProjectionEventFn
+	recoverTailProjectionEventFnMu.RUnlock()
+
+	return fn(projection, event)
+}
+
+func recoverTailProjectionEventDirect(projection *Projection, event models.Event) error {
+	return projection.ApplyReplayEvent(event)
+}
+
+func setRecoverTailProjectionEventFnForTest(fn func(*Projection, models.Event) error) func() {
+	recoverTailProjectionEventFnMu.Lock()
+	previous := recoverTailProjectionEventFn
+	recoverTailProjectionEventFn = fn
+	recoverTailProjectionEventFnMu.Unlock()
+
+	return func() {
+		recoverTailProjectionEventFnMu.Lock()
+		recoverTailProjectionEventFn = previous
+		recoverTailProjectionEventFnMu.Unlock()
+	}
 }

@@ -143,6 +143,36 @@ func TestQueryPlanner_QueryDistinctMetadataUsesProjectionState(t *testing.T) {
 	require.Equal(t, []string{"Pod"}, kinds)
 }
 
+func TestQueryPlanner_DedupesHotAndColdDuplicatesDeterministically(t *testing.T) {
+	resource := models.ResourceMetadata{
+		Version:   "v1",
+		UID:       "pod-dedupe",
+		Namespace: "default",
+		Kind:      "Pod",
+		Name:      "pod-dedupe",
+	}
+
+	coldDuplicate := plannerParityEvent("dup", 20, models.EventTypeUpdate, resource)
+	coldDuplicate.Data = []byte(`{"source":"cold"}`)
+	hotDuplicate := plannerParityEvent("dup", 20, models.EventTypeUpdate, resource)
+	hotDuplicate.Data = []byte(`{"source":"hot"}`)
+
+	engine := newTestEngineWithColdSegment(t, []models.Event{coldDuplicate}, []models.Event{hotDuplicate})
+	planner := engine.QueryExecutor().planner
+	require.NotNil(t, planner)
+
+	merged, _, err := planner.collectMergedResourceEvents(context.Background(), resource.UID, resource, 0, 30*1e9)
+	require.NoError(t, err)
+	require.Len(t, merged, 1)
+
+	exported, _, err := planner.exportTimeRange(context.Background(), 0, 30*1e9, models.QueryFilters{})
+	require.NoError(t, err)
+	require.Len(t, exported, 1)
+
+	require.Equal(t, string(merged[0].Data), string(exported[0].Data))
+	require.JSONEq(t, `{"source":"cold"}`, string(merged[0].Data))
+}
+
 func TestQueryPlanner_ExportFallsBackToFullScanWhenDimensionIndexIsMissing(t *testing.T) {
 	engine := newFlushedTestEngine(t, []models.Event{
 		{

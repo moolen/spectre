@@ -12,6 +12,10 @@ type EngineConfig struct {
 	HotMaxResourceVersions    int
 	FlushInterval             time.Duration
 	CheckpointInterval        time.Duration
+	CheckpointRetentionCount  int
+	CheckpointMaxTailEvents   int
+	CheckpointMaxTailBytes    int64
+	CheckpointOnShutdown      bool
 	SegmentTargetBytes        int64
 	CompactionMinSegments     int
 	MetricsRegisterer         prometheus.Registerer

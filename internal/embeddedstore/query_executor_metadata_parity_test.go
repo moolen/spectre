@@ -34,13 +34,9 @@ func TestQueryExecutor_MetadataPlannerParity(t *testing.T) {
 		plannerParityEvent("deploy-40", 40, models.EventTypeCreate, boundaryDeploy),
 	}))
 
-	engine.projection.mu.Lock()
-	deletedHistory := append([]models.Event(nil), engine.projection.eventsByResourceUID[deletedPod.UID]...)
-	require.Len(t, deletedHistory, 2)
-	// Mixed-state parity case: projection keeps only in-window delete, while planner
-	// still has cold history containing the pre-window create event.
-	engine.projection.eventsByResourceUID[deletedPod.UID] = deletedHistory[1:]
-	engine.projection.mu.Unlock()
+	engine.projection.mu.RLock()
+	require.Empty(t, engine.projection.eventsByResourceUID)
+	engine.projection.mu.RUnlock()
 
 	namespaces, kinds, minTime, maxTime, err := engine.QueryExecutor().QueryDistinctMetadata(context.Background(), 20*1e9, 40*1e9)
 	require.NoError(t, err)
@@ -48,4 +44,42 @@ func TestQueryExecutor_MetadataPlannerParity(t *testing.T) {
 	require.Equal(t, []string{"Deployment", "Pod", "Service"}, kinds)
 	require.Equal(t, int64(10*1e9), minTime)
 	require.Equal(t, int64(40*1e9), maxTime)
+}
+
+func TestQueryExecutor_MetadataFullRangeUsesProjectionStateWithoutHistoryFallback(t *testing.T) {
+	projection, err := BuildProjection([]models.Event{
+		{
+			ID:        "pod-create",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				UID:       "pod-1",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-1",
+			},
+		},
+		{
+			ID:        "deploy-create",
+			Timestamp: 20,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				UID:       "deploy-1",
+				Namespace: "apps",
+				Kind:      "Deployment",
+				Name:      "deploy-1",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	executor := NewQueryExecutor(projection)
+	executor.DisableProjectionHistoryFallback()
+
+	namespaces, kinds, minTime, maxTime, err := executor.QueryDistinctMetadata(context.Background(), 0, 30)
+	require.NoError(t, err)
+	require.Equal(t, []string{"apps", "default"}, namespaces)
+	require.Equal(t, []string{"Deployment", "Pod"}, kinds)
+	require.Equal(t, int64(10), minTime)
+	require.Equal(t, int64(20), maxTime)
 }

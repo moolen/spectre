@@ -1,6 +1,8 @@
 package embeddedstore
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -92,6 +94,267 @@ func TestEngine_OpenBuildsProjectionFromReplaySegmentsWithoutCheckpoint(t *testi
 	require.Len(t, engine.projection.resourcesByUID["uid-d"].versions, 1)
 }
 
+func TestEngine_OpenUsesCheckpointAndTailOnNormalRestart(t *testing.T) {
+	dir := t.TempDir()
+	expectedEvent := seedStoreWithCheckpointAndTail(t, dir)
+
+	restore := setApplyProjectionEventFnForTest(func(*Projection, models.Event) error {
+		t.Fatal("normal restart should not apply cold segment replay")
+		return nil
+	})
+	t.Cleanup(restore)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.True(t, engine.IsReady())
+	record := engine.projection.resourcesByUID[expectedEvent.Resource.UID]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 1)
+	require.Equal(t, expectedEvent.ID, record.versions[0].eventID)
+	require.Equal(t, []string{expectedEvent.ID}, replayTestEventIDs(engine.hot.ScanTimeRange(expectedEvent.Timestamp, expectedEvent.Timestamp)))
+}
+
+func TestEngine_OpenFastPathUsesReplayProjectionApplyForTailRecovery(t *testing.T) {
+	dir := t.TempDir()
+	expectedEvent := seedStoreWithCheckpointAndTail(t, dir)
+
+	appliedIDs := make([]string, 0, 1)
+	restore := setRecoverTailProjectionEventFnForTest(func(projection *Projection, event models.Event) error {
+		appliedIDs = append(appliedIDs, event.ID)
+		return projection.ApplyReplayEvent(event)
+	})
+	t.Cleanup(restore)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.Equal(t, []string{expectedEvent.ID}, appliedIDs)
+}
+
+func TestEngine_OpenFastPathDoesNotRequireSegmentSidecars(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	event := testReplayEvent("segment-sidecar", 1)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{event}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.NoError(t, engine.Close())
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	require.Len(t, manifest.ActiveSegments, 1)
+
+	segmentDir := filepath.Join(rootDir, segmentsDirName, manifest.ActiveSegments[0].ID)
+	require.NoError(t, os.Remove(filepath.Join(segmentDir, segmentStatsFile)))
+	require.NoError(t, os.Remove(filepath.Join(segmentDir, segmentTimeIndexFile)))
+	require.NoError(t, os.Remove(filepath.Join(segmentDir, segmentUIDIndexFile)))
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+}
+
+func TestEngine_OpenFastPathLegacyManifestDoesNotRequireSegmentStatsAtStartup(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	event := testReplayEvent("legacy-manifest-fast-open", 1)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{event}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.NoError(t, engine.Close())
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	require.Len(t, manifest.ActiveSegments, 1)
+
+	legacyManifest := manifest
+	legacyManifest.ActiveSegments = []SegmentMeta{{
+		ID:            manifest.ActiveSegments[0].ID,
+		HighWaterMark: manifest.ActiveSegments[0].HighWaterMark,
+	}}
+	require.NoError(t, storeManifest(rootDir, legacyManifest))
+
+	segmentDir := filepath.Join(rootDir, segmentsDirName, manifest.ActiveSegments[0].ID)
+	require.NoError(t, os.Remove(filepath.Join(segmentDir, segmentStatsFile)))
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+}
+
+func TestEngine_OpenFallsBackToRepairReplayWhenTailStateIsStale(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+	checkpointEvent, repairEvent := seedStoreWithCheckpointAndStaleTail(t, dir)
+
+	appliedIDs := make([]string, 0, 2)
+	restore := setApplyProjectionEventFnForTest(func(projection *Projection, event models.Event) error {
+		appliedIDs = append(appliedIDs, event.ID)
+		return projection.Apply(event)
+	})
+	t.Cleanup(restore)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.True(t, engine.IsReady())
+	require.Equal(t, []string{repairEvent.ID}, appliedIDs)
+
+	record := engine.projection.resourcesByUID[checkpointEvent.Resource.UID]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 2)
+	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID)
+	require.Equal(t, repairEvent.ID, record.versions[1].eventID)
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), manifest.ActiveTail.LastHighWaterMark)
+}
+
+func TestEngine_OpenFallsBackToRepairReplayWhenTailJournalIsTruncated(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+	checkpointEvent, repairEvent := seedStoreWithCheckpointAndTail(t, dir), testReplayEvent("repair-after-truncated-tail", 3)
+	repairEvent.Resource.UID = checkpointEvent.Resource.UID
+	repairEvent.Resource.Name = checkpointEvent.Resource.Name
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{repairEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Close())
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+	tailPath := filepath.Join(rootDir, tailDirName, manifest.ActiveTail.ID, journalFileName)
+	info, err := os.Stat(tailPath)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(8))
+	require.NoError(t, os.Truncate(tailPath, info.Size()-8))
+
+	appliedIDs := make([]string, 0, 2)
+	restore := setApplyProjectionEventFnForTest(func(projection *Projection, event models.Event) error {
+		appliedIDs = append(appliedIDs, event.ID)
+		return projection.Apply(event)
+	})
+	t.Cleanup(restore)
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	require.True(t, reopened.IsReady())
+	require.Contains(t, appliedIDs, repairEvent.ID)
+
+	record := reopened.projection.resourcesByUID[checkpointEvent.Resource.UID]
+	require.NotNil(t, record)
+	require.GreaterOrEqual(t, len(record.versions), 2)
+	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID)
+	require.Equal(t, repairEvent.ID, record.versions[len(record.versions)-1].eventID)
+	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.BaseHighWaterMark)
+	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.LastHighWaterMark)
+	require.Zero(t, reopened.manifest.ActiveTail.EventCount)
+}
+
+func TestEngine_OpenFailsWhenCheckpointIsCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{testReplayEvent("checkpoint-corrupt", 1)}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	checkpointPath := filepath.Join(rootDir, checkpointsDirName, engine.manifest.ActiveCheckpoint.ID, checkpointStateFile)
+	require.NoError(t, os.WriteFile(checkpointPath, []byte("{not-json"), 0o600))
+	require.NoError(t, engine.tail.Close())
+
+	_, err = OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "load checkpoint")
+	require.ErrorContains(t, err, "decode state file")
+}
+
+func TestEngine_OpenRepairFromLegacyManifestCreatesTailAtRecoveredHighWaterMark(t *testing.T) {
+	dir := t.TempDir()
+	rootDir := embeddedRootDir(dir)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	checkpointEvent := testReplayEvent("legacy-checkpoint", 1)
+	checkpointEvent.Resource.UID = "legacy-shared"
+	checkpointEvent.Resource.Name = "legacy-shared"
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{checkpointEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	repairEvent := testReplayEvent("legacy-repair", 2)
+	repairEvent.Resource.UID = checkpointEvent.Resource.UID
+	repairEvent.Resource.Name = checkpointEvent.Resource.Name
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{repairEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Close())
+
+	manifest, err := loadOrCreateManifest(rootDir)
+	require.NoError(t, err)
+
+	legacyPayload, err := json.Marshal(struct {
+		FormatVersion      int              `json:"format_version"`
+		ActiveSegments     []SegmentMeta    `json:"active_segments"`
+		Checkpoints        []CheckpointMeta `json:"checkpoints"`
+		FlushHighWaterMark uint64           `json:"flush_high_water_mark"`
+	}{
+		FormatVersion:      storageFormatVersion,
+		ActiveSegments:     manifest.ActiveSegments,
+		Checkpoints:        manifest.Checkpoints,
+		FlushHighWaterMark: manifest.FlushHighWaterMark,
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(rootDir, manifestFileName), legacyPayload, 0o600))
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	require.Equal(t, uint64(2), reopened.manifest.ActiveTail.BaseHighWaterMark)
+	require.Equal(t, uint64(2), reopened.manifest.ActiveTail.LastHighWaterMark)
+
+	newEvent := testReplayEvent("legacy-new", 3)
+	newEvent.Resource.UID = checkpointEvent.Resource.UID
+	newEvent.Resource.Name = checkpointEvent.Resource.Name
+	require.NoError(t, reopened.ProcessBatch(context.Background(), []models.Event{newEvent}))
+	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.LastHighWaterMark)
+}
+
 func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {
 	dir := t.TempDir()
 	rootDir := embeddedRootDir(dir)
@@ -134,6 +397,22 @@ func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {
 	require.ErrorContains(t, err, "boom")
 }
 
+func TestSegmentReplayCursor_KeepsFileOpenAcrossSequentialReads(t *testing.T) {
+	reader := writeReplayTestSegment(t)
+	cursor := newSegmentReplayCursor(replaySegmentReader{segmentID: "seg-1", reader: reader})
+
+	first, ok, err := cursor.next(context.Background())
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, os.Remove(reader.eventsPath))
+
+	second, ok, err := cursor.next(context.Background())
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotEqual(t, first.ID, second.ID)
+}
+
 func testReplayEvent(id string, timestamp int64) models.Event {
 	return models.Event{
 		ID:        id,
@@ -156,4 +435,75 @@ func eventIDsForUID(events []models.Event) []string {
 		ids = append(ids, events[i].ID)
 	}
 	return ids
+}
+
+func replayTestEventIDs(events []models.Event) []string {
+	ids := make([]string, 0, len(events))
+	for i := range events {
+		ids = append(ids, events[i].ID)
+	}
+	return ids
+}
+
+func seedStoreWithCheckpointAndTail(t *testing.T, dataDir string) models.Event {
+	t.Helper()
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	checkpointed := testReplayEvent("checkpointed", 1)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{checkpointed}))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	tailEvent := testReplayEvent("tail-overlap", 2)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{tailEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.tail.Close())
+
+	return tailEvent
+}
+
+func seedStoreWithCheckpointAndStaleTail(t *testing.T, dataDir string) (models.Event, models.Event) {
+	t.Helper()
+
+	rootDir := embeddedRootDir(dataDir)
+	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	checkpointEvent := testReplayEvent("repair-checkpointed", 1)
+	checkpointEvent.Resource.UID = "repair-shared"
+	checkpointEvent.Resource.Name = "repair-shared"
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{checkpointEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	repairEvent := testReplayEvent("repair-segment", 2)
+	repairEvent.Resource.UID = checkpointEvent.Resource.UID
+	repairEvent.Resource.Name = checkpointEvent.Resource.Name
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{repairEvent}))
+	require.NoError(t, engine.Flush(context.Background()))
+
+	staleManifest := engine.manifest
+	staleManifest.ActiveTail.LastHighWaterMark = staleManifest.ActiveCheckpoint.HighWaterMark
+	staleManifest.ActiveTail.EventCount = 0
+	staleManifest.ActiveTail.SizeBytes = 0
+	require.NoError(t, storeManifest(rootDir, staleManifest))
+	require.NoError(t, engine.tail.Close())
+
+	return checkpointEvent, repairEvent
+}
+
+func writeReplayTestSegment(t *testing.T) *segmentReader {
+	t.Helper()
+
+	rootDir := t.TempDir()
+	segment, err := writeSegment(rootDir, "seg-replay", []models.Event{
+		testReplayEvent("first", 10),
+		testReplayEvent("second", 20),
+	})
+	require.NoError(t, err)
+
+	reader, err := openSegmentReader(rootDir, segment)
+	require.NoError(t, err)
+	return reader
 }

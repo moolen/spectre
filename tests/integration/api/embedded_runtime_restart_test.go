@@ -43,6 +43,7 @@ func TestEmbeddedRuntimeRestartPersistsDataInDataDir(t *testing.T) {
 
 	server := newEmbeddedRuntimeServer(t, backend2)
 	response := queryEmbeddedTimeline(t, server, 0, 1000)
+	require.NotEmpty(t, response.Resources)
 	resource := findResource(response.Resources, "Pod", "restart-pod")
 	require.NotNil(t, resource)
 	require.True(t, backend2.IsReady())
@@ -94,6 +95,7 @@ func TestEmbeddedRuntimeRestartLoadsCheckpointWithColdSegments(t *testing.T) {
 	requireRuntimeReady(t, server, true)
 
 	response := queryEmbeddedTimeline(t, server, 0, 1000)
+	require.NotEmpty(t, response.Resources)
 	resource := findResource(response.Resources, "Pod", "checkpoint-pod")
 	require.NotNil(t, resource)
 	require.Len(t, resource.StatusSegments, 2)

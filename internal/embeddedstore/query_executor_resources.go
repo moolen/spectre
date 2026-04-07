@@ -27,23 +27,20 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 		return qe.executeEventQuery(ctx, startTimeNs, endTimeNs, query.Filters, pagination, pageSize, start)
 	}
 
-	filteredResources, stats, err := qe.collectFilteredResources(ctx, startTimeNs, endTimeNs, query.Filters)
+	filteredResources, paginationResp, stats, err := qe.collectPaginatedResources(ctx, startTimeNs, endTimeNs, query.Filters, pagination, pageSize)
 	if err != nil {
 		qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, err)
 		return nil, nil, err
 	}
 
-	startIdx := qe.cursorStartIndex(filteredResources, pagination)
-	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(filteredResources, startIdx, pageSize)
-
 	var resultEvents []models.Event
-	k8sEventsByResource, k8sEventStats, err := qe.collectK8sEventsForResources(ctx, filteredResources[startIdx:endIdx], startTimeNs, endTimeNs)
+	k8sEventsByResource, k8sEventStats, err := qe.collectK8sEventsForResources(ctx, filteredResources, startTimeNs, endTimeNs)
 	stats = stats.merge(k8sEventStats)
 	if err != nil {
 		qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, err)
 		return nil, nil, err
 	}
-	for _, resource := range filteredResources[startIdx:endIdx] {
+	for _, resource := range filteredResources {
 		resultEvents = append(resultEvents, resource.events...)
 	}
 
@@ -57,26 +54,27 @@ func (qe *QueryExecutor) ExecutePaginated(ctx context.Context, query *models.Que
 		K8sEventsByResource: k8sEventsByResource,
 	}
 
-	paginationResp := &models.PaginationResponse{
-		NextCursor: nextCursor,
-		HasMore:    hasMore,
-		PageSize:   pageSize,
-	}
-
 	qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, nil)
 	return queryResult, paginationResp, nil
 }
 
-func (qe *QueryExecutor) collectFilteredResources(
+func (qe *QueryExecutor) collectPaginatedResources(
 	ctx context.Context,
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
-) ([]filteredResource, queryPlanStats, error) {
-	orderedResources, metaByUID := qe.snapshotResourceMetadata()
-	filtered := make([]filteredResource, 0, len(orderedResources))
+	pagination *models.PaginationRequest,
+	pageSize int,
+) ([]filteredResource, *models.PaginationResponse, queryPlanStats, error) {
+	orderedResources, metaByUID, _, _ := qe.snapshotResourceMetadata()
+	filtered := make([]filteredResource, 0, pageSize)
 	stats := queryPlanStats{}
+	cursor := decodePaginationCursor(pagination)
 
 	for _, key := range orderedResources {
+		if cursor != nil && compareOrderedResourceKeyToCursor(key, cursor) <= 0 {
+			continue
+		}
+
 		meta, ok := metaByUID[key.uid]
 		if !ok {
 			continue
@@ -87,20 +85,42 @@ func (qe *QueryExecutor) collectFilteredResources(
 
 		resourceEvents, resourceStats, err := qe.resourceEvents(ctx, key.uid, meta, startTimeNs, endTimeNs)
 		if err != nil {
-			return nil, stats.merge(resourceStats), err
+			stats = stats.merge(resourceStats)
+			return nil, nil, stats, err
 		}
 		stats = stats.merge(resourceStats)
 		if len(resourceEvents) == 0 {
 			continue
 		}
 
-		filtered = append(filtered, filteredResource{
+		resource := filteredResource{
 			orderedResourceKey: key,
 			events:             resourceEvents,
-		})
+		}
+
+		if len(filtered) < pageSize {
+			filtered = append(filtered, resource)
+			continue
+		}
+
+		lastResource := filtered[len(filtered)-1]
+		lastCursor := models.NewResourceCursor(lastResource.kind, lastResource.namespace, lastResource.name)
+		if compareCursorKey(resource, lastCursor) == 0 {
+			filtered = append(filtered, resource)
+			continue
+		}
+
+		return filtered, &models.PaginationResponse{
+			NextCursor: lastCursor.Encode(),
+			HasMore:    true,
+			PageSize:   pageSize,
+		}, stats, nil
 	}
 
-	return filtered, stats, nil
+	return filtered, &models.PaginationResponse{
+		HasMore:  false,
+		PageSize: pageSize,
+	}, stats, nil
 }
 
 func (qe *QueryExecutor) collectResourceEvents(events []models.Event, startTimeNs, endTimeNs int64) []models.Event {

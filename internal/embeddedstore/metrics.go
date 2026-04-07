@@ -26,8 +26,12 @@ type Metrics struct {
 	IngestErrors   prometheus.Counter
 	IngestDuration prometheus.Histogram
 
-	HotEvents    prometheus.Gauge
-	HotEvictions *prometheus.CounterVec
+	StartupMode      *prometheus.GaugeVec
+	TailReplayEvents prometheus.Counter
+	HotEvents        prometheus.Gauge
+	HotEvictions     *prometheus.CounterVec
+	ActiveTailEvents prometheus.Gauge
+	ActiveTailBytes  prometheus.Gauge
 
 	FlushTotal    prometheus.Counter
 	FlushErrors   prometheus.Counter
@@ -76,6 +80,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Help:    "Time spent processing embedded ingest batches.",
 		Buckets: prometheus.DefBuckets,
 	})
+	startupMode := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "spectre_embedded_startup_mode",
+		Help: "Startup mode of the embedded engine by mode label.",
+	}, []string{"mode"})
+	tailReplayEvents := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "spectre_embedded_tail_replayed_events_total",
+		Help: "Total number of tail events replayed while opening the embedded engine.",
+	})
 	hotEvents := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "spectre_embedded_hot_events",
 		Help: "Current number of events retained in the embedded hot store.",
@@ -84,6 +96,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Name: "spectre_embedded_hot_evictions_total",
 		Help: "Total number of embedded hot-store evictions by scope.",
 	}, []string{"scope"})
+	activeTailEvents := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "spectre_embedded_active_tail_events",
+		Help: "Current number of events retained in the active embedded tail journal.",
+	})
+	activeTailBytes := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "spectre_embedded_active_tail_bytes",
+		Help: "Current size in bytes of the active embedded tail journal.",
+	})
 	flushTotal := prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "spectre_embedded_flush_total",
 		Help: "Total number of embedded flush operations.",
@@ -162,8 +182,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		ingestEvents,
 		ingestErrors,
 		ingestDuration,
+		startupMode,
+		tailReplayEvents,
 		hotEvents,
 		hotEvictions,
+		activeTailEvents,
+		activeTailBytes,
 		flushTotal,
 		flushErrors,
 		flushDuration,
@@ -183,15 +207,19 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		uidDiskLookups,
 	}
 	reg.MustRegister(collectors...)
-	initializeMetricsLabelSets(queryTotal, queryDuration, hotEvictions, segmentScans, hotScans, uidDiskLookups)
+	initializeMetricsLabelSets(startupMode, queryTotal, queryDuration, hotEvictions, segmentScans, hotScans, uidDiskLookups)
 
 	return &Metrics{
 		IngestBatches:      ingestBatches,
 		IngestEvents:       ingestEvents,
 		IngestErrors:       ingestErrors,
 		IngestDuration:     ingestDuration,
+		StartupMode:        startupMode,
+		TailReplayEvents:   tailReplayEvents,
 		HotEvents:          hotEvents,
 		HotEvictions:       hotEvictions,
+		ActiveTailEvents:   activeTailEvents,
+		ActiveTailBytes:    activeTailBytes,
 		FlushTotal:         flushTotal,
 		FlushErrors:        flushErrors,
 		FlushDuration:      flushDuration,
@@ -215,6 +243,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 }
 
 func initializeMetricsLabelSets(
+	startupMode *prometheus.GaugeVec,
 	queryTotal *prometheus.CounterVec,
 	queryDuration *prometheus.HistogramVec,
 	hotEvictions *prometheus.CounterVec,
@@ -222,6 +251,10 @@ func initializeMetricsLabelSets(
 	hotScans *prometheus.CounterVec,
 	uidDiskLookups *prometheus.CounterVec,
 ) {
+	for _, mode := range []string{"fast", "repair"} {
+		startupMode.WithLabelValues(mode)
+	}
+
 	queryFamilies := []string{queryFamilyResourceEvents, queryFamilyExportTimeRange, queryFamilyDistinctMeta}
 	storeMixes := []string{storeMixProjectionOnly, storeMixHotOnly, storeMixColdOnly, storeMixMixed}
 	results := []string{queryResultSuccess, queryResultError}
@@ -266,11 +299,39 @@ func (m *Metrics) RecordIngest(eventCount int, duration time.Duration, err error
 	m.IngestDuration.Observe(duration.Seconds())
 }
 
+func (m *Metrics) RecordStartupMode(mode string) {
+	if m == nil || m.StartupMode == nil {
+		return
+	}
+	for _, knownMode := range []string{"fast", "repair"} {
+		value := 0.0
+		if knownMode == mode {
+			value = 1
+		}
+		m.StartupMode.WithLabelValues(knownMode).Set(value)
+	}
+}
+
+func (m *Metrics) RecordTailReplay(eventCount int) {
+	if m == nil || eventCount <= 0 {
+		return
+	}
+	m.TailReplayEvents.Add(float64(eventCount))
+}
+
 func (m *Metrics) SetHotEvents(count int) {
 	if m == nil {
 		return
 	}
 	m.HotEvents.Set(float64(count))
+}
+
+func (m *Metrics) SetActiveTail(eventCount int, byteCount int64) {
+	if m == nil {
+		return
+	}
+	m.ActiveTailEvents.Set(float64(eventCount))
+	m.ActiveTailBytes.Set(float64(byteCount))
 }
 
 func (m *Metrics) RecordHotEvictions(scope string, count int) {
