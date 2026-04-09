@@ -64,6 +64,8 @@ func runEmbeddedServerRuntime(cfg *config.Config, mode serverRuntimeMode, manage
 func embeddedStoreConfig() embeddedstore.Config {
 	return embeddedstore.Config{
 		DataDir:                     dataDir,
+		FlushInterval:               embeddedFlushInterval,
+		EmbeddedRetentionDays:       embeddedRetentionDays,
 		CheckpointInterval:          embeddedCheckpointInterval,
 		CheckpointRetentionCount:    embeddedCheckpointRetentionCount,
 		CheckpointRetentionCountSet: embeddedCheckpointRetentionCountSet,
@@ -71,6 +73,9 @@ func embeddedStoreConfig() embeddedstore.Config {
 		CheckpointMaxTailBytes:      embeddedCheckpointMaxTailBytes,
 		CheckpointOnShutdown:        embeddedCheckpointOnShutdown,
 		CheckpointOnShutdownSet:     embeddedCheckpointOnShutdownSet,
+		SegmentTargetBytes:          embeddedSegmentTargetBytes,
+		CompactionMinSegments:       embeddedCompactionMinSegments,
+		DisableAutoCompaction:       !embeddedAutoCompaction,
 		MetricsRegisterer:           prometheus.DefaultRegisterer,
 		ProjectionHistoryFallback:   embeddedProjectionHistoryFallback,
 	}
@@ -231,7 +236,7 @@ func describeEmbeddedEngineConfig(cfg embeddedstore.EngineConfig) string {
 	}
 
 	return fmt.Sprintf(
-		"hot_max_events=%d hot_max_resource_versions=%d flush_interval=%s %s checkpoint_retention_count=%d checkpoint_max_tail_events=%d checkpoint_max_tail_bytes=%d checkpoint_on_shutdown=%t segment_target_bytes=%d compaction_min_segments=%d",
+		"hot_max_events=%d hot_max_resource_versions=%d flush_interval=%s %s checkpoint_retention_count=%d checkpoint_max_tail_events=%d checkpoint_max_tail_bytes=%d checkpoint_on_shutdown=%t segment_target_bytes=%d compaction_min_segments=%d auto_compaction=%t retention_days=%d",
 		cfg.HotMaxEvents,
 		cfg.HotMaxResourceVersions,
 		cfg.FlushInterval,
@@ -242,6 +247,8 @@ func describeEmbeddedEngineConfig(cfg embeddedstore.EngineConfig) string {
 		cfg.CheckpointOnShutdown,
 		cfg.SegmentTargetBytes,
 		cfg.CompactionMinSegments,
+		!cfg.DisableAutoCompaction,
+		cfg.EmbeddedRetentionDays,
 	)
 }
 

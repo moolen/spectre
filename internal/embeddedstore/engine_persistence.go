@@ -167,7 +167,8 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 		e.metrics.RecordCheckpoint(time.Since(start), err)
 	}()
 
-	meta, err := writeCheckpoint(e.rootDir, e.projection, e.nextHighWaterMark)
+	retentionCutoffTimestamp := embeddedRetentionCutoffTimestamp(e.config.EmbeddedRetentionDays, time.Now())
+	meta, err := writeCheckpointWithRetention(e.rootDir, e.projection, e.nextHighWaterMark, retentionCutoffTimestamp)
 	if err != nil {
 		return fmt.Errorf("checkpoint embedded engine: write checkpoint: %w", err)
 	}
@@ -201,11 +202,52 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 		}
 		e.manifest = updatedManifest
 	}
+	if err := e.applyRetentionLocked(ctx, retentionCutoffTimestamp); err != nil {
+		return fmt.Errorf("checkpoint embedded engine: apply retention: %w", err)
+	}
 	if err := e.pruneCheckpointHistoryLocked(); err != nil {
 		return fmt.Errorf("checkpoint embedded engine: prune checkpoint history: %w", err)
 	}
+	e.logStaleTailCleanupWarning(pruneStaleTailJournals(e.rootDir, e.manifest.ActiveTail.ID))
+	if e.shouldAutoCompactLocked() {
+		if compactErr := e.compactLocked(ctx); compactErr != nil {
+			e.logAutoFlushError("checkpoint-triggered compaction failed", compactErr)
+		}
+	}
 
 	e.setActiveTailMetricsLocked()
+	return nil
+}
+
+func (e *Engine) applyRetentionLocked(ctx context.Context, retentionCutoffTimestamp int64) error {
+	if e == nil || retentionCutoffTimestamp <= 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	updatedManifest, err := reconcileEmbeddedRetention(ctx, e.rootDir, e.manifest, retentionCutoffTimestamp, false)
+	if err != nil {
+		return err
+	}
+
+	readers, err := openActiveSegmentReaders(e.rootDir, updatedManifest.ActiveSegments)
+	if err != nil {
+		return fmt.Errorf("reopen retained segments: %w", err)
+	}
+
+	e.manifest = updatedManifest
+	e.segmentReaders = readers
+	e.hot = rebuildHotStoreWithRetention(e.hot, e.metrics, retentionCutoffTimestamp)
+	e.projection.ApplyRetentionCutoff(retentionCutoffTimestamp)
+	e.refreshQueryPlanner()
+	e.metrics.SetActiveSegments(len(e.segmentReaders))
+	if e.queryExec != nil {
+		e.queryExec.recentEventCacheMu.Lock()
+		e.queryExec.pruneRecentEventTimelineCacheLocked(retentionCutoffTimestamp)
+		e.queryExec.recentEventCacheMu.Unlock()
+	}
 	return nil
 }
 
@@ -296,4 +338,19 @@ func (e *Engine) shouldCheckpointTailLocked() bool {
 		return true
 	}
 	return false
+}
+
+func (e *Engine) logStaleTailCleanupWarning(err error) {
+	if e == nil || err == nil {
+		return
+	}
+	if e.logger == nil {
+		e.logger = logging.GetLogger("embedded.engine")
+	}
+
+	e.logger.WarnWithFields(
+		"embedded tail cleanup skipped after successful persistence",
+		logging.Field("active_tail_id", e.manifest.ActiveTail.ID),
+		logging.Field("error", err.Error()),
+	)
 }

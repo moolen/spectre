@@ -37,6 +37,17 @@ func TestConfig_EffectiveEngineConfigPreservesExplicitCheckpointRetentionOverrid
 	require.Equal(t, 0, engineCfg.CheckpointRetentionCount)
 }
 
+func TestConfig_EffectiveEngineConfigPreservesExplicitEmbeddedRetentionDisable(t *testing.T) {
+	cfg := Config{
+		DataDir:               t.TempDir(),
+		EmbeddedRetentionDays: 0,
+	}
+
+	engineCfg, err := cfg.EffectiveEngineConfig()
+	require.NoError(t, err)
+	require.Equal(t, 0, engineCfg.EmbeddedRetentionDays)
+}
+
 func TestConfig_EffectiveEngineConfigRejectsInvalidValues(t *testing.T) {
 	testCases := []struct {
 		name   string
@@ -79,6 +90,14 @@ func TestConfig_EffectiveEngineConfigRejectsInvalidValues(t *testing.T) {
 				CompactionMinSegments: 1,
 			},
 			substr: "compaction min segments must be at least 2",
+		},
+		{
+			name: "negative embedded retention days",
+			cfg: Config{
+				DataDir:               t.TempDir(),
+				EmbeddedRetentionDays: -1,
+			},
+			substr: "embedded retention days must be non-negative",
 		},
 	}
 

@@ -2,6 +2,7 @@ package embeddedstore
 
 import (
 	"sort"
+	"time"
 
 	"github.com/moolen/spectre/internal/models"
 )
@@ -86,17 +87,23 @@ func (p *Projection) recentWindowChangedUIDs(startTimeNs int64) (map[string]stru
 }
 
 func (p *Projection) recentWindowChangedUIDsLocked(startTimeNs int64) (map[string]struct{}, bool) {
-	if p == nil || p.maxTimestampNs <= 0 {
+	if p == nil || p.maxTimestampNs <= 0 || len(p.recentResourceChanges) == 0 {
 		return nil, false
 	}
-	retentionStart, retainRecentWindow := checkpointRetentionWindowStart(p.maxTimestampNs)
-	if !retainRecentWindow || startTimeNs < retentionStart {
-		return nil, false
+
+	if p.retentionWindowNs > 0 {
+		retentionStart := time.Now().UTC().Add(-time.Duration(p.retentionWindowNs)).UnixNano()
+		if startTimeNs < retentionStart {
+			return nil, false
+		}
 	}
 
 	idx := sort.Search(len(p.recentResourceChanges), func(i int) bool {
 		return p.recentResourceChanges[i].timestamp >= startTimeNs
 	})
+	if idx >= len(p.recentResourceChanges) {
+		return nil, false
+	}
 	changedUIDs := make(map[string]struct{})
 	for i := idx; i < len(p.recentResourceChanges); i++ {
 		changedUIDs[p.recentResourceChanges[i].uid] = struct{}{}

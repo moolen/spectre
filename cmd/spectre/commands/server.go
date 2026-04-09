@@ -27,6 +27,8 @@ var (
 	startupImportTimelineOnly           bool
 	embeddedMode                        bool
 	embeddedProjectionHistoryFallback   bool
+	embeddedFlushInterval               time.Duration
+	embeddedRetentionDays               int
 	embeddedCheckpointInterval          time.Duration
 	embeddedCheckpointRetentionCount    int
 	embeddedCheckpointRetentionCountSet bool
@@ -34,6 +36,9 @@ var (
 	embeddedCheckpointMaxTailBytes      int64
 	embeddedCheckpointOnShutdown        bool
 	embeddedCheckpointOnShutdownSet     bool
+	embeddedSegmentTargetBytes          int64
+	embeddedCompactionMinSegments       int
+	embeddedAutoCompaction              bool
 	dataDir                             string
 	pprofEnabled                        bool
 	pprofPort                           int
@@ -91,6 +96,18 @@ func init() {
 	serverCmd.Flags().BoolVar(&embeddedMode, "embedded", false, "Run with the persistent embedded backend instead of FalkorDB")
 	serverCmd.Flags().BoolVar(&embeddedProjectionHistoryFallback, "embedded-projection-history-fallback", false, "Temporarily enable projection history fallback in embedded mode (rollback switch)")
 	serverCmd.Flags().DurationVar(
+		&embeddedFlushInterval,
+		"embedded-flush-interval",
+		30*time.Second,
+		"Interval between embedded hot-store flushes into segment files",
+	)
+	serverCmd.Flags().IntVar(
+		&embeddedRetentionDays,
+		"embedded-retention-days",
+		0,
+		"Retention window in days for embedded raw events and checkpoint history; 0 disables time-based retention",
+	)
+	serverCmd.Flags().DurationVar(
 		&embeddedCheckpointInterval,
 		"embedded-checkpoint-interval",
 		15*time.Minute,
@@ -119,6 +136,24 @@ func init() {
 		"embedded-checkpoint-on-shutdown",
 		true,
 		"Write an embedded checkpoint during graceful shutdown",
+	)
+	serverCmd.Flags().Int64Var(
+		&embeddedSegmentTargetBytes,
+		"embedded-segment-target-bytes",
+		16<<20,
+		"Approximate embedded segment size target in bytes for size-triggered flushes",
+	)
+	serverCmd.Flags().IntVar(
+		&embeddedCompactionMinSegments,
+		"embedded-compaction-min-segments",
+		4,
+		"Minimum embedded segment count required before compaction runs",
+	)
+	serverCmd.Flags().BoolVar(
+		&embeddedAutoCompaction,
+		"embedded-auto-compaction",
+		true,
+		"Enable automatic embedded compaction after successful checkpoints",
 	)
 	serverCmd.Flags().StringVar(&dataDir, "data-dir", "./data", "Directory for embedded persistent state")
 	serverCmd.Flags().BoolVar(&pprofEnabled, "pprof-enabled", false, "Enable pprof profiling server (default: false)")

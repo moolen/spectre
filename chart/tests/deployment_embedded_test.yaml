@@ -168,3 +168,41 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--embedded-checkpoint-on-shutdown=false"
+
+  - it: should pass embedded flush and segment tuning when configured
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        flushInterval: 2m
+        segmentTargetBytes: 33554432
+        compactionMinSegments: 8
+        autoCompaction: false
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-flush-interval=2m"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-segment-target-bytes=33554432"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-compaction-min-segments=8"
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-auto-compaction=false"
+
+  - it: should pass embedded retention days when configured
+    set:
+      embedded:
+        enabled: true
+        dataDir: /var/lib/spectre-data
+        retentionDays: 14
+      graph:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: "--embedded-retention-days=14"

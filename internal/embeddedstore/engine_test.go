@@ -270,6 +270,56 @@ func TestEngine_AnalysisReadsSurviveFlushCheckpointRestart(t *testing.T) {
 	require.NotEmpty(t, changeEvents["pod-1"])
 }
 
+func TestEngine_OpenAppliesEmbeddedRetentionAndPreservesCurrentResourceState(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	oldTimestamp := now.Add(-48 * time.Hour).UnixNano()
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		{
+			ID:        "pod-old-create",
+			Timestamp: oldTimestamp,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				UID:       "pod-old",
+				Namespace: "default",
+				Kind:      "Pod",
+				Name:      "pod-old",
+			},
+			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-old","namespace":"default","uid":"pod-old"}}`),
+		},
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.NoError(t, engine.Close())
+
+	reopened, err := OpenEngine(EngineConfig{
+		DataDir:                dir,
+		HotMaxEvents:           100,
+		HotMaxResourceVersions: 4,
+		EmbeddedRetentionDays:  1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	exported, err := reopened.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{
+		StartTimestamp: time.Unix(0, oldTimestamp).Add(-time.Hour).Unix(),
+		EndTimestamp:   now.Unix(),
+	})
+	require.NoError(t, err)
+	require.Empty(t, exported)
+
+	resource, err := reopened.AnalysisStore().GetResource(context.Background(), "pod-old")
+	require.NoError(t, err)
+	require.NotNil(t, resource)
+	require.Equal(t, "pod-old", resource.UID)
+}
+
 func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *testing.T) {
 	dir := t.TempDir()
 
@@ -790,6 +840,55 @@ func TestEngine_ProcessBatchCancellationAfterTailAppendDoesNotWedgeIngest(t *tes
 	require.Equal(t, uint64(2), engine.tail.meta.LastHighWaterMark)
 }
 
+func TestEngine_CheckpointRemovesStaleTailDirectories(t *testing.T) {
+	dir := t.TempDir()
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeReplayHeavyEventsFrom(1, 1)))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	tailDirs, err := tailJournalDirs(engine.rootDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{engine.manifest.ActiveTail.ID}, tailDirs)
+}
+
+func TestEngine_OpenRemovesOrphanedTailDirectories(t *testing.T) {
+	dir := t.TempDir()
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+
+	activeTailID := engine.manifest.ActiveTail.ID
+	require.NoError(t, engine.Close())
+
+	orphanedTail, err := openTailJournal(embeddedRootDir(dir), TailJournalMeta{
+		BaseHighWaterMark: 999,
+		LastHighWaterMark: 999,
+	})
+	require.NoError(t, err)
+	orphanedTailID := orphanedTail.meta.ID
+	require.NoError(t, orphanedTail.Close())
+
+	tailDirs, err := tailJournalDirs(embeddedRootDir(dir))
+	require.NoError(t, err)
+	require.Contains(t, tailDirs, orphanedTailID)
+	require.Contains(t, tailDirs, activeTailID)
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	tailDirs, err = tailJournalDirs(reopened.rootDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{reopened.manifest.ActiveTail.ID}, tailDirs)
+	require.NotEqual(t, orphanedTailID, reopened.manifest.ActiveTail.ID)
+}
+
 func newFlushedTestEngine(t *testing.T, events []models.Event) *Engine {
 	t.Helper()
 
@@ -828,6 +927,21 @@ func makeReplayHeavyEventsFrom(start, count int) []models.Event {
 		})
 	}
 	return events
+}
+
+func tailJournalDirs(rootDir string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(rootDir, tailDirName))
+	if err != nil {
+		return nil, err
+	}
+
+	dirs := make([]string, 0, len(entries))
+	for i := range entries {
+		if entries[i].IsDir() {
+			dirs = append(dirs, entries[i].Name())
+		}
+	}
+	return dirs, nil
 }
 
 type cancelAfterNErrChecksContext struct {

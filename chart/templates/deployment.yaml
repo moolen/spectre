@@ -115,6 +115,8 @@ spec:
         {{- if .Values.embedded.enabled }}
         - --embedded
         - --data-dir={{ .Values.embedded.dataDir }}
+        - --embedded-flush-interval={{ .Values.embedded.flushInterval }}
+        - --embedded-retention-days={{ .Values.embedded.retentionDays }}
         {{- if .Values.embedded.checkpointInterval }}
         - --embedded-checkpoint-interval={{ .Values.embedded.checkpointInterval }}
         {{- end }}
@@ -126,6 +128,9 @@ spec:
         - --embedded-checkpoint-max-tail-bytes={{ int64 .Values.embedded.checkpointMaxTailBytes }}
         {{- end }}
         - --embedded-checkpoint-on-shutdown={{ .Values.embedded.checkpointOnShutdown }}
+        - --embedded-segment-target-bytes={{ int64 .Values.embedded.segmentTargetBytes }}
+        - --embedded-compaction-min-segments={{ .Values.embedded.compactionMinSegments }}
+        - --embedded-auto-compaction={{ .Values.embedded.autoCompaction }}
         {{- end }}
         {{- if and .Values.graph.enabled (not .Values.embedded.enabled) }}
         - --graph-enabled=true

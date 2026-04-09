@@ -55,6 +55,13 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open embedded engine: load manifest: %w", err)
 	}
+	retentionCutoffTimestamp := embeddedRetentionCutoffTimestamp(cfg.EmbeddedRetentionDays, time.Now())
+	if retentionCutoffTimestamp > 0 {
+		manifest, err = reconcileEmbeddedRetention(context.Background(), rootDir, manifest, retentionCutoffTimestamp, true)
+		if err != nil {
+			return nil, fmt.Errorf("open embedded engine: apply retention: %w", err)
+		}
+	}
 	needsSegmentIndexMigration := manifest.SegmentIndexGeneration < associatedIndexGeneration && len(manifest.ActiveSegments) > 0
 
 	readers, tail, recoveredHighWaterMark, projection, recoveredHot, mode, replayedTailEvents, err := loadEngineState(rootDir, manifest)
@@ -65,14 +72,18 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	if projection == nil {
 		projection = NewProjection()
 	}
+	projection.SetRetentionWindowDays(cfg.EmbeddedRetentionDays)
 	if cfg.ProjectionHistoryFallback {
 		projection.EnableHistoricalEventRetention()
+	}
+	if retentionCutoffTimestamp > 0 {
+		projection.ApplyRetentionCutoff(retentionCutoffTimestamp)
 	}
 
 	metrics := NewMetrics(cfg.MetricsRegisterer)
 	hot := newHotStore(HotStoreConfig{MaxEvents: cfg.HotMaxEvents, MaxResourceVersions: cfg.HotMaxResourceVersions}, metrics)
 	if recoveredHot != nil {
-		hot.Append(recoveredHot.ExtractFlushBatch(0).Events)
+		hot.Append(filterEventsByTimestamp(recoveredHot.ExtractFlushBatch(0).Events, retentionCutoffTimestamp))
 	}
 
 	nextHighWaterMark := maxUint64(manifest.FlushHighWaterMark, maxSegmentHighWaterMark(manifest.ActiveSegments), recoveredHighWaterMark)
@@ -150,6 +161,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	engine.metrics.RecordTailReplay(replayedTailEvents)
 	engine.metrics.SetActiveSegments(len(engine.segmentReaders))
 	engine.setActiveTailMetrics()
+	engine.logStaleTailCleanupWarning(pruneStaleTailJournals(engine.rootDir, engine.manifest.ActiveTail.ID))
 	engine.logStartup(mode, replayedTailEvents)
 	engine.ready.Store(true)
 	engine.startBackgroundRecentEventTimelineCacheSeed()

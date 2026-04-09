@@ -27,6 +27,10 @@ func (e *Engine) Compact(ctx context.Context) error {
 		return nil
 	}
 
+	return e.compactLocked(ctx)
+}
+
+func (e *Engine) compactLocked(ctx context.Context) error {
 	minSegments := e.config.CompactionMinSegments
 	if minSegments < 2 {
 		minSegments = 2
@@ -35,6 +39,7 @@ func (e *Engine) Compact(ctx context.Context) error {
 		return nil
 	}
 	start := time.Now()
+	retentionCutoffTimestamp := embeddedRetentionCutoffTimestamp(e.config.EmbeddedRetentionDays, start)
 
 	mergedEvents := make([]models.Event, 0)
 	oldSegmentIDs := make([]string, 0, len(e.segmentReaders))
@@ -52,7 +57,11 @@ func (e *Engine) Compact(ctx context.Context) error {
 		if meta.EventCount == 0 {
 			continue
 		}
-		events, err := reader.ScanTimeRange(ctx, meta.MinTimestamp, meta.MaxTimestamp)
+		startTimestamp := meta.MinTimestamp
+		if retentionCutoffTimestamp > startTimestamp {
+			startTimestamp = retentionCutoffTimestamp
+		}
+		events, err := reader.ScanTimeRange(ctx, startTimestamp, meta.MaxTimestamp)
 		if err != nil {
 			e.metrics.RecordCompaction(time.Since(start), err)
 			return fmt.Errorf("compact embedded engine: scan segment %q: %w", meta.ID, err)
@@ -60,6 +69,32 @@ func (e *Engine) Compact(ctx context.Context) error {
 		mergedEvents = append(mergedEvents, events...)
 	}
 	if len(oldSegmentIDs) < minSegments {
+		return nil
+	}
+	if len(mergedEvents) == 0 {
+		updatedManifest := e.manifest
+		updatedManifest.ActiveSegments = nil
+		if err := storeManifest(e.rootDir, updatedManifest); err != nil {
+			e.metrics.RecordCompaction(time.Since(start), err)
+			return fmt.Errorf("compact embedded engine: store empty manifest: %w", err)
+		}
+		e.manifest = updatedManifest
+		e.segmentReaders = nil
+		e.refreshQueryPlanner()
+		e.metrics.SetActiveSegments(0)
+
+		segmentsRoot := filepath.Join(e.rootDir, segmentsDirName)
+		for i := range oldSegmentIDs {
+			if err := os.RemoveAll(filepath.Join(segmentsRoot, oldSegmentIDs[i])); err != nil {
+				e.metrics.RecordCompaction(time.Since(start), err)
+				return fmt.Errorf("compact embedded engine: remove old segment %q: %w", oldSegmentIDs[i], err)
+			}
+		}
+		if err := syncPath(segmentsRoot); err != nil {
+			e.metrics.RecordCompaction(time.Since(start), err)
+			return fmt.Errorf("compact embedded engine: sync segments dir: %w", err)
+		}
+		e.metrics.RecordCompaction(time.Since(start), nil)
 		return nil
 	}
 
@@ -106,4 +141,16 @@ func (e *Engine) Compact(ctx context.Context) error {
 	}
 	e.metrics.RecordCompaction(time.Since(start), nil)
 	return nil
+}
+
+func (e *Engine) shouldAutoCompactLocked() bool {
+	if e == nil || e.config.DisableAutoCompaction {
+		return false
+	}
+
+	minSegments := e.config.CompactionMinSegments
+	if minSegments < 2 {
+		minSegments = 2
+	}
+	return len(e.manifest.ActiveSegments) >= minSegments
 }

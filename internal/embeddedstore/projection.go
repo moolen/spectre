@@ -45,6 +45,7 @@ type Projection struct {
 	mu sync.RWMutex
 
 	retainHistoricalEventArrays bool
+	retentionWindowNs           int64
 
 	// Legacy history fields are kept only for compatibility with older helpers/tests.
 	// Compact projection state should leave them empty after build/import/apply.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/models"
@@ -335,11 +336,13 @@ func TestCheckpoint_RoundTripCompactsRedundantResourceVersionsWhilePreservingHis
 	}, checkpointEventIDs(exported))
 }
 
-func TestCheckpoint_RoundTripRetainsRecentAnalysisWindowWhileServingFullHistory(t *testing.T) {
+func TestCheckpoint_RoundTripRetainsRecentAnalysisWindow(t *testing.T) {
+	now := time.Now().UTC()
 	engine, err := OpenEngine(EngineConfig{
 		DataDir:                t.TempDir(),
 		HotMaxEvents:           128,
 		HotMaxResourceVersions: 32,
+		EmbeddedRetentionDays:  1,
 	})
 	require.NoError(t, err)
 
@@ -352,10 +355,10 @@ func TestCheckpoint_RoundTripRetainsRecentAnalysisWindowWhileServingFullHistory(
 	}
 
 	timestamps := []int64{
-		1,
-		maxLookbackNs / 2,
-		maxLookbackNs + 1,
-		(2 * maxLookbackNs) + 1,
+		now.Add(-36 * time.Hour).UnixNano(),
+		now.Add(-12 * time.Hour).UnixNano(),
+		now.Add(-6 * time.Hour).UnixNano(),
+		now.Add(-1 * time.Hour).UnixNano(),
 	}
 
 	events := make([]models.Event, 0, len(timestamps))
@@ -381,6 +384,7 @@ func TestCheckpoint_RoundTripRetainsRecentAnalysisWindowWhileServingFullHistory(
 		DataDir:                engine.config.DataDir,
 		HotMaxEvents:           128,
 		HotMaxResourceVersions: 32,
+		EmbeddedRetentionDays:  1,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -389,8 +393,9 @@ func TestCheckpoint_RoundTripRetainsRecentAnalysisWindowWhileServingFullHistory(
 
 	record := reopened.projection.resourcesByUID["pod-1"]
 	require.NotNil(t, record)
-	require.Len(t, record.versions, 3)
+	require.Len(t, record.versions, 4)
 	require.Equal(t, []string{
+		checkpointEventID("pod-window", 0),
 		checkpointEventID("pod-window", 1),
 		checkpointEventID("pod-window", 2),
 		checkpointEventID("pod-window", 3),
@@ -398,19 +403,67 @@ func TestCheckpoint_RoundTripRetainsRecentAnalysisWindowWhileServingFullHistory(
 		record.versions[0].eventID,
 		record.versions[1].eventID,
 		record.versions[2].eventID,
+		record.versions[3].eventID,
 	})
+}
 
-	exported, err := reopened.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{
-		StartTimestamp: 0,
-		EndTimestamp:   (3 * maxLookbackNs) / 1e9,
+func TestCheckpoint_RetentionDisabledKeepsFullAnalysisHistory(t *testing.T) {
+	now := time.Now().UTC()
+	timestamps := []int64{
+		now.Add(-72 * time.Hour).UnixNano(),
+		now.Add(-36 * time.Hour).UnixNano(),
+		now.Add(-12 * time.Hour).UnixNano(),
+	}
+
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                t.TempDir(),
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 32,
+		EmbeddedRetentionDays:  0,
 	})
 	require.NoError(t, err)
-	require.Equal(t, []string{
-		checkpointEventID("pod-window", 0),
-		checkpointEventID("pod-window", 1),
-		checkpointEventID("pod-window", 2),
-		checkpointEventID("pod-window", 3),
-	}, checkpointEventIDs(exported))
+
+	pod := models.ResourceMetadata{
+		Version:   "v1",
+		Kind:      "Pod",
+		Namespace: "default",
+		Name:      "pod-history",
+		UID:       "pod-history",
+	}
+
+	events := make([]models.Event, 0, len(timestamps))
+	for i := range timestamps {
+		events = append(events, models.Event{
+			ID:        checkpointEventID("pod-history", i),
+			Timestamp: timestamps[i],
+			Type:      models.EventTypeUpdate,
+			Resource:  pod,
+			Data: []byte(fmt.Sprintf(
+				`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-history","namespace":"default","uid":"pod-history"},"spec":{"containers":[{"name":"app","image":"nginx:%d"}]}}`,
+				i,
+			)),
+		})
+	}
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), events))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.NoError(t, engine.Close())
+
+	reopened, err := OpenEngine(EngineConfig{
+		DataDir:                engine.config.DataDir,
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 32,
+		EmbeddedRetentionDays:  0,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopened.Close())
+	})
+
+	record := reopened.projection.resourcesByUID["pod-history"]
+	require.NotNil(t, record)
+	require.Len(t, record.versions, 3)
 }
 
 func checkpointEventID(prefix string, idx int) string {

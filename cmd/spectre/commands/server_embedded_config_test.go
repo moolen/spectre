@@ -19,9 +19,10 @@ func TestDescribeEmbeddedEngineConfig_ExplicitCheckpointMode(t *testing.T) {
 		CheckpointOnShutdown:     true,
 		SegmentTargetBytes:       16 << 20,
 		CompactionMinSegments:    4,
+		EmbeddedRetentionDays:    0,
 	})
 
-	expected := "hot_max_events=50000 hot_max_resource_versions=32 flush_interval=30s checkpoint_strategy=explicit+shutdown checkpoint_retention_count=3 checkpoint_max_tail_events=2048 checkpoint_max_tail_bytes=16777216 checkpoint_on_shutdown=true segment_target_bytes=16777216 compaction_min_segments=4"
+	expected := "hot_max_events=50000 hot_max_resource_versions=32 flush_interval=30s checkpoint_strategy=explicit+shutdown checkpoint_retention_count=3 checkpoint_max_tail_events=2048 checkpoint_max_tail_bytes=16777216 checkpoint_on_shutdown=true segment_target_bytes=16777216 compaction_min_segments=4 auto_compaction=true retention_days=0"
 	if description != expected {
 		t.Fatalf("unexpected description:\nwant: %s\ngot:  %s", expected, description)
 	}
@@ -39,9 +40,11 @@ func TestDescribeEmbeddedEngineConfig_PeriodicCheckpointMode(t *testing.T) {
 		CheckpointOnShutdown:     false,
 		SegmentTargetBytes:       1024,
 		CompactionMinSegments:    3,
+		DisableAutoCompaction:    true,
+		EmbeddedRetentionDays:    7,
 	})
 
-	expected := "hot_max_events=100 hot_max_resource_versions=8 flush_interval=15s checkpoint_interval=2m0s checkpoint_retention_count=5 checkpoint_max_tail_events=128 checkpoint_max_tail_bytes=4096 checkpoint_on_shutdown=false segment_target_bytes=1024 compaction_min_segments=3"
+	expected := "hot_max_events=100 hot_max_resource_versions=8 flush_interval=15s checkpoint_interval=2m0s checkpoint_retention_count=5 checkpoint_max_tail_events=128 checkpoint_max_tail_bytes=4096 checkpoint_on_shutdown=false segment_target_bytes=1024 compaction_min_segments=3 auto_compaction=false retention_days=7"
 	if description != expected {
 		t.Fatalf("unexpected description:\nwant: %s\ngot:  %s", expected, description)
 	}
@@ -202,5 +205,80 @@ func TestEmbeddedStoreConfigMarksCheckpointOnShutdownAsExplicitWhenSetTrue(t *te
 	}
 	if !cfg.CheckpointOnShutdownSet {
 		t.Fatal("expected checkpoint on shutdown override to be marked as explicitly set")
+	}
+}
+
+func TestEmbeddedStoreConfigIncludesFlushAndSegmentOverrides(t *testing.T) {
+	previousFlushInterval := embeddedFlushInterval
+	previousSegmentTargetBytes := embeddedSegmentTargetBytes
+	previousCompactionMinSegments := embeddedCompactionMinSegments
+	previousAutoCompaction := embeddedAutoCompaction
+	previousEmbeddedRetentionDays := embeddedRetentionDays
+	flushIntervalFlag := serverCmd.Flags().Lookup("embedded-flush-interval")
+	if flushIntervalFlag == nil {
+		t.Fatal("embedded-flush-interval flag not found")
+	}
+	previousFlushIntervalFlagValue := flushIntervalFlag.Value.String()
+	segmentTargetBytesFlag := serverCmd.Flags().Lookup("embedded-segment-target-bytes")
+	if segmentTargetBytesFlag == nil {
+		t.Fatal("embedded-segment-target-bytes flag not found")
+	}
+	previousSegmentTargetBytesFlagValue := segmentTargetBytesFlag.Value.String()
+	compactionMinSegmentsFlag := serverCmd.Flags().Lookup("embedded-compaction-min-segments")
+	if compactionMinSegmentsFlag == nil {
+		t.Fatal("embedded-compaction-min-segments flag not found")
+	}
+	previousCompactionMinSegmentsFlagValue := compactionMinSegmentsFlag.Value.String()
+	autoCompactionFlag := serverCmd.Flags().Lookup("embedded-auto-compaction")
+	if autoCompactionFlag == nil {
+		t.Fatal("embedded-auto-compaction flag not found")
+	}
+	previousAutoCompactionFlagValue := autoCompactionFlag.Value.String()
+	retentionDaysFlag := serverCmd.Flags().Lookup("embedded-retention-days")
+	if retentionDaysFlag == nil {
+		t.Fatal("embedded-retention-days flag not found")
+	}
+	previousRetentionDaysFlagValue := retentionDaysFlag.Value.String()
+	t.Cleanup(func() {
+		embeddedFlushInterval = previousFlushInterval
+		embeddedSegmentTargetBytes = previousSegmentTargetBytes
+		embeddedCompactionMinSegments = previousCompactionMinSegments
+		embeddedAutoCompaction = previousAutoCompaction
+		embeddedRetentionDays = previousEmbeddedRetentionDays
+		requireNoError(t, serverCmd.Flags().Set("embedded-flush-interval", previousFlushIntervalFlagValue))
+		requireNoError(t, serverCmd.Flags().Set("embedded-segment-target-bytes", previousSegmentTargetBytesFlagValue))
+		requireNoError(t, serverCmd.Flags().Set("embedded-compaction-min-segments", previousCompactionMinSegmentsFlagValue))
+		requireNoError(t, serverCmd.Flags().Set("embedded-auto-compaction", previousAutoCompactionFlagValue))
+		requireNoError(t, serverCmd.Flags().Set("embedded-retention-days", previousRetentionDaysFlagValue))
+	})
+
+	requireNoError(t, serverCmd.Flags().Set("embedded-flush-interval", "2m"))
+	requireNoError(t, serverCmd.Flags().Set("embedded-segment-target-bytes", "33554432"))
+	requireNoError(t, serverCmd.Flags().Set("embedded-compaction-min-segments", "8"))
+	requireNoError(t, serverCmd.Flags().Set("embedded-auto-compaction", "false"))
+	requireNoError(t, serverCmd.Flags().Set("embedded-retention-days", "14"))
+
+	cfg := embeddedStoreConfig()
+	if cfg.FlushInterval != 2*time.Minute {
+		t.Fatalf("expected flush interval 2m, got %s", cfg.FlushInterval)
+	}
+	if cfg.SegmentTargetBytes != 33554432 {
+		t.Fatalf("expected segment target bytes 33554432, got %d", cfg.SegmentTargetBytes)
+	}
+	if cfg.CompactionMinSegments != 8 {
+		t.Fatalf("expected compaction min segments 8, got %d", cfg.CompactionMinSegments)
+	}
+	if !cfg.DisableAutoCompaction {
+		t.Fatal("expected auto compaction to be disabled when flag is false")
+	}
+	if cfg.EmbeddedRetentionDays != 14 {
+		t.Fatalf("expected embedded retention days 14, got %d", cfg.EmbeddedRetentionDays)
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }

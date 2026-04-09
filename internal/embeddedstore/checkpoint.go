@@ -60,6 +60,15 @@ func (s checkpointState) MarshalJSON() ([]byte, error) {
 }
 
 func writeCheckpoint(rootDir string, projection *Projection, highWaterMark uint64) (CheckpointMeta, error) {
+	return writeCheckpointWithRetention(rootDir, projection, highWaterMark, 0)
+}
+
+func writeCheckpointWithRetention(
+	rootDir string,
+	projection *Projection,
+	highWaterMark uint64,
+	retentionCutoffTimestamp int64,
+) (CheckpointMeta, error) {
 	if rootDir == "" {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: root dir is empty")
 	}
@@ -101,10 +110,13 @@ func writeCheckpoint(rootDir string, projection *Projection, highWaterMark uint6
 	if err := writeJSONFile(filepath.Join(tmpCheckpointDir, checkpointStateFile), state); err != nil {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: state file: %w", err)
 	}
-	if err := writeCheckpointResourcesGob(filepath.Join(tmpCheckpointDir, checkpointResourcesFile), projection); err != nil {
+	if err := writeCheckpointResourcesGob(filepath.Join(tmpCheckpointDir, checkpointResourcesFile), projection, retentionCutoffTimestamp); err != nil {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: resources stream: %w", err)
 	}
-	if err := writeCheckpointK8sEventsGob(filepath.Join(tmpCheckpointDir, checkpointK8sEventsFile), projection.CheckpointK8sEvents()); err != nil {
+	if err := writeCheckpointK8sEventsGob(
+		filepath.Join(tmpCheckpointDir, checkpointK8sEventsFile),
+		projection.CheckpointK8sEventsWithRetention(retentionCutoffTimestamp),
+	); err != nil {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: k8s events file: %w", err)
 	}
 	if err := syncPath(tmpCheckpointDir); err != nil {
@@ -179,7 +191,7 @@ func newCheckpointID(highWaterMark uint64) string {
 	return fmt.Sprintf("chk-%020d-%d", highWaterMark, time.Now().UTC().UnixNano())
 }
 
-func writeCheckpointResourcesGob(path string, projection *Projection) error {
+func writeCheckpointResourcesGob(path string, projection *Projection, retentionCutoffTimestamp int64) error {
 	file, encoder, err := openCompressedCheckpointWriter(path)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
@@ -194,7 +206,7 @@ func writeCheckpointResourcesGob(path string, projection *Projection) error {
 	}()
 
 	gobEncoder := gob.NewEncoder(encoder)
-	if err := projection.StreamCheckpointResources(func(snapshot ProjectionResourceSnapshot) error {
+	if err := projection.StreamCheckpointResourcesWithRetention(retentionCutoffTimestamp, func(snapshot ProjectionResourceSnapshot) error {
 		return gobEncoder.Encode(&snapshot)
 	}); err != nil {
 		return fmt.Errorf("encode resources: %w", err)

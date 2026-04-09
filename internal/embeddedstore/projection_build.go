@@ -2,6 +2,7 @@ package embeddedstore
 
 import (
 	"sort"
+	"time"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/models"
@@ -61,7 +62,7 @@ func (p *Projection) finalizeReplayBuild() {
 		clear(p.eventsByResourceUID)
 		clear(p.k8sRawEventsByInvolvedUID)
 	}
-	p.pruneRecentResourceChanges()
+	p.pruneRecentResourceChangesLocked()
 }
 
 func (p *Projection) Apply(event models.Event) error {
@@ -94,7 +95,7 @@ func (p *Projection) Apply(event models.Event) error {
 	}
 	p.resourceMetaByUID[uid] = latestResourceMeta(history)
 	p.updateTimestampBounds(cloned.Timestamp)
-	p.pruneRecentResourceChanges()
+	p.pruneRecentResourceChangesLocked()
 
 	return nil
 }
@@ -147,7 +148,7 @@ func (p *Projection) ApplyReplayEvent(event models.Event) error {
 
 	p.resourceMetaByUID[uid] = cloned.Resource
 	p.updateTimestampBounds(cloned.Timestamp)
-	p.pruneRecentResourceChanges()
+	p.pruneRecentResourceChangesLocked()
 
 	return nil
 }
@@ -197,7 +198,7 @@ func (p *Projection) applyEventToIndexes(event models.Event) {
 	}
 	p.resourceMetaByUID[uid] = event.Resource
 	p.updateTimestampBounds(event.Timestamp)
-	p.pruneRecentResourceChanges()
+	p.pruneRecentResourceChangesLocked()
 }
 
 func (p *Projection) applyK8sEvent(event models.Event) {
@@ -288,11 +289,19 @@ func (p *Projection) appendRecentResourceChange(uid string, timestamp int64) {
 }
 
 func (p *Projection) pruneRecentResourceChanges() {
+	p.pruneRecentResourceChangesLocked()
+}
+
+func (p *Projection) pruneRecentResourceChangesLocked() {
 	if p == nil || len(p.recentResourceChanges) == 0 || p.maxTimestampNs <= 0 {
 		return
 	}
 
-	cutoff := p.maxTimestampNs - maxLookbackNs
+	if p.retentionWindowNs <= 0 {
+		return
+	}
+
+	cutoff := time.Now().UTC().Add(-time.Duration(p.retentionWindowNs)).UnixNano()
 	if cutoff <= 0 {
 		return
 	}

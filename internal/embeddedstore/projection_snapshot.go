@@ -31,7 +31,7 @@ func (p *Projection) ExportSnapshot() ProjectionSnapshot {
 		if record == nil {
 			continue
 		}
-		resources = append(resources, snapshotResourceRecord(record, p.maxTimestampNs))
+		resources = append(resources, snapshotResourceRecord(record, 0))
 	}
 
 	return ProjectionSnapshot{
@@ -43,6 +43,13 @@ func (p *Projection) ExportSnapshot() ProjectionSnapshot {
 }
 
 func (p *Projection) StreamCheckpointResources(emit func(ProjectionResourceSnapshot) error) error {
+	return p.StreamCheckpointResourcesWithRetention(0, emit)
+}
+
+func (p *Projection) StreamCheckpointResourcesWithRetention(
+	retentionCutoffTimestamp int64,
+	emit func(ProjectionResourceSnapshot) error,
+) error {
 	if emit == nil {
 		return fmt.Errorf("stream checkpoint resources: emit func is nil")
 	}
@@ -63,7 +70,11 @@ func (p *Projection) StreamCheckpointResources(emit func(ProjectionResourceSnaps
 			p.mu.RUnlock()
 			continue
 		}
-		snapshot := snapshotResourceRecord(record, checkpointMaxTimestamp)
+		retentionCutoff := retentionCutoffTimestamp
+		if retentionCutoff <= 0 {
+			retentionCutoff = checkpointRetentionCutoffTimestamp(checkpointMaxTimestamp, p.retentionWindowLocked())
+		}
+		snapshot := snapshotResourceRecord(record, retentionCutoff)
 		p.mu.RUnlock()
 		if err := emit(snapshot); err != nil {
 			return fmt.Errorf("stream checkpoint resources: emit %q: %w", uid, err)
@@ -85,9 +96,16 @@ func (p *Projection) CheckpointState(highWaterMark uint64) checkpointState {
 }
 
 func (p *Projection) CheckpointK8sEvents() map[string][]analysisstore.K8sEventInfo {
+	return p.CheckpointK8sEventsWithRetention(0)
+}
+
+func (p *Projection) CheckpointK8sEventsWithRetention(retentionCutoffTimestamp int64) map[string][]analysisstore.K8sEventInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return cloneK8sEventsByUID(p.k8sEventsByInvolvedUID)
+	if retentionCutoffTimestamp <= 0 {
+		retentionCutoffTimestamp = checkpointRetentionCutoffTimestamp(p.maxTimestampNs, p.retentionWindowLocked())
+	}
+	return filterK8sEventInfosByTimestamp(p.k8sEventsByInvolvedUID, retentionCutoffTimestamp)
 }
 
 func ProjectionFromSnapshot(snapshot ProjectionSnapshot) (*Projection, error) {
@@ -190,6 +208,7 @@ func (p *Projection) ImportSnapshot(snapshot ProjectionSnapshot) error {
 
 func (p *Projection) replaceStateLocked(other *Projection) {
 	retainHistoricalEventArrays := p.retainHistoricalEventArrays
+	retentionWindowNs := p.retentionWindowNs
 	p.events = other.events
 	p.eventsByResourceUID = other.eventsByResourceUID
 	p.resourceMetaByUID = other.resourceMetaByUID
@@ -204,6 +223,7 @@ func (p *Projection) replaceStateLocked(other *Projection) {
 	p.minTimestampNs = other.minTimestampNs
 	p.maxTimestampNs = other.maxTimestampNs
 	p.retainHistoricalEventArrays = retainHistoricalEventArrays || other.retainHistoricalEventArrays
+	p.retentionWindowNs = retentionWindowNs
 }
 
 func (p *Projection) snapshotEventsLocked() []models.Event {
@@ -285,11 +305,7 @@ func restoreProjectionResourceRecord(projection *Projection, record *resourceRec
 		uid:       meta.UID,
 	})
 	projection.updateActiveResourceIndex(record)
-	retentionStart, retainRecentWindow := checkpointRetentionWindowStart(projection.maxTimestampNs)
 	for i := range record.versions {
-		if retainRecentWindow && record.versions[i].timestamp < retentionStart {
-			continue
-		}
 		projection.appendRecentResourceChange(record.uid, record.versions[i].timestamp)
 	}
 }
@@ -303,7 +319,7 @@ func sortRecentResourceChanges(changes []recentResourceChange) {
 	})
 }
 
-func snapshotResourceRecord(record *resourceRecord, checkpointMaxTimestamp int64) ProjectionResourceSnapshot {
+func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int64) ProjectionResourceSnapshot {
 	if record == nil {
 		return ProjectionResourceSnapshot{}
 	}
@@ -311,7 +327,6 @@ func snapshotResourceRecord(record *resourceRecord, checkpointMaxTimestamp int64
 	versions := make([]ProjectionResourceVersionSnapshot, 0, len(record.versions))
 	var lastCheckpointVersion *resourceVersion
 	var retainedWindowSentinel *ProjectionResourceVersionSnapshot
-	retentionWindowStart, retainRecentWindow := checkpointRetentionWindowStart(checkpointMaxTimestamp)
 	for i := range record.versions {
 		version := record.versions[i]
 		if lastCheckpointVersion != nil && checkpointEquivalentState(*lastCheckpointVersion, version) {
@@ -326,7 +341,7 @@ func snapshotResourceRecord(record *resourceRecord, checkpointMaxTimestamp int64
 			Data:        cloneBytes(version.data),
 			ChangeEvent: cloneChangeEventInfo(version.changeEvent),
 		}
-		if retainRecentWindow && version.timestamp < retentionWindowStart {
+		if retentionCutoffTimestamp > 0 && version.timestamp < retentionCutoffTimestamp {
 			snapshotCopy := snapshotVersion
 			retainedWindowSentinel = &snapshotCopy
 			copied := version
@@ -352,14 +367,14 @@ func snapshotResourceRecord(record *resourceRecord, checkpointMaxTimestamp int64
 	}
 }
 
-func checkpointRetentionWindowStart(checkpointMaxTimestamp int64) (int64, bool) {
-	if checkpointMaxTimestamp <= 0 {
-		return 0, false
+func checkpointRetentionCutoffTimestamp(checkpointMaxTimestamp, retentionWindowNs int64) int64 {
+	if checkpointMaxTimestamp <= 0 || retentionWindowNs <= 0 {
+		return 0
 	}
-	if checkpointMaxTimestamp <= maxLookbackNs {
-		return 0, true
+	if checkpointMaxTimestamp <= retentionWindowNs {
+		return 0
 	}
-	return checkpointMaxTimestamp - maxLookbackNs, true
+	return checkpointMaxTimestamp - retentionWindowNs
 }
 
 func restoreResourceRecord(snapshot ProjectionResourceSnapshot) *resourceRecord {

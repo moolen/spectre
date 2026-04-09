@@ -3,6 +3,7 @@ package embeddedstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,79 @@ func TestCompaction_MergesOldSegmentsAndPreservesQueryResults(t *testing.T) {
 		_, err := os.Stat(filepath.Join(engine.rootDir, segmentsDirName, segmentID))
 		require.Truef(t, errors.Is(err, os.ErrNotExist), "segment %q should be removed after compaction", segmentID)
 	}
+}
+
+func TestEngine_CheckpointAutoCompactsByDefault(t *testing.T) {
+	engine := newCompactionTestEngine(t, EngineConfig{
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 16,
+		CompactionMinSegments:  2,
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-a", 0, 3)))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-b", 100, 3)))
+	require.NoError(t, engine.Flush(context.Background()))
+
+	require.Len(t, engine.manifest.ActiveSegments, 2)
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.Len(t, engine.manifest.ActiveSegments, 1)
+}
+
+func TestEngine_CheckpointSkipsAutoCompactionWhenDisabled(t *testing.T) {
+	engine := newCompactionTestEngine(t, EngineConfig{
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 16,
+		CompactionMinSegments:  2,
+		DisableAutoCompaction:  true,
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-a", 0, 3)))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-b", 100, 3)))
+	require.NoError(t, engine.Flush(context.Background()))
+
+	require.Len(t, engine.manifest.ActiveSegments, 2)
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.Len(t, engine.manifest.ActiveSegments, 2)
+}
+
+func TestEngine_CheckpointRetentionRewritesMixedSegmentsAndDropsExpiredSegments(t *testing.T) {
+	now := time.Now().UTC()
+	oldTimestamp := now.Add(-48 * time.Hour).UnixNano()
+	retainedTimestamp := now.Add(-2 * time.Hour).UnixNano()
+
+	engine := newCompactionTestEngine(t, EngineConfig{
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 16,
+		CompactionMinSegments:  8,
+		DisableAutoCompaction:  true,
+		EmbeddedRetentionDays:  1,
+	})
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-old", oldTimestamp, 1)))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		makeCompactionSingleEvent("seg-mixed-old", oldTimestamp, "pod-mixed"),
+		makeCompactionSingleEvent("seg-mixed-new", retainedTimestamp, "pod-mixed"),
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+
+	require.Len(t, engine.manifest.ActiveSegments, 2)
+	expiredSegmentID := engine.manifest.ActiveSegments[0].ID
+
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.Len(t, engine.manifest.ActiveSegments, 1)
+
+	exported, err := engine.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{
+		StartTimestamp: time.Unix(0, oldTimestamp).Add(-time.Hour).Unix(),
+		EndTimestamp:   time.Unix(0, retainedTimestamp).Add(time.Hour).Unix(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"seg-mixed-new"}, checkpointEventIDs(exported))
+
+	_, err = os.Stat(filepath.Join(engine.rootDir, segmentsDirName, expiredSegmentID))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestEngine_StartFlushesHotEventsByInterval(t *testing.T) {
@@ -191,19 +265,27 @@ func newCompactionTestEngine(t *testing.T, cfg EngineConfig) *Engine {
 func makeCompactionTestEvents(prefix string, startTimestamp int64, count int) []models.Event {
 	events := make([]models.Event, 0, count)
 	for i := 0; i < count; i++ {
-		events = append(events, models.Event{
-			ID:        prefix + "-" + time.Unix(0, startTimestamp+int64(i)).UTC().Format("150405.000000000"),
-			Timestamp: startTimestamp + int64(i),
-			Type:      models.EventTypeCreate,
-			Resource: models.ResourceMetadata{
-				Version:   "v1",
-				UID:       "pod-1",
-				Namespace: "default",
-				Kind:      "Pod",
-				Name:      "pod-1",
-			},
-			Data: []byte(`{"kind":"Pod","metadata":{"name":"pod-1","namespace":"default","uid":"pod-1"}}`),
-		})
+		events = append(events, makeCompactionSingleEvent(
+			prefix+"-"+time.Unix(0, startTimestamp+int64(i)).UTC().Format("150405.000000000"),
+			startTimestamp+int64(i),
+			"pod-1",
+		))
 	}
 	return events
+}
+
+func makeCompactionSingleEvent(id string, timestamp int64, uid string) models.Event {
+	return models.Event{
+		ID:        id,
+		Timestamp: timestamp,
+		Type:      models.EventTypeCreate,
+		Resource: models.ResourceMetadata{
+			Version:   "v1",
+			UID:       uid,
+			Namespace: "default",
+			Kind:      "Pod",
+			Name:      uid,
+		},
+		Data: []byte(fmt.Sprintf(`{"kind":"Pod","metadata":{"name":"%s","namespace":"default","uid":"%s"}}`, uid, uid)),
+	}
 }

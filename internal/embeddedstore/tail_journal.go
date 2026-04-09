@@ -3,6 +3,7 @@ package embeddedstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -215,4 +216,37 @@ func (t *tailJournal) Reset(newBaseHighWaterMark uint64) (TailJournalMeta, error
 
 func newTailJournalID(baseHighWaterMark uint64) string {
 	return fmt.Sprintf("tail-%020d-%d", baseHighWaterMark, time.Now().UTC().UnixNano())
+}
+
+func pruneStaleTailJournals(root, activeTailID string) error {
+	if root == "" || activeTailID == "" {
+		return nil
+	}
+
+	tailRoot := filepath.Join(root, tailDirName)
+	entries, err := os.ReadDir(tailRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("prune stale tail journals: list tail dir: %w", err)
+	}
+
+	removed := false
+	for i := range entries {
+		if !entries[i].IsDir() || entries[i].Name() == activeTailID {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(tailRoot, entries[i].Name())); err != nil {
+			return fmt.Errorf("prune stale tail journals: remove %q: %w", entries[i].Name(), err)
+		}
+		removed = true
+	}
+	if removed {
+		if err := syncPath(tailRoot); err != nil {
+			return fmt.Errorf("prune stale tail journals: sync tail dir: %w", err)
+		}
+	}
+
+	return nil
 }

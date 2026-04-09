@@ -16,6 +16,7 @@ type Config struct {
 	HotMaxEvents                int
 	HotMaxResourceVersions      int
 	FlushInterval               time.Duration
+	EmbeddedRetentionDays       int
 	CheckpointInterval          time.Duration
 	CheckpointRetentionCount    int
 	CheckpointRetentionCountSet bool
@@ -25,6 +26,7 @@ type Config struct {
 	CheckpointOnShutdownSet     bool
 	SegmentTargetBytes          int64
 	CompactionMinSegments       int
+	DisableAutoCompaction       bool
 	MetricsRegisterer           prometheus.Registerer
 	ProjectionHistoryFallback   bool
 }
@@ -79,6 +81,9 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 	if cfg.FlushInterval < 0 {
 		return EngineConfig{}, fmt.Errorf("flush interval must be positive")
 	}
+	if cfg.EmbeddedRetentionDays < 0 {
+		return EngineConfig{}, fmt.Errorf("embedded retention days must be non-negative")
+	}
 	if cfg.CheckpointInterval < 0 {
 		return EngineConfig{}, fmt.Errorf("checkpoint interval must be positive")
 	}
@@ -100,6 +105,7 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 		HotMaxEvents:              cfg.HotMaxEvents,
 		HotMaxResourceVersions:    cfg.HotMaxResourceVersions,
 		FlushInterval:             cfg.FlushInterval,
+		EmbeddedRetentionDays:     cfg.EmbeddedRetentionDays,
 		CheckpointInterval:        cfg.CheckpointInterval,
 		CheckpointRetentionCount:  cfg.CheckpointRetentionCount,
 		CheckpointMaxTailEvents:   cfg.CheckpointMaxTailEvents,
@@ -107,6 +113,7 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 		CheckpointOnShutdown:      cfg.CheckpointOnShutdown,
 		SegmentTargetBytes:        cfg.SegmentTargetBytes,
 		CompactionMinSegments:     cfg.CompactionMinSegments,
+		DisableAutoCompaction:     cfg.DisableAutoCompaction,
 		MetricsRegisterer:         cfg.MetricsRegisterer,
 		ProjectionHistoryFallback: cfg.ProjectionHistoryFallback,
 	}

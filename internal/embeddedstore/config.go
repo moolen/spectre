@@ -11,6 +11,7 @@ type EngineConfig struct {
 	HotMaxEvents              int
 	HotMaxResourceVersions    int
 	FlushInterval             time.Duration
+	EmbeddedRetentionDays     int
 	CheckpointInterval        time.Duration
 	CheckpointRetentionCount  int
 	CheckpointMaxTailEvents   int
@@ -18,6 +19,7 @@ type EngineConfig struct {
 	CheckpointOnShutdown      bool
 	SegmentTargetBytes        int64
 	CompactionMinSegments     int
+	DisableAutoCompaction     bool
 	MetricsRegisterer         prometheus.Registerer
 	ProjectionHistoryFallback bool
 }

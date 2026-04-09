@@ -17,7 +17,7 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 	defer s.projection.mu.RUnlock()
 
 	startTime := time.Now()
-	query := normalizeNamespaceQuery(input)
+	query := normalizeNamespaceQuery(input, s.projection.RetentionWindowNs())
 
 	namespacedResources := s.projection.activeResourcesInNamespace(query.Namespace, query.TimestampNs)
 	startIndex, err := decodeCursor(query.Cursor)
@@ -108,7 +108,7 @@ type namespaceCursor struct {
 	LastName string `json:"lastName"`
 }
 
-func normalizeNamespaceQuery(input analysisstore.NamespaceGraphQuery) analysisstore.NamespaceGraphQuery {
+func normalizeNamespaceQuery(input analysisstore.NamespaceGraphQuery, maxLookbackNs int64) analysisstore.NamespaceGraphQuery {
 	normalized := input
 	if normalized.Limit <= 0 {
 		normalized.Limit = defaultLimit
@@ -125,7 +125,7 @@ func normalizeNamespaceQuery(input analysisstore.NamespaceGraphQuery) analysisst
 	if normalized.LookbackNs <= 0 {
 		normalized.LookbackNs = defaultLookbackNs
 	}
-	if normalized.LookbackNs > maxLookbackNs {
+	if maxLookbackNs > 0 && normalized.LookbackNs > maxLookbackNs {
 		normalized.LookbackNs = maxLookbackNs
 	}
 	return normalized
