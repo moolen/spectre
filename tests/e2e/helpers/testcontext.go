@@ -97,20 +97,34 @@ func (tc *TestContext) ReconnectPortForward() error {
 		serviceName = fmt.Sprintf("%s-spectre", tc.SharedDeployment.ReleaseName)
 	}
 
-	// Create new port-forward
-	portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetContext(), namespace, serviceName, defaultServicePort)
-	if err != nil {
-		return fmt.Errorf("failed to create new port-forward: %w", err)
-	}
-	if err := portForwarder.WaitForReady(30 * time.Second); err != nil {
-		return fmt.Errorf("service not reachable via new port-forward: %w", err)
+	var lastErr error
+	deadline := time.Now().Add(30 * time.Second)
+
+	for time.Now().Before(deadline) {
+		portForwarder, err := NewPortForwarder(tc.t, tc.Cluster.GetContext(), namespace, serviceName, defaultServicePort)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create new port-forward: %w", err)
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if err := portForwarder.WaitForReady(30 * time.Second); err != nil {
+			lastErr = fmt.Errorf("service not reachable via new port-forward: %w", err)
+			_ = portForwarder.Stop()
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		tc.PortForward = portForwarder
+		tc.APIClient = NewAPIClient(tc.t, portForwarder.GetURL())
+
+		tc.t.Logf("✓ Port-forward reconnected to new pod")
+		return nil
 	}
 
-	tc.PortForward = portForwarder
-	tc.APIClient = NewAPIClient(tc.t, portForwarder.GetURL())
-
-	tc.t.Logf("✓ Port-forward reconnected to new pod")
-	return nil
+	if lastErr == nil {
+		lastErr = fmt.Errorf("timed out waiting for replacement port-forward")
+	}
+	return lastErr
 }
 
 // SetupE2ETestWithValuesFile provisions test infrastructure using a custom Helm values file.
