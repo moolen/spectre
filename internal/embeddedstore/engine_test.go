@@ -358,7 +358,13 @@ func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *t
 		if err != nil {
 			return false
 		}
-		return len(manifest.Checkpoints) >= 1
+		if len(manifest.Checkpoints) == 0 {
+			return false
+		}
+		checkpoint := latestCheckpointMeta(manifest.Checkpoints)
+		return checkpoint.HighWaterMark == 1 &&
+			manifest.ActiveTail.BaseHighWaterMark == checkpoint.HighWaterMark &&
+			manifest.ActiveTail.EventCount == 0
 	}, time.Second, 10*time.Millisecond)
 
 	manifest, err := loadOrCreateManifest(rootDir)
