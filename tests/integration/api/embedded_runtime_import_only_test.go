@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	spectreapi "github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/embeddedstore"
 	"github.com/moolen/spectre/internal/importexport"
@@ -30,19 +29,12 @@ func newEmbeddedRuntimeServer(t *testing.T, runtime embeddedRuntimeStorage) *api
 	return apiserver.NewWithStorageGraphAndPipeline(
 		0,
 		runtime.QueryExecutor(),
-		nil,
-		spectreapi.TimelineQuerySourceStorage,
-		nil,
-		nil,
 		runtime.AnalysisStore(),
 		nil,
 		runtime,
 		nil,
 		time.Minute,
 		apiserver.NamespaceGraphCacheConfig{},
-		"",
-		nil,
-		nil,
 	)
 }
 

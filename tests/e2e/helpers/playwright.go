@@ -95,26 +95,25 @@ func BuildTimelineURL(baseURL string, duration time.Duration) string {
 	return u.String()
 }
 
-// EnsurePlaywrightInstalled checks if Playwright-Go is installed
-// This will attempt to install it if not present
+// EnsurePlaywrightInstalled verifies that the Playwright runtime and a Chromium
+// browser binary are available for UI e2e tests. The Go test suite also runs in
+// environments that do not provision browser binaries; in those cases we skip
+// the browser-dependent UI e2e package and rely on the dedicated UI Playwright
+// lane instead.
 func EnsurePlaywrightInstalled(t *testing.T) {
-	// Check if playwright is available by trying to run it
-	// If it fails, we'll try to install it
 	pw, err := playwright.Run()
 	if err != nil {
-		t.Logf("Playwright not available, attempting to install...")
-		// Try to install playwright
-		if installErr := playwright.Install(); installErr != nil {
-			require.NoError(t, installErr, "Failed to install Playwright. Run: go run github.com/playwright-community/playwright-go/cmd/playwright@latest install --with-deps")
-		}
-		// Try again after installation
-		pw, err = playwright.Run()
-		require.NoError(t, err, "Failed to start Playwright after installation")
+		t.Skipf("Skipping UI e2e: Playwright runtime is unavailable: %v", err)
 	}
-	// If we got here, playwright is working, so clean up
-	if pw != nil {
-		pw.Stop()
+	defer func() {
+		require.NoError(t, pw.Stop(), "failed to stop Playwright")
+	}()
+
+	browser, err := pw.Chromium.Launch()
+	if err != nil {
+		t.Skipf("Skipping UI e2e: Chromium browser is unavailable: %v", err)
 	}
+	require.NoError(t, browser.Close(), "failed to close Playwright browser")
 }
 
 // FindFreePort finds an available port on localhost

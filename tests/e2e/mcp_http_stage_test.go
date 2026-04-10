@@ -152,11 +152,10 @@ func (s *MCPHTTPStage) tools_are_listed() *MCPHTTPStage {
 	return s
 }
 
-func (s *MCPHTTPStage) four_tools_are_available() *MCPHTTPStage {
+func (s *MCPHTTPStage) three_tools_are_available() *MCPHTTPStage {
 	s.Require.NotNil(s.tools, "tools must be listed first")
-	// Should have 5 tools (base tools including causal_paths)
 	toolCount := len(s.tools)
-	s.Assert.Equal(5, toolCount, "should have 5 tools, got %d", toolCount)
+	s.Assert.Equal(3, toolCount, "should have 3 tools, got %d", toolCount)
 	s.T.Logf("Available tools count: %d", toolCount)
 	return s
 }
@@ -164,13 +163,10 @@ func (s *MCPHTTPStage) four_tools_are_available() *MCPHTTPStage {
 func (s *MCPHTTPStage) expected_tools_are_present() *MCPHTTPStage {
 	s.Require.NotNil(s.tools, "tools must be listed first")
 
-	// Base tools that should always be present (including causal_paths which now uses HTTP API)
 	baseTools := map[string]bool{
 		"cluster_health":            false,
 		"resource_timeline_changes": false,
 		"resource_timeline":         false,
-		"detect_anomalies":          false,
-		"causal_paths":              false,
 	}
 
 	for _, tool := range s.tools {

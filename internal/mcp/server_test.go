@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
+	"github.com/moolen/spectre/internal/logging"
 )
 
 // MockTool is a simple test tool
@@ -21,19 +24,46 @@ func (m *MockTool) Execute(ctx context.Context, input json.RawMessage) (interfac
 }
 
 func TestSpectreServer_Creation(t *testing.T) {
-	// NewSpectreServerWithOptions requires TimelineService and GraphService
-	// Without them, creation should fail
 	_, err := NewSpectreServerWithOptions(ServerOptions{
 		Version: "1.0.0-test",
-		// TimelineService and GraphService are nil
 	})
 	if err == nil {
-		t.Error("Expected error when TimelineService is nil")
+		t.Fatal("expected error when TimelineService is nil")
 	}
 
-	// Verify error message mentions the missing service
-	if err != nil && err.Error() == "" {
-		t.Error("Error should have a message")
+	if err.Error() == "" {
+		t.Fatal("expected error message for missing TimelineService")
+	}
+}
+
+func TestSpectreServer_RegistersEmbeddedSafeToolsOnly(t *testing.T) {
+	timelineService := apptimeline.NewService(nil, logging.GetLogger("test"), nil)
+
+	s, err := NewSpectreServerWithOptions(ServerOptions{
+		Version:         "1.0.0-test",
+		TimelineService: timelineService,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating server: %v", err)
+	}
+
+	expectedTools := map[string]struct{}{
+		"cluster_health":            {},
+		"resource_timeline":         {},
+		"resource_timeline_changes": {},
+	}
+	if len(s.tools) != len(expectedTools) {
+		t.Fatalf("expected %d tools, got %d", len(expectedTools), len(s.tools))
+	}
+	for name := range expectedTools {
+		if _, ok := s.tools[name]; !ok {
+			t.Fatalf("expected tool %q to be registered", name)
+		}
+	}
+	for name := range s.tools {
+		if _, ok := expectedTools[name]; !ok {
+			t.Fatalf("unexpected tool registered: %s", name)
+		}
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	analysisembedded "github.com/moolen/spectre/internal/analysis/store/embedded"
-	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
 	"github.com/moolen/spectre/internal/embedded"
 	"github.com/moolen/spectre/internal/models"
@@ -85,19 +84,12 @@ func newEmbeddedFixtureServer(t *testing.T, fixture string) *apiserver.Server {
 	return apiserver.NewWithStorageGraphAndPipeline(
 		0,
 		executor,
-		nil,
-		api.TimelineQuerySourceStorage,
-		nil,
-		nil,
 		analysisStore,
 		nil,
 		&apiserver.NoOpReadinessChecker{},
 		nil,
 		time.Minute,
 		apiserver.NamespaceGraphCacheConfig{},
-		"",
-		nil,
-		nil,
 	)
 }
 

@@ -73,7 +73,9 @@ with optional "resource" override and "kind" fallback.
 {{- "" -}}
 {{- else if eq $kind "ingress" -}}
 ingresses
-{{- else if hasSuffix $kind "s" -}}
+{{- else if hasSuffix "y" $kind -}}
+{{ printf "%sies" (trimSuffix "y" $kind) }}
+{{- else if hasSuffix "s" $kind -}}
 {{ $kind }}
 {{- else -}}
 {{ printf "%ss" $kind }}

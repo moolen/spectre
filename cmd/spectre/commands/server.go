@@ -4,11 +4,6 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/config"
-
-	// Import integration implementations to register their factories
-	_ "github.com/moolen/spectre/internal/integration/grafana"
-	_ "github.com/moolen/spectre/internal/integration/logzio"
-	_ "github.com/moolen/spectre/internal/integration/victorialogs"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/spf13/cobra"
@@ -25,7 +20,6 @@ var (
 	importMode                          bool
 	startupImportDisableCausality       bool
 	startupImportTimelineOnly           bool
-	embeddedMode                        bool
 	embeddedProjectionHistoryFallback   bool
 	embeddedFlushInterval               time.Duration
 	embeddedRetentionDays               int
@@ -49,12 +43,6 @@ var (
 	tracingEndpoint                     string
 	tracingTLSCAPath                    string
 	tracingTLSInsecure                  bool
-	// Graph reasoning layer flags
-	graphEnabled        bool
-	graphHost           string
-	graphPort           int
-	graphName           string
-	graphRetentionHours int
 	// Audit log flag
 	auditLogPath string
 	// Metadata cache configuration
@@ -67,9 +55,6 @@ var (
 	reconcilerEnabled      bool
 	reconcilerIntervalMins int
 	reconcilerBatchSize    int
-	// Integration manager configuration
-	integrationsConfigPath string
-	minIntegrationVersion  string
 	// MCP server configuration
 	stdioEnabled bool
 )
@@ -93,7 +78,6 @@ func init() {
 	serverCmd.Flags().BoolVar(&importMode, "import-mode", false, "Enable startup import opt-in mode (reserved for future tuning)")
 	serverCmd.Flags().BoolVar(&startupImportDisableCausality, "startup-import-disable-causality", false, "Disable causality inference during startup import only")
 	serverCmd.Flags().BoolVar(&startupImportTimelineOnly, "startup-import-timeline-only", false, "Import only timeline-critical graph data during startup import")
-	serverCmd.Flags().BoolVar(&embeddedMode, "embedded", false, "Run with the persistent embedded backend instead of FalkorDB")
 	serverCmd.Flags().BoolVar(&embeddedProjectionHistoryFallback, "embedded-projection-history-fallback", false, "Temporarily enable projection history fallback in embedded mode (rollback switch)")
 	serverCmd.Flags().DurationVar(
 		&embeddedFlushInterval,
@@ -166,13 +150,6 @@ func init() {
 	serverCmd.Flags().StringVar(&tracingTLSCAPath, "tracing-tls-ca", "", "Path to CA certificate for TLS verification (optional)")
 	serverCmd.Flags().BoolVar(&tracingTLSInsecure, "tracing-tls-insecure", false, "Skip TLS certificate verification (insecure, use only for testing)")
 
-	// Graph reasoning layer flags
-	serverCmd.Flags().BoolVar(&graphEnabled, "graph-enabled", false, "Enable graph-based reasoning layer (default: false)")
-	serverCmd.Flags().StringVar(&graphHost, "graph-host", "localhost", "FalkorDB host (default: localhost)")
-	serverCmd.Flags().IntVar(&graphPort, "graph-port", 6379, "FalkorDB port (default: 6379)")
-	serverCmd.Flags().StringVar(&graphName, "graph-name", "spectre", "FalkorDB graph name (default: spectre)")
-	serverCmd.Flags().IntVar(&graphRetentionHours, "graph-retention-hours", 168, "Graph data retention window in hours (default: 168 = 7 days)")
-
 	// Audit log flag
 	serverCmd.Flags().StringVar(&auditLogPath, "audit-log", "",
 		"Path to write event audit log (JSONL format) for test fixtures. "+
@@ -197,12 +174,6 @@ func init() {
 		"Reconciliation interval in minutes (default: 5)")
 	serverCmd.Flags().IntVar(&reconcilerBatchSize, "reconciler-batch-size", 100,
 		"Maximum resources to check per reconciliation cycle (default: 100)")
-
-	// Integration manager configuration
-	serverCmd.Flags().StringVar(&integrationsConfigPath, "integrations-config", "/var/lib/spectre/config/integrations.yaml",
-		"Path to integrations configuration YAML file")
-	serverCmd.Flags().StringVar(&minIntegrationVersion, "min-integration-version", "",
-		"Minimum required integration version (e.g., '1.0.0') for version validation (optional)")
 
 	// MCP server configuration
 	serverCmd.Flags().BoolVar(&stdioEnabled, "stdio", false, "Enable stdio MCP transport alongside HTTP (default: false)")
@@ -235,31 +206,21 @@ func runServer(cmd *cobra.Command, args []string) {
 	logger.Debug("Configuration loaded: APIPort=%d", cfg.APIPort)
 
 	mode, err := resolveServerRuntimeMode(serverModeInput{
-		Embedded:       embeddedMode,
-		GraphEnabled:   graphEnabled,
 		WatcherEnabled: watcherEnabled,
 		ImportPath:     importPath,
-		AuditLogPath:   auditLogPath,
 	})
 	if err != nil {
 		logger.Error("Runtime mode validation failed: %v", err)
 		HandleError(err, "Configuration error")
 	}
-	logger.Info("Server runtime mode: %s (embedded=%t audit-only=%t)", mode.Name, mode.Embedded, mode.AuditOnly)
+	logger.Info("Server runtime mode: %s", mode.Name)
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
 
-	ensureDefaultIntegrationsConfig(mode, logger)
 	tracingProvider := initializeTracingProvider(cfg, manager, logger)
 	startPprofServer(logger)
-
-	if mode.Embedded {
-		runEmbeddedServerRuntime(cfg, mode, manager, tracingProvider, logger)
-		return
-	}
-
-	runGraphServerRuntime(cfg, mode, manager, tracingProvider, logger)
+	runEmbeddedServerRuntime(cfg, mode, manager, tracingProvider, logger)
 }
 
 func syncEmbeddedCheckpointOnShutdownFlagState(cmd *cobra.Command) {

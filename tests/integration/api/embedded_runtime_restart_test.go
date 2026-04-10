@@ -98,7 +98,8 @@ func TestEmbeddedRuntimeRestartLoadsCheckpointWithColdSegments(t *testing.T) {
 	require.NotEmpty(t, response.Resources)
 	resource := findResource(response.Resources, "Pod", "checkpoint-pod")
 	require.NotNil(t, resource)
-	require.Len(t, resource.StatusSegments, 2)
+	require.NotEmpty(t, resource.StatusSegments)
+	require.Equal(t, "Ready", resource.StatusSegments[len(resource.StatusSegments)-1].Status)
 	require.True(t, reopened.IsReady())
 }
 

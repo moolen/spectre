@@ -9,7 +9,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/apiserver"
-	appgraph "github.com/moolen/spectre/internal/app/graph"
 	"github.com/moolen/spectre/internal/config"
 	"github.com/moolen/spectre/internal/embeddedstore"
 	"github.com/moolen/spectre/internal/lifecycle"
@@ -176,10 +175,6 @@ func newEmbeddedAPI(cfg *config.Config, mode serverRuntimeMode, tracingProvider 
 	apiComponent := apiserver.NewWithStorageGraphAndPipeline(
 		cfg.APIPort,
 		embeddedBackend.QueryExecutor(),
-		nil,
-		api.TimelineQuerySourceStorage,
-		nil,
-		nil,
 		embeddedBackend.AnalysisStore(),
 		importIngestor,
 		readinessChecker,
@@ -190,9 +185,6 @@ func newEmbeddedAPI(cfg *config.Config, mode serverRuntimeMode, tracingProvider 
 			RefreshTTL:  time.Duration(namespaceGraphCacheRefreshSeconds) * time.Second,
 			MaxMemoryMB: int64(namespaceGraphCacheMemoryMB),
 		},
-		"",
-		nil,
-		nil,
 	)
 	logger.Info("API server component created (embedded)")
 
@@ -201,15 +193,9 @@ func newEmbeddedAPI(cfg *config.Config, mode serverRuntimeMode, tracingProvider 
 	}
 
 	timelineService := apiComponent.GetTimelineService()
-	graphService := appgraph.NewService(
-		embeddedBackend.AnalysisStore(),
-		logger,
-		getTracingProviderTracer(tracingProvider, "graph_service"),
-	)
 	spectreServer, err := mcp.NewSpectreServerWithOptions(mcp.ServerOptions{
 		Version:         Version,
 		TimelineService: timelineService,
-		GraphService:    graphService,
 	})
 	if err != nil {
 		logger.Error("Failed to create embedded MCP server: %v", err)
@@ -253,7 +239,7 @@ func describeEmbeddedEngineConfig(cfg embeddedstore.EngineConfig) string {
 }
 
 func embeddedImportAPIEnabled(mode serverRuntimeMode) bool {
-	return mode.Embedded && mode.StartWatcher
+	return mode.StartWatcher
 }
 
 func hasUsableEmbeddedBackend(backend *embeddedstore.Backend) (bool, error) {

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moolen/spectre/internal/api"
 	"github.com/moolen/spectre/internal/embeddedstore"
 	"github.com/stretchr/testify/require"
 )
@@ -24,19 +23,12 @@ func newEmbeddedTestServer(t *testing.T) *Server {
 	return NewWithStorageGraphAndPipeline(
 		0,
 		backend.QueryExecutor(),
-		nil,
-		api.TimelineQuerySourceStorage,
-		nil,
-		nil,
 		backend.AnalysisStore(),
 		backend,
 		backend,
 		nil,
 		time.Minute,
 		NamespaceGraphCacheConfig{},
-		"",
-		nil,
-		nil,
 	)
 }
 
@@ -54,19 +46,12 @@ func newEmbeddedCompareTestServer(t *testing.T) *Server {
 	return NewWithStorageGraphAndPipeline(
 		0,
 		executor,
-		executor,
-		api.TimelineQuerySourceStorage,
-		nil,
-		nil,
 		backend.AnalysisStore(),
 		backend,
 		backend,
 		nil,
 		time.Minute,
 		NamespaceGraphCacheConfig{},
-		"",
-		nil,
-		nil,
 	)
 }
 

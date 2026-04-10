@@ -2,57 +2,53 @@ suite: test embedded deployment
 templates:
   - deployment.yaml
 tests:
-  - it: should configure embedded mode with a dedicated data volume and no falkordb sidecar
+  - it: should configure an embedded data volume and no falkordb sidecar
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         persistence:
           enabled: true
-      graph:
-        enabled: true
-        falkordb:
-          sidecar: true
     asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--embedded"
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--data-dir=/var/lib/spectre-data"
       - equal:
-          path: spec.template.spec.containers[0].volumeMounts[2].name
+          path: spec.template.spec.containers[0].volumeMounts[1].name
           value: embedded-data
       - equal:
-          path: spec.template.spec.containers[0].volumeMounts[2].mountPath
+          path: spec.template.spec.containers[0].volumeMounts[1].mountPath
           value: /var/lib/spectre-data
       - equal:
-          path: spec.template.spec.volumes[2].name
+          path: spec.template.spec.volumes[1].name
           value: embedded-data
       - equal:
-          path: spec.template.spec.volumes[2].persistentVolumeClaim.claimName
+          path: spec.template.spec.volumes[1].persistentVolumeClaim.claimName
           value: RELEASE-NAME-spectre-embedded
       - isNull:
           path: spec.template.spec.containers[1]
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--graph-enabled=true"
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--integrations-config=/var/lib/spectre/config/integrations.yaml"
 
   - it: should fall back to emptyDir when embedded persistence is disabled
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         persistence:
           enabled: false
     asserts:
       - equal:
-          path: spec.template.spec.volumes[2].name
+          path: spec.template.spec.volumes[1].name
           value: embedded-data
       - isNotNull:
-          path: spec.template.spec.volumes[2].emptyDir
+          path: spec.template.spec.volumes[1].emptyDir
 
   - it: should use Recreate for single-replica embedded persistent deployments with the default strategy
     set:
       embedded:
-        enabled: true
         persistence:
           enabled: true
       replicaCount: 1
@@ -67,7 +63,6 @@ tests:
   - it: should keep an explicit embedded rolling update override
     set:
       embedded:
-        enabled: true
         persistence:
           enabled: true
       updateStrategy:
@@ -86,32 +81,26 @@ tests:
           path: spec.strategy.rollingUpdate.maxSurge
           value: 0
 
-  - it: should not append an integrations data-dir override in embedded mode
+  - it: should not append integration or backend-selection args
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
-      graph:
-        enabled: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
           content: "--data-dir=/var/lib/spectre-data"
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: "--integrations-config=/var/lib/spectre/config/integrations.yaml"
       - notContains:
           path: spec.template.spec.containers[0].args
-          content: "--data-dir=/var/lib/spectre/data"
+          content: "--embedded"
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: "--integrations-config=/var/lib/spectre/config/integrations.yaml"
 
   - it: should pass embedded checkpoint interval when configured
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         checkpointInterval: 15m
-      graph:
-        enabled: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
@@ -120,11 +109,8 @@ tests:
   - it: should pass embedded checkpoint tail event budget when embedded mode is enabled
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         checkpointMaxTailEvents: 2048
-      graph:
-        enabled: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
@@ -133,11 +119,8 @@ tests:
   - it: should pass embedded checkpoint retention count when embedded mode is enabled
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         checkpointRetentionCount: 3
-      graph:
-        enabled: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
@@ -146,11 +129,8 @@ tests:
   - it: should pass embedded checkpoint tail byte budget when embedded mode is enabled
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         checkpointMaxTailBytes: 16777216
-      graph:
-        enabled: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
@@ -159,11 +139,8 @@ tests:
   - it: should pass embedded checkpoint shutdown behavior when embedded mode is enabled
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         checkpointOnShutdown: false
-      graph:
-        enabled: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
@@ -172,14 +149,11 @@ tests:
   - it: should pass embedded flush and segment tuning when configured
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         flushInterval: 2m
         segmentTargetBytes: 33554432
         compactionMinSegments: 8
         autoCompaction: false
-      graph:
-        enabled: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
@@ -197,11 +171,8 @@ tests:
   - it: should pass embedded retention days when configured
     set:
       embedded:
-        enabled: true
         dataDir: /var/lib/spectre-data
         retentionDays: 14
-      graph:
-        enabled: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args

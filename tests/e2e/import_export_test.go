@@ -150,8 +150,8 @@ func TestBatchImportWithResourceTimeline(t *testing.T) {
 // 1. Deploy Spectre via Helm
 // 2. Generate test events including Kubernetes Events (Kind=Event) with involvedObject references
 // 3. Call the JSON import endpoint
-// 4. Verify imported events are present via search and metadata APIs, including Kind=Event
-// 5. Verify that Kubernetes Events have the InvolvedObjectUID properly populated
+// 4. Verify imported resource kinds appear in metadata while Kubernetes Events remain attached to involved objects
+// 5. Verify that attached Kubernetes Events are queryable through the timeline API with InvolvedObjectUID linkage
 func TestJSONEventBatchImportWithKubernetesEvents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping e2e test in short mode")
@@ -167,7 +167,7 @@ func TestJSONEventBatchImportWithKubernetesEvents(t *testing.T) {
 		wait_for_data_indexing()
 
 	then.namespaces_appear_in_metadata().and().
-		kubernetes_event_kind_is_present().and().
+		kubernetes_events_are_attached_not_listed_in_metadata().and().
 		kubernetes_events_can_be_queried().and().
 		specific_kubernetes_event_is_present()
 }

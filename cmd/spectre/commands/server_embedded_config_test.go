@@ -51,14 +51,11 @@ func TestDescribeEmbeddedEngineConfig_PeriodicCheckpointMode(t *testing.T) {
 }
 
 func TestEmbeddedImportAPIEnabled(t *testing.T) {
-	if !embeddedImportAPIEnabled(serverRuntimeMode{Embedded: true, StartWatcher: true}) {
+	if !embeddedImportAPIEnabled(serverRuntimeMode{StartWatcher: true}) {
 		t.Fatal("expected live embedded mode to expose import API")
 	}
-	if embeddedImportAPIEnabled(serverRuntimeMode{Embedded: true, StartWatcher: false, ImportOnly: true}) {
+	if embeddedImportAPIEnabled(serverRuntimeMode{StartWatcher: false, ImportOnly: true}) {
 		t.Fatal("expected read-only embedded mode to disable import API")
-	}
-	if embeddedImportAPIEnabled(serverRuntimeMode{Embedded: false, StartWatcher: true}) {
-		t.Fatal("expected non-embedded mode helper to stay false")
 	}
 }
 

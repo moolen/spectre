@@ -21,25 +21,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func ensureDefaultIntegrationsConfig(mode serverRuntimeMode, logger *logging.Logger) {
-	if mode.Embedded || integrationsConfigPath == "" {
-		return
-	}
-	if _, err := os.Stat(integrationsConfigPath); !os.IsNotExist(err) {
-		return
-	}
-
-	logger.Info("Creating default integrations config file: %s", integrationsConfigPath)
-	defaultConfig := &config.IntegrationsFile{
-		SchemaVersion: "v1",
-		Instances:     []config.IntegrationConfig{},
-	}
-	if err := config.WriteIntegrationsFile(integrationsConfigPath, defaultConfig); err != nil {
-		logger.Error("Failed to create default integrations config: %v", err)
-		HandleError(err, "Integration config creation error")
-	}
-}
-
 func initializeTracingProvider(cfg *config.Config, manager *lifecycle.Manager, logger *logging.Logger) *tracing.TracingProvider {
 	tracingProvider, err := tracing.NewTracingProvider(tracing.Config{
 		Enabled:     cfg.TracingEnabled,
