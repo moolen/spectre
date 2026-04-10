@@ -12,7 +12,7 @@
 
 ## What is Spectre?
 
-Spectre is a Kubernetes observability system that captures resource changes across your cluster and stores them in a graph database. It provides timeline visualization, relationship mapping, anomaly detection, and root cause analysis through both a web UI and MCP integration for AI assistants.
+Spectre is a Kubernetes observability system that captures resource changes across your cluster and stores them in its embedded event store. It provides timeline visualization, relationship mapping, anomaly detection, and root cause analysis through both a web UI and MCP integration for AI assistants.
 
 <div align="center">
 <table>
@@ -30,7 +30,7 @@ Spectre is a Kubernetes observability system that captures resource changes acro
 ### Features
 
 - **Event Capture** - Watches Kubernetes resources and records all create, update, delete operations
-- **Graph Storage** - Stores resources and their relationships (ownership, references, scheduling) in FalkorDB
+- **Embedded Storage** - Persists events and derived relationship data without an external graph database
 - **Timeline View** - Visualizes resource state changes over time with diff inspection
 - **Graph View** - Displays resource relationships within a namespace with anomaly highlighting
 - **Anomaly Detection** - Identifies crash loops, image pull failures, config errors, scaling issues
@@ -81,7 +81,7 @@ After port-forwarding the Spectre service (see [Quick Start](#quick-start)), con
 http://localhost:8080/v1/mcp
 ```
 
-The MCP server exposes five tools:
+The MCP server exposes three tools:
 
 ### Tools
 
@@ -90,10 +90,6 @@ The MCP server exposes five tools:
 **resource_timeline** - Returns status timeline for resources matching kind/name/namespace filters. Shows status segments with durations, state transitions, and associated Kubernetes events. Used to understand when and how a resource's state changed.
 
 **resource_timeline_changes** - Returns field-level diffs for specific resource UIDs. Filters out noise (managedFields, resourceVersion) and summarizes status condition changes. Shows what actually changed in the resource spec/status between versions.
-
-**detect_anomalies** - Analyzes a resource and its causal subgraph for anomalies. Detects crash loops, image pull failures, OOMKills, probe failures, config reference errors, scaling issues, and network policy problems. Returns anomalies with severity, timestamps, and affected resources.
-
-**causal_paths** - Given a failing resource UID and failure timestamp, traverses the resource graph backwards through ownership, reference, and management edges to find root causes. Returns ranked causal paths with confidence scores based on temporal proximity and relationship type.
 
 ### Prompts
 

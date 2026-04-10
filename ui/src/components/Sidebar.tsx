@@ -1,6 +1,5 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { useBetaFeatures } from '../contexts/BetaFeaturesContext';
 
 // Sidebar navigation component with auto-collapse behavior
 
@@ -12,7 +11,6 @@ interface NavItem {
   path: string;
   label: string;
   icon: React.ReactNode;
-  beta?: boolean; // If true, only shown when ?beta=true is in URL
 }
 
 const navItems: NavItem[] = [
@@ -30,40 +28,6 @@ const navItems: NavItem[] = [
     label: 'Graph',
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="5" cy="6" r="3"></circle><path d="M5 9v6"></path><circle cx="5" cy="18" r="3"></circle><path d="M12 3v18"></path><circle cx="19" cy="6" r="3"></circle><path d="M16 15.7A9 9 0 0 0 19 9"></path></svg>
-    ),
-  },
-  {
-    path: '/observatory',
-    label: 'Observatory',
-    beta: true, // Only visible with ?beta=true
-    icon: (
-      // Telescope icon for Observatory - simple refractor telescope
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        {/* Telescope tube */}
-        <line x1="4" y1="10" x2="18" y2="4" />
-        <line x1="4" y1="13" x2="18" y2="7" />
-        {/* Front lens */}
-        <line x1="18" y1="3" x2="19" y2="8" />
-        {/* Eyepiece */}
-        <line x1="3" y1="9" x2="4" y2="14" />
-        {/* Tripod mount */}
-        <circle cx="11" cy="12" r="1.5" fill="currentColor" />
-        {/* Tripod legs */}
-        <line x1="11" y1="13.5" x2="7" y2="21" />
-        <line x1="11" y1="13.5" x2="15" y2="21" />
-        <line x1="11" y1="13.5" x2="11" y2="18" />
-      </svg>
-    ),
-  },
-  {
-    path: '/integrations',
-    label: 'Integrations',
-    beta: true, // Only visible with ?beta=true
-    icon: (
-      // Puzzle piece / plug icon for integrations
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z" />
-      </svg>
     ),
   },
 ];
@@ -236,13 +200,6 @@ const sidebarCSS = `
 `;
 
 export function Sidebar({ onHoverChange }: SidebarProps) {
-  const isBetaEnabled = useBetaFeatures();
-
-  // Filter nav items based on beta flag
-  const visibleNavItems = useMemo(() => {
-    return navItems.filter(item => !item.beta || isBetaEnabled);
-  }, [isBetaEnabled]);
-
   return (
     <aside
       className="sidebar-container"
@@ -272,7 +229,7 @@ export function Sidebar({ onHoverChange }: SidebarProps) {
 
       {/* Main Navigation */}
       <nav className="sidebar-nav">
-        {visibleNavItems.map((item) => (
+        {navItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}

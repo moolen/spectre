@@ -61,7 +61,7 @@ type ResourceStatusCount struct {
 
 // Issue represents a resource with persistent issues
 type Issue struct {
-	ResourceUID       string `json:"resource_uid"` // UID for use with other tools (resource_timeline_changes, detect_anomalies, causal_paths)
+	ResourceUID       string `json:"resource_uid"` // UID for use with resource_timeline_changes
 	Kind              string `json:"kind"`
 	Namespace         string `json:"namespace"`
 	Name              string `json:"name"`

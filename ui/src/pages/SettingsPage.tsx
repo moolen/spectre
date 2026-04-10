@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Theme, TimeFormat, useSettings, COMMON_KINDS, DEFAULT_KINDS, OBSERVATORY_NODE_TYPES, DEFAULT_OBSERVATORY_NODE_TYPES } from '../hooks/useSettings';
+import { Theme, TimeFormat, useSettings, COMMON_KINDS, DEFAULT_KINDS } from '../hooks/useSettings';
 import { TimeInputWithCalendar } from '../components/TimeInputWithCalendar';
 import { validateTimeRange } from '../utils/timeParsing';
 import { apiClient } from '../services/api';
@@ -22,8 +22,6 @@ const SettingsPage: React.FC = () => {
     setCompactMode,
     defaultKinds,
     setDefaultKinds,
-    defaultObservatoryNodeTypes,
-    setDefaultObservatoryNodeTypes,
     hideInactiveReplicaSets,
     setHideInactiveReplicaSets,
   } = useSettings();
@@ -35,12 +33,15 @@ const SettingsPage: React.FC = () => {
     from: '1d ago',
     to: 'now',
     clusterId: '',
-    instanceId: ''
+    instanceId: '',
   });
 
   // Import state
   const [isImporting, setIsImporting] = useState(false);
-  const [importMessage, setImportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [importMessage, setImportMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = async () => {
@@ -104,14 +105,14 @@ const SettingsPage: React.FC = () => {
       const successMessage = `Successfully imported ${result.total_events || 0} events from ${result.imported_files || 0} file(s)`;
       setImportMessage({
         type: 'success',
-        text: successMessage
+        text: successMessage,
       });
       toast.success('Data imported successfully', successMessage);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Import failed';
       setImportMessage({
         type: 'error',
-        text: errorMessage
+        text: errorMessage,
       });
       toast.error('Import failed', errorMessage);
     } finally {
@@ -129,7 +130,8 @@ const SettingsPage: React.FC = () => {
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Settings</h1>
           <p className="text-[var(--color-text-muted)]">
-            Configure your Spectre preferences. Settings are stored locally and persist across sessions.
+            Configure your Spectre preferences. Settings are stored locally and persist across
+            sessions.
           </p>
         </div>
 
@@ -162,12 +164,32 @@ const SettingsPage: React.FC = () => {
                     >
                       <div className="flex items-center justify-center gap-2">
                         {t === 'dark' ? (
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                          <svg
+                            className="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+                            />
                           </svg>
                         ) : (
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                          <svg
+                            className="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+                            />
                           </svg>
                         )}
                         <span className="capitalize">{t}</span>
@@ -180,7 +202,9 @@ const SettingsPage: React.FC = () => {
               {/* Compact Mode Setting */}
               <div className="space-y-3">
                 <div>
-                  <h3 className="text-base font-medium text-[var(--color-text-primary)]">Compact Mode</h3>
+                  <h3 className="text-base font-medium text-[var(--color-text-primary)]">
+                    Compact Mode
+                  </h3>
                   <p className="text-sm text-[var(--color-text-muted)]">
                     Reduce row height and spacing for dense overviews
                   </p>
@@ -193,10 +217,14 @@ const SettingsPage: React.FC = () => {
                       : 'border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
                   }`}
                 >
-                  <span className="text-sm font-medium">{compactMode ? 'Enabled' : 'Disabled'}</span>
+                  <span className="text-sm font-medium">
+                    {compactMode ? 'Enabled' : 'Disabled'}
+                  </span>
                   <span
                     className={`inline-flex h-6 w-11 items-center rounded-full p-0.5 transition-colors ${
-                      compactMode ? 'bg-brand-500 justify-end' : 'bg-[var(--color-border-soft)] justify-start'
+                      compactMode
+                        ? 'bg-brand-500 justify-end'
+                        : 'bg-[var(--color-border-soft)] justify-start'
                     }`}
                   >
                     <span className="h-5 w-5 rounded-full bg-white shadow transition-transform" />
@@ -214,7 +242,9 @@ const SettingsPage: React.FC = () => {
             <div className="max-w-md">
               <div className="space-y-3">
                 <div>
-                  <h3 className="text-base font-medium text-[var(--color-text-primary)]">Time Format</h3>
+                  <h3 className="text-base font-medium text-[var(--color-text-primary)]">
+                    Time Format
+                  </h3>
                   <p className="text-sm text-[var(--color-text-muted)]">
                     Choose how times are displayed throughout the application
                   </p>
@@ -248,9 +278,11 @@ const SettingsPage: React.FC = () => {
             </h2>
             <div className="space-y-4">
               <div>
-                <h3 className="text-base font-medium text-[var(--color-text-primary)]">Default Resource Kinds</h3>
+                <h3 className="text-base font-medium text-[var(--color-text-primary)]">
+                  Default Resource Kinds
+                </h3>
                 <p className="text-sm text-[var(--color-text-muted)] mb-4">
-                  Select which resource kinds are shown by default in Timeline and Graph views. 
+                  Select which resource kinds are shown by default in Timeline and Graph views.
                   Changing these defaults will reset your current filters.
                 </p>
               </div>
@@ -259,10 +291,7 @@ const SettingsPage: React.FC = () => {
               <div className="bg-[var(--color-surface-muted)] rounded-lg border border-[var(--color-border-soft)] p-4">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                   {COMMON_KINDS.map((kind) => (
-                    <label
-                      key={kind}
-                      className="flex items-center gap-2 cursor-pointer group"
-                    >
+                    <label key={kind} className="flex items-center gap-2 cursor-pointer group">
                       <input
                         type="checkbox"
                         checked={defaultKinds.includes(kind)}
@@ -270,7 +299,7 @@ const SettingsPage: React.FC = () => {
                           if (e.target.checked) {
                             setDefaultKinds([...defaultKinds, kind]);
                           } else {
-                            setDefaultKinds(defaultKinds.filter(k => k !== kind));
+                            setDefaultKinds(defaultKinds.filter((k) => k !== kind));
                           }
                         }}
                         className="w-4 h-4 rounded border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]
@@ -315,10 +344,13 @@ const SettingsPage: React.FC = () => {
               {/* Hide Inactive ReplicaSets Setting */}
               <div className="mt-6 space-y-3">
                 <div>
-                  <h3 className="text-base font-medium text-[var(--color-text-primary)]">Hide Inactive ReplicaSets</h3>
+                  <h3 className="text-base font-medium text-[var(--color-text-primary)]">
+                    Hide Inactive ReplicaSets
+                  </h3>
                   <p className="text-sm text-[var(--color-text-muted)]">
-                    Hide ReplicaSets with spec.replicas = 0 in the Graph view. These are typically old ReplicaSets
-                    kept for rollback purposes but are no longer actively running pods.
+                    Hide ReplicaSets with spec.replicas = 0 in the Graph view. These are typically
+                    old ReplicaSets kept for rollback purposes but are no longer actively running
+                    pods.
                   </p>
                 </div>
                 <button
@@ -329,87 +361,19 @@ const SettingsPage: React.FC = () => {
                       : 'border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
                   }`}
                 >
-                  <span className="text-sm font-medium">{hideInactiveReplicaSets ? 'Enabled' : 'Disabled'}</span>
+                  <span className="text-sm font-medium">
+                    {hideInactiveReplicaSets ? 'Enabled' : 'Disabled'}
+                  </span>
                   <span
                     className={`inline-flex h-6 w-11 items-center rounded-full p-0.5 transition-colors ${
-                      hideInactiveReplicaSets ? 'bg-brand-500 justify-end' : 'bg-[var(--color-border-soft)] justify-start'
+                      hideInactiveReplicaSets
+                        ? 'bg-brand-500 justify-end'
+                        : 'bg-[var(--color-border-soft)] justify-start'
                     }`}
                   >
                     <span className="h-5 w-5 rounded-full bg-white shadow transition-transform" />
                   </span>
                 </button>
-              </div>
-            </div>
-          </section>
-
-          {/* Observatory Section */}
-          <section className="bg-[var(--color-surface-elevated)] rounded-xl border border-[var(--color-border-soft)] p-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-6">
-              Observatory
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-base font-medium text-[var(--color-text-primary)]">Default Node Types</h3>
-                <p className="text-sm text-[var(--color-text-muted)] mb-4">
-                  Select which node types are shown by default in the Observatory view.
-                </p>
-              </div>
-
-              {/* Node type checkboxes grid */}
-              <div className="bg-[var(--color-surface-muted)] rounded-lg border border-[var(--color-border-soft)] p-4">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {OBSERVATORY_NODE_TYPES.map((nodeType) => (
-                    <label
-                      key={nodeType}
-                      className="flex items-center gap-2 cursor-pointer group"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={defaultObservatoryNodeTypes.includes(nodeType)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setDefaultObservatoryNodeTypes([...defaultObservatoryNodeTypes, nodeType]);
-                          } else {
-                            setDefaultObservatoryNodeTypes(defaultObservatoryNodeTypes.filter(t => t !== nodeType));
-                          }
-                        }}
-                        className="w-4 h-4 rounded border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]
-                                   text-brand-500 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
-                      />
-                      <span className="text-sm text-[var(--color-text-primary)] group-hover:text-brand-400 transition-colors">
-                        {nodeType}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-
-                {/* Actions */}
-                <div className="mt-4 pt-4 border-t border-[var(--color-border-soft)] flex items-center gap-4">
-                  <button
-                    onClick={() => setDefaultObservatoryNodeTypes(DEFAULT_OBSERVATORY_NODE_TYPES)}
-                    className="px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]
-                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors"
-                  >
-                    Reset to Defaults
-                  </button>
-                  <button
-                    onClick={() => setDefaultObservatoryNodeTypes(OBSERVATORY_NODE_TYPES)}
-                    className="px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]
-                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors"
-                  >
-                    Select All
-                  </button>
-                  <button
-                    onClick={() => setDefaultObservatoryNodeTypes([])}
-                    className="px-3 py-1.5 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]
-                               text-sm text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)] transition-colors"
-                  >
-                    Clear All
-                  </button>
-                  <span className="ml-auto text-xs text-[var(--color-text-muted)]">
-                    {defaultObservatoryNodeTypes.length} of {OBSERVATORY_NODE_TYPES.length} selected
-                  </span>
-                </div>
               </div>
             </div>
           </section>
@@ -424,8 +388,18 @@ const SettingsPage: React.FC = () => {
               <div className="space-y-4">
                 <div>
                   <h3 className="text-base font-medium text-[var(--color-text-primary)] flex items-center gap-2">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+                      />
                     </svg>
                     Export Data
                   </h3>
@@ -445,7 +419,9 @@ const SettingsPage: React.FC = () => {
                         placeholder="e.g., 1d ago, 2h ago"
                         className="w-full"
                       />
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1">Data from this time onwards</p>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Data from this time onwards
+                      </p>
                     </div>
                     <div>
                       <TimeInputWithCalendar
@@ -455,7 +431,9 @@ const SettingsPage: React.FC = () => {
                         placeholder="e.g., now, 1h ago"
                         className="w-full"
                       />
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1">Data up to this time</p>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Data up to this time
+                      </p>
                     </div>
                   </div>
 
@@ -472,7 +450,9 @@ const SettingsPage: React.FC = () => {
                         <input
                           type="text"
                           value={exportForm.clusterId}
-                          onChange={(e) => setExportForm({ ...exportForm, clusterId: e.target.value })}
+                          onChange={(e) =>
+                            setExportForm({ ...exportForm, clusterId: e.target.value })
+                          }
                           placeholder="e.g., production"
                           className="w-full px-3 py-2 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 placeholder-[var(--color-text-muted)]"
                         />
@@ -484,7 +464,9 @@ const SettingsPage: React.FC = () => {
                         <input
                           type="text"
                           value={exportForm.instanceId}
-                          onChange={(e) => setExportForm({ ...exportForm, instanceId: e.target.value })}
+                          onChange={(e) =>
+                            setExportForm({ ...exportForm, instanceId: e.target.value })
+                          }
                           placeholder="e.g., instance-1"
                           className="w-full px-3 py-2 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 placeholder-[var(--color-text-muted)]"
                         />
@@ -496,8 +478,18 @@ const SettingsPage: React.FC = () => {
                   {exportError && (
                     <div className="bg-red-900/20 border border-red-500/40 rounded-lg p-3">
                       <div className="flex items-start gap-2">
-                        <svg className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        <svg
+                          className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
                         </svg>
                         <div className="text-sm text-red-400">{exportError}</div>
                       </div>
@@ -513,15 +505,36 @@ const SettingsPage: React.FC = () => {
                     {isExporting ? (
                       <>
                         <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          />
                         </svg>
                         <span>Exporting...</span>
                       </>
                     ) : (
                       <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+                          />
                         </svg>
                         <span>Download Export</span>
                       </>
@@ -534,8 +547,18 @@ const SettingsPage: React.FC = () => {
               <div className="space-y-4">
                 <div>
                   <h3 className="text-base font-medium text-[var(--color-text-primary)] flex items-center gap-2">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                      />
                     </svg>
                     Import Data
                   </h3>
@@ -554,15 +577,36 @@ const SettingsPage: React.FC = () => {
                       {isImporting ? (
                         <>
                           <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
                           </svg>
                           <span>Importing...</span>
                         </>
                       ) : (
                         <>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                            />
                           </svg>
                           <span>Choose File</span>
                         </>
@@ -581,11 +625,13 @@ const SettingsPage: React.FC = () => {
                   </div>
 
                   {importMessage && (
-                    <div className={`mt-4 text-sm px-3 py-2 rounded-lg ${
-                      importMessage.type === 'success'
-                        ? 'text-green-400 bg-green-900/20 border border-green-500/40'
-                        : 'text-red-400 bg-red-900/20 border border-red-500/40'
-                    }`}>
+                    <div
+                      className={`mt-4 text-sm px-3 py-2 rounded-lg ${
+                        importMessage.type === 'success'
+                          ? 'text-green-400 bg-green-900/20 border border-green-500/40'
+                          : 'text-red-400 bg-red-900/20 border border-red-500/40'
+                      }`}
+                    >
                       {importMessage.text}
                     </div>
                   )}
@@ -598,7 +644,8 @@ const SettingsPage: React.FC = () => {
         {/* Footer Note */}
         <div className="mt-8 text-center">
           <p className="text-sm text-[var(--color-text-muted)]">
-            All settings are stored in your browser's local storage and will persist across sessions.
+            All settings are stored in your browser&apos;s local storage and will persist across
+            sessions.
           </p>
         </div>
       </div>

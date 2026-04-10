@@ -6,7 +6,6 @@ import (
 	"time"
 
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
-	observatorygraph "github.com/moolen/spectre/internal/analysis/observatory_graph"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	graphmodel "github.com/moolen/spectre/internal/graph"
 	"github.com/moolen/spectre/internal/logging"
@@ -84,15 +83,4 @@ func TestService_AnalyzeNamespaceGraph_UsesStore(t *testing.T) {
 	require.Equal(t, "default", response.Metadata.Namespace)
 	require.Len(t, response.Graph.Nodes, 1)
 	require.Equal(t, "Deployment", response.Graph.Nodes[0].Kind)
-}
-
-func TestService_AnalyzeObservatoryGraph_ReturnsUnsupportedWithoutAnalyzer(t *testing.T) {
-	service := NewService(&stubAnalysisStore{}, logging.GetLogger("test"), nil)
-
-	_, err := service.AnalyzeObservatoryGraph(context.Background(), observatorygraph.AnalyzeInput{
-		Integration: "grafana-dev",
-		Namespace:   "default",
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not supported")
 }

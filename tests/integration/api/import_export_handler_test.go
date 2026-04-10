@@ -13,21 +13,15 @@ import (
 
 	"github.com/google/uuid"
 	handlers "github.com/moolen/spectre/internal/api/handlers"
-	"github.com/moolen/spectre/internal/graph"
+	"github.com/moolen/spectre/internal/embeddedstore"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
-	graphfixtures "github.com/moolen/spectre/tests/integration/graph"
 	"github.com/stretchr/testify/require"
 )
 
 func TestExportImportRoundTripWithPaginatedExport(t *testing.T) {
-	sourceHarness, err := NewTestHarness(t)
-	require.NoError(t, err)
-	defer sourceHarness.Cleanup(context.Background())
-
-	destHarness, err := NewTestHarness(t)
-	require.NoError(t, err)
-	defer destHarness.Cleanup(context.Background())
+	sourceBackend := newEmbeddedImportExportBackend(t)
+	destBackend := newEmbeddedImportExportBackend(t)
 
 	ctx := context.Background()
 	baseTime := time.Now().Add(-10 * time.Minute)
@@ -39,24 +33,22 @@ func TestExportImportRoundTripWithPaginatedExport(t *testing.T) {
 	for i := 0; i < 520; i++ {
 		ns := namespaces[i%len(namespaces)]
 		expectedByNamespace[ns]++
-		events = append(events, graphfixtures.CreateDeploymentEvent(
+		events = append(events, createDeploymentEvent(
 			uuid.New().String(),
 			"import-deploy-"+uuid.New().String()[:8],
 			ns,
 			baseTime.Add(time.Duration(i)*time.Second),
-			models.EventTypeCreate,
 			1,
 		))
 	}
 
-	err = sourceHarness.GetPipeline().ProcessBatch(ctx, events)
-	require.NoError(t, err)
+	require.NoError(t, sourceBackend.ProcessBatch(ctx, events))
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/v1/storage/export?from="+
 		int64ToString(baseTime.Add(-time.Minute).Unix())+"&to="+
 		int64ToString(baseTime.Add(20*time.Minute).Unix()), nil)
 	exportRec := httptest.NewRecorder()
-	exportHandler := handlers.NewExportHandler(graph.NewQueryExecutor(sourceHarness.GetClient()), logging.GetLogger("test.export"))
+	exportHandler := handlers.NewExportHandler(sourceBackend.QueryExecutor(), logging.GetLogger("test.export"))
 	exportHandler.Handle(exportRec, exportReq)
 
 	exportResp := exportRec.Result()
@@ -81,14 +73,14 @@ func TestExportImportRoundTripWithPaginatedExport(t *testing.T) {
 	importReq := httptest.NewRequest(http.MethodPost, "/v1/storage/import?validate=true&overwrite=true", bytes.NewReader(payloadJSON))
 	importReq.Header.Set("Content-Type", "application/vnd.spectre.events.v1+json")
 	importRec := httptest.NewRecorder()
-	importHandler := handlers.NewImportHandler(destHarness.GetPipeline(), logging.GetLogger("test.import"))
+	importHandler := handlers.NewImportHandler(destBackend, logging.GetLogger("test.import"))
 	importHandler.Handle(importRec, importReq)
 
 	importResp := importRec.Result()
 	defer importResp.Body.Close()
 	require.Equal(t, http.StatusOK, importResp.StatusCode)
 
-	queryExecutor := graph.NewQueryExecutor(destHarness.GetClient())
+	queryExecutor := destBackend.QueryExecutor()
 	for _, ns := range namespaces {
 		result, _, queryErr := queryExecutor.ExecutePaginated(ctx, &models.QueryRequest{
 			StartTimestamp: baseTime.Add(-time.Minute).Unix(),
@@ -113,4 +105,52 @@ func uniqueResourceUIDs(events []models.Event) map[string]struct{} {
 
 func int64ToString(v int64) string {
 	return strconv.FormatInt(v, 10)
+}
+
+func newEmbeddedImportExportBackend(t *testing.T) *embeddedstore.Backend {
+	t.Helper()
+
+	backend, err := embeddedstore.Open(embeddedstore.Config{DataDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = backend.Close()
+	})
+
+	return backend
+}
+
+func createDeploymentEvent(uid, name, namespace string, timestamp time.Time, revision int) models.Event {
+	data, err := json.Marshal(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":              name,
+			"namespace":         namespace,
+			"uid":               uid,
+			"resourceVersion":   strconv.Itoa(revision),
+			"creationTimestamp": timestamp.UTC().Format(time.RFC3339Nano),
+		},
+		"spec": map[string]any{
+			"replicas": 1,
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return models.Event{
+		ID:        uuid.New().String(),
+		Timestamp: timestamp.UnixNano(),
+		Type:      models.EventTypeCreate,
+		Resource: models.ResourceMetadata{
+			Group:     "apps",
+			Version:   "v1",
+			Kind:      "Deployment",
+			Namespace: namespace,
+			Name:      name,
+			UID:       uid,
+		},
+		Data:     data,
+		DataSize: int32(len(data)),
+	}
 }

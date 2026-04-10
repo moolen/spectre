@@ -76,7 +76,7 @@
 //
 // # Usage Example
 //
-//	analyzer := analysis.NewRootCauseAnalyzerFromGraphClient(graphClient)
+//	analyzer := analysis.NewRootCauseAnalyzer(store)
 //	result, err := analyzer.Analyze(ctx, analysis.AnalyzeInput{
 //		ResourceUID:      "pod-uid-123",
 //		FailureTimestamp: time.Now().UnixNano(),
@@ -112,5 +112,4 @@
 //   - confidence_test.go: Confidence calculation tests
 //   - symptom_test.go: Symptom classification tests
 //   - root_cause_test.go: Root cause identification tests
-//   - causal_chain_integration_test.go: Integration tests with graph queries
 package analysis

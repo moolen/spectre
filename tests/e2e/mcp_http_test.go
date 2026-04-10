@@ -24,7 +24,7 @@ func TestMCPHTTPTransport(t *testing.T) {
 
 	when.tools_are_listed()
 
-	then.four_tools_are_available().and().
+	then.three_tools_are_available().and().
 		expected_tools_are_present().and().
 		each_tool_has_description_and_schema()
 

@@ -14,21 +14,16 @@ import (
 )
 
 func TestResolveServerRuntimeMode(t *testing.T) {
-	t.Run("embedded live mode enables watcher and mcp", func(t *testing.T) {
+	t.Run("live mode enables watcher and mcp", func(t *testing.T) {
 		mode, err := resolveServerRuntimeMode(serverModeInput{
-			Embedded:       true,
-			ImportPath:     "",
-			GraphEnabled:   true,
 			WatcherEnabled: true,
+			ImportPath:     "",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if mode.Name != string(runtimeNameEmbedded) {
 			t.Fatalf("expected mode name %s, got %q", runtimeNameEmbedded, mode.Name)
-		}
-		if !mode.Embedded {
-			t.Fatalf("expected embedded to be true")
 		}
 		if mode.Backend != string(backendEmbedded) {
 			t.Fatalf("expected backend %s, got %q", backendEmbedded, mode.Backend)
@@ -39,9 +34,6 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		if mode.ImportOnly {
 			t.Fatalf("expected import-only flag to be false")
 		}
-		if mode.StartGraph {
-			t.Fatalf("expected StartGraph to be false in embedded live mode")
-		}
 		if !mode.StartWatcher {
 			t.Fatalf("expected StartWatcher to be true in embedded live mode")
 		}
@@ -50,24 +42,16 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		}
 	})
 
-	t.Run("embedded import-only mode disables watcher and enables mcp", func(t *testing.T) {
+	t.Run("import-only mode disables watcher and keeps mcp enabled", func(t *testing.T) {
 		mode, err := resolveServerRuntimeMode(serverModeInput{
-			Embedded:       true,
-			ImportPath:     "/tmp/import.jsonl",
-			GraphEnabled:   false,
 			WatcherEnabled: false,
+			ImportPath:     "/tmp/import.jsonl",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if mode.Name != string(runtimeNameEmbedded) {
 			t.Fatalf("expected mode name %s, got %q", runtimeNameEmbedded, mode.Name)
-		}
-		if !mode.Embedded {
-			t.Fatalf("expected embedded to be true")
-		}
-		if mode.AuditOnly {
-			t.Fatalf("expected audit-only to be false")
 		}
 		if mode.Backend != string(backendEmbedded) {
 			t.Fatalf("expected backend %s, got %q", backendEmbedded, mode.Backend)
@@ -78,9 +62,6 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		if !mode.ImportOnly {
 			t.Fatalf("expected import-only flag to be true")
 		}
-		if mode.StartGraph {
-			t.Fatalf("expected StartGraph to be false in embedded import-only mode")
-		}
 		if mode.StartWatcher {
 			t.Fatalf("expected StartWatcher to be false in embedded import-only mode")
 		}
@@ -89,12 +70,10 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		}
 	})
 
-	t.Run("embedded import-only mode without import path still serves persisted data", func(t *testing.T) {
+	t.Run("watcher-disabled mode without import path still serves persisted data", func(t *testing.T) {
 		mode, err := resolveServerRuntimeMode(serverModeInput{
-			Embedded:       true,
-			ImportPath:     "",
-			GraphEnabled:   true,
 			WatcherEnabled: false,
+			ImportPath:     "",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -107,61 +86,25 @@ func TestResolveServerRuntimeMode(t *testing.T) {
 		}
 	})
 
-	t.Run("graph disabled without audit-only returns error", func(t *testing.T) {
-		_, err := resolveServerRuntimeMode(serverModeInput{
-			GraphEnabled:   false,
-			WatcherEnabled: true,
-			AuditLogPath:   "",
-		})
-		if err == nil {
-			t.Fatalf("expected error when graph is disabled without audit-only mode")
-		}
-	})
+}
 
-	t.Run("audit-only mode uses watcher without graph", func(t *testing.T) {
-		mode, err := resolveServerRuntimeMode(serverModeInput{
-			GraphEnabled:   false,
-			WatcherEnabled: true,
-			AuditLogPath:   "/tmp/audit.jsonl",
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !mode.AuditOnly {
-			t.Fatalf("expected audit-only mode")
-		}
-		if mode.StartGraph {
-			t.Fatalf("expected StartGraph to be false in audit-only mode")
-		}
-		if !mode.StartWatcher {
-			t.Fatalf("expected StartWatcher to be true in audit-only mode")
-		}
-		if mode.StartMCP {
-			t.Fatalf("expected StartMCP to be false in audit-only mode")
-		}
-	})
+func TestServer_RemovedGraphAndIntegrationFlags(t *testing.T) {
+	t.Helper()
 
-	t.Run("graph enabled with watcher disabled disables watcher", func(t *testing.T) {
-		mode, err := resolveServerRuntimeMode(serverModeInput{
-			GraphEnabled:   true,
-			WatcherEnabled: false,
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if mode.Name != string(runtimeNameGraph) {
-			t.Fatalf("expected mode name %s, got %q", runtimeNameGraph, mode.Name)
-		}
-		if mode.Backend != string(backendFalkor) {
-			t.Fatalf("expected backend %s, got %q", backendFalkor, mode.Backend)
-		}
-		if mode.IngestionMode != string(ingestionModeLive) {
-			t.Fatalf("expected ingestion mode %s, got %q", ingestionModeLive, mode.IngestionMode)
-		}
-		if mode.StartWatcher {
-			t.Fatalf("expected StartWatcher to be false when watcher is disabled")
-		}
-	})
+	removedFlags := []string{
+		"embedded",
+		"graph-enabled",
+		"graph-host",
+		"graph-port",
+		"graph-name",
+		"graph-retention-hours",
+		"integrations-config",
+		"min-integration-version",
+	}
+
+	for _, name := range removedFlags {
+		require.Nilf(t, serverCmd.Flags().Lookup(name), "flag %q should not be registered", name)
+	}
 }
 
 func TestEmbeddedExecutorHasUsableEvents(t *testing.T) {

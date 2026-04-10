@@ -5,7 +5,6 @@ tests:
   - it: should create an embedded PVC when embedded persistence is enabled
     set:
       embedded:
-        enabled: true
         persistence:
           enabled: true
     asserts:
@@ -21,9 +20,8 @@ tests:
   - it: should not create an embedded PVC when embedded mode is disabled
     set:
       embedded:
-        enabled: false
         persistence:
-          enabled: true
+          enabled: false
     asserts:
       - hasDocuments:
           count: 0
@@ -31,7 +29,6 @@ tests:
   - it: should not create an embedded PVC when persistence is disabled
     set:
       embedded:
-        enabled: true
         persistence:
           enabled: false
     asserts:

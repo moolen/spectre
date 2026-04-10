@@ -7,9 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	appgraph "github.com/moolen/spectre/internal/app/graph"
 	apptimeline "github.com/moolen/spectre/internal/app/timeline"
-	"github.com/moolen/spectre/internal/integration"
 )
 
 // Tool defines the interface for our existing tool implementations
@@ -21,7 +19,6 @@ type Tool interface {
 type SpectreServer struct {
 	mcpServer       *server.MCPServer
 	timelineService *apptimeline.Service
-	graphService    *appgraph.Service
 	tools           map[string]Tool
 	version         string
 }
@@ -30,7 +27,6 @@ type SpectreServer struct {
 type ServerOptions struct {
 	Version         string
 	TimelineService *apptimeline.Service // Required: Direct service for tools
-	GraphService    *appgraph.Service    // Required: Direct graph service for tools
 }
 
 // NewSpectreServerWithOptions creates a new Spectre MCP server with services
@@ -38,9 +34,6 @@ func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
 	// Validate required services
 	if opts.TimelineService == nil {
 		return nil, fmt.Errorf("TimelineService is required")
-	}
-	if opts.GraphService == nil {
-		return nil, fmt.Errorf("GraphService is required")
 	}
 
 	// Create mcp-go server with capabilities
@@ -54,7 +47,6 @@ func NewSpectreServerWithOptions(opts ServerOptions) (*SpectreServer, error) {
 	s := &SpectreServer{
 		mcpServer:       mcpServer,
 		timelineService: opts.TimelineService,
-		graphService:    opts.GraphService,
 		tools:           make(map[string]Tool),
 		version:         opts.Version,
 	}
@@ -200,67 +192,4 @@ func (s *SpectreServer) registerPrompts() {
 // GetMCPServer returns the underlying mcp-go server for transport setup
 func (s *SpectreServer) GetMCPServer() *server.MCPServer {
 	return s.mcpServer
-}
-
-// MCPToolRegistry adapts the integration.ToolRegistry interface to the mcp-go server.
-// It allows integrations to register tools dynamically during startup.
-type MCPToolRegistry struct {
-	mcpServer *server.MCPServer
-}
-
-// NewMCPToolRegistry creates a new tool registry adapter.
-func NewMCPToolRegistry(mcpServer *server.MCPServer) *MCPToolRegistry {
-	return &MCPToolRegistry{
-		mcpServer: mcpServer,
-	}
-}
-
-// RegisterTool registers an MCP tool with the mcp-go server.
-// It adapts the integration.ToolHandler to the mcp-go handler format.
-func (r *MCPToolRegistry) RegisterTool(name string, description string, handler integration.ToolHandler, inputSchema map[string]interface{}) error {
-	// Validation
-	if name == "" {
-		return fmt.Errorf("tool name cannot be empty")
-	}
-
-	// Use provided schema or fall back to empty object schema
-	if inputSchema == nil {
-		inputSchema = map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		}
-	}
-	schemaJSON, err := json.Marshal(inputSchema)
-	if err != nil {
-		return fmt.Errorf("failed to marshal schema: %w", err)
-	}
-
-	// Create MCP tool with provided schema
-	mcpTool := mcp.NewToolWithRawSchema(name, description, schemaJSON)
-
-	// Adapter: integration.ToolHandler -> server.ToolHandlerFunc
-	adaptedHandler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Marshal mcp arguments to []byte for integration handler
-		args, err := json.Marshal(request.Params.Arguments)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid arguments: %v", err)), nil
-		}
-
-		// Call integration handler
-		result, err := handler(ctx, args)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Tool execution failed: %v", err)), nil
-		}
-
-		// Format result as JSON
-		resultJSON, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to format result: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(resultJSON)), nil
-	}
-
-	r.mcpServer.AddTool(mcpTool, adaptedHandler)
-	return nil
 }

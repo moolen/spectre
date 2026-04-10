@@ -888,7 +888,7 @@ func (s *ImportExportStage) status_segments_are_ordered() *ImportExportStage {
 	return s
 }
 
-func (s *ImportExportStage) kubernetes_event_kind_is_present() *ImportExportStage {
+func (s *ImportExportStage) kubernetes_events_are_attached_not_listed_in_metadata() *ImportExportStage {
 	startTime := s.baseTime.Unix() - 300
 	endTime := s.baseTime.Unix() + 300
 
@@ -902,16 +902,28 @@ func (s *ImportExportStage) kubernetes_event_kind_is_present() *ImportExportStag
 			return false
 		}
 
+		hasPod := false
+		hasStandaloneEvent := false
 		for _, kind := range metadata.Kinds {
+			if kind == kindPod {
+				hasPod = true
+			}
 			if kind == "Event" {
-				s.t.Logf("✓ Event kind found in metadata")
-				// ResourceCounts field removed from MetadataResponse
-				return true
+				hasStandaloneEvent = true
 			}
 		}
 
-		s.t.Logf("Event kind not yet in metadata, found kinds: %v", metadata.Kinds)
-		return false
+		if !hasPod {
+			s.t.Logf("Pod kind not yet in metadata, found kinds: %v", metadata.Kinds)
+			return false
+		}
+		if hasStandaloneEvent {
+			s.t.Logf("Event kind unexpectedly present in metadata: %v", metadata.Kinds)
+			return false
+		}
+
+		s.t.Logf("✓ Metadata lists workload/resource kinds without standalone Event entries")
+		return true
 	}, helpers.SlowEventuallyOption)
 
 	return s
@@ -1163,7 +1175,6 @@ func (s *ImportExportStage) spectre_is_deployed_in_embedded_mode_with_import_on_
 	graphValues["enabled"] = false
 
 	values["extraArgs"] = []string{
-		"--embedded",
 		"--watcher-enabled=false",
 		fmt.Sprintf("--import-path=%s", importMountPath),
 	}

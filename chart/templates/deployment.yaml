@@ -7,7 +7,7 @@ metadata:
     {{- include "spectre.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
-  {{- $useEmbeddedRecreate := and .Values.embedded.enabled .Values.embedded.persistence.enabled (eq (int .Values.replicaCount) 1) (eq .Values.updateStrategy.type "RollingUpdate") (eq (int .Values.updateStrategy.rollingUpdate.maxUnavailable) 0) (eq (int .Values.updateStrategy.rollingUpdate.maxSurge) 1) }}
+  {{- $useEmbeddedRecreate := and .Values.embedded.persistence.enabled (eq (int .Values.replicaCount) 1) (eq .Values.updateStrategy.type "RollingUpdate") (eq (int .Values.updateStrategy.rollingUpdate.maxUnavailable) 0) (eq (int .Values.updateStrategy.rollingUpdate.maxSurge) 1) }}
   {{- if $useEmbeddedRecreate }}
   strategy:
     type: Recreate
@@ -104,16 +104,6 @@ spec:
         {{- end }}
         - --watcher-config=/etc/watcher/watcher.yaml
         - --max-concurrent-requests={{ .Values.config.maxConcurrentRequests }}
-        {{- if .Values.pprof.enabled }}
-        - --pprof-enabled=true
-        - --pprof-port={{ .Values.pprof.port }}
-        {{- end }}
-        {{- if .Values.tracing.enabled }}
-        - --tracing-enabled=true
-        - --tracing-endpoint={{ .Values.tracing.endpoint }}
-        {{- end }}
-        {{- if .Values.embedded.enabled }}
-        - --embedded
         - --data-dir={{ .Values.embedded.dataDir }}
         - --embedded-flush-interval={{ .Values.embedded.flushInterval }}
         - --embedded-retention-days={{ .Values.embedded.retentionDays }}
@@ -131,22 +121,16 @@ spec:
         - --embedded-segment-target-bytes={{ int64 .Values.embedded.segmentTargetBytes }}
         - --embedded-compaction-min-segments={{ .Values.embedded.compactionMinSegments }}
         - --embedded-auto-compaction={{ .Values.embedded.autoCompaction }}
+        {{- if .Values.pprof.enabled }}
+        - --pprof-enabled=true
+        - --pprof-port={{ .Values.pprof.port }}
         {{- end }}
-        {{- if and .Values.graph.enabled (not .Values.embedded.enabled) }}
-        - --graph-enabled=true
-        - --graph-host=127.0.0.1
-        - --graph-port={{ .Values.graph.falkordb.port }}
-        - --graph-name={{ .Values.graph.falkordb.graphName }}
-        - --graph-retention-hours={{ .Values.graph.sync.retentionHours }}
+        {{- if .Values.tracing.enabled }}
+        - --tracing-enabled=true
+        - --tracing-endpoint={{ .Values.tracing.endpoint }}
         {{- end }}
         {{- if .Values.metadataCache }}
         - --metadata-cache-refresh-seconds={{ .Values.metadataCache.refreshSeconds }}
-        {{- end }}
-        {{- if .Values.integrations.enabled }}
-        - --integrations-config={{ .Values.integrations.configPath }}
-        {{- end }}
-        {{- if and .Values.integrations.persistence.enabled (not .Values.embedded.enabled) }}
-        - --data-dir={{ .Values.integrations.persistence.mountPath }}/data
         {{- end }}
         {{- range .Values.extraArgs }}
         - {{ . }}
@@ -155,14 +139,8 @@ spec:
         - name: watcher-config
           mountPath: /etc/watcher
           readOnly: true
-        {{- if .Values.integrations.persistence.enabled }}
-        - name: integrations-data
-          mountPath: {{ .Values.integrations.persistence.mountPath }}
-        {{- end }}
-        {{- if .Values.embedded.enabled }}
         - name: embedded-data
           mountPath: {{ .Values.embedded.dataDir }}
-        {{- end }}
         {{- with .Values.extraVolumeMounts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -192,78 +170,10 @@ spec:
         {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 12 }}
-      {{- if and .Values.graph.enabled (not .Values.embedded.enabled) .Values.graph.falkordb.sidecar }}
-      - name: falkordb
-        image: "{{ .Values.graph.falkordb.image.repository }}:{{ .Values.graph.falkordb.image.tag }}"
-        imagePullPolicy: {{ .Values.graph.falkordb.image.pullPolicy }}
-        {{- with .Values.graph.falkordb.securityContext }}
-        securityContext:
-          {{- toYaml . | nindent 12 }}
-        {{- end }}
-        {{- if .Values.graph.falkordb.persistence.enabled }}
-        command:
-        - redis-server
-        args:
-        - --dir
-        - {{ .Values.graph.falkordb.persistence.mountPath }}
-        - --dbfilename
-        - dump.rdb
-        - --loadmodule
-        - /var/lib/falkordb/bin/falkordb.so
-        {{- if .Values.graph.falkordb.persistence.aof.enabled }}
-        - --appendonly
-        - "yes"
-        - --appendfsync
-        - {{ .Values.graph.falkordb.persistence.aof.fsync | quote }}
-        {{- end }}
-        {{- if .Values.graph.falkordb.persistence.rdb.save }}
-        - --save
-        - {{ .Values.graph.falkordb.persistence.rdb.save | quote }}
-        {{- end }}
-        {{- end }}
-        ports:
-        - name: redis
-          containerPort: {{ .Values.graph.falkordb.port }}
-          protocol: TCP
-        - name: browser
-          containerPort: 3000
-          protocol: TCP
-        volumeMounts:
-        {{- if .Values.graph.falkordb.persistence.enabled }}
-        - name: graph-data
-          mountPath: {{ .Values.graph.falkordb.persistence.mountPath }}
-        {{- end }}
-        {{- if .Values.graph.falkordb.livenessProbe.enabled }}
-        livenessProbe:
-          {{- omit .Values.graph.falkordb.livenessProbe "enabled" | toYaml | nindent 10 }}
-        {{- end }}
-        {{- if .Values.graph.falkordb.readinessProbe.enabled }}
-        readinessProbe:
-          {{- omit .Values.graph.falkordb.readinessProbe "enabled" | toYaml | nindent 10 }}
-        {{- end }}
-        # Graceful shutdown: SHUTDOWN SAVE persists data before exit
-        lifecycle:
-          preStop:
-            exec:
-              command: ["redis-cli", "SHUTDOWN", "SAVE"]
-        resources:
-          {{- toYaml .Values.graph.falkordb.resources | nindent 12 }}
-      {{- end }}
       volumes:
       - name: watcher-config
         configMap:
           name: {{ include "spectre.fullname" . }}
-      {{- if and .Values.graph.enabled (not .Values.embedded.enabled) .Values.graph.falkordb.sidecar .Values.graph.falkordb.persistence.enabled }}
-      - name: graph-data
-        persistentVolumeClaim:
-          claimName: {{ include "spectre.fullname" . }}-graph
-      {{- end }}
-      {{- if .Values.integrations.persistence.enabled }}
-      - name: integrations-data
-        persistentVolumeClaim:
-          claimName: {{ include "spectre.fullname" . }}-integrations
-      {{- end }}
-      {{- if .Values.embedded.enabled }}
       - name: embedded-data
         {{- if .Values.embedded.persistence.enabled }}
         persistentVolumeClaim:
@@ -271,7 +181,6 @@ spec:
         {{- else }}
         emptyDir: {}
         {{- end }}
-      {{- end }}
       {{- with .Values.extraVolumes }}
       {{- toYaml . | nindent 6 }}
       {{- end }}

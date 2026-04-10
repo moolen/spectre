@@ -47,6 +47,8 @@ func TestEmbeddedRuntimeFastRestartServesTimelineImmediately(t *testing.T) {
 	require.Equal(t, 1.0, gaugeValueFromFamilies(t, families, "spectre_embedded_active_tail_events", nil))
 
 	manifestAfterReopen := readEmbeddedManifest(t, dir)
+	require.Equal(t, 1, manifestAfterReopen.SegmentIndexGeneration)
+	manifestBeforeReopen.SegmentIndexGeneration = manifestAfterReopen.SegmentIndexGeneration
 	require.Equal(t, manifestBeforeReopen, manifestAfterReopen)
 
 	server := newEmbeddedRuntimeServer(t, engine)
