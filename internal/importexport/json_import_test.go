@@ -488,11 +488,11 @@ func TestImportFromDirectory(t *testing.T) {
 
 	// Create test files
 	files := map[string]int{
-		filepath.Join(tmpDir, "file1.json"):       1,
-		filepath.Join(subDir1, "file2.json"):      2,
-		filepath.Join(subDir2, "file3.json"):      1,
-		filepath.Join(tmpDir, "readme.txt"):       0, // Should be ignored
-		filepath.Join(subDir1, "another.txt"):     0, // Should be ignored
+		filepath.Join(tmpDir, "file1.json"):   1,
+		filepath.Join(subDir1, "file2.json"):  2,
+		filepath.Join(subDir2, "file3.json"):  1,
+		filepath.Join(tmpDir, "readme.txt"):   0, // Should be ignored
+		filepath.Join(subDir1, "another.txt"): 0, // Should be ignored
 	}
 
 	createEventFile := func(path string, eventCount int) error {

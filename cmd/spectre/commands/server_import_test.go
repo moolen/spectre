@@ -17,6 +17,7 @@ import (
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/scrub"
 )
 
 type fakeStartupImportBatchIngestor struct {
@@ -178,6 +179,96 @@ func TestRunStartupImportPropagatesStreamError(t *testing.T) {
 	})
 	if !errors.Is(err, errStream) {
 		t.Fatalf("expected stream error, got: %v", err)
+	}
+}
+
+func TestRunStartupImportScrubsImportedPayloadsWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	streamFn := func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error {
+		return onChunk([]models.Event{{
+			ID:   "event-1",
+			Type: models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				Kind:      "ConfigMap",
+				Namespace: "default",
+				Name:      "cfg",
+				UID:       "uid-1",
+			},
+			Data: json.RawMessage(`{"kind":"ConfigMap","data":{"JWT_SECRET":"demo_jwt_secret_key"}}`),
+		}})
+	}
+
+	ingestor := &fakeStartupImportBatchIngestor{}
+	err := runStartupImport(context.Background(), startupImportOptions{
+		Path:          "fixtures/import.json",
+		Logger:        logging.GetLogger("test_startup_import_scrub_enabled"),
+		BatchIngestor: ingestor,
+		Stream:        streamFn,
+		Scrubber:      scrub.New(true),
+	})
+	if err != nil {
+		t.Fatalf("runStartupImport returned error: %v", err)
+	}
+
+	if len(ingestor.batches) != 1 || len(ingestor.batches[0]) != 1 {
+		t.Fatalf("expected one imported event batch, got %#v", ingestor.batches)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(ingestor.batches[0][0].Data, &got); err != nil {
+		t.Fatalf("failed to unmarshal scrubbed payload: %v", err)
+	}
+
+	data := got["data"].(map[string]any)
+	if data["JWT_SECRET"] == "demo_jwt_secret_key" {
+		t.Fatalf("expected startup import payload to be scrubbed")
+	}
+}
+
+func TestRunStartupImportLeavesImportedPayloadUntouchedWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	streamFn := func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error {
+		return onChunk([]models.Event{{
+			ID:   "event-1",
+			Type: models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				Kind:      "ConfigMap",
+				Namespace: "default",
+				Name:      "cfg",
+				UID:       "uid-1",
+			},
+			Data: json.RawMessage(`{"kind":"ConfigMap","data":{"JWT_SECRET":"demo_jwt_secret_key"}}`),
+		}})
+	}
+
+	ingestor := &fakeStartupImportBatchIngestor{}
+	err := runStartupImport(context.Background(), startupImportOptions{
+		Path:          "fixtures/import.json",
+		Logger:        logging.GetLogger("test_startup_import_scrub_disabled"),
+		BatchIngestor: ingestor,
+		Stream:        streamFn,
+		Scrubber:      scrub.New(false),
+	})
+	if err != nil {
+		t.Fatalf("runStartupImport returned error: %v", err)
+	}
+
+	if len(ingestor.batches) != 1 || len(ingestor.batches[0]) != 1 {
+		t.Fatalf("expected one imported event batch, got %#v", ingestor.batches)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(ingestor.batches[0][0].Data, &got); err != nil {
+		t.Fatalf("failed to unmarshal preserved payload: %v", err)
+	}
+
+	data := got["data"].(map[string]any)
+	if data["JWT_SECRET"] != "demo_jwt_secret_key" {
+		t.Fatalf("expected startup import payload to remain unchanged")
 	}
 }
 

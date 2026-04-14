@@ -11,6 +11,7 @@ import (
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/scrub"
 )
 
 const defaultStartupImportChunkSize = 1024
@@ -23,6 +24,7 @@ type startupImportOptions struct {
 	Logger           *logging.Logger
 	BatchIngestor    api.BatchIngestor
 	Pipeline         api.BatchIngestor // Deprecated compatibility alias for existing callers
+	Scrubber         *scrub.Scrubber
 	Stream           func(source importexport.ImportSource, chunkSize int, onChunk importexport.ChunkCallback, opts ...importexport.ImportOption) error
 }
 
@@ -86,6 +88,10 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 			totalChunks++
 			totalEvents += len(chunk)
 
+			if err := scrubImportedEvents(chunk, opts.Scrubber); err != nil {
+				return err
+			}
+
 			processStart := time.Now()
 			if err := batchIngestor.ProcessBatch(ctx, chunk); err != nil {
 				return err
@@ -134,6 +140,27 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 		}
 		logger.InfoWithFields("Startup import benchmark report written",
 			logging.Field("path", opts.BenchmarkLogPath))
+	}
+
+	return nil
+}
+
+func scrubImportedEvents(events []models.Event, scrubber *scrub.Scrubber) error {
+	if scrubber == nil || !scrubber.Enabled() {
+		return nil
+	}
+
+	for i := range events {
+		if len(events[i].Data) == 0 {
+			continue
+		}
+
+		scrubbed, err := scrubber.ScrubEventData(events[i].Resource.Kind, events[i].Data)
+		if err != nil {
+			return fmt.Errorf("scrub imported event %s: %w", events[i].ID, err)
+		}
+
+		events[i].Data = scrubbed
 	}
 
 	return nil

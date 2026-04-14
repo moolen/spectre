@@ -56,7 +56,8 @@ var (
 	reconcilerIntervalMins int
 	reconcilerBatchSize    int
 	// MCP server configuration
-	stdioEnabled bool
+	stdioEnabled       bool
+	scrubSensitiveData bool
 )
 
 var serverCmd = &cobra.Command{
@@ -177,6 +178,7 @@ func init() {
 
 	// MCP server configuration
 	serverCmd.Flags().BoolVar(&stdioEnabled, "stdio", false, "Enable stdio MCP transport alongside HTTP (default: false)")
+	serverCmd.Flags().BoolVar(&scrubSensitiveData, "scrub-sensitive-data", false, "Scrub sensitive values before writing resource data to storage")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -191,6 +193,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		tracingEndpoint,
 		tracingTLSCAPath,
 		tracingTLSInsecure,
+		scrubSensitiveData,
 	)
 
 	if err := cfg.Validate(); err != nil {
@@ -217,7 +220,6 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	manager := lifecycle.NewManager()
 	logger.Info("Lifecycle manager created")
-
 	tracingProvider := initializeTracingProvider(cfg, manager, logger)
 	startPprofServer(logger)
 	runEmbeddedServerRuntime(cfg, mode, manager, tracingProvider, logger)

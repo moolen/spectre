@@ -14,6 +14,7 @@ import (
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/mcp"
+	"github.com/moolen/spectre/internal/scrub"
 	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
 	"github.com/prometheus/client_golang/prometheus"
@@ -40,12 +41,13 @@ func runEmbeddedServerRuntime(cfg *config.Config, mode serverRuntimeMode, manage
 		HandleError(err, "Embedded backend registration error")
 	}
 
+	eventScrubber := scrub.New(cfg.ScrubSensitiveData)
 	auditLogWriter := newAuditLogWriter(logger)
-	runEmbeddedStartupImport(embeddedBackend, logger)
+	runEmbeddedStartupImport(embeddedBackend, eventScrubber, logger)
 	validateEmbeddedImportMode(mode, embeddedBackend, logger)
 	skipInitialListReplay := shouldSkipEmbeddedInitialListReplay(embeddedBackend, logger)
 
-	watcherComponent := registerEmbeddedWatcher(mode, cfg, manager, embeddedBackend, auditLogWriter, skipInitialListReplay, logger)
+	watcherComponent := registerEmbeddedWatcher(mode, cfg, manager, embeddedBackend, eventScrubber, auditLogWriter, skipInitialListReplay, logger)
 	apiComponent, mcpServer := newEmbeddedAPI(cfg, mode, tracingProvider, embeddedBackend, watcherComponent, logger)
 
 	if err := manager.Register(apiComponent, embeddedBackend); err != nil {
@@ -94,7 +96,7 @@ func newAuditLogWriter(logger *logging.Logger) *watcher.FileAuditLogWriter {
 	return auditLogWriter
 }
 
-func runEmbeddedStartupImport(embeddedBackend *embeddedstore.Backend, logger *logging.Logger) {
+func runEmbeddedStartupImport(embeddedBackend *embeddedstore.Backend, scrubber *scrub.Scrubber, logger *logging.Logger) {
 	if importPath == "" {
 		return
 	}
@@ -109,6 +111,7 @@ func runEmbeddedStartupImport(embeddedBackend *embeddedstore.Backend, logger *lo
 		ImportMode:       importMode,
 		Logger:           logger,
 		BatchIngestor:    embeddedBackend,
+		Scrubber:         scrubber,
 	}); err != nil {
 		logger.Error("Failed to run embedded startup import: %v", err)
 		HandleError(err, "Import error")
@@ -134,13 +137,13 @@ func validateEmbeddedImportMode(mode serverRuntimeMode, embeddedBackend *embedde
 	HandleError(fmt.Errorf("no usable embedded events found in %s", source), "Import error")
 }
 
-func registerEmbeddedWatcher(mode serverRuntimeMode, cfg *config.Config, manager *lifecycle.Manager, embeddedBackend *embeddedstore.Backend, auditLogWriter *watcher.FileAuditLogWriter, skipInitialListReplay bool, logger *logging.Logger) *watcher.Watcher {
+func registerEmbeddedWatcher(mode serverRuntimeMode, cfg *config.Config, manager *lifecycle.Manager, embeddedBackend *embeddedstore.Backend, scrubber *scrub.Scrubber, auditLogWriter *watcher.FileAuditLogWriter, skipInitialListReplay bool, logger *logging.Logger) *watcher.Watcher {
 	if !mode.StartWatcher {
 		logger.Info("Embedded import-only mode - watcher disabled")
 		return nil
 	}
 
-	eventHandler := watcher.NewEventCaptureHandler(embeddedBackend)
+	eventHandler := watcher.NewEventCaptureHandler(embeddedBackend, scrubber)
 	if auditLogWriter != nil {
 		eventHandler.SetAuditLog(auditLogWriter)
 	}

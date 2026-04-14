@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/moolen/spectre/internal/embeddedstore"
+	"github.com/moolen/spectre/internal/scrub"
 	"github.com/moolen/spectre/internal/watcher"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,7 +22,7 @@ func TestEmbeddedRuntimeLiveWatcherWritesAreServed(t *testing.T) {
 	})
 
 	server := newEmbeddedRuntimeServer(t, backend)
-	handler := watcher.NewEventCaptureHandler(backend)
+	handler := watcher.NewEventCaptureHandler(backend, scrub.New(false))
 
 	err = handler.OnAdd(&corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
