@@ -65,7 +65,7 @@ func maskString(value string) string {
 		return string(runes[:1]) + repeatMask(n-1)
 	}
 	if n <= 8 {
-		return repeatMask(n)
+		return string(runes[:1]) + repeatMask(n-2) + string(runes[n-1:])
 	}
 	return string(runes[:3]) + repeatMask(n-5) + string(runes[n-2:])
 }

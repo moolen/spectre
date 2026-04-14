@@ -139,6 +139,9 @@ func TestMaskString_ShortValuesKeepFirstRune(t *testing.T) {
 	if got := maskString("abcd"); got != "a***" {
 		t.Fatalf("expected \"abcd\" -> \"a***\", got %q", got)
 	}
+	if got := maskString("secret12"); got != "s******2" {
+		t.Fatalf("expected \"secret12\" -> \"s******2\", got %q", got)
+	}
 }
 
 func TestScrubEventData_PreservesLargeIntegers(t *testing.T) {
