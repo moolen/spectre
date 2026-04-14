@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -101,7 +103,7 @@ func (s *Scrubber) scrubBase64Map(obj map[string]any, field string) {
 			continue
 		}
 		if !utf8.Valid(decoded) {
-			values[key] = maskString(text)
+			values[key] = maskBase64(text)
 			continue
 		}
 		values[key] = base64.StdEncoding.EncodeToString([]byte(maskString(string(decoded))))
@@ -206,5 +208,40 @@ func (s *Scrubber) scrubLastAppliedConfiguration(obj map[string]any) {
 func decodeJSONNumber(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if decoder.More() {
+		return fmt.Errorf("unexpected trailing JSON data")
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing JSON data")
+		}
+		return err
+	}
+	return nil
+}
+
+func maskBase64(value string) string {
+	if value == "" {
+		return value
+	}
+
+	trimmed := strings.TrimRight(value, "=")
+	padding := value[len(trimmed):]
+	if trimmed == "" {
+		return value
+	}
+
+	runes := []rune(trimmed)
+	n := len(runes)
+	if n <= 4 {
+		return strings.Repeat("A", n) + padding
+	}
+
+	head := string(runes[:2])
+	tail := string(runes[n-2:])
+	mid := strings.Repeat("A", n-4)
+	return head + mid + tail + padding
 }

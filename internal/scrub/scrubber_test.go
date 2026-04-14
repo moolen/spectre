@@ -59,6 +59,27 @@ func TestScrubEventData_SecretDataReencodesBase64(t *testing.T) {
 	}
 }
 
+func TestScrubEventData_SecretStringDataScrubsValues(t *testing.T) {
+	s := New(true)
+	input := json.RawMessage(`{"kind":"Secret","stringData":{"token":"secret_value"}}`)
+
+	out, err := s.ScrubEventData("Secret", input)
+	if err != nil {
+		t.Fatalf("ScrubEventData() error = %v", err)
+	}
+
+	var got struct {
+		StringData map[string]string `json:"stringData"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.StringData["token"] == "secret_value" {
+		t.Fatalf("expected stringData value to be scrubbed")
+	}
+}
+
 func TestScrubEventData_LastAppliedConfigurationRecurses(t *testing.T) {
 	s := New(true)
 	input := json.RawMessage(`{
@@ -129,6 +150,15 @@ func TestScrubEventData_PreservesLargeIntegers(t *testing.T) {
 
 	if got["observedGeneration"] != json.Number("9007199254740993") {
 		t.Fatalf("expected large integer preserved, got %#v", got["observedGeneration"])
+	}
+}
+
+func TestScrubEventData_RejectsTrailingJSONGarbage(t *testing.T) {
+	s := New(true)
+	input := json.RawMessage(`{"kind":"ConfigMap"} trailing`)
+
+	if _, err := s.ScrubEventData("ConfigMap", input); err == nil {
+		t.Fatalf("expected error for trailing JSON garbage")
 	}
 }
 
@@ -302,8 +332,29 @@ func TestScrubEventData_SecretBinaryDataMasksBase64String(t *testing.T) {
 	if got.Data["token"] == encoded {
 		t.Fatalf("expected encoded secret to be masked")
 	}
-	decoded, err := base64.StdEncoding.DecodeString(got.Data["token"])
-	if err == nil && bytes.Equal(decoded, binary) {
-		t.Fatalf("expected binary secret not to round-trip")
+	if _, err := base64.StdEncoding.DecodeString(got.Data["token"]); err != nil {
+		t.Fatalf("expected masked value to remain valid base64")
+	}
+}
+
+func TestScrubEventData_ConfigMapBinaryDataScrubsValues(t *testing.T) {
+	s := New(true)
+	encoded := base64.StdEncoding.EncodeToString([]byte("binary_data"))
+	input := json.RawMessage(`{"kind":"ConfigMap","binaryData":{"payload":"` + encoded + `"}}`)
+
+	out, err := s.ScrubEventData("ConfigMap", input)
+	if err != nil {
+		t.Fatalf("ScrubEventData() error = %v", err)
+	}
+
+	var got struct {
+		BinaryData map[string]string `json:"binaryData"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.BinaryData["payload"] == encoded {
+		t.Fatalf("expected binaryData value to be scrubbed")
 	}
 }
