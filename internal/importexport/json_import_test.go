@@ -162,6 +162,48 @@ func TestParseJSONEvents(t *testing.T) {
 	}
 }
 
+func TestParseImportPayload_SpectreEnvelope(t *testing.T) {
+	input := []byte(`{
+		"events": [
+			{
+				"id": "event1",
+				"timestamp": 1234567890000000000,
+				"type": "CREATE",
+				"resource": {
+					"group": "apps",
+					"version": "v1",
+					"kind": "Deployment",
+					"namespace": "default",
+					"name": "test-deployment",
+					"uid": "test-uid"
+				},
+				"data": {
+					"apiVersion": "apps/v1",
+					"kind": "Deployment",
+					"metadata": {
+						"name": "test-deployment",
+						"namespace": "default",
+						"uid": "test-uid"
+					}
+				}
+			}
+		]
+	}`)
+
+	events, warnings, err := ParseImportPayload(input)
+	if err != nil {
+		t.Fatalf("ParseImportPayload() unexpected error = %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("ParseImportPayload() got %d events, want 1", len(events))
+	}
+
+	if len(warnings) != 0 {
+		t.Fatalf("ParseImportPayload() got %d warnings, want 0", len(warnings))
+	}
+}
+
 func TestImportJSONFile(t *testing.T) {
 	// Create a temporary directory
 	tmpDir := t.TempDir()
