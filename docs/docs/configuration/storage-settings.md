@@ -379,6 +379,32 @@ Import Summary:
   Duration: 42.5s
 ```
 
+### Sensitive Data Scrubbing
+
+**Flag:** `--scrub-sensitive-data`
+**Type:** Boolean
+**Default:** `false`
+
+**Purpose:** Scrub sensitive values before newly ingested resource payloads are written to storage.
+
+When enabled, Spectre masks sensitive fields in:
+- `Secret.data` and `Secret.stringData`
+- `ConfigMap.data` and `ConfigMap.binaryData`
+- container environment variable values in supported workload specs
+
+Masking preserves a small visible prefix or suffix so values remain partially readable for debugging, while avoiding full plaintext storage.
+
+**Example command:**
+```bash
+spectre server --data-dir=./data --scrub-sensitive-data=true
+```
+
+**Behavior notes:**
+- Applies to live watcher ingestion before events are persisted
+- Applies to startup JSON imports before imported events are batch written
+- Does not rewrite existing historical data already stored on disk
+- Leaves references such as `valueFrom` intact because no literal secret value is present there
+
 ## Configuration Examples
 
 ### Development (Local)
