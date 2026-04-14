@@ -356,3 +356,26 @@ func TestParseImportPayload_AuditUsesPayloadUIDWhenObjectRefUIDMissing(t *testin
 		t.Fatalf("ParseImportPayload() got %d warnings, want 0", len(warnings))
 	}
 }
+
+func TestParseImportPayload_AuditEventListRejectsNonAuditItem(t *testing.T) {
+	input := strings.NewReader(`{
+		"kind": "EventList",
+		"apiVersion": "audit.k8s.io/v1",
+		"items": [
+			{
+				"kind": "Event",
+				"apiVersion": "v1",
+				"verb": "create",
+				"stage": "ResponseComplete"
+			}
+		]
+	}`)
+
+	_, _, err := ParseImportPayload(input)
+	if err == nil {
+		t.Fatalf("ParseImportPayload() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported audit EventList item") {
+		t.Fatalf("ParseImportPayload() error = %v, want error containing %q", err, "unsupported audit EventList item")
+	}
+}

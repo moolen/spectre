@@ -65,6 +65,11 @@ func parseAuditObjectPayload(data []byte) (*parseResult, error) {
 		if err := json.Unmarshal(data, &list); err != nil {
 			return nil, fmt.Errorf("failed to parse audit EventList: %w", err)
 		}
+		for i, item := range list.Items {
+			if !isAuditAPIVersion(item.APIVersion) {
+				return nil, fmt.Errorf("unsupported audit EventList item %d apiVersion %q", i, item.APIVersion)
+			}
+		}
 		return normalizeAuditEvents(list.Items), nil
 	default:
 		return nil, fmt.Errorf("unsupported audit kind %q", meta.Kind)
