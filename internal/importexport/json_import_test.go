@@ -550,6 +550,7 @@ func TestFormatImportReport(t *testing.T) {
 		FailedFiles:   0,
 		TotalEvents:   100,
 		Errors:        []string{},
+		Warnings:      []string{"audit warning"},
 	}
 
 	output := FormatImportReport(report)
@@ -564,6 +565,14 @@ func TestFormatImportReport(t *testing.T) {
 
 	if !strings.Contains(output, "Merged Hours:   2") {
 		t.Error("Expected output to contain merged hours")
+	}
+
+	if !strings.Contains(output, "Warnings:") {
+		t.Error("Expected output to contain warnings section")
+	}
+
+	if !strings.Contains(output, "audit warning") {
+		t.Error("Expected output to contain warning details")
 	}
 }
 

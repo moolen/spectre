@@ -120,7 +120,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	}
 
 	// Parse JSON request using shared utility
-	events, _, err := importexport.ParseImportPayload(decompressedBody)
+	events, warnings, err := importexport.ParseImportPayload(decompressedBody)
 	if err != nil {
 		h.logger.Error("Failed to parse JSON: %v", err)
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
@@ -128,7 +128,8 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	}
 
 	h.logger.InfoWithFields("Parsed JSON import request",
-		logging.Field("event_count", len(events)))
+		logging.Field("event_count", len(events)),
+		logging.Field("warning_count", len(warnings)))
 
 	// Call storage engine to ingest events
 	report, err := h.storage.AddEventsBatch(events, opts)
@@ -142,6 +143,12 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		logging.Field("total_events", report.TotalEvents),
 		logging.Field("merged_hours", report.MergedHours),
 		logging.Field("errors", len(report.Errors)))
+	if len(warnings) > 0 {
+		h.logger.Warn("JSON import completed with %d warnings", len(warnings))
+		for _, warning := range warnings {
+			h.logger.Warn("Import warning: %s", warning)
+		}
+	}
 
 	// Return import report
 	w.Header().Set("Content-Type", "application/json")
@@ -155,6 +162,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		"imported_files": report.ImportedFiles,
 		"duration":       report.Duration.String(),
 		"errors":         report.Errors,
+		"warnings":       warnings,
 	}
 
 	_ = json.NewEncoder(w).Encode(response)

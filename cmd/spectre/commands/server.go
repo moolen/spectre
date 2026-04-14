@@ -210,6 +210,10 @@ func runServer(cmd *cobra.Command, args []string) {
 					HandleError(err, "Import file error")
 				}
 
+				for _, warning := range warnings {
+					logger.Warn("Import warning: %s", warning)
+				}
+
 				fmt.Printf("  Loaded %d events from %s\n", len(events), importPath)
 
 				// Import the events
