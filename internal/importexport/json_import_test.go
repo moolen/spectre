@@ -362,7 +362,7 @@ func TestImportJSONFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			events, err := ImportJSONFile(tt.filePath)
+			events, warnings, err := ImportJSONFile(tt.filePath)
 
 			if tt.wantErr {
 				if err == nil {
@@ -378,6 +378,10 @@ func TestImportJSONFile(t *testing.T) {
 
 			if len(events) != tt.wantCount {
 				t.Errorf("ImportJSONFile() got %d events, want %d", len(events), tt.wantCount)
+			}
+
+			if len(warnings) != 0 {
+				t.Errorf("ImportJSONFile() got %d warnings, want 0", len(warnings))
 			}
 		})
 	}
