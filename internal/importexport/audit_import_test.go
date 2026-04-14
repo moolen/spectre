@@ -164,6 +164,10 @@ func TestParseImportPayload_AuditMissingObjectPayloadWarns(t *testing.T) {
 
 func TestWalkAndImportJSON_MixedSpectreAndAuditFiles(t *testing.T) {
 	tmpDir := t.TempDir()
+	nestedDir := filepath.Join(tmpDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatalf("Failed to create nested directory: %v", err)
+	}
 
 	spectrePath := filepath.Join(tmpDir, "spectre.json")
 	spectreEnvelope := `{
@@ -225,7 +229,7 @@ func TestWalkAndImportJSON_MixedSpectreAndAuditFiles(t *testing.T) {
 		t.Fatalf("Failed to create audit JSON file: %v", err)
 	}
 
-	auditLogPath := filepath.Join(tmpDir, "audit.log")
+	auditLogPath := filepath.Join(nestedDir, "audit.log")
 	auditLog := `{"kind":"Event","apiVersion":"audit.k8s.io/v1","auditID":"audit-dir-log","stage":"ResponseComplete","verb":"patch","requestURI":"/apis/apps/v1/namespaces/default/deployments/d1","objectRef":{"resource":"deployments","namespace":"default","name":"d1","uid":"d1-uid","apiGroup":"apps","apiVersion":"v1"},"responseObject":{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d1","namespace":"default","uid":"d1-uid"}}}`
 	if err := os.WriteFile(auditLogPath, []byte(auditLog), 0644); err != nil {
 		t.Fatalf("Failed to create audit log file: %v", err)
