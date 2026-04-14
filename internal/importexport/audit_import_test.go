@@ -15,6 +15,7 @@ func TestParseImportPayload_AuditSingleEvent(t *testing.T) {
 		"apiVersion": "audit.k8s.io/v1",
 		"auditID": "audit-1",
 		"stage": "ResponseComplete",
+		"stageTimestamp": "2024-01-02T03:04:05Z",
 		"verb": "create",
 		"requestURI": "/api/v1/namespaces/default/configmaps/cm-one",
 		"objectRef": {
@@ -48,6 +49,30 @@ func TestParseImportPayload_AuditSingleEvent(t *testing.T) {
 		t.Fatalf("ParseImportPayload() event type = %q, want %q", events[0].Type, models.EventTypeCreate)
 	}
 
+	if events[0].Timestamp != 1704164645000000000 {
+		t.Fatalf("ParseImportPayload() event timestamp = %d, want %d", events[0].Timestamp, int64(1704164645000000000))
+	}
+
+	if events[0].Resource.Namespace != "default" {
+		t.Fatalf("ParseImportPayload() resource namespace = %q, want %q", events[0].Resource.Namespace, "default")
+	}
+
+	if events[0].Resource.Name != "cm-one" {
+		t.Fatalf("ParseImportPayload() resource name = %q, want %q", events[0].Resource.Name, "cm-one")
+	}
+
+	if events[0].Resource.UID != "cm-one-uid" {
+		t.Fatalf("ParseImportPayload() resource UID = %q, want %q", events[0].Resource.UID, "cm-one-uid")
+	}
+
+	if len(events[0].Data) == 0 {
+		t.Fatalf("ParseImportPayload() event data is empty, expected responseObject content")
+	}
+
+	if !strings.Contains(string(events[0].Data), "ConfigMap") || !strings.Contains(string(events[0].Data), "cm-one") {
+		t.Fatalf("ParseImportPayload() event data does not contain expected responseObject content: %s", string(events[0].Data))
+	}
+
 	if len(warnings) != 0 {
 		t.Fatalf("ParseImportPayload() got %d warnings, want 0", len(warnings))
 	}
@@ -63,6 +88,7 @@ func TestParseImportPayload_AuditEventList(t *testing.T) {
 				"apiVersion": "audit.k8s.io/v1",
 				"auditID": "audit-2",
 				"stage": "ResponseComplete",
+				"stageTimestamp": "2024-01-02T03:04:06Z",
 				"verb": "patch",
 				"requestURI": "/api/v1/namespaces/default/configmaps/cm-from-request",
 				"objectRef": {
@@ -96,6 +122,30 @@ func TestParseImportPayload_AuditEventList(t *testing.T) {
 
 	if events[0].Type != models.EventTypeUpdate {
 		t.Fatalf("ParseImportPayload() event type = %q, want %q", events[0].Type, models.EventTypeUpdate)
+	}
+
+	if events[0].Timestamp != 1704164646000000000 {
+		t.Fatalf("ParseImportPayload() event timestamp = %d, want %d", events[0].Timestamp, int64(1704164646000000000))
+	}
+
+	if events[0].Resource.Namespace != "default" {
+		t.Fatalf("ParseImportPayload() resource namespace = %q, want %q", events[0].Resource.Namespace, "default")
+	}
+
+	if events[0].Resource.Name != "cm-from-request" {
+		t.Fatalf("ParseImportPayload() resource name = %q, want %q", events[0].Resource.Name, "cm-from-request")
+	}
+
+	if events[0].Resource.UID != "cm-request-uid" {
+		t.Fatalf("ParseImportPayload() resource UID = %q, want %q", events[0].Resource.UID, "cm-request-uid")
+	}
+
+	if len(events[0].Data) == 0 {
+		t.Fatalf("ParseImportPayload() event data is empty, expected requestObject content")
+	}
+
+	if !strings.Contains(string(events[0].Data), "ConfigMap") || !strings.Contains(string(events[0].Data), "cm-from-request") {
+		t.Fatalf("ParseImportPayload() event data does not contain expected requestObject content: %s", string(events[0].Data))
 	}
 
 	if len(warnings) != 0 {
@@ -136,6 +186,7 @@ func TestParseImportPayload_AuditMissingObjectPayloadWarns(t *testing.T) {
 		"apiVersion": "audit.k8s.io/v1",
 		"auditID": "audit-3",
 		"stage": "ResponseComplete",
+		"stageTimestamp": "2024-01-02T03:04:07Z",
 		"verb": "create",
 		"requestURI": "/api/v1/namespaces/default/configmaps/no-payload",
 		"objectRef": {
@@ -158,5 +209,16 @@ func TestParseImportPayload_AuditMissingObjectPayloadWarns(t *testing.T) {
 
 	if len(warnings) < 1 {
 		t.Fatalf("ParseImportPayload() got %d warnings, want at least 1", len(warnings))
+	}
+
+	hasIdentifyingWarning := false
+	for _, warning := range warnings {
+		if strings.Contains(warning, "no-payload") {
+			hasIdentifyingWarning = true
+			break
+		}
+	}
+	if !hasIdentifyingWarning {
+		t.Fatalf("ParseImportPayload() warnings = %v, want at least one warning containing %q", warnings, "no-payload")
 	}
 }

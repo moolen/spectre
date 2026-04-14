@@ -301,6 +301,10 @@ func TestWalkAndImportJSON_MixedSpectreAndAuditFiles(t *testing.T) {
 	if report.TotalEvents != 3 {
 		t.Fatalf("WalkAndImportJSON() total events = %d, want 3", report.TotalEvents)
 	}
+
+	if report.FailedFiles != 0 {
+		t.Fatalf("WalkAndImportJSON() failed files = %d, want 0", report.FailedFiles)
+	}
 }
 
 func TestImportJSONFile(t *testing.T) {
