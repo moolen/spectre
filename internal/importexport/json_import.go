@@ -22,8 +22,8 @@ type BatchEventImportRequest struct {
 	Events []*models.Event `json:"events"`
 }
 
-// ParseResult contains parsed events and non-fatal warnings.
-type ParseResult struct {
+// parseResult contains parsed events and non-fatal warnings.
+type parseResult struct {
 	Events   []*models.Event
 	Warnings []string
 }
@@ -194,13 +194,13 @@ func ParseImportPayload(r io.Reader) ([]*models.Event, []string, error) {
 	return result.Events, result.Warnings, nil
 }
 
-func parseImportPayload(r io.Reader) (*ParseResult, error) {
+func parseImportPayload(r io.Reader) (*parseResult, error) {
 	events, err := ParseJSONEvents(r)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ParseResult{
+	return &parseResult{
 		Events:   events,
 		Warnings: []string{},
 	}, nil

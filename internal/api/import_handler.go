@@ -120,7 +120,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	}
 
 	// Parse JSON request using shared utility
-	events, err := importexport.ParseJSONEvents(decompressedBody)
+	events, _, err := importexport.ParseImportPayload(decompressedBody)
 	if err != nil {
 		h.logger.Error("Failed to parse JSON: %v", err)
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())

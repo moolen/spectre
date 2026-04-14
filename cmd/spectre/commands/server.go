@@ -204,7 +204,7 @@ func runServer(cmd *cobra.Command, args []string) {
 				startTime := time.Now()
 
 				// Read the JSON file
-				events, err := importexport.ImportJSONFile(importPath)
+				events, warnings, err := importexport.ImportJSONFile(importPath)
 				if err != nil {
 					logger.Error("Failed to read file: %v", err)
 					HandleError(err, "Import file error")
@@ -228,6 +228,7 @@ func runServer(cmd *cobra.Command, args []string) {
 					FailedFiles:   storageReport.FailedFiles,
 					TotalEvents:   storageReport.TotalEvents,
 					Errors:        storageReport.Errors,
+					Warnings:      warnings,
 					Duration:      time.Since(startTime),
 				}
 			}
