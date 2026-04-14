@@ -1,0 +1,179 @@
+package scrub
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+)
+
+type Scrubber struct {
+	enabled bool
+}
+
+func New(enabled bool) *Scrubber {
+	return &Scrubber{enabled: enabled}
+}
+
+func (s *Scrubber) Enabled() bool {
+	return s != nil && s.enabled
+}
+
+func (s *Scrubber) ScrubEventData(kind string, data json.RawMessage) (json.RawMessage, error) {
+	if !s.Enabled() || len(data) == 0 {
+		return data, nil
+	}
+
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return nil, fmt.Errorf("parse scrub target: %w", err)
+	}
+
+	switch kind {
+	case "Secret":
+		s.scrubStringMap(obj, "stringData")
+		s.scrubBase64Map(obj, "data")
+	case "ConfigMap":
+		s.scrubStringMap(obj, "data")
+		s.scrubBase64Map(obj, "binaryData")
+	}
+
+	s.scrubWorkloadEnv(obj)
+	s.scrubLastAppliedConfiguration(obj)
+
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("marshal scrub target: %w", err)
+	}
+	return json.RawMessage(out), nil
+}
+
+func maskString(value string) string {
+	n := len(value)
+	if n == 0 {
+		return value
+	}
+	if n <= 4 {
+		return value[:1] + repeatMask(n-1)
+	}
+	if n <= 8 {
+		return value[:1] + repeatMask(n-2) + value[n-1:]
+	}
+	return value[:3] + repeatMask(n-5) + value[n-2:]
+}
+
+func repeatMask(n int) string {
+	buf := make([]byte, n)
+	for i := range buf {
+		buf[i] = '*'
+	}
+	return string(buf)
+}
+
+func (s *Scrubber) scrubStringMap(obj map[string]any, field string) {
+	values, ok := obj[field].(map[string]any)
+	if !ok {
+		return
+	}
+	for key, raw := range values {
+		if text, ok := raw.(string); ok {
+			values[key] = maskString(text)
+		}
+	}
+}
+
+func (s *Scrubber) scrubBase64Map(obj map[string]any, field string) {
+	values, ok := obj[field].(map[string]any)
+	if !ok {
+		return
+	}
+	for key, raw := range values {
+		text, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(text)
+		if err != nil {
+			values[key] = maskString(text)
+			continue
+		}
+		values[key] = base64.StdEncoding.EncodeToString([]byte(maskString(string(decoded))))
+	}
+}
+
+func (s *Scrubber) scrubWorkloadEnv(obj map[string]any) {
+	spec, ok := obj["spec"].(map[string]any)
+	if !ok {
+		return
+	}
+	template, ok := spec["template"].(map[string]any)
+	if !ok {
+		return
+	}
+	templateSpec, ok := template["spec"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	for _, field := range []string{"containers", "initContainers", "ephemeralContainers"} {
+		items, ok := templateSpec[field].([]any)
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			container, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			envItems, ok := container["env"].([]any)
+			if !ok {
+				continue
+			}
+			for _, envItem := range envItems {
+				envMap, ok := envItem.(map[string]any)
+				if !ok {
+					continue
+				}
+				value, ok := envMap["value"].(string)
+				if !ok {
+					continue
+				}
+				envMap["value"] = maskString(value)
+			}
+		}
+	}
+}
+
+func (s *Scrubber) scrubLastAppliedConfiguration(obj map[string]any) {
+	metadata, ok := obj["metadata"].(map[string]any)
+	if !ok {
+		return
+	}
+	annotations, ok := metadata["annotations"].(map[string]any)
+	if !ok {
+		return
+	}
+	raw, ok := annotations["kubectl.kubernetes.io/last-applied-configuration"].(string)
+	if !ok || raw == "" {
+		return
+	}
+
+	var nested map[string]any
+	if err := json.Unmarshal([]byte(raw), &nested); err != nil {
+		annotations["kubectl.kubernetes.io/last-applied-configuration"] = maskString(raw)
+		return
+	}
+
+	nestedKind, _ := nested["kind"].(string)
+	nestedJSON, err := json.Marshal(nested)
+	if err != nil {
+		annotations["kubectl.kubernetes.io/last-applied-configuration"] = maskString(raw)
+		return
+	}
+
+	scrubbed, err := s.ScrubEventData(nestedKind, nestedJSON)
+	if err != nil {
+		annotations["kubectl.kubernetes.io/last-applied-configuration"] = maskString(raw)
+		return
+	}
+	annotations["kubectl.kubernetes.io/last-applied-configuration"] = string(scrubbed)
+}
