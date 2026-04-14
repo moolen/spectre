@@ -352,6 +352,20 @@ curl http://localhost:8080/api/v1/storage/stats
 
 **Purpose:** Import historical events from JSON files at startup
 
+Spectre accepts these startup import formats:
+
+- Native Spectre JSON: `{"events":[...]}`
+- Kubernetes audit `Event`
+- Kubernetes audit `EventList`
+- Line-delimited Kubernetes audit JSON in `.jsonl` or `.log` files
+
+When importing official Kubernetes audit logs, Spectre:
+
+- keeps mutating requests only: `create`, `update`, `patch`, `apply`, `delete`, `deletecollection`
+- skips read-only requests such as `get`, `list`, `watch`, `proxy`, and `connect`
+- uses `responseObject` first, then `requestObject`, as the best-effort resource snapshot
+- warns and skips mutating audit entries that do not contain enough object payload or identity data to build a Spectre event
+
 **Examples:**
 
 **Import single file:**
@@ -362,6 +376,11 @@ spectre server --import=/backups/events-2025-12-11.json
 **Import directory:**
 ```bash
 spectre server --import=/backups/december/
+```
+
+**Import Kubernetes audit logs:**
+```bash
+spectre server --import=/backups/kube-apiserver-audit/
 ```
 
 **Progress tracking:**
@@ -552,7 +571,7 @@ resources:
 **1. File format incorrect:**
 ```
 Error: invalid JSON format
-Solution: Ensure files are JSON array of events
+Solution: Ensure files are native Spectre JSON, Kubernetes audit Event/EventList JSON, or line-delimited Kubernetes audit JSON
 ```
 
 **2. File permissions:**
