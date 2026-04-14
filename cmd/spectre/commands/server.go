@@ -167,6 +167,7 @@ func runServer(cmd *cobra.Command, args []string) {
 			HandleError(err, "Storage initialization error")
 		}
 		logger.Info("Storage component created")
+		eventScrubber := scrub.New(cfg.ScrubSensitiveData)
 
 		// Handle import if --import flag is provided
 		if importPath != "" {
@@ -195,7 +196,7 @@ func runServer(cmd *cobra.Command, args []string) {
 					fmt.Printf("  [%d] Loaded %d events from %s\n", filesProcessed, eventCount, filename)
 				}
 
-				report, err = importexport.WalkAndImportJSON(importPath, storageComponent, importOpts, progressCallback)
+				report, err = importexport.WalkAndImportJSON(importPath, storageComponent, importOpts, progressCallback, eventScrubber)
 				if err != nil {
 					logger.Error("Import failed: %v", err)
 					HandleError(err, "Import error")
@@ -212,6 +213,11 @@ func runServer(cmd *cobra.Command, args []string) {
 				if err != nil {
 					logger.Error("Failed to read file: %v", err)
 					HandleError(err, "Import file error")
+				}
+
+				if err := importexport.ScrubEvents(events, eventScrubber); err != nil {
+					logger.Error("Failed to scrub imported events: %v", err)
+					HandleError(err, "Import scrub error")
 				}
 
 				fmt.Printf("  Loaded %d events from %s\n", len(events), importPath)
@@ -242,7 +248,6 @@ func runServer(cmd *cobra.Command, args []string) {
 
 		// Only initialize watcher if enabled
 		if watcherEnabled {
-			eventScrubber := scrub.New(cfg.ScrubSensitiveData)
 			watcherComponent, err = watcher.New(
 				watcher.NewEventCaptureHandler(storageComponent, eventScrubber),
 				cfg.WatcherConfigPath,

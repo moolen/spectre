@@ -11,6 +11,7 @@ import (
 
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/scrub"
 	"github.com/moolen/spectre/internal/storage"
 )
 
@@ -34,9 +35,31 @@ type ImportReport struct {
 	Duration      time.Duration
 }
 
+// ScrubEvents scrubs sensitive payload fields before imported events are persisted.
+func ScrubEvents(events []*models.Event, scrubber *scrub.Scrubber) error {
+	if scrubber == nil || !scrubber.Enabled() {
+		return nil
+	}
+
+	for _, event := range events {
+		if event == nil || len(event.Data) == 0 {
+			continue
+		}
+
+		scrubbed, err := scrubber.ScrubEventData(event.Resource.Kind, event.Data)
+		if err != nil {
+			return fmt.Errorf("scrub imported event %s: %w", event.ID, err)
+		}
+
+		event.Data = scrubbed
+	}
+
+	return nil
+}
+
 // WalkAndImportJSON recursively walks a directory tree and imports all JSON files
 // containing event arrays. It calls the progress callback for each file processed.
-func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportOptions, progress ProgressCallback) (*ImportReport, error) {
+func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportOptions, progress ProgressCallback, scrubber *scrub.Scrubber) (*ImportReport, error) {
 	logger := logging.GetLogger("importexport")
 
 	// Verify directory exists
@@ -129,6 +152,10 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 	}
 
 	logger.Info("Importing %d total events from %d files", len(allEvents), filesProcessed)
+
+	if err := ScrubEvents(allEvents, scrubber); err != nil {
+		return nil, fmt.Errorf("failed to scrub imported events: %w", err)
+	}
 
 	// Use storage's batch import functionality
 	storageReport, err := st.AddEventsBatch(allEvents, opts)

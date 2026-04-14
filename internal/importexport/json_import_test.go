@@ -8,8 +8,61 @@ import (
 	"testing"
 
 	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/scrub"
 	"github.com/moolen/spectre/internal/storage"
 )
+
+func TestScrubEventsScrubsImportedConfigMapPayloads(t *testing.T) {
+	events := []*models.Event{
+		{
+			ID:        "event-1",
+			Timestamp: 1234567890000000000,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				Kind:      "ConfigMap",
+				Namespace: "default",
+				Name:      "cfg",
+				UID:       "uid-1",
+			},
+			Data: json.RawMessage(`{"kind":"ConfigMap","data":{"JWT_SECRET":"demo_jwt_secret_key"}}`),
+		},
+	}
+
+	if err := ScrubEvents(events, scrub.New(true)); err != nil {
+		t.Fatalf("ScrubEvents() error = %v", err)
+	}
+
+	if string(events[0].Data) == `{"kind":"ConfigMap","data":{"JWT_SECRET":"demo_jwt_secret_key"}}` {
+		t.Fatalf("expected imported payload to be scrubbed")
+	}
+}
+
+func TestScrubEventsLeavesImportedPayloadUntouchedWhenDisabled(t *testing.T) {
+	events := []*models.Event{
+		{
+			ID:        "event-1",
+			Timestamp: 1234567890000000000,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Version:   "v1",
+				Kind:      "ConfigMap",
+				Namespace: "default",
+				Name:      "cfg",
+				UID:       "uid-1",
+			},
+			Data: json.RawMessage(`{"kind":"ConfigMap","data":{"JWT_SECRET":"demo_jwt_secret_key"}}`),
+		},
+	}
+
+	before := string(events[0].Data)
+	if err := ScrubEvents(events, scrub.New(false)); err != nil {
+		t.Fatalf("ScrubEvents() error = %v", err)
+	}
+	if string(events[0].Data) != before {
+		t.Fatalf("expected payload to remain unchanged when scrubbing is disabled")
+	}
+}
 
 func TestParseJSONEvents(t *testing.T) {
 	tests := []struct {
@@ -328,7 +381,7 @@ func TestWalkAndImportJSON(t *testing.T) {
 		OverwriteExisting: true,
 	}
 
-	report, err := WalkAndImportJSON(tmpDir, st, opts, progressCallback)
+	report, err := WalkAndImportJSON(tmpDir, st, opts, progressCallback, scrub.New(false))
 	if err != nil {
 		t.Fatalf("WalkAndImportJSON() error = %v", err)
 	}
@@ -362,7 +415,7 @@ func TestWalkAndImportJSON_EmptyDirectory(t *testing.T) {
 		OverwriteExisting: true,
 	}
 
-	report, err := WalkAndImportJSON(tmpDir, st, opts, nil)
+	report, err := WalkAndImportJSON(tmpDir, st, opts, nil, scrub.New(false))
 	if err != nil {
 		t.Fatalf("WalkAndImportJSON() error = %v", err)
 	}
@@ -385,7 +438,7 @@ func TestWalkAndImportJSON_InvalidDirectory(t *testing.T) {
 		OverwriteExisting: true,
 	}
 
-	_, err = WalkAndImportJSON("/nonexistent/path", st, opts, nil)
+	_, err = WalkAndImportJSON("/nonexistent/path", st, opts, nil, scrub.New(false))
 	if err == nil {
 		t.Error("Expected error for non-existent directory, got nil")
 	}
