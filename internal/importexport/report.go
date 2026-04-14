@@ -31,6 +31,12 @@ func FormatImportReport(report *ImportReport) string {
 			sb.WriteString(fmt.Sprintf("  - %s\n", err))
 		}
 	}
+	if len(report.Warnings) > 0 {
+		sb.WriteString("\nWarnings:\n")
+		for _, warning := range report.Warnings {
+			sb.WriteString(fmt.Sprintf("  - %s\n", warning))
+		}
+	}
 
 	return sb.String()
 }

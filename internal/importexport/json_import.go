@@ -22,6 +22,12 @@ type BatchEventImportRequest struct {
 	Events []*models.Event `json:"events"`
 }
 
+// ParseResult contains parsed events and non-fatal warnings.
+type ParseResult struct {
+	Events   []*models.Event
+	Warnings []string
+}
+
 // ImportReport contains the results of an import operation
 type ImportReport struct {
 	TotalFiles    int
@@ -31,6 +37,7 @@ type ImportReport struct {
 	FailedFiles   int
 	TotalEvents   int64
 	Errors        []string
+	Warnings      []string
 	Duration      time.Duration
 }
 
@@ -83,6 +90,7 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 			FailedFiles:   0,
 			TotalEvents:   0,
 			Errors:        []string{},
+			Warnings:      []string{},
 		}, nil
 	}
 
@@ -90,13 +98,19 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 
 	// Aggregate all events from all files
 	var allEvents []*models.Event
+	var allWarnings []string
 	filesProcessed := 0
 
 	for _, filePath := range jsonFiles {
-		events, err := ImportJSONFile(filePath)
+		events, warnings, err := ImportJSONFile(filePath)
 		if err != nil {
 			logger.Error("Failed to parse %s: %v", filePath, err)
 			return nil, fmt.Errorf("failed to parse %s: %w", filePath, err)
+		}
+		if len(warnings) > 0 {
+			for _, warning := range warnings {
+				allWarnings = append(allWarnings, fmt.Sprintf("%s: %s", filePath, warning))
+			}
 		}
 
 		if len(events) == 0 {
@@ -125,6 +139,7 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 			FailedFiles:   0,
 			TotalEvents:   0,
 			Errors:        []string{},
+			Warnings:      allWarnings,
 		}, nil
 	}
 
@@ -147,6 +162,7 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 		FailedFiles:   storageReport.FailedFiles,
 		TotalEvents:   storageReport.TotalEvents,
 		Errors:        storageReport.Errors,
+		Warnings:      allWarnings,
 		Duration:      storageReport.Duration,
 	}
 
@@ -154,10 +170,10 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 }
 
 // ImportJSONFile reads and parses a single JSON file containing an events array
-func ImportJSONFile(filePath string) ([]*models.Event, error) {
+func ImportJSONFile(filePath string) ([]*models.Event, []string, error) {
 	file, err := os.Open(filePath) //nolint:gosec // filePath is validated before use
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		return nil, nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer func() {
 		if err := file.Close(); err != nil {
@@ -165,7 +181,29 @@ func ImportJSONFile(filePath string) ([]*models.Event, error) {
 		}
 	}()
 
-	return ParseJSONEvents(file)
+	return ParseImportPayload(file)
+}
+
+// ParseImportPayload parses a supported import payload format into events and warnings.
+func ParseImportPayload(r io.Reader) ([]*models.Event, []string, error) {
+	result, err := parseImportPayload(r)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return result.Events, result.Warnings, nil
+}
+
+func parseImportPayload(r io.Reader) (*ParseResult, error) {
+	events, err := ParseJSONEvents(r)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ParseResult{
+		Events:   events,
+		Warnings: []string{},
+	}, nil
 }
 
 // ParseJSONEvents parses a JSON events array from a reader
