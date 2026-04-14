@@ -107,6 +107,8 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 			logger.Error("Failed to parse %s: %v", filePath, err)
 			return nil, fmt.Errorf("failed to parse %s: %w", filePath, err)
 		}
+		filesProcessed++
+
 		if len(warnings) > 0 {
 			for _, warning := range warnings {
 				allWarnings = append(allWarnings, fmt.Sprintf("%s: %s", filePath, warning))
@@ -119,7 +121,6 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 		}
 
 		allEvents = append(allEvents, events...)
-		filesProcessed++
 
 		// Call progress callback
 		if progress != nil {
