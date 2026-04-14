@@ -127,8 +127,17 @@ func TestMaskString_PreservesLength(t *testing.T) {
 }
 
 func TestMaskString_SingleByteIsMasked(t *testing.T) {
-	if got := maskString("x"); got == "x" {
-		t.Fatalf("expected single-byte value to be masked")
+	if got := maskString("x"); got != "*" {
+		t.Fatalf("expected single-byte value to be '*', got %q", got)
+	}
+}
+
+func TestMaskString_ShortValuesKeepFirstRune(t *testing.T) {
+	if got := maskString("ab"); got != "a*" {
+		t.Fatalf("expected \"ab\" -> \"a*\", got %q", got)
+	}
+	if got := maskString("abcd"); got != "a***" {
+		t.Fatalf("expected \"abcd\" -> \"a***\", got %q", got)
 	}
 }
 

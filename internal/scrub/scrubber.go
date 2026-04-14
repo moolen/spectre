@@ -58,11 +58,14 @@ func maskString(value string) string {
 
 	runes := []rune(value)
 	n := len(runes)
+	if n == 1 {
+		return "*"
+	}
 	if n <= 4 {
-		return repeatMask(n)
+		return string(runes[:1]) + repeatMask(n-1)
 	}
 	if n <= 8 {
-		return string(runes[:1]) + repeatMask(n-2) + string(runes[n-1:])
+		return repeatMask(n)
 	}
 	return string(runes[:3]) + repeatMask(n-5) + string(runes[n-2:])
 }
