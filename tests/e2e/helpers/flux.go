@@ -10,24 +10,29 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
+
+const fluxInstallTimeout = 4 * time.Minute
 
 // EnsureFluxInstalled checks if Flux is installed and installs it if not
 func EnsureFluxInstalled(t *testing.T, k8sClient *K8sClient, kubeContext string) error {
 	t.Helper()
 	startTime := time.Now()
 
-	// Check if Flux namespace exists
 	ctx := context.Background()
-	_, err := k8sClient.Clientset.CoreV1().Namespaces().Get(ctx, "flux-system", metav1.GetOptions{})
-
-	if err == nil {
+	if IsFluxInstalled(k8sClient) {
 		t.Logf("✓ Flux is already installed (check took %v)", time.Since(startTime))
 		return nil
 	}
 
-	t.Log("Flux not found, installing Flux...")
+	if fluxNamespaceExists(k8sClient.Clientset) {
+		t.Log("Flux namespace exists but controllers are not ready, re-applying Flux...")
+	} else {
+		t.Log("Flux not found, installing Flux...")
+	}
 	installStart := time.Now()
 
 	// Get absolute path to flux-install.yaml relative to project root
@@ -58,9 +63,9 @@ func EnsureFluxInstalled(t *testing.T, k8sClient *K8sClient, kubeContext string)
 
 	// Wait for Flux to be ready
 	waitStart := time.Now()
-	err = waitForFluxReady(ctx, k8sClient, 2*time.Minute)
+	err = waitForFluxReady(ctx, k8sClient, fluxInstallTimeout)
 	if err != nil {
-		return fmt.Errorf("Flux installation timeout: %w", err)
+		return fmt.Errorf("Flux installation timeout after %v: %w", fluxInstallTimeout, err)
 	}
 
 	t.Logf("✓ Flux installed successfully (total time: %v, wait time: %v)", time.Since(startTime), time.Since(waitStart))
@@ -70,50 +75,69 @@ func EnsureFluxInstalled(t *testing.T, k8sClient *K8sClient, kubeContext string)
 // waitForFluxReady waits for Flux controllers to be ready
 func waitForFluxReady(ctx context.Context, k8sClient *K8sClient, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	
+
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		
-		// Check source-controller deployment
-		sourceController, err := k8sClient.Clientset.AppsV1().Deployments("flux-system").Get(
-			ctx, "source-controller", metav1.GetOptions{},
-		)
-		if err == nil && sourceController.Status.ReadyReplicas > 0 {
-			// Check helm-controller deployment
-			helmController, err := k8sClient.Clientset.AppsV1().Deployments("flux-system").Get(
-				ctx, "helm-controller", metav1.GetOptions{},
-			)
-			if err == nil && helmController.Status.ReadyReplicas > 0 {
-				return nil
-			}
+
+		if fluxControllersReady(k8sClient.Clientset) {
+			return nil
 		}
-		
+
 		time.Sleep(5 * time.Second)
 	}
-	
+
 	return fmt.Errorf("timeout waiting for Flux controllers to be ready")
 }
 
 // IsFluxInstalled checks if Flux is installed
 func IsFluxInstalled(k8sClient *K8sClient) bool {
-	ctx := context.Background()
-	_, err := k8sClient.Clientset.CoreV1().Namespaces().Get(ctx, "flux-system", metav1.GetOptions{})
+	return fluxControllersReady(k8sClient.Clientset)
+}
+
+func fluxControllersReady(clientset kubernetes.Interface) bool {
+	if !fluxNamespaceExists(clientset) {
+		return false
+	}
+
+	sourceController, err := clientset.AppsV1().Deployments("flux-system").Get(
+		context.Background(), "source-controller", metav1.GetOptions{},
+	)
+	if err != nil || !deploymentReady(sourceController) {
+		return false
+	}
+
+	helmController, err := clientset.AppsV1().Deployments("flux-system").Get(
+		context.Background(), "helm-controller", metav1.GetOptions{},
+	)
+	if err != nil || !deploymentReady(helmController) {
+		return false
+	}
+
+	return true
+}
+
+func fluxNamespaceExists(clientset kubernetes.Interface) bool {
+	_, err := clientset.CoreV1().Namespaces().Get(context.Background(), "flux-system", metav1.GetOptions{})
 	return err == nil
+}
+
+func deploymentReady(deployment *appsv1.Deployment) bool {
+	return deployment != nil && deployment.Status.ReadyReplicas > 0
 }
 
 // WaitForHelmReleaseReady waits for a HelmRelease to be ready
 func WaitForHelmReleaseReady(ctx context.Context, t *testing.T, kubeContext, namespace, name string, timeout time.Duration) error {
 	t.Helper()
-	
+
 	// Get kubeconfig from environment (set by shared cluster test setup)
 	// kubectl commands use default kubeconfig
-	
+
 	deadline := time.Now().Add(timeout)
-	
+
 	t.Logf("Waiting for HelmRelease %s/%s to be ready...", namespace, name)
 
 	// First, try to get the source repository name and kind from the HelmRelease
@@ -163,7 +187,7 @@ func WaitForHelmReleaseReady(ctx context.Context, t *testing.T, kubeContext, nam
 	} else {
 		t.Logf("No sourceRef found (using inline OCI chart URL), skipping repository wait")
 	}
-	
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -366,7 +390,7 @@ func findProjectRoot(startDir string) string {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir
 		}
-		
+
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			// Reached root without finding go.mod

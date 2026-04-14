@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -196,19 +197,46 @@ func isClusterHealthy(t *testing.T, tc *TestCluster) bool {
 	// Check if all nodes are ready
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
-		ready := false
-		for _, condition := range node.Status.Conditions {
-			if condition.Type == "Ready" && condition.Status == conditionValueTrue {
-				ready = true
-				break
-			}
-		}
-		if !ready {
-			t.Logf("Node %s is not ready", node.Name)
+		if err := nodeHealthError(node); err != nil {
+			t.Log(err)
 			return false
 		}
 	}
 
 	t.Logf("Cluster %s is healthy with %d ready node(s)", tc.Name, len(nodes.Items))
 	return true
+}
+
+func nodeHealthError(node *corev1.Node) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
+
+	if !nodeConditionIs(node, corev1.NodeReady, corev1.ConditionTrue) {
+		return fmt.Errorf("node %s is not ready", node.Name)
+	}
+
+	pressureConditions := []corev1.NodeConditionType{
+		corev1.NodeMemoryPressure,
+		corev1.NodeDiskPressure,
+		corev1.NodePIDPressure,
+	}
+
+	for _, conditionType := range pressureConditions {
+		if nodeConditionIs(node, conditionType, corev1.ConditionTrue) {
+			return fmt.Errorf("node %s has %s", node.Name, conditionType)
+		}
+	}
+
+	return nil
+}
+
+func nodeConditionIs(node *corev1.Node, conditionType corev1.NodeConditionType, status corev1.ConditionStatus) bool {
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == conditionType && condition.Status == status {
+			return true
+		}
+	}
+
+	return false
 }

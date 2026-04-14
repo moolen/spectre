@@ -14,7 +14,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o spectre ./cmd/spectre
+RUN CGO_ENABLED=0 GOOS=linux go build -o spectre ./cmd/spectre
 
 FROM alpine:3.18
 WORKDIR /app

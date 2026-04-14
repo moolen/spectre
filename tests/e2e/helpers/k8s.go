@@ -22,7 +22,7 @@ import (
 
 // K8sClient provides methods to interact with a Kubernetes cluster.
 type K8sClient struct {
-	Clientset *kubernetes.Clientset
+	Clientset kubernetes.Interface
 	t         *testing.T
 }
 

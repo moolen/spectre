@@ -504,8 +504,8 @@ func buildAndLoadTestImage(t *testing.T, clusterName, imageRef string) error {
 	builtImagesMutex.RUnlock()
 
 	if !alreadyBuilt {
-		t.Logf("Building Docker image %s (--no-cache)", imageRef)
-		buildCmd := exec.Command("docker", "build", "--no-cache", "-t", imageRef, root)
+		t.Logf("Building Docker image %s", imageRef)
+		buildCmd := exec.Command("docker", dockerBuildArgs(imageRef, root)...)
 		if err := runCommand(buildCmd); err != nil {
 			return err
 		}
@@ -525,6 +525,10 @@ func buildAndLoadTestImage(t *testing.T, clusterName, imageRef string) error {
 	}
 
 	return nil
+}
+
+func dockerBuildArgs(imageRef, root string) []string {
+	return []string{"build", "-t", imageRef, root}
 }
 
 func runCommand(cmd *exec.Cmd) error {
