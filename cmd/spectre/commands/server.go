@@ -17,6 +17,7 @@ import (
 	"github.com/moolen/spectre/internal/importexport"
 	"github.com/moolen/spectre/internal/lifecycle"
 	"github.com/moolen/spectre/internal/logging"
+	"github.com/moolen/spectre/internal/scrub"
 	"github.com/moolen/spectre/internal/storage"
 	"github.com/moolen/spectre/internal/tracing"
 	"github.com/moolen/spectre/internal/watcher"
@@ -241,7 +242,11 @@ func runServer(cmd *cobra.Command, args []string) {
 
 		// Only initialize watcher if enabled
 		if watcherEnabled {
-			watcherComponent, err = watcher.New(watcher.NewEventCaptureHandler(storageComponent), cfg.WatcherConfigPath)
+			eventScrubber := scrub.New(cfg.ScrubSensitiveData)
+			watcherComponent, err = watcher.New(
+				watcher.NewEventCaptureHandler(storageComponent, eventScrubber),
+				cfg.WatcherConfigPath,
+			)
 			if err != nil {
 				logger.Error("Failed to create watcher component: %v", err)
 				HandleError(err, "Watcher initialization error")

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
+	"github.com/moolen/spectre/internal/scrub"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -23,17 +24,19 @@ type StorageWriter interface {
 
 // EventCaptureHandler captures Kubernetes events and routes them to storage
 type EventCaptureHandler struct {
-	storage StorageWriter
-	logger  *logging.Logger
-	pruner  *ManagedFieldsPruner
+	storage  StorageWriter
+	logger   *logging.Logger
+	pruner   *ManagedFieldsPruner
+	scrubber *scrub.Scrubber
 }
 
 // NewEventCaptureHandler creates a new event capture handler
-func NewEventCaptureHandler(storage StorageWriter) *EventCaptureHandler {
+func NewEventCaptureHandler(storage StorageWriter, scrubber *scrub.Scrubber) *EventCaptureHandler {
 	return &EventCaptureHandler{
-		storage: storage,
-		logger:  logging.GetLogger("event_handler"),
-		pruner:  NewManagedFieldsPruner(),
+		storage:  storage,
+		logger:   logging.GetLogger("event_handler"),
+		pruner:   NewManagedFieldsPruner(),
+		scrubber: scrubber,
 	}
 }
 
@@ -156,7 +159,13 @@ func (h *EventCaptureHandler) objectToJSON(obj runtime.Object) (json.RawMessage,
 		// Continue without pruning - don't fail the entire operation
 	}
 
-	return json.RawMessage(jsonData), dataSize, nil
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	scrubbed, err := h.scrubber.ScrubEventData(gvk.Kind, jsonData)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to scrub object JSON: %w", err)
+	}
+
+	return json.RawMessage(scrubbed), dataSize, nil
 }
 
 // extractMetadata extracts resource metadata from a Kubernetes object
