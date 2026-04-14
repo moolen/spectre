@@ -62,10 +62,13 @@ func TestEventCaptureHandlerOnAddLeavesPayloadUntouchedWhenDisabled(t *testing.T
 		t.Fatalf("OnAdd() error = %v", err)
 	}
 
-	if !json.Valid(store.event.Data) {
-		t.Fatalf("expected valid stored JSON")
+	var got map[string]any
+	if err := json.Unmarshal(store.event.Data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if string(store.event.Data) == "" {
-		t.Fatalf("expected stored payload")
+
+	data := got["data"].(map[string]any)
+	if data["JWT_SECRET"] != "demo_jwt_secret_key" {
+		t.Fatalf("expected stored ConfigMap data to be untouched")
 	}
 }
