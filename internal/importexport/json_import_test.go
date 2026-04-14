@@ -248,6 +248,7 @@ func TestWalkAndImportJSON_MixedSpectreAndAuditFiles(t *testing.T) {
 		"apiVersion": "audit.k8s.io/v1",
 		"auditID": "audit-dir-json",
 		"stage": "ResponseComplete",
+		"stageTimestamp": "2024-01-02T03:04:10Z",
 		"verb": "create",
 		"requestURI": "/api/v1/namespaces/default/configmaps/cm-dir",
 		"objectRef": {
@@ -272,7 +273,7 @@ func TestWalkAndImportJSON_MixedSpectreAndAuditFiles(t *testing.T) {
 	}
 
 	auditLogPath := filepath.Join(nestedDir, "audit.log")
-	auditLog := `{"kind":"Event","apiVersion":"audit.k8s.io/v1","auditID":"audit-dir-log","stage":"ResponseComplete","verb":"patch","requestURI":"/apis/apps/v1/namespaces/default/deployments/d1","objectRef":{"resource":"deployments","namespace":"default","name":"d1","uid":"d1-uid","apiGroup":"apps","apiVersion":"v1"},"responseObject":{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d1","namespace":"default","uid":"d1-uid"}}}`
+	auditLog := `{"kind":"Event","apiVersion":"audit.k8s.io/v1","auditID":"audit-dir-log","stage":"ResponseComplete","stageTimestamp":"2024-01-02T03:04:11Z","verb":"patch","requestURI":"/apis/apps/v1/namespaces/default/deployments/d1","objectRef":{"resource":"deployments","namespace":"default","name":"d1","uid":"d1-uid","apiGroup":"apps","apiVersion":"v1"},"responseObject":{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d1","namespace":"default","uid":"d1-uid"}}}`
 	if err := os.WriteFile(auditLogPath, []byte(auditLog), 0644); err != nil {
 		t.Fatalf("Failed to create audit log file: %v", err)
 	}

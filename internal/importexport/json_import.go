@@ -42,8 +42,8 @@ type ImportReport struct {
 	Duration      time.Duration
 }
 
-// WalkAndImportJSON recursively walks a directory tree and imports all JSON files
-// containing event arrays. It calls the progress callback for each file processed.
+// WalkAndImportJSON recursively walks a directory tree and imports all supported
+// import files. It calls the progress callback for each file processed.
 func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportOptions, progress ProgressCallback) (*ImportReport, error) {
 	logger := logging.GetLogger("importexport")
 
@@ -56,8 +56,8 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 		return nil, fmt.Errorf("import path is not a directory: %s", dirPath)
 	}
 
-	// Collect all JSON files
-	var jsonFiles []string
+	// Collect all supported import files.
+	var importFiles []string
 	err = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			logger.Warn("Error accessing path %s: %v", path, err)
@@ -69,9 +69,8 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 			return nil
 		}
 
-		// Only process .json files
-		if strings.HasSuffix(strings.ToLower(info.Name()), ".json") {
-			jsonFiles = append(jsonFiles, path)
+		if isSupportedImportFile(info.Name()) {
+			importFiles = append(importFiles, path)
 		}
 
 		return nil
@@ -81,8 +80,8 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 		return nil, fmt.Errorf("failed to walk directory tree: %w", err)
 	}
 
-	if len(jsonFiles) == 0 {
-		logger.Warn("No JSON files found in directory: %s", dirPath)
+	if len(importFiles) == 0 {
+		logger.Warn("No supported import files found in directory: %s", dirPath)
 		return &ImportReport{
 			TotalFiles:    0,
 			ImportedFiles: 0,
@@ -95,14 +94,14 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 		}, nil
 	}
 
-	logger.Info("Found %d JSON files to import", len(jsonFiles))
+	logger.Info("Found %d supported import files to import", len(importFiles))
 
 	// Aggregate all events from all files
 	var allEvents []*models.Event
 	var allWarnings []string
 	filesProcessed := 0
 
-	for _, filePath := range jsonFiles {
+	for _, filePath := range importFiles {
 		events, warnings, err := ImportJSONFile(filePath)
 		if err != nil {
 			logger.Error("Failed to parse %s: %v", filePath, err)
@@ -132,7 +131,7 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 	}
 
 	if len(allEvents) == 0 {
-		logger.Warn("No events found in any JSON files")
+		logger.Warn("No events found in any supported import files")
 		return &ImportReport{
 			TotalFiles:    filesProcessed,
 			ImportedFiles: 0,
@@ -169,6 +168,21 @@ func WalkAndImportJSON(dirPath string, st *storage.Storage, opts storage.ImportO
 	}
 
 	return report, nil
+}
+
+func isSupportedImportFile(name string) bool {
+	lower := strings.ToLower(name)
+
+	switch {
+	case strings.HasSuffix(lower, ".json"):
+		return true
+	case strings.HasSuffix(lower, ".jsonl"):
+		return true
+	case strings.HasSuffix(lower, ".log"):
+		return true
+	default:
+		return false
+	}
 }
 
 // ImportJSONFile reads and parses a single JSON file containing an events array
