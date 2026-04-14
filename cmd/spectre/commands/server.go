@@ -43,6 +43,7 @@ var (
 	tracingEndpoint       string
 	tracingTLSCAPath      string
 	tracingTLSInsecure    bool
+	scrubSensitiveData    bool
 )
 
 var serverCmd = &cobra.Command{
@@ -73,6 +74,7 @@ func init() {
 	serverCmd.Flags().StringVar(&tracingEndpoint, "tracing-endpoint", "", "OTLP gRPC endpoint for traces (e.g., victorialogs:4317)")
 	serverCmd.Flags().StringVar(&tracingTLSCAPath, "tracing-tls-ca", "", "Path to CA certificate for TLS verification (optional)")
 	serverCmd.Flags().BoolVar(&tracingTLSInsecure, "tracing-tls-insecure", false, "Skip TLS certificate verification (insecure, use only for testing)")
+	serverCmd.Flags().BoolVar(&scrubSensitiveData, "scrub-sensitive-data", false, "Scrub sensitive values before writing resource data to storage")
 }
 
 func runServer(cmd *cobra.Command, args []string) {
@@ -90,6 +92,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		tracingEndpoint,
 		tracingTLSCAPath,
 		tracingTLSInsecure,
+		scrubSensitiveData,
 	)
 
 	// Validate configuration

@@ -37,10 +37,13 @@ type Config struct {
 
 	// TracingTLSInsecure allows insecure TLS connections (skip verification)
 	TracingTLSInsecure bool
+
+	// ScrubSensitiveData indicates whether to scrub sensitive data on ingest
+	ScrubSensitiveData bool
 }
 
 // LoadConfig creates a Config with the provided values
-func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled, tracingEnabled bool, tracingEndpoint, tracingTLSCAPath string, tracingTLSInsecure bool) *Config {
+func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string, segmentSize int64, maxConcurrentRequests int, blockCacheMaxMB int64, blockCacheEnabled, tracingEnabled bool, tracingEndpoint, tracingTLSCAPath string, tracingTLSInsecure bool, scrubSensitiveData bool) *Config {
 	cfg := &Config{
 		DataDir:               dataDir,
 		APIPort:               apiPort,
@@ -54,6 +57,7 @@ func LoadConfig(dataDir string, apiPort int, logLevel, watcherConfigPath string,
 		TracingEndpoint:       tracingEndpoint,
 		TracingTLSCAPath:      tracingTLSCAPath,
 		TracingTLSInsecure:    tracingTLSInsecure,
+		ScrubSensitiveData:    scrubSensitiveData,
 	}
 
 	return cfg
