@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 )
 
 type Scrubber struct {
@@ -49,17 +50,19 @@ func (s *Scrubber) ScrubEventData(kind string, data json.RawMessage) (json.RawMe
 }
 
 func maskString(value string) string {
-	n := len(value)
-	if n == 0 {
+	if value == "" {
 		return value
 	}
+
+	runes := []rune(value)
+	n := len(runes)
 	if n <= 4 {
 		return repeatMask(n)
 	}
 	if n <= 8 {
-		return value[:1] + repeatMask(n-2) + value[n-1:]
+		return string(runes[:1]) + repeatMask(n-2) + string(runes[n-1:])
 	}
-	return value[:3] + repeatMask(n-5) + value[n-2:]
+	return string(runes[:3]) + repeatMask(n-5) + string(runes[n-2:])
 }
 
 func repeatMask(n int) string {
@@ -97,6 +100,10 @@ func (s *Scrubber) scrubBase64Map(obj map[string]any, field string) {
 			values[key] = maskString(text)
 			continue
 		}
+		if !utf8.Valid(decoded) {
+			values[key] = maskString(text)
+			continue
+		}
 		values[key] = base64.StdEncoding.EncodeToString([]byte(maskString(string(decoded))))
 	}
 }
@@ -108,6 +115,7 @@ func (s *Scrubber) scrubWorkloadEnv(obj map[string]any) {
 	}
 
 	s.scrubEnvInSpec(spec)
+	s.scrubTemplateSpec(spec)
 
 	jobTemplate, ok := spec["jobTemplate"].(map[string]any)
 	if ok {

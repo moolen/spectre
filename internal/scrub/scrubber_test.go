@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestScrubEventData_ConfigMapData(t *testing.T) {
@@ -226,5 +227,83 @@ func TestScrubEventData_CronJobEnvValuesAreScrubbed(t *testing.T) {
 
 	if got.Spec.JobTemplate.Spec.Template.Spec.Containers[0].Env[0].Value == "cron_secret" {
 		t.Fatalf("expected cronjob env value to be scrubbed")
+	}
+}
+
+func TestScrubEventData_DeploymentTemplateEnvValuesAreScrubbed(t *testing.T) {
+	s := New(true)
+	input := json.RawMessage(`{
+		"kind":"Deployment",
+		"spec":{
+			"template":{
+				"spec":{
+					"containers":[{"env":[{"name":"TOKEN","value":"deploy_secret"}]}]
+				}
+			}
+		}
+	}`)
+
+	out, err := s.ScrubEventData("Deployment", input)
+	if err != nil {
+		t.Fatalf("ScrubEventData() error = %v", err)
+	}
+
+	var got struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Env []struct {
+							Value string `json:"value"`
+						} `json:"env"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.Spec.Template.Spec.Containers[0].Env[0].Value == "deploy_secret" {
+		t.Fatalf("expected deployment env value to be scrubbed")
+	}
+}
+
+func TestMaskString_UnicodePreservesValidity(t *testing.T) {
+	input := "hëllo"
+	got := maskString(input)
+	if !utf8.ValidString(got) {
+		t.Fatalf("expected masked unicode to stay valid UTF-8")
+	}
+	if utf8.RuneCountInString(got) != utf8.RuneCountInString(input) {
+		t.Fatalf("expected rune length preserved, got %d", utf8.RuneCountInString(got))
+	}
+}
+
+func TestScrubEventData_SecretBinaryDataMasksBase64String(t *testing.T) {
+	s := New(true)
+	binary := []byte{0xff, 0xfe, 0xfd, 0xfc}
+	encoded := base64.StdEncoding.EncodeToString(binary)
+	input := json.RawMessage(`{"kind":"Secret","data":{"token":"` + encoded + `"}}`)
+
+	out, err := s.ScrubEventData("Secret", input)
+	if err != nil {
+		t.Fatalf("ScrubEventData() error = %v", err)
+	}
+
+	var got struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.Data["token"] == encoded {
+		t.Fatalf("expected encoded secret to be masked")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(got.Data["token"])
+	if err == nil && bytes.Equal(decoded, binary) {
+		t.Fatalf("expected binary secret not to round-trip")
 	}
 }
