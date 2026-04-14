@@ -43,10 +43,14 @@ type auditEventList struct {
 
 func parseAuditObjectPayload(data []byte) (*parseResult, error) {
 	var meta struct {
-		Kind string `json:"kind"`
+		Kind       string `json:"kind"`
+		APIVersion string `json:"apiVersion"`
 	}
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+	if !isAuditAPIVersion(meta.APIVersion) {
+		return nil, fmt.Errorf("unsupported audit apiVersion %q", meta.APIVersion)
 	}
 
 	switch meta.Kind {
@@ -84,6 +88,9 @@ func parseAuditJSONLPayload(data []byte) (*parseResult, error) {
 		if evt.Kind != "Event" {
 			return nil, fmt.Errorf("unsupported audit JSONL line %d kind %q", i+1, evt.Kind)
 		}
+		if !isAuditAPIVersion(evt.APIVersion) {
+			return nil, fmt.Errorf("unsupported audit JSONL line %d apiVersion %q", i+1, evt.APIVersion)
+		}
 
 		events = append(events, evt)
 	}
@@ -116,6 +123,15 @@ func normalizeAuditEvents(auditEvents []auditEvent) *parseResult {
 			continue
 		}
 
+		timestamp, ok := parseAuditTimestamp(auditEvt)
+		if !ok {
+			result.Warnings = append(result.Warnings, fmt.Sprintf(
+				"skipped audit event for %q: missing or invalid stageTimestamp/requestReceivedTimestamp",
+				auditObjectIdentifier(auditEvt),
+			))
+			continue
+		}
+
 		resource, ok := buildAuditResourceMetadata(auditEvt, data)
 		if !ok {
 			result.Warnings = append(result.Warnings, fmt.Sprintf(
@@ -127,7 +143,7 @@ func normalizeAuditEvents(auditEvents []auditEvent) *parseResult {
 
 		evt := &models.Event{
 			ID:        uuid.NewString(),
-			Timestamp: parseAuditTimestamp(auditEvt),
+			Timestamp: timestamp,
 			Type:      eventType,
 			Resource:  resource,
 			Data:      data,
@@ -174,20 +190,20 @@ func preferredAuditObjectPayload(auditEvt auditEvent) json.RawMessage {
 	return nil
 }
 
-func parseAuditTimestamp(auditEvt auditEvent) int64 {
+func parseAuditTimestamp(auditEvt auditEvent) (int64, bool) {
 	ts := strings.TrimSpace(auditEvt.StageTimestamp)
 	if ts == "" {
 		ts = strings.TrimSpace(auditEvt.RequestReceivedTimestamp)
 	}
 	if ts == "" {
-		return 0
+		return 0, false
 	}
 
 	parsed, err := time.Parse(time.RFC3339Nano, ts)
 	if err != nil {
-		return 0
+		return 0, false
 	}
-	return parsed.UnixNano()
+	return parsed.UnixNano(), true
 }
 
 func buildAuditResourceMetadata(auditEvt auditEvent, payload json.RawMessage) (models.ResourceMetadata, bool) {
@@ -221,6 +237,9 @@ func buildAuditResourceMetadata(auditEvt auditEvent, payload json.RawMessage) (m
 
 	uid := strings.TrimSpace(auditEvt.ObjectRef.UID)
 	if uid == "" {
+		uid = payloadMeta.UID
+	}
+	if uid == "" {
 		uid = synthesizeAuditUID(group, version, kind, namespace, name, auditEvt.ObjectRef.Resource)
 	}
 
@@ -240,6 +259,7 @@ type auditPayloadMetadata struct {
 	Kind      string
 	Name      string
 	Namespace string
+	UID       string
 }
 
 func extractAuditPayloadMetadata(payload json.RawMessage) auditPayloadMetadata {
@@ -253,6 +273,7 @@ func extractAuditPayloadMetadata(payload json.RawMessage) auditPayloadMetadata {
 		Metadata   struct {
 			Name      string `json:"name"`
 			Namespace string `json:"namespace"`
+			UID       string `json:"uid"`
 		} `json:"metadata"`
 	}
 
@@ -267,7 +288,12 @@ func extractAuditPayloadMetadata(payload json.RawMessage) auditPayloadMetadata {
 		Kind:      strings.TrimSpace(m.Kind),
 		Name:      strings.TrimSpace(m.Metadata.Name),
 		Namespace: strings.TrimSpace(m.Metadata.Namespace),
+		UID:       strings.TrimSpace(m.Metadata.UID),
 	}
+}
+
+func isAuditAPIVersion(apiVersion string) bool {
+	return strings.HasPrefix(strings.TrimSpace(apiVersion), "audit.k8s.io/")
 }
 
 func parseAuditGroupVersion(apiGroup, apiVersion string) (string, string) {

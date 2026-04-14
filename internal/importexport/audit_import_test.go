@@ -180,8 +180,8 @@ func TestParseImportPayload_AuditEventList(t *testing.T) {
 func TestImportJSONFile_AuditJSONL(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "audit.log")
-	data := `{"kind":"Event","apiVersion":"audit.k8s.io/v1","auditID":"audit-delete","stage":"ResponseComplete","verb":"delete","requestURI":"/api/v1/namespaces/default/pods/p1","objectRef":{"resource":"pods","namespace":"default","name":"p1","uid":"pod-1-uid","apiVersion":"v1"}}
-{"kind":"Event","apiVersion":"audit.k8s.io/v1","auditID":"audit-get","stage":"ResponseComplete","verb":"get","requestURI":"/api/v1/namespaces/default/pods/p1","objectRef":{"resource":"pods","namespace":"default","name":"p1","uid":"pod-1-uid","apiVersion":"v1"}}`
+	data := `{"kind":"Event","apiVersion":"audit.k8s.io/v1","auditID":"audit-delete","stage":"ResponseComplete","stageTimestamp":"2024-01-02T03:04:08Z","verb":"delete","requestURI":"/api/v1/namespaces/default/pods/p1","objectRef":{"resource":"pods","namespace":"default","name":"p1","uid":"pod-1-uid","apiVersion":"v1"}}
+{"kind":"Event","apiVersion":"audit.k8s.io/v1","auditID":"audit-get","stage":"ResponseComplete","stageTimestamp":"2024-01-02T03:04:09Z","verb":"get","requestURI":"/api/v1/namespaces/default/pods/p1","objectRef":{"resource":"pods","namespace":"default","name":"p1","uid":"pod-1-uid","apiVersion":"v1"}}`
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatalf("Failed to create audit log: %v", err)
 	}
@@ -244,5 +244,115 @@ func TestParseImportPayload_AuditMissingObjectPayloadWarns(t *testing.T) {
 	}
 	if !hasIdentifyingWarning {
 		t.Fatalf("ParseImportPayload() warnings = %v, want at least one warning containing %q", warnings, "no-payload")
+	}
+}
+
+func TestParseImportPayload_NonAuditEventObjectDoesNotUseAuditPath(t *testing.T) {
+	input := strings.NewReader(`{
+		"kind": "Event",
+		"apiVersion": "v1"
+	}`)
+
+	_, _, err := ParseImportPayload(input)
+	if err == nil {
+		t.Fatalf("ParseImportPayload() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "events array is empty") {
+		t.Fatalf("ParseImportPayload() error = %v, want error containing %q", err, "events array is empty")
+	}
+}
+
+func TestParseImportPayload_AuditInvalidTimestampWarnsAndSkips(t *testing.T) {
+	input := strings.NewReader(`{
+		"kind": "Event",
+		"apiVersion": "audit.k8s.io/v1",
+		"auditID": "audit-invalid-ts",
+		"stage": "ResponseComplete",
+		"stageTimestamp": "not-a-timestamp",
+		"verb": "create",
+		"requestURI": "/api/v1/namespaces/default/configmaps/cm-invalid-ts",
+		"objectRef": {
+			"resource": "configmaps",
+			"namespace": "default",
+			"name": "cm-invalid-ts",
+			"uid": "cm-invalid-ts-uid",
+			"apiVersion": "v1"
+		},
+		"responseObject": {
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "cm-invalid-ts",
+				"namespace": "default",
+				"uid": "cm-invalid-ts-uid"
+			}
+		}
+	}`)
+
+	events, warnings, err := ParseImportPayload(input)
+	if err != nil {
+		t.Fatalf("ParseImportPayload() unexpected error = %v", err)
+	}
+
+	if len(events) != 0 {
+		t.Fatalf("ParseImportPayload() got %d events, want 0", len(events))
+	}
+
+	if len(warnings) < 1 {
+		t.Fatalf("ParseImportPayload() got %d warnings, want at least 1", len(warnings))
+	}
+
+	hasTimestampWarning := false
+	for _, warning := range warnings {
+		if strings.Contains(warning, "invalid stageTimestamp") || strings.Contains(warning, "stageTimestamp/requestReceivedTimestamp") {
+			hasTimestampWarning = true
+			break
+		}
+	}
+	if !hasTimestampWarning {
+		t.Fatalf("ParseImportPayload() warnings = %v, want timestamp warning", warnings)
+	}
+}
+
+func TestParseImportPayload_AuditUsesPayloadUIDWhenObjectRefUIDMissing(t *testing.T) {
+	input := strings.NewReader(`{
+		"kind": "Event",
+		"apiVersion": "audit.k8s.io/v1",
+		"auditID": "audit-payload-uid",
+		"stage": "ResponseComplete",
+		"stageTimestamp": "2024-01-02T03:04:09Z",
+		"verb": "patch",
+		"requestURI": "/api/v1/namespaces/default/configmaps/cm-payload-uid",
+		"objectRef": {
+			"resource": "configmaps",
+			"namespace": "default",
+			"name": "cm-payload-uid",
+			"uid": "",
+			"apiVersion": "v1"
+		},
+		"responseObject": {
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "cm-payload-uid",
+				"namespace": "default",
+				"uid": "uid-from-payload"
+			}
+		}
+	}`)
+
+	events, warnings, err := ParseImportPayload(input)
+	if err != nil {
+		t.Fatalf("ParseImportPayload() unexpected error = %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("ParseImportPayload() got %d events, want 1", len(events))
+	}
+	if events[0].Resource.UID != "uid-from-payload" {
+		t.Fatalf("ParseImportPayload() resource UID = %q, want %q", events[0].Resource.UID, "uid-from-payload")
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("ParseImportPayload() got %d warnings, want 0", len(warnings))
 	}
 }

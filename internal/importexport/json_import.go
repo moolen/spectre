@@ -221,7 +221,9 @@ func parseImportPayload(r io.Reader) (*parseResult, error) {
 
 		var kind string
 		if err := json.Unmarshal(root["kind"], &kind); err == nil {
-			if kind == "Event" || kind == "EventList" {
+			var apiVersion string
+			_ = json.Unmarshal(root["apiVersion"], &apiVersion)
+			if (kind == "Event" || kind == "EventList") && isAuditAPIVersion(apiVersion) {
 				return parseAuditObjectPayload(trimmed)
 			}
 		}
