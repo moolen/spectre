@@ -1,6 +1,7 @@
 package scrub
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -24,7 +25,7 @@ func (s *Scrubber) ScrubEventData(kind string, data json.RawMessage) (json.RawMe
 	}
 
 	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
+	if err := decodeJSONNumber(data, &obj); err != nil {
 		return nil, fmt.Errorf("parse scrub target: %w", err)
 	}
 
@@ -53,7 +54,7 @@ func maskString(value string) string {
 		return value
 	}
 	if n <= 4 {
-		return value[:1] + repeatMask(n-1)
+		return repeatMask(n)
 	}
 	if n <= 8 {
 		return value[:1] + repeatMask(n-2) + value[n-1:]
@@ -105,6 +106,19 @@ func (s *Scrubber) scrubWorkloadEnv(obj map[string]any) {
 	if !ok {
 		return
 	}
+
+	s.scrubEnvInSpec(spec)
+
+	jobTemplate, ok := spec["jobTemplate"].(map[string]any)
+	if ok {
+		jobSpec, ok := jobTemplate["spec"].(map[string]any)
+		if ok {
+			s.scrubTemplateSpec(jobSpec)
+		}
+	}
+}
+
+func (s *Scrubber) scrubTemplateSpec(spec map[string]any) {
 	template, ok := spec["template"].(map[string]any)
 	if !ok {
 		return
@@ -113,9 +127,12 @@ func (s *Scrubber) scrubWorkloadEnv(obj map[string]any) {
 	if !ok {
 		return
 	}
+	s.scrubEnvInSpec(templateSpec)
+}
 
+func (s *Scrubber) scrubEnvInSpec(spec map[string]any) {
 	for _, field := range []string{"containers", "initContainers", "ephemeralContainers"} {
-		items, ok := templateSpec[field].([]any)
+		items, ok := spec[field].([]any)
 		if !ok {
 			continue
 		}
@@ -158,7 +175,7 @@ func (s *Scrubber) scrubLastAppliedConfiguration(obj map[string]any) {
 	}
 
 	var nested map[string]any
-	if err := json.Unmarshal([]byte(raw), &nested); err != nil {
+	if err := decodeJSONNumber([]byte(raw), &nested); err != nil {
 		annotations["kubectl.kubernetes.io/last-applied-configuration"] = maskString(raw)
 		return
 	}
@@ -176,4 +193,10 @@ func (s *Scrubber) scrubLastAppliedConfiguration(obj map[string]any) {
 		return
 	}
 	annotations["kubectl.kubernetes.io/last-applied-configuration"] = string(scrubbed)
+}
+
+func decodeJSONNumber(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(target)
 }
