@@ -1,6 +1,7 @@
 package importexport
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -196,15 +197,52 @@ func ParseImportPayload(r io.Reader) ([]*models.Event, []string, error) {
 }
 
 func parseImportPayload(r io.Reader) (*parseResult, error) {
-	events, err := ParseJSONEvents(r)
+	payload, err := io.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read import payload: %w", err)
+	}
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("empty file")
 	}
 
-	return &parseResult{
-		Events:   events,
-		Warnings: []string{},
-	}, nil
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &root); err == nil {
+		if _, hasEvents := root["events"]; hasEvents {
+			events, parseErr := ParseJSONEvents(bytes.NewReader(trimmed))
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			return &parseResult{
+				Events:   events,
+				Warnings: []string{},
+			}, nil
+		}
+
+		var kind string
+		if err := json.Unmarshal(root["kind"], &kind); err == nil {
+			if kind == "Event" || kind == "EventList" {
+				return parseAuditObjectPayload(trimmed)
+			}
+		}
+
+		// Keep existing behavior for unknown JSON objects.
+		events, parseErr := ParseJSONEvents(bytes.NewReader(trimmed))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		return &parseResult{
+			Events:   events,
+			Warnings: []string{},
+		}, nil
+	}
+
+	result, err := parseAuditJSONLPayload(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	return result, nil
 }
 
 // ParseJSONEvents parses a JSON events array from a reader
