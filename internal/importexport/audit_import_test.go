@@ -57,6 +57,18 @@ func TestParseImportPayload_AuditSingleEvent(t *testing.T) {
 		t.Fatalf("ParseImportPayload() resource namespace = %q, want %q", events[0].Resource.Namespace, "default")
 	}
 
+	if events[0].Resource.Group != "" {
+		t.Fatalf("ParseImportPayload() resource group = %q, want %q", events[0].Resource.Group, "")
+	}
+
+	if events[0].Resource.Version != "v1" {
+		t.Fatalf("ParseImportPayload() resource version = %q, want %q", events[0].Resource.Version, "v1")
+	}
+
+	if events[0].Resource.Kind != "ConfigMap" {
+		t.Fatalf("ParseImportPayload() resource kind = %q, want %q", events[0].Resource.Kind, "ConfigMap")
+	}
+
 	if events[0].Resource.Name != "cm-one" {
 		t.Fatalf("ParseImportPayload() resource name = %q, want %q", events[0].Resource.Name, "cm-one")
 	}
@@ -130,6 +142,18 @@ func TestParseImportPayload_AuditEventList(t *testing.T) {
 
 	if events[0].Resource.Namespace != "default" {
 		t.Fatalf("ParseImportPayload() resource namespace = %q, want %q", events[0].Resource.Namespace, "default")
+	}
+
+	if events[0].Resource.Group != "" {
+		t.Fatalf("ParseImportPayload() resource group = %q, want %q", events[0].Resource.Group, "")
+	}
+
+	if events[0].Resource.Version != "v1" {
+		t.Fatalf("ParseImportPayload() resource version = %q, want %q", events[0].Resource.Version, "v1")
+	}
+
+	if events[0].Resource.Kind != "ConfigMap" {
+		t.Fatalf("ParseImportPayload() resource kind = %q, want %q", events[0].Resource.Kind, "ConfigMap")
 	}
 
 	if events[0].Resource.Name != "cm-from-request" {
