@@ -35,6 +35,7 @@ func newEmbeddedRuntimeServer(t *testing.T, runtime embeddedRuntimeStorage) *api
 		nil,
 		time.Minute,
 		apiserver.NamespaceGraphCacheConfig{},
+		true,
 	)
 }
 

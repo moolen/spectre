@@ -76,6 +76,12 @@ interface ApiClientConfig {
   timeout?: number;
 }
 
+interface RuntimeMode {
+  watcherEnabled: boolean;
+}
+
+let runtimeMode: RuntimeMode | null = null;
+
 class ApiClient {
   private baseUrl: string;
   private timeout: number = 180000; // 3 minutes default for resource-constrained environments
@@ -513,6 +519,44 @@ export const apiClient = new ApiClient({
 
 // Export for testing/mocking
 export { ApiClient };
+
+export async function detectWatcherEnabled(): Promise<boolean> {
+  if (runtimeMode !== null) {
+    return runtimeMode.watcherEnabled;
+  }
+
+  try {
+    const response = await fetch('/health', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+      runtimeMode = { watcherEnabled: true };
+      return runtimeMode.watcherEnabled;
+    }
+
+    const data = await response.json() as { watcherEnabled?: boolean };
+    runtimeMode = {
+      watcherEnabled: data.watcherEnabled ?? true,
+    };
+    return runtimeMode.watcherEnabled;
+  } catch {
+    runtimeMode = { watcherEnabled: true };
+    return runtimeMode.watcherEnabled;
+  }
+}
+
+export function getWatcherEnabled(): boolean {
+  if (runtimeMode !== null) {
+    return runtimeMode.watcherEnabled;
+  }
+  return true;
+}
+
+export function resetRuntimeModeForTests(): void {
+  runtimeMode = null;
+}
 
 function normalizeToSeconds(value: string | number): number {
   if (typeof value === 'number') {

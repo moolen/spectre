@@ -29,6 +29,7 @@ func newEmbeddedTestServer(t *testing.T) *Server {
 		nil,
 		time.Minute,
 		NamespaceGraphCacheConfig{},
+		true,
 	)
 }
 
@@ -52,6 +53,7 @@ func newEmbeddedCompareTestServer(t *testing.T) *Server {
 		nil,
 		time.Minute,
 		NamespaceGraphCacheConfig{},
+		true,
 	)
 }
 
@@ -103,4 +105,48 @@ func TestServer_EmbeddedMode_CompareRouteAbsent(t *testing.T) {
 	require.NotNil(t, handler)
 
 	assertRouteStatus(t, handler, http.MethodGet, "/v1/timeline/compare?start=1&end=2", http.StatusNotFound)
+}
+
+func TestServer_HealthIncludesWatcherEnabledFalse(t *testing.T) {
+	server := NewWithStorageGraphAndPipeline(
+		0,
+		nil,
+		nil,
+		nil,
+		&NoOpReadinessChecker{},
+		nil,
+		time.Minute,
+		NamespaceGraphCacheConfig{},
+		false,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
+	rr := httptest.NewRecorder()
+
+	server.server.Handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.JSONEq(t, `{"status":"healthy","watcherEnabled":false}`, rr.Body.String())
+}
+
+func TestServer_HealthIncludesWatcherEnabledTrue(t *testing.T) {
+	server := NewWithStorageGraphAndPipeline(
+		0,
+		nil,
+		nil,
+		nil,
+		&NoOpReadinessChecker{},
+		nil,
+		time.Minute,
+		NamespaceGraphCacheConfig{},
+		true,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
+	rr := httptest.NewRecorder()
+
+	server.server.Handler.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.JSONEq(t, `{"status":"healthy","watcherEnabled":true}`, rr.Body.String())
 }

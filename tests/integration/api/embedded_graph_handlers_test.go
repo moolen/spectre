@@ -90,6 +90,7 @@ func newEmbeddedFixtureServer(t *testing.T, fixture string) *apiserver.Server {
 		nil,
 		time.Minute,
 		apiserver.NamespaceGraphCacheConfig{},
+		true,
 	)
 }
 

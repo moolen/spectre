@@ -107,6 +107,7 @@ func TestEmbeddedTimelineAPI(t *testing.T) {
 		nil,
 		time.Minute,
 		apiserver.NamespaceGraphCacheConfig{},
+		true,
 	)
 
 	start := int64(1700000000)

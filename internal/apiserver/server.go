@@ -46,7 +46,8 @@ type Server struct {
 		GetTracer(string) trace.Tracer
 		IsEnabled() bool
 	}
-	mcpServer *server.MCPServer
+	mcpServer      *server.MCPServer
+	watcherEnabled bool
 }
 
 // NamespaceGraphCacheConfig holds configuration for the namespace graph cache.
@@ -69,6 +70,7 @@ func NewWithStorageGraphAndPipeline(
 	},
 	metadataRefreshPeriod time.Duration,
 	nsGraphCacheConfig NamespaceGraphCacheConfig,
+	watcherEnabled bool,
 ) *Server {
 	s := &Server{
 		port:             port,
@@ -79,6 +81,7 @@ func NewWithStorageGraphAndPipeline(
 		router:           http.NewServeMux(),
 		readinessChecker: readinessChecker,
 		tracingProvider:  tracingProvider,
+		watcherEnabled:   watcherEnabled,
 	}
 
 	if storageExecutor != nil {
@@ -211,7 +214,10 @@ func (s *Server) Stop(ctx context.Context) error {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	response := map[string]interface{}{"status": "healthy"}
+	response := map[string]interface{}{
+		"status":         "healthy",
+		"watcherEnabled": s.watcherEnabled,
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = api.WriteJSON(w, response)

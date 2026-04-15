@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/moolen/spectre/internal/models"
 	"github.com/moolen/spectre/tests/e2e/helpers"
+	"github.com/playwright-community/playwright-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -51,9 +53,12 @@ type ImportExportStage struct {
 	involvedPodUIDs  []string
 
 	// CLI import on startup
-	spectreNamespace string
-	testCluster      *helpers.TestCluster
-	configMapName    string
+	spectreNamespace  string
+	testCluster       *helpers.TestCluster
+	configMapName     string
+	browserTest       *helpers.BrowserTest
+	uiURL             string
+	importedTimeRange helpers.TimeRange
 }
 
 func NewImportExportStage(t *testing.T) (*ImportExportStage, *ImportExportStage, *ImportExportStage) {
@@ -1210,6 +1215,7 @@ func (s *ImportExportStage) port_forward_to_spectre() *ImportExportStage {
 	s.require.NoError(err, "HTTP service not reachable via port-forward")
 
 	s.apiClient = helpers.NewAPIClient(s.t, portForwarder.GetURL())
+	s.uiURL = portForwarder.GetURL()
 	return s
 }
 
@@ -1361,6 +1367,87 @@ func (s *ImportExportStage) verify_import_report_in_logs() *ImportExportStage {
 
 	s.t.Logf("✓ Pod logs confirm import execution")
 	s.t.Log("✓ CLI import on startup test completed successfully!")
+	return s
+}
+
+func (s *ImportExportStage) browser_is_initialized() *ImportExportStage {
+	helpers.EnsurePlaywrightInstalled(s.t)
+
+	bt, err := helpers.NewBrowserTest(s.t)
+	s.require.NoError(err, "failed to create browser test")
+	s.browserTest = bt
+	s.t.Cleanup(func() {
+		if err := bt.Close(); err != nil {
+			s.t.Logf("Warning: failed to close browser: %v", err)
+		}
+	})
+
+	return s
+}
+
+func (s *ImportExportStage) imported_metadata_time_range_is_available() *ImportExportStage {
+	helpers.EventuallyCondition(s.t, func() bool {
+		metadataCtx, metadataCancel := context.WithTimeout(s.t.Context(), 5*time.Second)
+		defer metadataCancel()
+
+		metadata, err := s.apiClient.GetMetadata(metadataCtx, nil, nil)
+		if err != nil {
+			s.t.Logf("GetMetadata without time bounds failed: %v", err)
+			return false
+		}
+
+		if metadata.TimeRange.Earliest <= 0 || metadata.TimeRange.Latest < metadata.TimeRange.Earliest {
+			s.t.Logf("Metadata time range not ready yet: %+v", metadata.TimeRange)
+			return false
+		}
+
+		s.importedTimeRange = metadata.TimeRange
+		return true
+	}, helpers.SlowEventuallyOption)
+
+	s.t.Logf("✓ Imported metadata time range available: earliest=%d latest=%d",
+		s.importedTimeRange.Earliest, s.importedTimeRange.Latest)
+	return s
+}
+
+func (s *ImportExportStage) navigated_to_root_without_time_params() *ImportExportStage {
+	_, err := s.browserTest.Page.Goto(s.uiURL+"/", playwright.PageGotoOptions{
+		WaitUntil: playwright.WaitUntilStateLoad,
+		Timeout:   playwright.Float(30000),
+	})
+	s.require.NoError(err, "failed to navigate to root page")
+	return s
+}
+
+func (s *ImportExportStage) timeline_url_is_initialized_to_imported_metadata_bounds() *ImportExportStage {
+	expectedStart := time.Unix(s.importedTimeRange.Earliest, 0).UTC().Format("2006-01-02T15:04:05.000Z")
+	expectedEnd := time.Unix(s.importedTimeRange.Latest, 0).UTC().Format("2006-01-02T15:04:05.000Z")
+
+	helpers.EventuallyCondition(s.t, func() bool {
+		currentURL := s.browserTest.Page.URL()
+		parsedURL, err := url.Parse(currentURL)
+		if err != nil {
+			s.t.Logf("Failed to parse current page URL %q: %v", currentURL, err)
+			return false
+		}
+
+		start := parsedURL.Query().Get("start")
+		end := parsedURL.Query().Get("end")
+		if start == "" || end == "" {
+			s.t.Logf("Timeline URL not initialized yet: %s", currentURL)
+			return false
+		}
+
+		if start != expectedStart || end != expectedEnd {
+			s.t.Logf("Timeline URL mismatch. got start=%s end=%s want start=%s end=%s",
+				start, end, expectedStart, expectedEnd)
+			return false
+		}
+
+		return true
+	}, helpers.SlowEventuallyOption)
+
+	s.t.Logf("✓ Timeline URL initialized to imported metadata bounds: start=%s end=%s", expectedStart, expectedEnd)
 	return s
 }
 

@@ -9,8 +9,10 @@ import { usePersistedFilters } from '../hooks/usePersistedFilters';
 import { usePersistedQuickPreset } from '../hooks/usePersistedQuickPreset';
 import { K8sResource, FilterState, SelectedPoint, TimeRange, ResourceStatus } from '../types';
 import { useSettings } from '../hooks/useSettings';
+import { apiClient, detectWatcherEnabled } from '../services/api';
 import { parseTimeExpression } from '../utils/timeParsing';
 import { fromNamespaceFilterValue, sortNamespaceFilterOptions } from '../utils/namespaceFilters';
+import { buildWatcherDisabledInitialRange } from './timelineStartup';
 
 const AUTO_REFRESH_INTERVALS: Record<string, number> = {
   off: 0,
@@ -27,40 +29,68 @@ function TimelinePage() {
   const originalUrlParamsRef = useRef<{ start?: string; end?: string } | null>(null);
   const isUpdatingFromZoom = useRef(false);
 
-  // Auto-set time range to now-30m -> now if no URL params
   useEffect(() => {
-    const startParam = searchParams.get('start');
-    const endParam = searchParams.get('end');
+    let cancelled = false;
 
-    // Only auto-set if no time range is specified in URL
-    if (!startParam && !endParam) {
-      console.log('[TimelinePage] Auto-setting time range to now-30m -> now');
-      // Set default time range to "now-30m" to "now" (last 30 minutes)
-      const endExpr = 'now';
-      const startExpr = 'now-30m';
+    const initializeStartupRange = async () => {
+      const startParam = searchParams.get('start');
+      const endParam = searchParams.get('end');
 
-      setSearchParams({
-        start: startExpr,
-        end: endExpr
-      }, { replace: true }); // Use replace to avoid adding to history
-    }
+      // Only auto-set if no time range is specified in URL
+      if (startParam || endParam) {
+        return;
+      }
+
+      const defaultStart = 'now-30m';
+      const defaultEnd = 'now';
+
+      try {
+        const watcherEnabled = await detectWatcherEnabled();
+        if (cancelled) {
+          return;
+        }
+
+        if (!watcherEnabled) {
+          const metadata = await apiClient.getMetadata();
+          if (cancelled) {
+            return;
+          }
+
+          const initialRange = buildWatcherDisabledInitialRange(metadata.timeRange);
+          if (initialRange) {
+            setSearchParams(
+              {
+                start: initialRange.start.toISOString(),
+                end: initialRange.end.toISOString(),
+              },
+              { replace: true },
+            );
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to initialize startup time range:', error);
+      }
+
+      if (!cancelled) {
+        setSearchParams(
+          {
+            start: defaultStart,
+            end: defaultEnd,
+          },
+          { replace: true },
+        );
+      }
+    };
+
+    initializeStartupRange();
+
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams, setSearchParams]);
 
-  // Create a display time range that reads from URL for FilterBar
-  // This allows FilterBar to update without triggering Timeline re-renders
-  const displayTimeRange = useMemo(() => {
-    const startParam = searchParams.get('start');
-    const endParam = searchParams.get('end');
-    if (!startParam || !endParam) return timeRange;
-
-    const start = new Date(startParam);
-    const end = new Date(endParam);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) return timeRange;
-
-    return { start, end };
-  }, [searchParams, timeRange]);
-
-  // Parse time range from URL
+  // Parse the time range from the URL
   useEffect(() => {
     // Skip processing if this update came from a zoom action (to prevent render loops)
     if (isUpdatingFromZoom.current) {
@@ -119,6 +149,20 @@ function TimelinePage() {
       end: parsedEnd !== null ? endParam : undefined,
     });
   }, [searchParams]); // Re-run when URL params change
+
+  // Create a display time range that reads from URL for FilterBar
+  // This allows FilterBar to update without triggering Timeline re-renders
+  const displayTimeRange = useMemo(() => {
+    const startParam = searchParams.get('start');
+    const endParam = searchParams.get('end');
+    if (!startParam || !endParam) return timeRange;
+
+    const start = new Date(startParam);
+    const end = new Date(endParam);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return timeRange;
+
+    return { start, end };
+  }, [searchParams, timeRange]);
 
   // Update URL when time range changes (from time picker)
   const handleTimeRangeChange = (range: TimeRange, rawStart?: string, rawEnd?: string) => {

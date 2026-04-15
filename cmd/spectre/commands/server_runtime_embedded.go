@@ -188,6 +188,7 @@ func newEmbeddedAPI(cfg *config.Config, mode serverRuntimeMode, tracingProvider 
 			RefreshTTL:  time.Duration(namespaceGraphCacheRefreshSeconds) * time.Second,
 			MaxMemoryMB: int64(namespaceGraphCacheMemoryMB),
 		},
+		mode.StartWatcher,
 	)
 	logger.Info("API server component created (embedded)")
 

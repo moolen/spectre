@@ -61,6 +61,28 @@ func TestCLIImportOnStartupEmbedded(t *testing.T) {
 		verify_import_report_in_logs()
 }
 
+func TestCLIImportOnStartupEmbeddedInitializesTimelineToFullImportedRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping e2e test in short mode")
+	}
+	t.Parallel()
+
+	given, when, then := NewImportExportStage(t)
+
+	given.a_test_cluster().and().
+		generated_test_events_stored_in_configmap()
+
+	when.spectre_is_deployed_in_embedded_mode_with_import_on_startup().and().
+		wait_for_spectre_to_become_ready().and().
+		port_forward_to_spectre().and().
+		browser_is_initialized().and().
+		navigated_to_root_without_time_params()
+
+	then.verify_imported_data_is_present_via_metadata_api().and().
+		imported_metadata_time_range_is_available().and().
+		timeline_url_is_initialized_to_imported_metadata_bounds()
+}
+
 // TestImportExportRoundTrip validates the full import/export workflow:
 // 1. Deploy Spectre via Helm
 // 2. Generate test data in two namespaces (import-1, import-2)
