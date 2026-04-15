@@ -11,6 +11,7 @@ Clean up GitHub Actions warnings without changing the release flow semantics.
 - Replace `azure/setup-helm` with explicit Helm binary installation in CI jobs.
 - Bump first-party GitHub actions to current major versions that support the Node 24 transition.
 - Bump the Docker-maintained GitHub actions in the release workflow to their current major versions.
+- Bump `actions/upload-artifact` and `actions/download-artifact` to their current Node 24-capable majors where they are used directly.
 
 ## Scope
 

@@ -154,7 +154,7 @@ jobs:
           helm push ${{ steps.package.outputs.chart_package }} oci://ghcr.io/moolen/charts
 
       - name: Upload chart as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helm-chart
           path: ${{ steps.package.outputs.chart_package }}
@@ -174,7 +174,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download Helm chart artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: helm-chart
 
