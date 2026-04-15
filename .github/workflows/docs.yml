@@ -8,9 +8,6 @@ on:
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 permissions:
   contents: read
   pages: write
@@ -49,10 +46,18 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v6
 
+      - name: Package Pages artifact
+        run: |
+          tar --directory ./docs/dist --create --file /tmp/github-pages.tar .
+          gzip --no-name /tmp/github-pages.tar
+
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
-          path: ./docs/dist
+          name: github-pages
+          path: /tmp/github-pages.tar.gz
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     name: Deploy to GitHub Pages

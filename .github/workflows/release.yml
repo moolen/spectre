@@ -4,9 +4,6 @@ on:
   push:
     branches: [ master ]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 permissions:
   contents: write
   packages: write
@@ -28,14 +25,37 @@ jobs:
 
       - name: Bump version and push tag
         id: tag_version
-        uses: mathieudutour/github-tag-action@v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: patch
-          default_prerelease_bump: prerelease
-          release_branches: master
-          pre_release_branches: develop
-          tag_prefix: v
+        run: |
+          latest_tag="$(git tag -l 'v*' --sort=-version:refname | head -n1)"
+          if [ -z "$latest_tag" ]; then
+            latest_tag="v0.0.0"
+          fi
+
+          version="${latest_tag#v}"
+          major="${version%%.*}"
+          rest="${version#*.}"
+          minor="${rest%%.*}"
+          patch="${rest##*.}"
+          next_patch=$((patch + 1))
+          new_version="${major}.${minor}.${next_patch}"
+          new_tag="v${new_version}"
+
+          git tag "${new_tag}"
+          git push origin "${new_tag}"
+
+          if [ "${latest_tag}" = "v0.0.0" ]; then
+            changelog="$(git log --pretty=format:'- %s (%h)')"
+          else
+            changelog="$(git log --pretty=format:'- %s (%h)' "${latest_tag}..HEAD")"
+          fi
+
+          {
+            echo "new_tag=${new_tag}"
+            echo "new_version=${new_version}"
+            echo "changelog<<EOF"
+            printf '%s\n' "${changelog}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
 
   build-and-push-image:
     needs: generate-version
@@ -97,10 +117,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Helm
-        uses: azure/setup-helm@v3
-        with:
-          version: 'v3.13.0'
+      - name: Install Helm
+        run: |
+          HELM_VERSION="v3.13.0"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" -o /tmp/helm.tgz
+          tar -C /tmp -xzf /tmp/helm.tgz
+          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version
 
       - name: Install yq
         run: |

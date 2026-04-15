@@ -6,10 +6,10 @@ Clean up GitHub Actions warnings without changing the release flow semantics.
 
 ## Changes
 
-- Remove the unsupported `initial_version` input from the release workflow's `github-tag-action` step.
-- Set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` at the workflow level for workflows that currently emit Node 20 deprecation warnings.
+- Replace the release workflow's `github-tag-action` step with an inline shell step that computes the next patch tag, pushes it, and emits the existing outputs.
+- Replace `actions/upload-pages-artifact` with explicit tar/gzip packaging plus a direct `actions/upload-artifact` upload for Pages deployment.
+- Replace `azure/setup-helm` with explicit Helm binary installation in CI jobs.
 - Bump first-party GitHub actions to current major versions that support the Node 24 transition.
-- Keep `actions/upload-pages-artifact@v3` because it is still the current major release for that action and is documented as compatible with newer `deploy-pages` releases.
 
 ## Scope
 
@@ -20,6 +20,6 @@ Clean up GitHub Actions warnings without changing the release flow semantics.
 
 ## Non-Goals
 
-- Rewrite semantic version tagging logic.
+- Change version bump semantics from the current patch-based release flow.
 - Change release artifact contents or chart publishing behavior.
 - Change runtime Node versions used by the project itself unless required for the action warning cleanup.
