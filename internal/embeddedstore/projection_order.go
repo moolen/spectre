@@ -17,6 +17,13 @@ func insertEventSorted(events []models.Event, event models.Event) []models.Event
 	return events
 }
 
+func appendOrInsertEventSorted(events []models.Event, event models.Event) []models.Event {
+	if len(events) == 0 || compareEventOrder(events[len(events)-1], event) <= 0 {
+		return append(events, event)
+	}
+	return insertEventSorted(events, event)
+}
+
 func insertOrderedResourceKey(keys []orderedResourceKey, key orderedResourceKey) []orderedResourceKey {
 	idx := sort.Search(len(keys), func(i int) bool {
 		return compareOrderedResourceKey(keys[i], key) >= 0

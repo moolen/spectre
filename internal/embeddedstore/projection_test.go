@@ -174,3 +174,107 @@ func TestProjection_BuildProjectionSupportsFallbackDistinctMetadata(t *testing.T
 	require.Equal(t, int64(10), minTime)
 	require.Equal(t, int64(20), maxTime)
 }
+
+func TestProjection_ApplyOrderedRepeatedResourceMatchesBuildProjection(t *testing.T) {
+	events := make([]models.Event, 0, 32)
+	for i := 0; i < 32; i++ {
+		eventType := models.EventTypeUpdate
+		if i == 0 {
+			eventType = models.EventTypeCreate
+		}
+		events = append(events, models.Event{
+			ID:        "deployment-event-" + string(rune('a'+i)),
+			Timestamp: int64(10 + i),
+			Type:      eventType,
+			Resource: models.ResourceMetadata{
+				Group:     "apps",
+				Version:   "v1",
+				Kind:      "Deployment",
+				Name:      "immich-postgres",
+				Namespace: "immich",
+				UID:       "immich-postgres-uid",
+			},
+			Data: []byte(`{"metadata":{"name":"immich-postgres","namespace":"immich"},"spec":{"replicas":1}}`),
+		})
+	}
+
+	live := embeddedstore.NewProjection()
+	for i := range events {
+		require.NoError(t, live.Apply(events[i]))
+	}
+
+	snap, err := embeddedstore.BuildProjection(events)
+	require.NoError(t, err)
+
+	require.Equal(t, snap.ExportSnapshot(), live.ExportSnapshot())
+}
+
+func TestProjection_ApplyOutOfOrderResourceMatchesBuildProjection(t *testing.T) {
+	events := []models.Event{
+		{
+			ID:        "deployment-update-40",
+			Timestamp: 40,
+			Type:      models.EventTypeUpdate,
+			Resource: models.ResourceMetadata{
+				Group:     "apps",
+				Version:   "v1",
+				Kind:      "Deployment",
+				Name:      "api",
+				Namespace: "default",
+				UID:       "deployment-uid",
+			},
+			Data: []byte(`{"metadata":{"name":"api","namespace":"default"},"spec":{"replicas":4}}`),
+		},
+		{
+			ID:        "deployment-create-10",
+			Timestamp: 10,
+			Type:      models.EventTypeCreate,
+			Resource: models.ResourceMetadata{
+				Group:     "apps",
+				Version:   "v1",
+				Kind:      "Deployment",
+				Name:      "api",
+				Namespace: "default",
+				UID:       "deployment-uid",
+			},
+			Data: []byte(`{"metadata":{"name":"api","namespace":"default"},"spec":{"replicas":1}}`),
+		},
+		{
+			ID:        "deployment-update-20",
+			Timestamp: 20,
+			Type:      models.EventTypeUpdate,
+			Resource: models.ResourceMetadata{
+				Group:     "apps",
+				Version:   "v1",
+				Kind:      "Deployment",
+				Name:      "api",
+				Namespace: "default",
+				UID:       "deployment-uid",
+			},
+			Data: []byte(`{"metadata":{"name":"api","namespace":"default"},"spec":{"replicas":2}}`),
+		},
+		{
+			ID:        "deployment-delete-50",
+			Timestamp: 50,
+			Type:      models.EventTypeDelete,
+			Resource: models.ResourceMetadata{
+				Group:     "apps",
+				Version:   "v1",
+				Kind:      "Deployment",
+				Name:      "api",
+				Namespace: "default",
+				UID:       "deployment-uid",
+			},
+		},
+	}
+
+	live := embeddedstore.NewProjection()
+	for i := range events {
+		require.NoError(t, live.Apply(events[i]))
+	}
+
+	snap, err := embeddedstore.BuildProjection(events)
+	require.NoError(t, err)
+
+	require.Equal(t, snap.ExportSnapshot(), live.ExportSnapshot())
+}
