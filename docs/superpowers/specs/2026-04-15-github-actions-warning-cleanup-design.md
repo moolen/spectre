@@ -10,6 +10,7 @@ Clean up GitHub Actions warnings without changing the release flow semantics.
 - Replace `actions/upload-pages-artifact` with explicit tar/gzip packaging plus a direct `actions/upload-artifact` upload for Pages deployment.
 - Replace `azure/setup-helm` with explicit Helm binary installation in CI jobs.
 - Bump first-party GitHub actions to current major versions that support the Node 24 transition.
+- Bump the Docker-maintained GitHub actions in the release workflow to their current major versions.
 
 ## Scope
 
