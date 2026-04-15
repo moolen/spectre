@@ -5,14 +5,16 @@ Status: Proposed
 
 ## Summary
 
-When Spectre runs with `--watcher-enabled=false`, the timeline UI should default to the full available event window instead of a recent relative range. On first load of the timeline page, if the URL does not already provide `start` and `end`, the UI should use the timestamp of the first available event as the timeline start and the timestamp of the last available event as the timeline end.
+When Spectre runs with `--watcher-enabled=false`, the timeline UI should skip the startup full-page time-range chooser and default to the full available event window instead of a recent relative range. On first load of the timeline page, if the URL does not already provide `start` and `end`, the UI should use the timestamp of the first available event as the timeline start and the timestamp of the last available event as the timeline end.
 
 This change is intended for offline and CI-investigation workflows where Spectre is started against already-imported data and no new watcher events will arrive.
 
 ## Goals
 
 - Make the initial timeline view useful for read-only and imported-data workflows.
+- Remove the blocking startup full-page time-range chooser for watcher-disabled imported-data sessions.
 - Preserve explicit user or shared URL ranges without overriding them.
+- Preserve the existing navbar time controls so users can narrow the range after startup.
 - Keep the current live-watcher startup behavior unchanged.
 - Reuse existing backend metadata rather than adding a new timeline query just to discover bounds.
 
@@ -21,6 +23,7 @@ This change is intended for offline and CI-investigation workflows where Spectre
 - Change behavior when `start` and `end` are already present in the URL.
 - Change demo mode startup behavior.
 - Change timeline behavior after the user manually selects, zooms, or edits a range.
+- Remove the navbar time controls in watcher-disabled mode.
 - Infer "static dataset" heuristically from timestamps alone.
 
 ## User-Facing Behavior
@@ -31,8 +34,20 @@ On timeline page load:
 
 - if the URL already contains both `start` and `end`, preserve them exactly
 - else if Spectre is running with watcher enabled, keep the existing startup behavior
-- else if Spectre is running with watcher disabled and metadata reports available events, initialize the URL time range to the full dataset bounds
+- else if Spectre is running with watcher disabled and metadata reports available events, initialize the URL time range to the full dataset bounds and do not show the startup full-page chooser
 - else if Spectre is running with watcher disabled and metadata reports no available events, keep the existing empty picker flow
+
+### Startup chooser visibility
+
+The full-page startup time-range chooser is a bootstrapping UI. It should only appear when the page still lacks a valid initial range after startup checks complete.
+
+That means:
+
+- watcher-disabled mode with valid metadata bounds should skip the chooser entirely
+- watcher-enabled mode can keep the existing chooser behavior
+- watcher-disabled mode with no import data can keep the existing empty/manual chooser behavior
+
+The navbar time controls remain available after page load in all modes.
 
 ### Full-range definition
 
@@ -118,7 +133,8 @@ Add a first-load initialization path in `ui/src/pages/TimelinePage.tsx`:
 4. If watcher is enabled, keep existing default handling.
 5. If watcher is disabled, fetch `/v1/metadata` without a user-selected time range.
 6. If metadata returns valid non-zero bounds, set URL params to those bounds.
-7. Let existing URL parsing and `useTimeline()` logic proceed normally.
+7. Skip rendering the startup full-page chooser while this watcher-disabled auto-initialization is in flight.
+8. Let existing URL parsing and `useTimeline()` logic proceed normally.
 
 This keeps the URL as the single source of truth for the rest of the page.
 
@@ -134,7 +150,8 @@ Watcher-disabled startup without URL params:
 6. Timeline page calls `/v1/metadata`.
 7. Backend returns `timeRange.earliest` and `timeRange.latest`.
 8. Timeline page writes those timestamps into the URL.
-9. Existing time-range parsing and timeline fetching use that full-range URL.
+9. The startup full-page chooser is never shown.
+10. Existing time-range parsing and timeline fetching use that full-range URL.
 
 Startup with URL params:
 
@@ -219,6 +236,7 @@ Add tests covering startup initialization logic:
 - URL params present: no override
 - watcher enabled: no full-range auto-init
 - watcher disabled with valid metadata bounds: URL set to full range
+- watcher disabled with valid metadata bounds: startup chooser is not rendered
 - watcher disabled with no data: no auto-init
 - watcher disabled with single-event bounds: padded range is used
 
@@ -230,6 +248,8 @@ Add a timeline UI test for the offline investigation flow:
 - import or provide historical data
 - open timeline without `start` and `end`
 - verify the page initializes to the earliest and latest event timestamps
+- verify the startup full-page chooser does not appear
+- verify the navbar time controls still appear
 
 Add a regression test:
 
@@ -240,6 +260,7 @@ Add a regression test:
 
 - Prefer implementing startup initialization in `TimelinePage` rather than inside `useTimeline`, because this is a routing concern and should happen before data-fetch hooks run.
 - Keep the change minimal: expose one backend boolean and reuse existing metadata time bounds.
+- Treat the startup chooser as an initialization fallback, not as the primary UI for watcher-disabled imported datasets.
 - Avoid tying this feature to persisted quick presets; explicit URL state should remain higher priority than local preset state.
 
 ## Open Questions Resolved
@@ -247,4 +268,6 @@ Add a regression test:
 - The feature applies only when no explicit `start` and `end` are present.
 - Watcher-disabled mode should be determined explicitly by the backend.
 - The full-range bounds should come from the first and last event timestamps.
+- The startup full-page chooser should be skipped only for watcher-disabled mode with valid metadata-backed bounds.
+- The navbar time controls should remain available after startup.
 - Demo mode should remain unchanged.
