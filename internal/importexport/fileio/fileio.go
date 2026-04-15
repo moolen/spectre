@@ -63,7 +63,7 @@ func (r *FileReader) ReadFile(path string) (io.ReadCloser, error) {
 	return file, nil
 }
 
-// DirectoryWalker handles recursive directory traversal for JSON files
+// DirectoryWalker handles recursive directory traversal for supported import files.
 type DirectoryWalker struct {
 	logger *logging.Logger
 }
@@ -79,7 +79,7 @@ type WalkResult struct {
 	Size     int64
 }
 
-// WalkJSON recursively finds all JSON files in the specified directory
+// WalkJSON recursively finds all supported import files in the specified directory.
 func (w *DirectoryWalker) WalkJSON(dirPath string) ([]WalkResult, error) {
 	// Validate directory path
 	if dirPath == "" {
@@ -117,14 +117,13 @@ func (w *DirectoryWalker) WalkJSON(dirPath string) ([]WalkResult, error) {
 			return nil
 		}
 
-		// Only process JSON files
-		if !isJSONFile(filePath) {
-			w.logger.Debug("Skipping non-JSON file: %s", filePath)
+		if !isSupportedImportFile(filePath) {
+			w.logger.Debug("Skipping unsupported import file: %s", filePath)
 			return nil
 		}
 
 		// Add to results
-		w.logger.Debug("Found JSON file: %s (size: %d bytes)", filePath, fileInfo.Size())
+		w.logger.Debug("Found import file: %s (size: %d bytes)", filePath, fileInfo.Size())
 		results = append(results, WalkResult{
 			FilePath: filePath,
 			Size:     fileInfo.Size(),
@@ -139,9 +138,9 @@ func (w *DirectoryWalker) WalkJSON(dirPath string) ([]WalkResult, error) {
 
 	if len(results) == 0 {
 		if len(walkErrors) > 0 {
-			return nil, fmt.Errorf("no JSON files found in %s (encountered %d errors during traversal)", dirPath, len(walkErrors))
+			return nil, fmt.Errorf("no supported import files found in %s (encountered %d errors during traversal)", dirPath, len(walkErrors))
 		}
-		return nil, fmt.Errorf("no JSON files found in directory: %s", dirPath)
+		return nil, fmt.Errorf("no supported import files found in directory: %s", dirPath)
 	}
 
 	sort.Slice(results, func(i, j int) bool {
@@ -156,9 +155,19 @@ func (w *DirectoryWalker) WalkJSON(dirPath string) ([]WalkResult, error) {
 	return results, nil
 }
 
-// isJSONFile returns true if the file has a .json extension (case-insensitive)
-func isJSONFile(path string) bool {
-	return strings.HasSuffix(strings.ToLower(path), ".json")
+func isSupportedImportFile(path string) bool {
+	lower := strings.ToLower(path)
+
+	switch {
+	case strings.HasSuffix(lower, ".json"):
+		return true
+	case strings.HasSuffix(lower, ".jsonl"):
+		return true
+	case strings.HasSuffix(lower, ".log"):
+		return true
+	default:
+		return false
+	}
 }
 
 // PathType represents the type of path (file or directory)

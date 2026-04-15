@@ -368,6 +368,50 @@ func TestRunStartupImportLogsWarningWhenBothIngestorsAreSet(t *testing.T) {
 	}
 }
 
+func TestRunStartupImportLogsAuditWarnings(t *testing.T) {
+	os.Setenv("LOG_TIMESTAMP", "2024-01-01T12:00:00Z")
+	defer os.Unsetenv("LOG_TIMESTAMP")
+
+	tmpDir := t.TempDir()
+	auditPath := filepath.Join(tmpDir, "audit.log")
+	payload := `{
+		"kind":"Event",
+		"apiVersion":"audit.k8s.io/v1",
+		"auditID":"audit-warning",
+		"stage":"ResponseComplete",
+		"stageTimestamp":"2024-01-02T03:04:05Z",
+		"verb":"update",
+		"objectRef":{
+			"resource":"deployments",
+			"namespace":"default",
+			"name":"missing-payload",
+			"apiGroup":"apps",
+			"apiVersion":"v1"
+		}
+	}`
+	if err := os.WriteFile(auditPath, []byte(payload), 0o644); err != nil {
+		t.Fatalf("failed to create audit fixture: %v", err)
+	}
+
+	output := captureStartupImportOutput(t, func() {
+		err := runStartupImport(context.Background(), startupImportOptions{
+			Path:          auditPath,
+			Logger:        logging.GetLogger("test_startup_import_audit_warning"),
+			BatchIngestor: &fakeStartupImportBatchIngestor{},
+		})
+		if err != nil {
+			t.Fatalf("runStartupImport returned error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "Import warning") {
+		t.Fatalf("expected startup import logs to contain %q, got %q", "Import warning", output)
+	}
+	if !strings.Contains(output, "missing responseObject/requestObject payload") {
+		t.Fatalf("expected startup import logs to mention missing audit payload, got %q", output)
+	}
+}
+
 func TestServerCommandDefinesStartupImportDisableCausalityFlag(t *testing.T) {
 	t.Parallel()
 

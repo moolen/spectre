@@ -114,9 +114,10 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Parse JSON request using new Import API
+	// Parse JSON request using shared import parser so audit import warnings can
+	// be surfaced to the caller without changing ingest semantics.
 	h.logger.Debug("Starting to parse JSON events from request body")
-	eventValues, err := importexport.Import(importexport.FromReader(decompressedBody), importexport.WithLogger(h.logger))
+	eventValues, warnings, err := importexport.ParseImportPayload(decompressedBody)
 	if err != nil {
 		h.logger.Error("Failed to parse JSON: %v", err)
 		api.WriteError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
@@ -126,6 +127,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	parseDuration := time.Since(startTime)
 	h.logger.InfoWithFields("Parsed JSON import request",
 		logging.Field("event_count", len(eventValues)),
+		logging.Field("warning_count", len(warnings)),
 		logging.Field("parse_duration", parseDuration))
 
 	// Process events through the ingest backend.
@@ -157,6 +159,12 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	h.logger.InfoWithFields("JSON event batch import completed",
 		logging.Field("total_events", len(eventValues)),
 		logging.Field("duration", duration))
+	if len(warnings) > 0 {
+		h.logger.Warn("JSON import completed with %d warnings", len(warnings))
+		for _, warning := range warnings {
+			h.logger.Warn("Import warning: %s", warning)
+		}
+	}
 
 	// Calculate approximate "files created" based on unique hours
 	// This is for compatibility with existing tests that expect this field
@@ -179,6 +187,7 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		"imported_files": 0,            // Not applicable in ingest mode
 		"duration":       duration.String(),
 		"errors":         []string{}, // No errors in success path
+		"warnings":       warnings,
 	}
 
 	h.logger.Debug("Writing import response to client")

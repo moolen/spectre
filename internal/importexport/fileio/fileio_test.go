@@ -89,12 +89,15 @@ func TestDirectoryWalker(t *testing.T) {
 
 	// Create test files
 	files := map[string]string{
-		filepath.Join(tmpDir, "file1.json"):   `{"event": 1}`,
-		filepath.Join(subDir1, "file2.json"):  `{"event": 2}`,
-		filepath.Join(subDir2, "file3.json"):  `{"event": 3}`,
-		filepath.Join(tmpDir, "readme.txt"):   "should be ignored",
-		filepath.Join(subDir1, "data.JSON"):   `{"event": 4}`, // uppercase extension
-		filepath.Join(subDir1, "ignore.xml"):  "<xml></xml>",
+		filepath.Join(tmpDir, "file1.json"):    `{"event": 1}`,
+		filepath.Join(subDir1, "file2.json"):   `{"event": 2}`,
+		filepath.Join(subDir2, "file3.json"):   `{"event": 3}`,
+		filepath.Join(tmpDir, "audit.jsonl"):   `{"event": 4}`,
+		filepath.Join(subDir2, "audit.log"):    `{"event": 5}`,
+		filepath.Join(tmpDir, "readme.txt"):    "should be ignored",
+		filepath.Join(subDir1, "data.JSON"):    `{"event": 6}`, // uppercase extension
+		filepath.Join(subDir1, "ignore.xml"):   "<xml></xml>",
+		filepath.Join(subDir2, "ignore.yaml"):  "kind: ConfigMap",
 	}
 
 	for path, content := range files {
@@ -109,10 +112,9 @@ func TestDirectoryWalker(t *testing.T) {
 			t.Fatalf("WalkJSON failed: %v", err)
 		}
 
-		// Should find 4 JSON files (file1, file2, file3, data.JSON)
-		// Should ignore readme.txt and ignore.xml
-		if len(results) != 4 {
-			t.Errorf("Expected 4 JSON files, got %d", len(results))
+		// Should find 6 supported import files and ignore non-import files.
+		if len(results) != 6 {
+			t.Errorf("Expected 6 supported import files, got %d", len(results))
 		}
 
 		// Verify results contain expected files
@@ -128,6 +130,8 @@ func TestDirectoryWalker(t *testing.T) {
 			filepath.Join(tmpDir, "file1.json"),
 			filepath.Join(subDir1, "file2.json"),
 			filepath.Join(subDir2, "file3.json"),
+			filepath.Join(tmpDir, "audit.jsonl"),
+			filepath.Join(subDir2, "audit.log"),
 			filepath.Join(subDir1, "data.JSON"),
 		}
 
@@ -148,8 +152,8 @@ func TestDirectoryWalker(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error for empty directory")
 		}
-		if !strings.Contains(err.Error(), "no JSON files found") {
-			t.Errorf("Expected 'no JSON files found' error, got: %v", err)
+		if !strings.Contains(err.Error(), "no supported import files found") {
+			t.Errorf("Expected 'no supported import files found' error, got: %v", err)
 		}
 	})
 

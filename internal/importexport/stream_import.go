@@ -115,13 +115,14 @@ func (s *fileSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk C
 		}
 	}()
 
-	err = parseJSONEventsInChunks(file, chunkSize, logger, onChunk)
+	warnings, err := parseImportPayloadInChunks(file, chunkSize, logger, onChunk)
 	if err != nil {
 		logger.ErrorWithFields("Failed to parse JSON events",
 			logging.Field("path", s.path),
 			logging.Field("error", err))
 		return err
 	}
+	logImportWarnings(logger, s.path, warnings)
 
 	logger.InfoWithFields("Successfully loaded events from file",
 		logging.Field("path", s.path))
@@ -132,12 +133,13 @@ func (s *fileSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk C
 func (s *readerSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk ChunkCallback) error {
 	logger.Debug("Loading events from reader")
 
-	err := parseJSONEventsInChunks(s.reader, chunkSize, logger, onChunk)
+	warnings, err := parseImportPayloadInChunks(s.reader, chunkSize, logger, onChunk)
 	if err != nil {
 		logger.ErrorWithFields("Failed to parse JSON events from reader",
 			logging.Field("error", err))
 		return err
 	}
+	logImportWarnings(logger, "reader", warnings)
 	logger.InfoWithFields("Successfully loaded events from reader")
 	return nil
 }
@@ -155,13 +157,12 @@ func (s *directorySource) streamLoad(logger *logging.Logger, chunkSize int, onCh
 		return err
 	}
 
-	logger.InfoWithFields("Found JSON files in directory",
+	logger.InfoWithFields("Found import files in directory",
 		logging.Field("path", s.path),
 		logging.Field("file_count", len(files)))
 
 	buffer := make([]models.Event, 0, chunkSize)
 	successCount := 0
-	failureCount := 0
 	totalEvents := 0
 
 	flushBuffer := func(force bool) error {
@@ -194,11 +195,7 @@ func (s *directorySource) streamLoad(logger *logging.Logger, chunkSize int, onCh
 			if errors.As(loadErr, &callbackErr) {
 				return callbackErr
 			}
-			failureCount++
-			logger.WarnWithFields("Failed to import file, skipping",
-				logging.Field("path", file.FilePath),
-				logging.Field("error", loadErr))
-			continue
+			return loadErr
 		}
 		successCount++
 	}
@@ -211,15 +208,15 @@ func (s *directorySource) streamLoad(logger *logging.Logger, chunkSize int, onCh
 		logger.ErrorWithFields("No events imported from directory",
 			logging.Field("path", s.path),
 			logging.Field("files_found", len(files)),
-			logging.Field("failures", failureCount))
-		return fmt.Errorf("no events found in directory %s (processed %d files, %d failures)", s.path, len(files), failureCount)
+			logging.Field("failures", 0))
+		return fmt.Errorf("no events found in directory %s (processed %d files, %d failures)", s.path, len(files), 0)
 	}
 
 	logger.InfoWithFields("Successfully loaded events from directory",
 		logging.Field("path", s.path),
 		logging.Field("event_count", totalEvents),
 		logging.Field("files_processed", successCount),
-		logging.Field("files_failed", failureCount))
+		logging.Field("files_failed", 0))
 
 	return nil
 }
@@ -249,5 +246,11 @@ func (s *pathSource) streamLoad(logger *logging.Logger, chunkSize int, onChunk C
 		return fmt.Errorf("unknown path type for %s", s.path)
 	default:
 		return fmt.Errorf("unknown path type for %s", s.path)
+	}
+}
+
+func logImportWarnings(logger *logging.Logger, source string, warnings []string) {
+	for _, warning := range warnings {
+		logger.Warn("Import warning (%s): %s", source, warning)
 	}
 }

@@ -166,6 +166,46 @@ func TestParseJSONEvents(t *testing.T) {
 	}
 }
 
+func TestParseImportPayload_SpectreEnvelope(t *testing.T) {
+	input := strings.NewReader(`{
+		"events": [
+			{
+				"id": "event1",
+				"timestamp": 1234567890000000000,
+				"type": "CREATE",
+				"resource": {
+					"group": "apps",
+					"version": "v1",
+					"kind": "Deployment",
+					"namespace": "default",
+					"name": "test-deployment",
+					"uid": "test-uid"
+				},
+				"data": {
+					"apiVersion": "apps/v1",
+					"kind": "Deployment",
+					"metadata": {
+						"name": "test-deployment",
+						"namespace": "default",
+						"uid": "test-uid"
+					}
+				}
+			}
+		]
+	}`)
+
+	events, warnings, err := ParseImportPayload(input)
+	if err != nil {
+		t.Fatalf("ParseImportPayload() unexpected error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("ParseImportPayload() got %d events, want 1", len(events))
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("ParseImportPayload() got %d warnings, want 0", len(warnings))
+	}
+}
+
 func TestImportJSONFile(t *testing.T) {
 	// Create a temporary directory
 	tmpDir := t.TempDir()
@@ -341,6 +381,7 @@ func TestFormatImportReport(t *testing.T) {
 		FailedFiles:   0,
 		TotalEvents:   100,
 		Errors:        []string{},
+		Warnings:      []string{"audit warning"},
 	}
 
 	output := FormatImportReport(report)
@@ -355,6 +396,12 @@ func TestFormatImportReport(t *testing.T) {
 
 	if !strings.Contains(output, "Merged Hours:   2") {
 		t.Error("Expected output to contain merged hours")
+	}
+	if !strings.Contains(output, "Warnings:") {
+		t.Error("Expected output to contain warnings section")
+	}
+	if !strings.Contains(output, "audit warning") {
+		t.Error("Expected output to contain warning details")
 	}
 }
 
@@ -553,8 +600,8 @@ func TestImportFromDirectory(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for empty directory")
 	}
-	if !strings.Contains(err.Error(), "no JSON files found") {
-		t.Errorf("Expected 'no JSON files found' error, got: %v", err)
+	if !strings.Contains(err.Error(), "no supported import files found") {
+		t.Errorf("Expected 'no supported import files found' error, got: %v", err)
 	}
 }
 

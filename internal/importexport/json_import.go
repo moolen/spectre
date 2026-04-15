@@ -85,6 +85,7 @@ type ImportReport struct {
 	FailedFiles   int
 	TotalEvents   int64
 	Errors        []string
+	Warnings      []string
 	Duration      time.Duration
 }
 
