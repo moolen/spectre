@@ -6,7 +6,6 @@ import (
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/api"
-	appgraph "github.com/moolen/spectre/internal/app/graph"
 	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/trace"
@@ -35,13 +34,13 @@ func RegisterHandlers(
 	router.HandleFunc("/v1/metadata", withMethod(http.MethodGet, metadataHandler.Handle))
 
 	if analysisStore != nil {
-		graphService := appgraph.NewService(analysisStore, logger, tracer)
+		namespaceAnalyzer := namespacegraph.NewAnalyzer(analysisStore)
 		if namespaceGraphCache != nil {
-			namespaceGraphHandler := NewNamespaceGraphHandlerWithCache(graphService, namespaceGraphCache, logger, tracer)
+			namespaceGraphHandler := NewNamespaceGraphHandler(namespaceGraphCache, logger, tracer)
 			router.HandleFunc("/v1/namespace-graph", withMethod(http.MethodGet, namespaceGraphHandler.Handle))
 			logger.Info("Registered /v1/namespace-graph endpoint (with caching)")
 		} else {
-			namespaceGraphHandler := NewNamespaceGraphHandler(graphService, logger, tracer)
+			namespaceGraphHandler := NewNamespaceGraphHandler(namespaceAnalyzer, logger, tracer)
 			router.HandleFunc("/v1/namespace-graph", withMethod(http.MethodGet, namespaceGraphHandler.Handle))
 			logger.Info("Registered /v1/namespace-graph endpoint")
 		}

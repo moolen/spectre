@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	apptimeline "github.com/moolen/spectre/internal/app/timeline"
+	"github.com/moolen/spectre/internal/api/pb"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -18,48 +18,47 @@ func (testStreamingQueryExecutor) Execute(context.Context, *models.QueryRequest)
 
 func (testStreamingQueryExecutor) SetSharedCache(interface{}) {}
 
-func TestApplyEntryPagination_SortsAndSlicesByCursor(t *testing.T) {
+func TestProtoToQueryRequest_BuildsPaginationOnlyWhenRequested(t *testing.T) {
 	logger := logging.GetLogger("test")
 	tracer := noop.NewTracerProvider().Tracer("test")
 	service := NewTimelineConnectService(testStreamingQueryExecutor{}, logger, tracer)
 
-	entries := []*apptimeline.TimelineResourceEntry{
-		{Kind: "Pod", Namespace: "zeta", Name: "pod-c"},
-		{Kind: "Deployment", Namespace: "alpha", Name: "deploy-a"},
-		{Kind: "Pod", Namespace: "alpha", Name: "pod-a"},
-	}
-
-	page1, page1Resp, err := service.applyEntryPagination(entries, &models.PaginationRequest{PageSize: 2})
-	if err != nil {
-		t.Fatalf("expected no error paginating first page, got %v", err)
-	}
-	if len(page1) != 2 {
-		t.Fatalf("expected 2 entries on first page, got %d", len(page1))
-	}
-	if page1[0].Kind != "Deployment" || page1[0].Namespace != "alpha" || page1[0].Name != "deploy-a" {
-		t.Fatalf("unexpected first entry on page 1: %#v", page1[0])
-	}
-	if page1[1].Kind != "Pod" || page1[1].Namespace != "alpha" || page1[1].Name != "pod-a" {
-		t.Fatalf("unexpected second entry on page 1: %#v", page1[1])
-	}
-	if !page1Resp.HasMore {
-		t.Fatal("expected first page to report more results")
-	}
-
-	page2, page2Resp, err := service.applyEntryPagination(entries, &models.PaginationRequest{
-		PageSize: 2,
-		Cursor:   page1Resp.NextCursor,
+	query, pagination, err := service.protoToQueryRequest(&pb.TimelineRequest{
+		StartTimestamp: 100,
+		EndTimestamp:   200,
+		Kinds:          []string{"Pod"},
+		Namespaces:     []string{"default"},
 	})
 	if err != nil {
-		t.Fatalf("expected no error paginating second page, got %v", err)
+		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(page2) != 1 {
-		t.Fatalf("expected 1 entry on second page, got %d", len(page2))
+	if query.StartTimestamp != 100 || query.EndTimestamp != 200 {
+		t.Fatalf("unexpected query timestamps: %#v", query)
 	}
-	if page2[0].Kind != "Pod" || page2[0].Namespace != "zeta" || page2[0].Name != "pod-c" {
-		t.Fatalf("unexpected entry on page 2: %#v", page2[0])
+	if pagination != nil {
+		t.Fatalf("expected nil pagination when page size and cursor are empty, got %#v", pagination)
 	}
-	if page2Resp.HasMore {
-		t.Fatal("expected second page to be terminal")
+}
+
+func TestProtoToQueryRequest_PreservesExplicitPagination(t *testing.T) {
+	logger := logging.GetLogger("test")
+	tracer := noop.NewTracerProvider().Tracer("test")
+	service := NewTimelineConnectService(testStreamingQueryExecutor{}, logger, tracer)
+
+	_, pagination, err := service.protoToQueryRequest(&pb.TimelineRequest{
+		StartTimestamp: 100,
+		EndTimestamp:   200,
+		Kinds:          []string{"Pod"},
+		PageSize:       2,
+		Cursor:         "cursor-1",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if pagination == nil {
+		t.Fatal("expected pagination request to be created")
+	}
+	if pagination.PageSize != 2 || pagination.Cursor != "cursor-1" {
+		t.Fatalf("unexpected pagination request: %#v", pagination)
 	}
 }

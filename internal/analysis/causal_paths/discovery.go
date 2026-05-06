@@ -74,14 +74,14 @@ func (d *PathDiscoverer) DiscoverCausalPaths(ctx context.Context, input CausalPa
 		input.ResourceUID, input.FailureTimestamp, input.LookbackNs, input.MaxDepth, input.MaxPaths)
 
 	// Step 1: Fetch causal subgraph using the existing analyzer
-	analyzeInput := analysis.AnalyzeInput{
+	analyzeInput := analysis.PrepareAnalyzeInput(analysis.AnalyzeInput{
 		ResourceUID:      input.ResourceUID,
 		FailureTimestamp: input.FailureTimestamp,
 		LookbackNs:       input.LookbackNs,
 		MaxDepth:         input.MaxDepth,
 		MinConfidence:    0.5,
 		Format:           analysis.FormatDiff,
-	}
+	})
 
 	result, err := d.analyzer.Analyze(ctx, analyzeInput)
 	if err != nil {

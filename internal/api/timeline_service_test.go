@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/api"
+	apptimeline "github.com/moolen/spectre/internal/app/timeline"
 	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -22,7 +23,7 @@ func (stubQueryExecutor) SetSharedCache(interface{}) {}
 func TestBuildTimelineResponse_ClampsPreExistingSegmentToQueryStart(t *testing.T) {
 	logger := logging.GetLogger("test")
 	tracer := noop.NewTracerProvider().Tracer("test")
-	timelineService := api.NewTimelineService(stubQueryExecutor{}, logger, tracer)
+	timelineService := apptimeline.NewService(stubQueryExecutor{}, logger, tracer)
 
 	queryStart := time.Unix(1_700_000_000, 0)
 	queryEnd := queryStart.Add(90 * time.Minute)
@@ -98,7 +99,7 @@ func TestBuildTimelineResponse_ClampsPreExistingSegmentToQueryStart(t *testing.T
 func TestBuildTimelineResponse_PreExistingOnlyResourceSpansWindow(t *testing.T) {
 	logger := logging.GetLogger("test")
 	tracer := noop.NewTracerProvider().Tracer("test")
-	timelineService := api.NewTimelineService(stubQueryExecutor{}, logger, tracer)
+	timelineService := apptimeline.NewService(stubQueryExecutor{}, logger, tracer)
 
 	queryStart := time.Unix(1_700_100_000, 0)
 	queryEnd := queryStart.Add(30 * time.Minute)
@@ -147,5 +148,56 @@ func TestBuildTimelineResponse_PreExistingOnlyResourceSpansWindow(t *testing.T) 
 	}
 	if segment.EndTime != queryEnd.UnixNano() {
 		t.Fatalf("expected segment end %d, got %d", queryEnd.UnixNano(), segment.EndTime)
+	}
+}
+
+func TestResourceToProto_EncodesStatusSegmentsAndEvents(t *testing.T) {
+	logger := logging.GetLogger("test")
+	tracer := noop.NewTracerProvider().Tracer("test")
+	timelineService := apptimeline.NewService(stubQueryExecutor{}, logger, tracer)
+
+	resource := &models.Resource{
+		ID:          "apps/v1/Deployment/deploy-uid",
+		Group:       "apps",
+		Version:     "v1",
+		Kind:        "Deployment",
+		Namespace:   "default",
+		Name:        "web",
+		PreExisting: true,
+		StatusSegments: []models.StatusSegment{
+			{
+				StartTime:    100,
+				EndTime:      200,
+				Status:       "Ready",
+				Message:      "ok",
+				ResourceData: []byte(`{"status":{"conditions":[{"reason":"Available"}]}}`),
+			},
+		},
+		Events: []models.K8sEvent{
+			{
+				ID:        "event-1",
+				Type:      "Normal",
+				Reason:    "ScalingReplicaSet",
+				Message:   "Scaled up",
+				Timestamp: 150,
+			},
+		},
+	}
+
+	protoResource := api.ResourceToProto(timelineService, resource)
+	if protoResource.ApiVersion != "apps/v1" {
+		t.Fatalf("expected apiVersion apps/v1, got %q", protoResource.ApiVersion)
+	}
+	if len(protoResource.StatusSegments) != 1 {
+		t.Fatalf("expected 1 status segment, got %d", len(protoResource.StatusSegments))
+	}
+	if protoResource.StatusSegments[0].Reason != "Available" {
+		t.Fatalf("expected reason Available, got %q", protoResource.StatusSegments[0].Reason)
+	}
+	if len(protoResource.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(protoResource.Events))
+	}
+	if protoResource.Events[0].Reason != "ScalingReplicaSet" {
+		t.Fatalf("expected event reason ScalingReplicaSet, got %q", protoResource.Events[0].Reason)
 	}
 }

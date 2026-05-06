@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -8,33 +9,13 @@ import (
 
 	namespacegraph "github.com/moolen/spectre/internal/analysis/namespace_graph"
 	"github.com/moolen/spectre/internal/api"
-	appgraph "github.com/moolen/spectre/internal/app/graph"
 	"github.com/moolen/spectre/internal/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TimestampBucketSize is the bucket size for timestamp normalization.
-// All timestamps are rounded down to the nearest 30-second boundary.
-// This ensures all requests within a 30s window get identical responses.
-const TimestampBucketSize = 30 * time.Second
-
-// bucketTimestamp rounds a timestamp (in nanoseconds) down to the nearest bucket boundary.
-// This normalizes "now" requests so multiple clients get the same cached snapshot.
-func bucketTimestamp(ts int64) int64 {
-	bucketNs := int64(TimestampBucketSize)
-	return (ts / bucketNs) * bucketNs
-}
-
-func normalizeNamespaceGraphTimestamp(ts, now int64) int64 {
-	delta := now - ts
-	if delta < 0 {
-		delta = -delta
-	}
-	if delta <= int64(TimestampBucketSize) {
-		return bucketTimestamp(ts)
-	}
-	return ts
+type namespaceGraphAnalyzer interface {
+	Analyze(context.Context, namespacegraph.AnalyzeInput) (*namespacegraph.NamespaceGraphResponse, error)
 }
 
 // normalizeToNanoseconds accepts Unix timestamps in seconds, milliseconds, or nanoseconds.
@@ -51,31 +32,17 @@ func normalizeToNanoseconds(ts int64) int64 {
 
 // NamespaceGraphHandler handles /v1/namespace-graph requests
 type NamespaceGraphHandler struct {
-	graphService *appgraph.Service
-	cache        *namespacegraph.Cache
-	logger       *logging.Logger
-	validator    *api.Validator
-	tracer       trace.Tracer
+	analyzer namespaceGraphAnalyzer
+	logger   *logging.Logger
+	tracer   trace.Tracer
 }
 
-// NewNamespaceGraphHandler creates a new handler without caching
-func NewNamespaceGraphHandler(graphService *appgraph.Service, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
+// NewNamespaceGraphHandler creates a new handler.
+func NewNamespaceGraphHandler(analyzer namespaceGraphAnalyzer, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
 	return &NamespaceGraphHandler{
-		graphService: graphService,
-		logger:       logger,
-		validator:    api.NewValidator(),
-		tracer:       tracer,
-	}
-}
-
-// NewNamespaceGraphHandlerWithCache creates a new handler with caching enabled
-func NewNamespaceGraphHandlerWithCache(graphService *appgraph.Service, cache *namespacegraph.Cache, logger *logging.Logger, tracer trace.Tracer) *NamespaceGraphHandler {
-	return &NamespaceGraphHandler{
-		graphService: graphService,
-		cache:        cache,
-		logger:       logger,
-		validator:    api.NewValidator(),
-		tracer:       tracer,
+		analyzer: analyzer,
+		logger:   logger,
+		tracer:   tracer,
 	}
 }
 
@@ -100,6 +67,16 @@ func (h *NamespaceGraphHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 2. Validate input
+	input, err = namespacegraph.PrepareAnalyzeInput(input, time.Now())
+	if err != nil {
+		if span != nil {
+			span.RecordError(err)
+		}
+		h.respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+
 	// Add span attributes for observability
 	if span != nil {
 		span.SetAttributes(
@@ -112,27 +89,11 @@ func (h *NamespaceGraphHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	// 2. Validate input
-	if err := h.validateInput(input); err != nil {
-		if span != nil {
-			span.RecordError(err)
-		}
-		h.respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
-		return
-	}
-
 	h.logger.Debug("Processing namespace graph request: namespace=%s, timestamp=%d",
 		input.Namespace, input.Timestamp)
 
-	// 3. Execute analysis via GraphService (use cache if available)
-	var result *namespacegraph.NamespaceGraphResponse
-
-	if h.cache != nil {
-		result, err = h.cache.Analyze(ctx, input)
-	} else {
-		result, err = h.graphService.AnalyzeNamespaceGraph(ctx, input)
-	}
-
+	// 3. Execute analysis
+	result, err := h.analyzer.Analyze(ctx, input)
 	if err != nil {
 		if span != nil {
 			span.RecordError(err)
@@ -183,10 +144,6 @@ func (h *NamespaceGraphHandler) parseInput(r *http.Request) (namespacegraph.Anal
 		return namespacegraph.AnalyzeInput{}, api.NewValidationError("invalid timestamp: %v", err)
 	}
 
-	// Bucket only near-real-time requests for cache efficiency.
-	// Historical imported data must keep the exact timestamp.
-	timestamp = normalizeNamespaceGraphTimestamp(timestamp, time.Now().UnixNano())
-
 	// Optional: includeAnomalies (default false)
 	includeAnomalies := false
 	if v := query.Get("includeAnomalies"); v != "" {
@@ -199,31 +156,27 @@ func (h *NamespaceGraphHandler) parseInput(r *http.Request) (namespacegraph.Anal
 		includeCausalPaths, _ = strconv.ParseBool(v)
 	}
 
-	// Optional: lookback (default 10m)
-	lookback := namespacegraph.DefaultLookback
+	// Optional: lookback
+	var lookback time.Duration
 	if v := query.Get("lookback"); v != "" {
 		if dur, err := time.ParseDuration(v); err == nil && dur > 0 {
 			lookback = dur
 		}
 	}
 
-	// Optional: maxDepth (default 3, range 1-10)
-	maxDepth := namespacegraph.DefaultMaxDepth
+	// Optional: maxDepth
+	maxDepth := 0
 	if v := query.Get("maxDepth"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
-			if parsed >= namespacegraph.MinMaxDepth && parsed <= namespacegraph.MaxMaxDepth {
-				maxDepth = parsed
-			}
+			maxDepth = parsed
 		}
 	}
 
-	// Optional: limit (default 100, max 500)
-	limit := namespacegraph.DefaultLimit
+	// Optional: limit
+	limit := 0
 	if v := query.Get("limit"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
-			if parsed > 0 && parsed <= namespacegraph.MaxLimit {
-				limit = parsed
-			}
+			limit = parsed
 		}
 	}
 
@@ -240,30 +193,6 @@ func (h *NamespaceGraphHandler) parseInput(r *http.Request) (namespacegraph.Anal
 		Limit:              limit,
 		Cursor:             cursor,
 	}, nil
-}
-
-// validateInput validates the parsed input
-func (h *NamespaceGraphHandler) validateInput(input namespacegraph.AnalyzeInput) error {
-	if input.Namespace == "" {
-		return api.NewValidationError("namespace cannot be empty")
-	}
-
-	// Validate namespace length (Kubernetes limit is 63 characters)
-	if len(input.Namespace) > 63 {
-		return api.NewValidationError("namespace must be 63 characters or less")
-	}
-
-	if input.Timestamp <= 0 {
-		return api.NewValidationError("timestamp must be positive")
-	}
-
-	// Validate timestamp is not in the future (with some tolerance)
-	now := time.Now().UnixNano()
-	if input.Timestamp > now+int64(time.Hour) {
-		return api.NewValidationError("timestamp cannot be more than 1 hour in the future")
-	}
-
-	return nil
 }
 
 // respondWithError writes an error response

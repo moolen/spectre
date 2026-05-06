@@ -33,25 +33,11 @@ func NewAnalyzer(store analysisstore.AnalysisStore) *Analyzer {
 func (a *Analyzer) Analyze(ctx context.Context, input AnalyzeInput) (*NamespaceGraphResponse, error) {
 	startTime := time.Now()
 
-	// Apply defaults
-	if input.Limit <= 0 {
-		input.Limit = DefaultLimit
+	prepared, err := PrepareAnalyzeInput(input, startTime)
+	if err != nil {
+		return nil, err
 	}
-	if input.Limit > MaxLimit {
-		input.Limit = MaxLimit
-	}
-	if input.MaxDepth <= 0 {
-		input.MaxDepth = DefaultMaxDepth
-	}
-	if input.MaxDepth > MaxMaxDepth {
-		input.MaxDepth = MaxMaxDepth
-	}
-	if input.Lookback <= 0 {
-		input.Lookback = DefaultLookback
-	}
-	if input.Lookback > MaxLookback {
-		input.Lookback = MaxLookback
-	}
+	input = prepared
 
 	a.logger.Debug("Analyzing namespace graph: namespace=%s, timestamp=%d, limit=%d, maxDepth=%d",
 		input.Namespace, input.Timestamp, input.Limit, input.MaxDepth)

@@ -61,14 +61,14 @@ func (d *AnomalyDetector) Detect(ctx context.Context, input DetectInput) (*Anoma
 		input.ResourceUID, timeWindow.Start, timeWindow.End)
 
 	// Use the existing analyzer to fetch the causal subgraph
-	analyzeInput := analysis.AnalyzeInput{
+	analyzeInput := analysis.PrepareAnalyzeInput(analysis.AnalyzeInput{
 		ResourceUID:      input.ResourceUID,
 		FailureTimestamp: failureTimestampNs,
 		LookbackNs:       lookbackNs,
 		MaxDepth:         5,
 		MinConfidence:    0.5,
 		Format:           analysis.FormatDiff,
-	}
+	})
 
 	result, err := d.analyzer.Analyze(ctx, analyzeInput)
 	if err != nil {

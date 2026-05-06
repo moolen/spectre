@@ -6,6 +6,8 @@ import (
 )
 
 func TestAnalyzeInputDefaults(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
 	tests := []struct {
 		name         string
 		input        AnalyzeInput
@@ -62,35 +64,23 @@ func TestAnalyzeInputDefaults(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Apply defaults like the analyzer does
 			input := tt.input
-			if input.Limit <= 0 {
-				input.Limit = DefaultLimit
-			}
-			if input.Limit > MaxLimit {
-				input.Limit = MaxLimit
-			}
-			if input.MaxDepth <= 0 {
-				input.MaxDepth = DefaultMaxDepth
-			}
-			if input.MaxDepth > MaxMaxDepth {
-				input.MaxDepth = MaxMaxDepth
-			}
-			if input.Lookback <= 0 {
-				input.Lookback = DefaultLookback
-			}
-			if input.Lookback > MaxLookback {
-				input.Lookback = MaxLookback
+			input.Namespace = "default"
+			input.Timestamp = now.UnixNano()
+
+			prepared, err := PrepareAnalyzeInput(input, now)
+			if err != nil {
+				t.Fatalf("PrepareAnalyzeInput returned error: %v", err)
 			}
 
-			if input.Limit != tt.wantLimit {
-				t.Errorf("Limit = %d, want %d", input.Limit, tt.wantLimit)
+			if prepared.Limit != tt.wantLimit {
+				t.Errorf("Limit = %d, want %d", prepared.Limit, tt.wantLimit)
 			}
-			if input.MaxDepth != tt.wantMaxDepth {
-				t.Errorf("MaxDepth = %d, want %d", input.MaxDepth, tt.wantMaxDepth)
+			if prepared.MaxDepth != tt.wantMaxDepth {
+				t.Errorf("MaxDepth = %d, want %d", prepared.MaxDepth, tt.wantMaxDepth)
 			}
-			if input.Lookback != tt.wantLookback {
-				t.Errorf("Lookback = %v, want %v", input.Lookback, tt.wantLookback)
+			if prepared.Lookback != tt.wantLookback {
+				t.Errorf("Lookback = %v, want %v", prepared.Lookback, tt.wantLookback)
 			}
 		})
 	}

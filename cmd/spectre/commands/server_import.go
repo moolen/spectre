@@ -77,27 +77,13 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 		logging.Field("import_mode", opts.ImportMode))
 
 	totalStart := time.Now()
-	processDuration := time.Duration(0)
-	totalEvents := 0
-	totalChunks := 0
+	session := importexport.NewIngestSession(batchIngestor, logger, opts.Scrubber)
 
 	streamErr := importInChunks(
 		importexport.FromPath(opts.Path),
 		chunkSize,
 		func(chunk []models.Event) error {
-			totalChunks++
-			totalEvents += len(chunk)
-
-			if err := scrubImportedEvents(chunk, opts.Scrubber); err != nil {
-				return err
-			}
-
-			processStart := time.Now()
-			if err := batchIngestor.ProcessBatch(ctx, chunk); err != nil {
-				return err
-			}
-			processDuration += time.Since(processStart)
-			return nil
+			return session.ProcessChunk(ctx, chunk)
 		},
 		importexport.WithLogger(logger),
 	)
@@ -105,8 +91,9 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 		return streamErr
 	}
 
+	stats := session.Stats()
 	totalDuration := time.Since(totalStart)
-	parseDuration := totalDuration - processDuration
+	parseDuration := totalDuration - stats.ProcessDuration
 	if parseDuration < 0 {
 		parseDuration = 0
 	}
@@ -114,10 +101,10 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 	logger.InfoWithFields("Import completed",
 		logging.Field("path", opts.Path),
 		logging.Field("chunk_size", chunkSize),
-		logging.Field("event_count", totalEvents),
-		logging.Field("chunk_count", totalChunks),
+		logging.Field("event_count", stats.TotalEvents),
+		logging.Field("chunk_count", stats.TotalChunks),
 		logging.Field("parse_duration", parseDuration),
-		logging.Field("process_duration", processDuration),
+		logging.Field("process_duration", stats.ProcessDuration),
 		logging.Field("total_duration", totalDuration))
 
 	if opts.BenchmarkLogPath != "" {
@@ -125,10 +112,10 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 			ImportPath:           opts.Path,
 			ImportMode:           opts.ImportMode,
 			ChunkSize:            chunkSize,
-			TotalEvents:          totalEvents,
-			TotalChunks:          totalChunks,
+			TotalEvents:          stats.TotalEvents,
+			TotalChunks:          stats.TotalChunks,
 			ParseDurationNanos:   parseDuration.Nanoseconds(),
-			ProcessDurationNanos: processDuration.Nanoseconds(),
+			ProcessDurationNanos: stats.ProcessDuration.Nanoseconds(),
 			TotalDurationNanos:   totalDuration.Nanoseconds(),
 		}
 		reportBytes, err := json.Marshal(report)
@@ -140,27 +127,6 @@ func runStartupImport(ctx context.Context, opts startupImportOptions) error {
 		}
 		logger.InfoWithFields("Startup import benchmark report written",
 			logging.Field("path", opts.BenchmarkLogPath))
-	}
-
-	return nil
-}
-
-func scrubImportedEvents(events []models.Event, scrubber *scrub.Scrubber) error {
-	if scrubber == nil || !scrubber.Enabled() {
-		return nil
-	}
-
-	for i := range events {
-		if len(events[i].Data) == 0 {
-			continue
-		}
-
-		scrubbed, err := scrubber.ScrubEventData(events[i].Resource.Kind, events[i].Data)
-		if err != nil {
-			return fmt.Errorf("scrub imported event %s: %w", events[i].ID, err)
-		}
-
-		events[i].Data = scrubbed
 	}
 
 	return nil

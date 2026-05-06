@@ -51,14 +51,14 @@ func (d *PathDiscoverer) traverseFromServiceSymptom(
 	anyPodAnalyzed := false
 
 	for _, target := range selectsTargets {
-		podAnalyzeInput := analysis.AnalyzeInput{
+		podAnalyzeInput := analysis.PrepareAnalyzeInput(analysis.AnalyzeInput{
 			ResourceUID:      target.uid,
 			FailureTimestamp: input.FailureTimestamp,
 			LookbackNs:       input.LookbackNs,
 			MaxDepth:         1,
 			MinConfidence:    0.5,
 			Format:           analysis.FormatDiff,
-		}
+		})
 
 		podResult, err := d.analyzer.Analyze(ctx, podAnalyzeInput)
 		if err != nil {
@@ -153,14 +153,14 @@ func (d *PathDiscoverer) traverseFromServiceSymptom(
 	for _, target := range selectsTargets {
 		d.logger.Debug("traverseFromServiceSymptom: Analyzing Pod %s (UID: %s)", target.name, target.uid)
 
-		podInput := analysis.AnalyzeInput{
+		podInput := analysis.PrepareAnalyzeInput(analysis.AnalyzeInput{
 			ResourceUID:      target.uid,
 			FailureTimestamp: input.FailureTimestamp,
 			LookbackNs:       input.LookbackNs,
 			MaxDepth:         input.MaxDepth - 1,
 			MinConfidence:    0.5,
 			Format:           analysis.FormatDiff,
-		}
+		})
 
 		podResult, err := d.analyzer.Analyze(ctx, podInput)
 		if err != nil {

@@ -138,18 +138,19 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		logging.Field("event_count", len(eventValues)),
 		logging.Field("timeout", "5m"))
 
-	processStartTime := time.Now()
-	if err := h.batchIngestor.ProcessBatch(ctx, eventValues); err != nil {
-		processDuration := time.Since(processStartTime)
+	session := importexport.NewIngestSession(h.batchIngestor, h.logger, nil)
+	if err := session.ProcessChunk(ctx, eventValues); err != nil {
+		stats := session.Stats()
 		h.logger.ErrorWithFields("Event batch processing failed",
 			logging.Field("error", err),
 			logging.Field("event_count", len(eventValues)),
-			logging.Field("process_duration", processDuration))
+			logging.Field("process_duration", stats.ProcessDuration))
 		api.WriteError(w, http.StatusInternalServerError, "INGEST_FAILED", err.Error())
 		return
 	}
 
-	processDuration := time.Since(processStartTime)
+	stats := session.Stats()
+	processDuration := stats.ProcessDuration
 	h.logger.InfoWithFields("Batch processing completed",
 		logging.Field("event_count", len(eventValues)),
 		logging.Field("process_duration", processDuration))
@@ -166,15 +167,6 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// Calculate approximate "files created" based on unique hours
-	// This is for compatibility with existing tests that expect this field
-	hourSet := make(map[int64]bool)
-	for _, event := range eventValues {
-		hour := time.Unix(0, event.Timestamp).Truncate(time.Hour).Unix()
-		hourSet[hour] = true
-	}
-	filesCreated := len(hourSet)
-
 	// Return import report
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -182,9 +174,9 @@ func (h *ImportHandler) handleJSONEventImport(w http.ResponseWriter, r *http.Req
 	response := map[string]any{
 		"status":         "success",
 		"total_events":   len(eventValues),
-		"merged_hours":   filesCreated, // Number of unique hours
-		"files_created":  filesCreated, // For compatibility with tests
-		"imported_files": 0,            // Not applicable in ingest mode
+		"merged_hours":   stats.FilesCreated, // Number of unique hours
+		"files_created":  stats.FilesCreated, // For compatibility with tests
+		"imported_files": 0,                  // Not applicable in ingest mode
 		"duration":       duration.String(),
 		"errors":         []string{}, // No errors in success path
 		"warnings":       warnings,

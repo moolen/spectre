@@ -5,41 +5,12 @@ import (
 
 	"github.com/moolen/spectre/internal/api/pb"
 	apptimeline "github.com/moolen/spectre/internal/app/timeline"
-	"github.com/moolen/spectre/internal/logging"
 	"github.com/moolen/spectre/internal/models"
-	"go.opentelemetry.io/otel/trace"
 )
-
-// TimelineService keeps the API package's transport-facing surface while
-// delegating timeline orchestration to the app layer.
-type TimelineService struct {
-	*apptimeline.Service
-}
-
-func NewTimelineService(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *TimelineService {
-	return &TimelineService{
-		Service: apptimeline.NewService(queryExecutor, logger, tracer),
-	}
-}
-
-func NewTimelineServiceWithMode(storageExecutor, graphExecutor QueryExecutor, querySource TimelineQuerySource, logger *logging.Logger, tracer trace.Tracer) *TimelineService {
-	return &TimelineService{
-		Service: apptimeline.NewServiceWithMode(storageExecutor, graphExecutor, toAppQuerySource(querySource), logger, tracer),
-	}
-}
-
-func toAppQuerySource(querySource TimelineQuerySource) apptimeline.QuerySource {
-	switch querySource {
-	case TimelineQuerySourceGraph:
-		return apptimeline.QuerySourceGraph
-	default:
-		return apptimeline.QuerySourceStorage
-	}
-}
 
 // ResourceToProto converts the transport response model into the protobuf shape
 // used by the streaming timeline APIs.
-func (s *TimelineService) ResourceToProto(res *models.Resource) *pb.TimelineResource {
+func ResourceToProto(service *apptimeline.Service, res *models.Resource) *pb.TimelineResource {
 	pbResource := &pb.TimelineResource{
 		Id:          res.ID,
 		Kind:        res.Kind,
@@ -52,7 +23,7 @@ func (s *TimelineService) ResourceToProto(res *models.Resource) *pb.TimelineReso
 
 	pbResource.StatusSegments = make([]*pb.StatusSegment, len(res.StatusSegments))
 	for i, seg := range res.StatusSegments {
-		reason, inferred := s.ExtractReasonFromResourceData(seg.ResourceData)
+		reason, inferred := service.ExtractReasonFromResourceData(seg.ResourceData)
 		pbResource.StatusSegments[i] = &pb.StatusSegment{
 			Id:           fmt.Sprintf("%s-%d", res.ID, i),
 			ResourceId:   res.ID,

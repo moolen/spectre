@@ -16,20 +16,20 @@ import (
 // It wraps the unified TimelineService with gRPC-compatible streaming
 type TimelineGRPCService struct {
 	pb.UnimplementedTimelineServiceServer
-	service *TimelineService
+	service *apptimeline.Service
 }
 
 // NewTimelineGRPCService creates a new timeline gRPC service with storage executor only
 func NewTimelineGRPCService(queryExecutor QueryExecutor, logger *logging.Logger, tracer trace.Tracer) *TimelineGRPCService {
 	return &TimelineGRPCService{
-		service: NewTimelineService(queryExecutor, logger, tracer),
+		service: apptimeline.NewService(queryExecutor, logger, tracer),
 	}
 }
 
 // NewTimelineGRPCServiceWithMode creates a new timeline gRPC service with both executors
 func NewTimelineGRPCServiceWithMode(storageExecutor, graphExecutor QueryExecutor, querySource TimelineQuerySource, logger *logging.Logger, tracer trace.Tracer) *TimelineGRPCService {
 	return &TimelineGRPCService{
-		service: NewTimelineServiceWithMode(storageExecutor, graphExecutor, querySource, logger, tracer),
+		service: apptimeline.NewServiceWithMode(storageExecutor, graphExecutor, toAppQuerySource(querySource), logger, tracer),
 	}
 }
 
@@ -50,7 +50,7 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 	defer span.End()
 
 	// Convert proto request to internal query request
-	query, err := s.protoToQueryRequest(req)
+	query, pagination, err := s.protoToQueryRequest(req)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Invalid request")
@@ -60,8 +60,7 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 		return fmt.Errorf("invalid request: %w", err)
 	}
 
-	// Execute concurrent queries
-	resourceResult, eventResult, err := s.service.ExecuteConcurrentQueries(ctx, query)
+	result, err := s.service.ExecuteTimeline(ctx, query, pagination)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "Query execution failed")
@@ -72,24 +71,22 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 	}
 
 	// Log query results for debugging
-	s.service.Logger().Debug("gRPC query completed: resources=%d, events=%d", resourceResult.Count, eventResult.Count)
-
-	timelineIndex := s.service.BuildTimelineIndex(resourceResult, eventResult)
+	s.service.Logger().Debug("gRPC query completed: resources=%d, events=%d", result.ResourceResult.Count, result.EventResult.Count)
 
 	span.SetAttributes(
-		attribute.Int("result.resource_count", timelineIndex.Count()),
-		attribute.Int64("result.execution_time_ms", timelineIndex.ExecutionTimeMs()),
+		attribute.Int("result.resource_count", result.Index.Count()),
+		attribute.Int64("result.execution_time_ms", result.Index.ExecutionTimeMs()),
 	)
 
 	// Stream metadata first
-	err = s.sendMetadata(stream, resourceResult, timelineIndex.Count())
+	err = s.sendMetadata(stream, result.ResourceResult, len(result.Entries), result.Pagination)
 	if err != nil {
 		span.RecordError(err)
 		s.service.Logger().Error("Failed to send metadata: %v", err)
 		return err
 	}
 
-	groupedEntries := groupAndSortTimelineEntries(timelineIndex.Entries())
+	groupedEntries := groupAndSortTimelineEntries(result.Entries)
 
 	// Stream resources in batches
 	// If no resources, send an empty batch to signal completion
@@ -109,7 +106,7 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 			return err
 		}
 	} else {
-		err = s.streamEntryBatches(stream, timelineIndex, groupedEntries)
+		err = s.streamEntryBatches(stream, result.Index, groupedEntries)
 		if err != nil {
 			span.RecordError(err)
 			s.service.Logger().Error("Failed to stream resources: %v", err)
@@ -118,113 +115,35 @@ func (s *TimelineGRPCService) GetTimeline(req *pb.TimelineRequest, stream pb.Tim
 	}
 
 	span.SetStatus(codes.Ok, "Streaming completed successfully")
-	s.service.Logger().Debug("gRPC streaming completed: %d resources in %d groups", timelineIndex.Count(), len(groupedEntries))
+	s.service.Logger().Debug("gRPC streaming completed: %d resources in %d groups", len(result.Entries), len(groupedEntries))
 
 	return nil
 }
 
-// sendMetadata sends the metadata chunk with count and query stats
-func (s *TimelineGRPCService) sendMetadata(stream pb.TimelineService_GetTimelineServer, result *models.QueryResult, totalCount int) error {
-	metadata := &pb.TimelineMetadata{
-		// Timeline event counts are bounded by database size and query limits
-		// #nosec G115 -- Event counts are bounded by practical query limits
-		TotalCount:           int32(totalCount),
-		FilesSearched:        result.FilesSearched,
-		SegmentsScanned:      result.SegmentsScanned,
-		SegmentsSkipped:      result.SegmentsSkipped,
-		QueryExecutionTimeMs: int64(result.ExecutionTimeMs),
-	}
-
+// sendMetadata sends the metadata chunk with count, query stats, and pagination info.
+func (s *TimelineGRPCService) sendMetadata(stream pb.TimelineService_GetTimelineServer, result *models.QueryResult, totalCount int, pagination *models.PaginationResponse) error {
 	chunk := &pb.TimelineChunk{
 		ChunkType: &pb.TimelineChunk_Metadata{
-			Metadata: metadata,
+			Metadata: buildTimelineMetadata(result, totalCount, pagination),
 		},
 	}
 
 	return stream.Send(chunk)
 }
 
-// streamResourceBatches streams resources in batches, one batch per kind
-func (s *TimelineGRPCService) streamResourceBatches(stream pb.TimelineService_GetTimelineServer, groups []*GroupedResources) error {
-	for groupIdx, group := range groups {
-		isLastGroup := groupIdx == len(groups)-1
-
-		// Convert all models.Resource to pb.TimelineResource for this kind
-		pbResources := make([]*pb.TimelineResource, len(group.Resources))
-		for i, res := range group.Resources {
-			pbResources[i] = s.service.ResourceToProto(&res)
-		}
-
-		chunk := &pb.TimelineChunk{
-			ChunkType: &pb.TimelineChunk_Batch{
-				Batch: &pb.ResourceBatch{
-					Kind:         group.Kind,
-					Resources:    pbResources,
-					IsFinalBatch: isLastGroup,
-				},
-			},
-		}
-
-		if err := stream.Send(chunk); err != nil {
-			return fmt.Errorf("failed to send batch: %w", err)
-		}
-	}
-
-	return nil
-}
-
 func (s *TimelineGRPCService) streamEntryBatches(stream pb.TimelineService_GetTimelineServer, index *apptimeline.TimelineIndex, groups []*GroupedTimelineEntries) error {
-	for groupIdx, group := range groups {
-		isLastGroup := groupIdx == len(groups)-1
-
-		resources := s.service.BuildTimelineResources(index, group.Entries)
-		pbResources := make([]*pb.TimelineResource, len(resources))
-		for i := range resources {
-			pbResources[i] = s.service.ResourceToProto(&resources[i])
-		}
-
-		chunk := &pb.TimelineChunk{
-			ChunkType: &pb.TimelineChunk_Batch{
-				Batch: &pb.ResourceBatch{
-					Kind:         group.Kind,
-					Resources:    pbResources,
-					IsFinalBatch: isLastGroup,
-				},
-			},
-		}
-
-		if err := stream.Send(chunk); err != nil {
-			return fmt.Errorf("failed to send batch: %w", err)
-		}
-	}
-
-	return nil
+	return streamTimelineEntryBatches(
+		index,
+		groups,
+		s.service.BuildTimelineResources,
+		func(res *models.Resource) *pb.TimelineResource { return ResourceToProto(s.service, res) },
+		stream.Send,
+	)
 }
 
-// protoToQueryRequest converts protobuf request to internal QueryRequest
-func (s *TimelineGRPCService) protoToQueryRequest(req *pb.TimelineRequest) (*models.QueryRequest, error) {
-	filters := models.QueryFilters{
-		Kind:      req.Kind,
-		Namespace: req.Namespace,
-		// Note: Name and LabelSelector are not currently supported by QueryFilters
-		// They would need to be added to the models.QueryFilters struct if needed
-	}
-
-	if err := s.service.Validator().ValidateFilters(filters); err != nil {
-		return nil, err
-	}
-
-	queryRequest := &models.QueryRequest{
-		StartTimestamp: req.StartTimestamp,
-		EndTimestamp:   req.EndTimestamp,
-		Filters:        filters,
-	}
-
-	if err := queryRequest.Validate(); err != nil {
-		return nil, err
-	}
-
-	return queryRequest, nil
+// protoToQueryRequest converts protobuf request to internal query and pagination requests.
+func (s *TimelineGRPCService) protoToQueryRequest(req *pb.TimelineRequest) (*models.QueryRequest, *models.PaginationRequest, error) {
+	return parseTimelineProtoRequest(s.service, req)
 }
 
 // resourceToProto converts internal Resource model to protobuf TimelineResource

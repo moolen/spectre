@@ -54,6 +54,7 @@ type AnalyzeInput struct {
 // result is degraded or contains partial data.
 func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*RootCauseAnalysisV2, error) {
 	startTime := time.Now()
+	input = PrepareAnalyzeInput(input)
 
 	// Initialize result quality tracking
 	quality := ResultQuality{
@@ -81,14 +82,10 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 
 	// 2. Build causal chain
 	a.logger.Debug("Building causal chain from symptom")
-	lookbackNs := input.LookbackNs
-	if lookbackNs == 0 {
-		lookbackNs = DefaultLookbackNs
-	}
-	a.logger.Debug("Using lookback window: %v (%d ns)", time.Duration(lookbackNs), lookbackNs)
+	a.logger.Debug("Using lookback window: %v (%d ns)", time.Duration(input.LookbackNs), input.LookbackNs)
 
 	graphStart := time.Now()
-	graph, graphErr := a.buildCausalGraph(ctx, symptom, input.FailureTimestamp, lookbackNs, input.MaxDepth)
+	graph, graphErr := a.buildCausalGraph(ctx, symptom, input.FailureTimestamp, input.LookbackNs, input.MaxDepth)
 	graphDuration := time.Since(graphStart)
 	perfMetrics.GraphBuildDurationMs = graphDuration.Milliseconds()
 
@@ -176,46 +173,19 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, input AnalyzeInput) (*R
 	a.logger.Info("Analysis completed in %v - degraded=%v, symptom_only=%v, confidence=%.2f",
 		totalDuration, quality.IsDegraded, quality.IsSymptomOnly, confidence.Score)
 
-	// Apply format-specific transformations
-	format := input.Format
-	if format == "" {
-		format = FormatDiff // Default to new format
-	}
-
-	if format == FormatDiff {
-		a.logger.Debug("Applying diff format transformations")
-		// Extract error patterns from symptom for correlation
-		errorPatterns := ExtractErrorPatterns(symptom.ErrorMessage)
-
-		// Apply significance scoring and diff conversion to all nodes
-		a.applyDiffFormat(&graph, time.Unix(0, input.FailureTimestamp), errorPatterns)
-
-		// Also process root cause event
-		if rootCause.ChangeEvent.Data != nil {
-			rootCause.ChangeEvent.Significance = CalculateChangeEventSignificance(
-				&rootCause.ChangeEvent, rootCause.Resource.Kind, true, time.Unix(0, input.FailureTimestamp), errorPatterns,
-			)
-			ConvertSingleEventToDiff(&rootCause.ChangeEvent, nil, true)
-		}
-	}
-
-	return &RootCauseAnalysisV2{
-		Incident: IncidentAnalysis{
-			ObservedSymptom: *symptom,
-			Graph:           graph,
-			RootCause:       *rootCause,
-			Confidence:      confidence,
-		},
-		SupportingEvidence:   evidence,
-		ExcludedAlternatives: excluded,
-		QueryMetadata: QueryMetadata{
-			QueryExecutionMs:   totalDuration.Milliseconds(),
-			AlgorithmVersion:   "v2.0-graph",
-			ExecutedAt:         time.Now(),
-			ResultQuality:      quality,
-			PerformanceMetrics: perfMetrics,
-		},
-	}, nil
+	return a.buildAnalysisResponse(
+		input,
+		symptom,
+		graph,
+		rootCause,
+		confidence,
+		evidence,
+		excluded,
+		quality,
+		perfMetrics,
+		time.Now(),
+		totalDuration.Milliseconds(),
+	), nil
 }
 
 // applyDiffFormat applies significance scoring and diff conversion to all graph nodes
