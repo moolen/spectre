@@ -17,7 +17,7 @@
     "@types/node": "^22.20.5",
     "@vitejs/plugin-react": "^5.2.0",
     "typescript": "~5.8.2",
-    "vite": "^6.4.4"
+    "vite": "^8.3.4"
   },
   "engines": {
     "node": ">=24.0.0"
