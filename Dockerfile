@@ -1,4 +1,4 @@
-FROM node:24-alpine AS ui-builder
+FROM node:26-alpine AS ui-builder
 WORKDIR /ui-build
 COPY ui/package*.json ./
 RUN npm ci
