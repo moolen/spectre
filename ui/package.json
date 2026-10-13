@@ -1,49 +1,44 @@
 {
   "dependencies": {
-    "@bufbuild/protobuf": "^2.10.2",
-    "@google/genai": "^1.30.0",
-    "@types/dagre": "^0.7.53",
+    "@bufbuild/protobuf": "^2.16.0",
+    "@google/genai": "^1.52.0",
+    "@types/dagre": "^0.7.54",
     "d3": "^7.9.0",
     "dagre": "^0.8.5",
-    "date-fns": "^4.1.0",
-    "google-protobuf": "^4.0.1",
-    "grpc-web": "^2.0.2",
-    "playwright": "^1.57.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "react-router-dom": "^6.28.0",
+    "date-fns": "^4.4.0",
+    "playwright": "^1.64.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
     "rxjs": "^7.8.2",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.8"
   },
   "devDependencies": {
-    "@playwright/experimental-ct-react": "^1.57.0",
+    "@playwright/experimental-ct-react": "^1.62.1",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.0.0",
-    "@testing-library/user-event": "^14.5.0",
-    "@types/d3": "^7.4.0",
-    "@types/google-protobuf": "^3.15.12",
-    "@types/node": "^22.14.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@typescript-eslint/parser": "^7.18.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "@vitest/ui": "^4.0.16",
-    "eslint": "^8.57.0",
-    "eslint-plugin-react": "^7.34.0",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/d3": "^7.4.3",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@typescript-eslint/parser": "^8.71.2",
+    "@vitejs/plugin-react": "^5.2.0",
+    "@vitest/ui": "^4.1.11",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^4.6.2",
-    "jsdom": "^27.2.0",
-    "prettier": "^3.2.0",
-    "protoc-gen-grpc-web": "^1.5.0",
-    "ts-proto": "^2.8.3",
+    "jsdom": "^27.4.0",
+    "prettier": "^3.9.10",
+    "ts-proto": "^2.15.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0",
-    "vitest": "^4.0.16"
+    "vite": "^6.4.4",
+    "vitest": "^4.1.11"
   },
   "name": "spectre",
   "overrides": {
-    "@remix-run/router": "1.23.2",
-    "lodash": "4.17.23",
-    "minimatch": "9.0.7"
+    "lodash": "4.18.1",
+    "minimatch": "9.0.9"
   },
   "private": true,
   "scripts": {
@@ -58,5 +53,8 @@
     "test:watch": "vitest"
   },
   "type": "module",
-  "version": "0.0.0"
+  "version": "0.0.0",
+  "engines": {
+    "node": ">=24.0.0"
+  }
 }

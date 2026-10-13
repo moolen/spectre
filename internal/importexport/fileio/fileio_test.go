@@ -255,7 +255,7 @@ func TestDetectPathType(t *testing.T) {
 	}
 }
 
-func TestIsJSONFile(t *testing.T) {
+func TestIsSupportedImportFile(t *testing.T) {
 	tests := []struct {
 		path     string
 		expected bool
@@ -264,19 +264,25 @@ func TestIsJSONFile(t *testing.T) {
 		{"test.JSON", true},
 		{"test.Json", true},
 		{"path/to/file.json", true},
+		{"events.jsonl", true},
+		{"events.JSONL", true},
+		{"audit.log", true},
+		{"audit.LOG", true},
 		{"test.txt", false},
 		{"test.xml", false},
 		{"test", false},
 		{"", false},
 		{".json", true},
 		{"file.json.bak", false},
+		{"events.jsonl.bak", false},
+		{"audit.log.bak", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			result := isJSONFile(tt.path)
+			result := isSupportedImportFile(tt.path)
 			if result != tt.expected {
-				t.Errorf("isJSONFile(%q) = %v, expected %v", tt.path, result, tt.expected)
+				t.Errorf("isSupportedImportFile(%q) = %v, expected %v", tt.path, result, tt.expected)
 			}
 		})
 	}

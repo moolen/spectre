@@ -46,6 +46,8 @@ export class GrpcWebTransport implements Rpc {
 
           let buffer = new Uint8Array(0);
 
+          // Read until the stream ends; the termination condition comes from reader.read().
+          // eslint-disable-next-line no-constant-condition
           while (true) {
             const { done, value } = await reader.read();
             
