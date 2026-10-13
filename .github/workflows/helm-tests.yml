@@ -26,14 +26,14 @@ jobs:
 
       - name: Install Helm
         run: |
-          HELM_VERSION="v3.19.4"
+          HELM_VERSION="v3.19.5"
           curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" -o /tmp/helm.tgz
           tar -C /tmp -xzf /tmp/helm.tgz
           sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
           helm version
 
       - name: Run helm unit tests
-        run: make helm-unittest-install
+        run: make helm-unittest
 
   lint-and-validate:
     runs-on: ubuntu-latest
@@ -48,7 +48,7 @@ jobs:
 
       - name: Install Helm
         run: |
-          HELM_VERSION="v3.19.4"
+          HELM_VERSION="v3.19.5"
           curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" -o /tmp/helm.tgz
           tar -C /tmp -xzf /tmp/helm.tgz
           sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
@@ -99,7 +99,7 @@ jobs:
 
       - name: Install Helm
         run: |
-          HELM_VERSION="v3.13.0"
+          HELM_VERSION="v3.19.5"
           curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" -o /tmp/helm.tgz
           tar -C /tmp -xzf /tmp/helm.tgz
           sudo install /tmp/linux-amd64/helm /usr/local/bin/helm

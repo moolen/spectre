@@ -47,6 +47,9 @@ Make sure your GitHub repository is configured to allow publishing packages.
 
 ## Building Locally
 
+Use Go 1.26.9 or newer and Node.js 24 LTS. CI reads the Go version from
+`go.mod`; the UI and documentation builds both use Node.js 24.
+
 To test the build locally before pushing:
 
 ```bash

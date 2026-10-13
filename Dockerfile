@@ -1,4 +1,4 @@
-FROM node:25-alpine AS ui-builder
+FROM node:24-alpine AS ui-builder
 WORKDIR /ui-build
 COPY ui/package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY ui/public ./public
 COPY ui/index.html ui/vite.config.ts ui/tsconfig.json ./
 RUN npm run build
 
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 WORKDIR /build
 RUN apk add --no-cache git make
 COPY go.mod go.sum ./
@@ -16,7 +16,7 @@ COPY cmd/ cmd/
 COPY internal/ internal/
 RUN CGO_ENABLED=0 GOOS=linux go build -o spectre ./cmd/spectre
 
-FROM alpine:3.18
+FROM alpine:3.24
 WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /build/spectre .

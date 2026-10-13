@@ -119,7 +119,7 @@ jobs:
 
       - name: Install Helm
         run: |
-          HELM_VERSION="v3.13.0"
+          HELM_VERSION="v3.19.5"
           curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" -o /tmp/helm.tgz
           tar -C /tmp -xzf /tmp/helm.tgz
           sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
