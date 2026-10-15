@@ -22,6 +22,10 @@ Two different directions for the dark redesign. Both keep the same page structur
 - **Graph:** round nodes with labels, the causal path drawn in ember, and a causal-path sheet with a step-by-step chain.
 - **Settings:** one centered column of grouped cards, in the style of macOS or claude.ai settings.
 
+## C: Graphite layout with Warm Ink colors (chosen direction)
+
+`approach-c.html` uses A's structure: the icon rail, the 52px top bar with a query bar and a segmented time control, hairline-divided panes, the docked detail pane and the bottom status bar. It is painted in B's warm neutrals with the ember accent (`#e07a47`), and the ghost tile uses an ember gradient. A selected timeline row gets a neutral highlight plus a thin ember edge, so it can't be mistaken for a warning.
+
 ## Notes
 
 - Both palettes avoid purple and teal, and the ghost tile gradient uses each palette's accent color.
