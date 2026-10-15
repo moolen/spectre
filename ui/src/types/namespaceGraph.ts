@@ -146,11 +146,11 @@ export interface D3GraphLink extends d3.SimulationLinkDatum<D3GraphNode> {
  * Status colors for node visualization
  */
 export const NODE_STATUS_COLORS: Record<string, string> = {
-  Ready: '#10b981',      // emerald-500
-  Warning: '#f59e0b',    // amber-500
-  Error: '#ef4444',      // red-500
-  Terminating: '#6b7280', // gray-500
-  Unknown: '#374151',    // gray-700
+  Ready: 'var(--color-status-ok)',
+  Warning: 'var(--color-status-warn)',
+  Error: 'var(--color-status-err)',
+  Terminating: 'var(--color-status-neutral)',
+  Unknown: 'var(--color-border-strong)',
 };
 
 /**

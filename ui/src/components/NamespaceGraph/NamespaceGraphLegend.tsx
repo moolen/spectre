@@ -57,7 +57,7 @@ export const NamespaceGraphLegend: React.FC<NamespaceGraphLegendProps> = ({
         </div>
         <div className="flex items-center gap-1.5">
           <div className="relative">
-            <div className="w-3 h-3 rounded-full bg-gray-500" />
+            <div className="w-3 h-3 rounded-full bg-[var(--color-status-neutral)]" />
             <div 
               className="absolute -top-1 -right-1 w-2 h-2 rounded-full flex items-center justify-center text-white"
               style={{ backgroundColor: '#ef4444', fontSize: '6px' }}

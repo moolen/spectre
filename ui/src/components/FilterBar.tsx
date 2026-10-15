@@ -1,7 +1,10 @@
 import React from 'react';
 import { FilterState, TimeRange } from '../types';
 import { TimeRangeDropdown } from './TimeRangeDropdown';
+import { TimeRangeQuickPresets } from './TimeRangeQuickPresets';
 import { SelectDropdown } from './SelectDropdown';
+import { PageHeader } from './Common/PageHeader';
+import { Icon } from './Common/Icon';
 import { formatNamespaceFilterOption } from '../utils/namespaceFilters';
 
 interface FilterBarProps {
@@ -15,6 +18,10 @@ interface FilterBarProps {
   rawEnd?: string;
 }
 
+/**
+ * Timeline top bar: page title, a single query bar holding the filter tokens
+ * and free-text search, and the time range controls on the right.
+ */
 export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeRange, onTimeRangeChange, availableNamespaces, availableKinds, rawStart, rawEnd }) => {
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,75 +37,74 @@ export const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, timeR
   };
 
   return (
-    <div className="w-full bg-[var(--color-surface-elevated)]/95 backdrop-blur border-b border-[var(--color-border-soft)] p-4 flex flex-row gap-6 items-center shadow-lg z-30 text-[var(--color-text-primary)] transition-colors duration-300">
-        {/* Search */}
-        <div className="relative group min-w-[150px] flex-grow max-w-xl">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg className="h-4 w-4 text-gray-500 group-focus-within:text-brand-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-            </div>
-            <input
-                type="text"
-                placeholder="Search resources by name..."
-                value={filters.search}
-                onChange={handleSearchChange}
-                className="block w-full pl-10 pr-3 py-2 border border-[var(--color-border-soft)] rounded-md leading-5 bg-[var(--color-input-bg)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:bg-[var(--color-surface-muted)] focus:border-brand-500 focus:ring-1 focus:ring-brand-500 sm:text-sm transition-all shadow-sm"
-            />
-        </div>
+    <PageHeader
+      title="Timeline"
+      actions={
+        <>
+          <TimeRangeQuickPresets onConfirm={onTimeRangeChange} rawStart={rawStart} rawEnd={rawEnd} />
+          <TimeRangeDropdown
+            currentRange={timeRange}
+            onConfirm={onTimeRangeChange}
+            rawStart={rawStart}
+            rawEnd={rawEnd}
+          />
+        </>
+      }
+    >
+      {/* Query bar: filter tokens + search in one field */}
+      <div className="group flex items-center gap-1 h-8 flex-1 max-w-[760px] ml-3 pl-2.5 pr-1.5 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface-elevated)] focus-within:border-[var(--color-accent-line)] focus-within:shadow-[0_0_0_3px_var(--color-accent-soft)] transition-colors">
+        <Icon name="search" size={14} className="text-[var(--color-text-faint)] mr-1" />
 
-        {/* Filters - Dropdowns */}
-        <div className="flex gap-3">
-            <SelectDropdown
-                label="All Namespaces"
-                options={availableNamespaces}
-                selected={filters.namespaces}
-                onChange={handleNamespacesChange}
-                multiple={true}
-                formatOption={formatNamespaceFilterOption}
-            />
+        <SelectDropdown
+          label="All Namespaces"
+          tokenLabel="ns"
+          variant="token"
+          options={availableNamespaces}
+          selected={filters.namespaces}
+          onChange={handleNamespacesChange}
+          multiple={true}
+          formatOption={formatNamespaceFilterOption}
+        />
 
-            <SelectDropdown
-                label="All Kinds"
-                options={availableKinds}
-                selected={filters.kinds}
-                onChange={handleKindsChange}
-                multiple={true}
-            />
+        <SelectDropdown
+          label="All Kinds"
+          tokenLabel="kind"
+          variant="token"
+          options={availableKinds}
+          selected={filters.kinds}
+          onChange={handleKindsChange}
+          multiple={true}
+        />
 
-            <button
-                onClick={() => setFilters(prev => ({ ...prev, hasProblematicStatus: !prev.hasProblematicStatus }))}
-                className={`flex items-center justify-between gap-2 px-4 py-2 text-sm font-medium rounded-md border transition-all outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
-                    filters.hasProblematicStatus
-                        ? 'bg-[var(--color-surface-active)] border-brand-500 text-brand-300 ring-1 ring-brand-500/20'
-                        : 'bg-[var(--color-surface-muted)] border-[var(--color-border-soft)] text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)]'
-                }`}
-                title="Show only resources with problematic status (Warning, Error, Terminating, or Unknown)"
-            >
-                <div className="flex items-center gap-2">
-                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
-                        filters.hasProblematicStatus
-                            ? 'bg-brand-600 border-brand-600'
-                            : 'border-[var(--color-border-soft)]'
-                    }`}>
-                        {filters.hasProblematicStatus && (
-                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                            </svg>
-                        )}
-                    </div>
-                    <span className="truncate">Problematic Only</span>
-                </div>
-            </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setFilters(prev => ({ ...prev, hasProblematicStatus: !prev.hasProblematicStatus }))}
+          aria-pressed={filters.hasProblematicStatus}
+          className={`inline-flex items-center gap-1.5 h-[22px] px-[7px] rounded-[5px] text-xs whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-soft)] ${
+            filters.hasProblematicStatus
+              ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-strong)]'
+              : 'text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)]'
+          }`}
+          title="Show only resources with problematic status (Warning, Error, Terminating, or Unknown)"
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              filters.hasProblematicStatus ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-status-err)]'
+            }`}
+          />
+          <span>Problematic only</span>
+        </button>
 
-        {/* Time Range Picker */}
-        <div className="ml-auto flex items-center gap-3">
-            <TimeRangeDropdown
-                currentRange={timeRange}
-                onConfirm={onTimeRangeChange}
-                rawStart={rawStart}
-                rawEnd={rawEnd}
-            />
-        </div>
-    </div>
+        <span className="w-px h-4 bg-[var(--color-border-strong)] mx-1.5" aria-hidden="true" />
+
+        <input
+          type="text"
+          placeholder="Search resources by name..."
+          value={filters.search}
+          onChange={handleSearchChange}
+          className="flex-1 min-w-[120px] h-full bg-transparent text-[12.5px] text-[var(--color-text-primary)] placeholder-[var(--color-text-faint)] outline-none border-none"
+        />
+      </div>
+    </PageHeader>
   );
 };

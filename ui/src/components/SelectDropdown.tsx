@@ -19,6 +19,16 @@ interface SelectDropdownProps {
   formatOption?: (value: string) => string;
   /** Whether to sort options alphabetically (default: true) */
   sortOptions?: boolean;
+  /**
+   * Visual style of the trigger:
+   * - 'control': standalone 32px control (default)
+   * - 'token': compact filter token for use inside a query bar
+   */
+  variant?: 'control' | 'token';
+  /** Short key shown in front of the value in token mode (e.g. "ns", "kind") */
+  tokenLabel?: string;
+  /** Optional leading element inside the trigger (e.g. an icon) */
+  prefix?: React.ReactNode;
 }
 
 /**
@@ -42,6 +52,9 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
   minWidth = '160px',
   formatOption = (v) => v,
   sortOptions = true,
+  variant = 'control',
+  tokenLabel,
+  prefix,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -237,6 +250,9 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     if (selectedArray.length === 1) {
       return formatOption(selectedArray[0]);
     }
+    if (selectedArray.length > 2) {
+      return `${selectedArray.slice(0, 2).map(formatOption).join(', ')} +${selectedArray.length - 2}`;
+    }
     return selectedArray.map(formatOption).join(', ');
   }, [selectedArray, label, formatOption]);
 
@@ -246,6 +262,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
     <div className="relative" ref={dropdownRef} onKeyDown={handleKeyDown} tabIndex={-1}>
       <button
         ref={triggerRef}
+        type="button"
         onClick={() => {
           setIsOpen(!isOpen);
           if (!isOpen) {
@@ -253,21 +270,29 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
             setSearchQuery('');
           }
         }}
-        style={{ minWidth }}
-        className={`flex items-center justify-between gap-2 px-4 py-2 text-sm font-medium rounded-md border transition-all outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
-          hasSelection
-            ? 'bg-[var(--color-surface-active)] border-brand-500 text-brand-300 ring-1 ring-brand-500/20'
-            : 'bg-[var(--color-surface-muted)] border-[var(--color-border-soft)] text-[var(--color-text-muted)] hover:border-brand-500 hover:text-[var(--color-text-primary)]'
-        }`}
+        style={variant === 'control' ? { minWidth } : undefined}
+        className={
+          variant === 'token'
+            ? `inline-flex items-center gap-1.5 h-[22px] pl-[7px] pr-1.5 rounded-[5px] text-xs whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-accent-soft)] ${
+                hasSelection
+                  ? 'bg-[var(--color-surface-active)] text-[var(--color-text-primary)] hover:bg-[var(--color-border-strong)]'
+                  : 'text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)]'
+              }`
+            : `ui-control justify-between ${hasSelection ? '!text-[var(--color-text-primary)]' : ''}`
+        }
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         title={hasSelection ? selectedArray.map(formatOption).join(', ') : ''}
       >
-        <span className="truncate max-w-[200px]">
+        {prefix}
+        {variant === 'token' && hasSelection && tokenLabel && (
+          <span className="text-[var(--color-text-faint)] font-medium">{tokenLabel}</span>
+        )}
+        <span className={`truncate ${variant === 'token' ? 'max-w-[260px]' : 'max-w-[200px]'}`}>
           {displayText}
         </span>
         <svg
-          className={`w-4 h-4 text-gray-500 transition-transform duration-200 flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`}
+          className={`flex-shrink-0 text-[var(--color-text-faint)] transition-transform duration-200 ${variant === 'token' ? 'w-3 h-3' : 'w-3.5 h-3.5'} ${isOpen ? 'rotate-180' : ''}`}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -277,14 +302,14 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-56 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl z-[60] overflow-hidden animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/10">
+        <div className="ui-popover absolute top-full left-0 mt-2 w-64 z-[60] overflow-hidden">
           {/* Search Input and Clear Button */}
           {(searchable || hasSelection) && (
             <div className="p-2 border-b border-[var(--color-border-soft)] space-y-2">
               {searchable && (
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
-                    <svg className="h-3.5 w-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-3.5 w-3.5 text-[var(--color-text-faint)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                   </div>
@@ -297,7 +322,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
                       setFocusedIndex(-1);
                     }}
                     placeholder="Search..."
-                    className="w-full pl-7 pr-2 py-1.5 text-xs border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    className="ui-input !h-[28px] !pl-7 !text-xs"
                     onClick={(e) => e.stopPropagation()}
                   />
                 </div>
@@ -309,7 +334,7 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
                     e.stopPropagation();
                     handleClear();
                   }}
-                  className="w-full px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-active)] border border-[var(--color-border-soft)] rounded-md transition-colors flex items-center justify-center gap-1.5"
+                  className="w-full h-7 px-3 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] rounded-md transition-colors flex items-center justify-center gap-1.5"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
@@ -322,14 +347,14 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
 
           {/* Options List */}
           <div
-            className="max-h-64 overflow-y-auto p-2 space-y-1 custom-scrollbar outline-none"
+            className="max-h-72 overflow-y-auto p-1 custom-scrollbar outline-none"
             role="listbox"
             ref={listRef}
             aria-multiselectable={multiple}
             tabIndex={0}
           >
             {filteredOptions.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-[var(--color-text-muted)] text-center">
+              <div className="px-3 py-3 text-xs text-[var(--color-text-faint)] text-center">
                 No matches found
               </div>
             ) : (
@@ -343,28 +368,31 @@ export const SelectDropdown: React.FC<SelectDropdownProps> = ({
                     aria-selected={isSelected}
                     onClick={() => handleSelect(option, !multiple)}
                     onMouseEnter={() => setFocusedIndex(index)}
-                    className={`flex items-center px-3 py-2 rounded-md cursor-pointer transition-colors ${
+                    className={`flex items-center h-8 px-2.5 rounded-md cursor-pointer transition-colors ${
                       isFocused ? 'bg-[var(--color-surface-muted)]' : ''
                     } ${
                       isSelected
-                        ? 'bg-brand-900/30 text-brand-200'
-                        : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text-primary)]'
+                        ? 'text-[var(--color-text-primary)]'
+                        : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
                     }`}
                   >
                     {multiple && (
-                      <div className={`w-4 h-4 rounded border mr-3 flex items-center justify-center transition-all ${
+                      <div className={`w-3.5 h-3.5 rounded-[4px] border mr-2.5 flex items-center justify-center transition-all ${
                         isSelected
-                          ? 'bg-brand-600 border-brand-600'
-                          : 'border-[var(--color-border-soft)]'
+                          ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
+                          : 'border-[var(--color-border-strong)]'
                       }`}>
                         {isSelected && (
-                          <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-2.5 h-2.5 text-[var(--color-on-accent)]" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
                           </svg>
                         )}
                       </div>
                     )}
-                    <span className="text-sm select-none">{formatOption(option)}</span>
+                    <span className="text-[13px] select-none truncate">{formatOption(option)}</span>
+                    {!multiple && isSelected && (
+                      <svg className="w-3.5 h-3.5 ml-auto text-[var(--color-accent)] flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                    )}
                   </div>
                 );
               })

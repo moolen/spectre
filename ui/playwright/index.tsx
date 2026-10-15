@@ -7,6 +7,7 @@
 import { beforeMount } from '@playwright/experimental-ct-react/hooks';
 import { BrowserRouter } from 'react-router-dom';
 import { SettingsProvider } from '../src/hooks/useSettings';
+import '../src/theme.css';
 
 // Wrap all mounted components with providers
 beforeMount(async ({ App }) => {

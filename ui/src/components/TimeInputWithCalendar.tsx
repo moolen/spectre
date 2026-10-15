@@ -94,7 +94,7 @@ export const TimeInputWithCalendar: React.FC<TimeInputWithCalendarProps> = ({
   return (
     <div ref={containerRef} className="relative">
       {label && (
-        <label className="block text-xs text-[var(--color-text-muted)] mb-1">
+        <label className="block text-xs text-[var(--color-text-secondary)] mb-1.5">
           {label}
         </label>
       )}
@@ -105,12 +105,12 @@ export const TimeInputWithCalendar: React.FC<TimeInputWithCalendarProps> = ({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className={`w-full px-3 py-1.5 pr-10 text-sm border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 ${className}`}
+          className={`ui-input !pr-9 ${className}`}
         />
         <button
           type="button"
           onClick={() => setIsCalendarOpen(!isCalendarOpen)}
-          className="absolute right-2 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+          className="absolute right-1.5 p-1 rounded text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] transition-colors"
           aria-label="Open calendar"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -127,16 +127,16 @@ export const TimeInputWithCalendar: React.FC<TimeInputWithCalendarProps> = ({
       {isCalendarOpen && (
         <div
           ref={calendarRef}
-          className="absolute z-50 mt-1 p-3 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl"
+          className="ui-popover absolute z-50 mt-1 p-3"
         >
-          <div className="text-xs text-[var(--color-text-muted)] mb-2">
+          <div className="ui-section-label mb-2">
             Select date
           </div>
           <input
             type="date"
             defaultValue={getCalendarValue()}
             onChange={handleCalendarSelect}
-            className="w-full px-3 py-2 text-sm border border-[var(--color-border-soft)] rounded-md bg-[var(--color-input-bg)] text-[var(--color-text-primary)] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            className="ui-input"
           />
         </div>
       )}

@@ -2,9 +2,9 @@
  * Layout Behavior Tests
  * 
  * These tests verify critical layout behaviors:
- * 1. Sidebar pushes content (doesn't overlap)
- * 2. Timeline container doesn't resize on sidebar hover (prevents layout thrashing)
- * 3. NamespaceGraph container doesn't resize on sidebar hover
+ * 1. The navigation rail has a fixed width and never shifts the content
+ * 2. Timeline container doesn't resize on rail hover (prevents layout thrashing)
+ * 3. NamespaceGraph container doesn't resize on rail hover
  * 4. Settings page is scrollable
  */
 import { test, expect } from '@playwright/experimental-ct-react';
@@ -45,50 +45,39 @@ const ResizeTracker: React.FC<{
 
 test.describe('Layout Behavior', () => {
   test.describe('Sidebar Navigation', () => {
-    test('sidebar expands and pushes content with marginLeft (not overlap)', async ({ mount, page }) => {
-      // Mount the full App component
+    test('rail has a fixed width and content is not shifted on hover', async ({ mount, page }) => {
       await mount(<App />);
 
-      // The layout uses a two-layer approach:
-      // - Outer wrapper div has a fixed marginLeft of 64px (collapsed sidebar width)
-      // - Inner <main> uses transform: translateX() to shift when sidebar expands
       const main = page.locator('main');
       await expect(main).toBeVisible();
 
-      // The outer wrapper is the parent div of <main>
-      const outerWrapper = main.locator('..');
-
-      // Move mouse away from sidebar to ensure collapsed state
-      await page.mouse.move(600, 300);
-      await page.waitForTimeout(400); // Wait for collapse transition
-
-      // Verify outer wrapper has fixed margin-left of 64px
-      await expect(outerWrapper).toHaveCSS('margin-left', '64px');
-
-      // Verify main has no transform offset when sidebar is collapsed
-      // translateX(0) computes to matrix(1, 0, 0, 1, 0, 0)
-      await expect(main).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
-
-      // Get the sidebar element and hover over it
       const sidebar = page.locator('.sidebar-container');
-      await sidebar.hover();
+      await expect(sidebar).toHaveCSS('width', '56px');
 
-      // Wait for the CSS transition to complete (250ms + buffer)
-      await page.waitForTimeout(350);
+      // Content starts right after the rail
+      await page.mouse.move(600, 300);
+      const before = await main.boundingBox();
+      expect(before?.x).toBe(56);
 
-      // Verify main is translated by 156px (220 - 64) when sidebar expands
-      // transform: translateX(156px) is represented as matrix(1, 0, 0, 1, 156, 0)
-      await expect(main).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 156, 0)');
+      // Hovering the rail shows a tooltip but does not move or resize the content
+      await page.locator('.sidebar-link[href="/graph"]').hover();
+      await page.waitForTimeout(300);
+      await expect(sidebar).toHaveCSS('width', '56px');
+      const during = await main.boundingBox();
+      expect(during).toEqual(before);
+      await expect(page.locator('.sidebar-link[href="/graph"] .sidebar-link-label')).toHaveCSS('opacity', '1');
 
-      // Outer wrapper margin stays fixed at 64px (no layout change)
-      await expect(outerWrapper).toHaveCSS('margin-left', '64px');
+      await page.mouse.move(600, 300);
+      await page.waitForTimeout(300);
+      expect(await main.boundingBox()).toEqual(before);
+    });
 
-      // Move mouse away from sidebar
-      await page.mouse.move(500, 500);
-      await page.waitForTimeout(350);
+    test('navigation links expose accessible names', async ({ mount, page }) => {
+      await mount(<App />);
 
-      // Verify transform returns to translateX(0)
-      await expect(main).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+      await expect(page.getByRole('link', { name: 'Timeline' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Graph' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Settings' })).toBeVisible();
     });
   });
 
@@ -101,7 +90,7 @@ test.describe('Layout Behavior', () => {
       await page.waitForTimeout(500);
 
       // The Timeline is on the main route, find its SVG
-      const timelineSvg = page.locator('main svg').first();
+      const timelineSvg = page.locator('main svg[width]').last();
       
       // Check if Timeline loaded (it may show loading state if no data)
       const svgExists = await timelineSvg.count() > 0;
@@ -110,7 +99,7 @@ test.describe('Layout Behavior', () => {
         // Get the initial SVG width attribute
         const initialWidth = await timelineSvg.evaluate((el) => el.getAttribute('width'));
 
-        // Simulate a width change by hovering the sidebar
+        // Hover the navigation rail (must not cause any re-layout)
         const sidebar = page.locator('.sidebar-container');
         await sidebar.hover();
         await page.waitForTimeout(400); // Wait for transition + debounce
@@ -148,7 +137,7 @@ test.describe('Layout Behavior', () => {
       await page.waitForTimeout(500);
 
       // Find the graph SVG
-      const graphSvg = page.locator('main svg').first();
+      const graphSvg = page.locator('main svg.block').first();
       const svgExists = await graphSvg.count() > 0;
 
       if (svgExists) {
@@ -158,7 +147,7 @@ test.describe('Layout Behavior', () => {
           height: el.getAttribute('height'),
         }));
 
-        // Simulate a width change by hovering the sidebar
+        // Hover the navigation rail (must not cause any re-layout)
         const sidebar = page.locator('.sidebar-container');
         await sidebar.hover();
         await page.waitForTimeout(400);
@@ -185,7 +174,7 @@ test.describe('Layout Behavior', () => {
       await mount(<SettingsPage />);
 
       // Find the scrollable container
-      const scrollContainer = page.locator('.h-screen.overflow-auto');
+      const scrollContainer = page.getByTestId('settings-scroll');
       await expect(scrollContainer).toBeVisible();
 
       // Verify the content is taller than the container (scrollable)
@@ -221,7 +210,7 @@ test.describe('Layout Behavior', () => {
       // Mount the SettingsPage
       await mount(<SettingsPage />);
 
-      const scrollContainer = page.locator('.h-screen.overflow-auto');
+      const scrollContainer = page.getByTestId('settings-scroll');
       await expect(scrollContainer).toBeVisible();
 
       // Scroll to bottom
@@ -245,7 +234,7 @@ test.describe('Layout Behavior', () => {
       await page.waitForTimeout(300);
 
       // Find the scrollable container in settings
-      const scrollContainer = page.locator('.h-screen.overflow-auto');
+      const scrollContainer = page.getByTestId('settings-scroll');
       await expect(scrollContainer).toBeVisible();
 
       // Verify it's scrollable

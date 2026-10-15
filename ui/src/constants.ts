@@ -1,11 +1,13 @@
 import { ResourceStatus } from './types';
 
+// Status colours resolve through theme tokens (src/theme.css) so they follow
+// the active light/dark theme without re-rendering.
 export const STATUS_COLORS: Record<ResourceStatus, string> = {
-  [ResourceStatus.Ready]: '#10b981', // emerald-500
-  [ResourceStatus.Warning]: '#f59e0b', // amber-500
-  [ResourceStatus.Error]: '#ef4444', // red-500
-  [ResourceStatus.Terminating]: '#6b7280', // gray-500
-  [ResourceStatus.Unknown]: '#374151', // gray-700
+  [ResourceStatus.Ready]: 'var(--color-status-ok)',
+  [ResourceStatus.Warning]: 'var(--color-status-warn)',
+  [ResourceStatus.Error]: 'var(--color-status-err)',
+  [ResourceStatus.Terminating]: 'var(--color-status-neutral)',
+  [ResourceStatus.Unknown]: 'var(--color-border-strong)',
 };
 
 export const MOCK_NAMESPACES = ['default', 'kube-system', 'production', 'staging', 'monitoring'];

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { SettingsProvider } from './hooks/useSettings';
 import { BetaFeaturesProvider } from './contexts/BetaFeaturesContext';
+import './theme.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

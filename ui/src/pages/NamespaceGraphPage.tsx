@@ -23,9 +23,9 @@ import {
  * Loading spinner component
  */
 const LoadingSpinner: React.FC<{ message?: string }> = ({ message = 'Loading...' }) => (
-  <div className="flex flex-col items-center justify-center h-full">
-    <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
-    <span className="text-[var(--color-text-muted)]">{message}</span>
+  <div className="flex flex-col items-center justify-center h-full gap-3">
+    <div className="w-6 h-6 rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-accent)] animate-spin" />
+    <span className="text-[12.5px] text-[var(--color-text-faint)]">{message}</span>
   </div>
 );
 
@@ -33,20 +33,18 @@ const LoadingSpinner: React.FC<{ message?: string }> = ({ message = 'Loading...'
  * Error message component
  */
 const ErrorMessage: React.FC<{ error: Error; onRetry?: () => void }> = ({ error, onRetry }) => (
-  <div className="flex flex-col items-center justify-center h-full p-8">
-    <svg className="w-16 h-16 text-red-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} 
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-    </svg>
-    <h3 className="text-lg font-medium text-[var(--color-text-primary)] mb-2">Failed to load graph</h3>
-    <p className="text-sm text-[var(--color-text-muted)] mb-4 text-center max-w-md">
+  <div className="flex flex-col items-center justify-center h-full p-8 gap-3 text-center">
+    <div className="w-10 h-10 rounded-full grid place-items-center bg-[var(--color-status-err-soft)] text-[var(--color-status-err)]">
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round">
+        <circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" />
+      </svg>
+    </div>
+    <h3 className="text-[13.5px] font-medium text-[var(--color-text-primary)]">Failed to load graph</h3>
+    <p className="text-xs text-[var(--color-text-faint)] max-w-md">
       {error.message}
     </p>
     {onRetry && (
-      <button
-        onClick={onRetry}
-        className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors"
-      >
+      <button onClick={onRetry} className="ui-control mt-1">
         Try Again
       </button>
     )}
@@ -57,15 +55,38 @@ const ErrorMessage: React.FC<{ error: Error; onRetry?: () => void }> = ({ error,
  * Empty state component when no namespaces are available
  */
 const EmptyState: React.FC = () => (
-  <div className="flex flex-col items-center justify-center h-full p-8">
-    <svg className="w-16 h-16 text-[var(--color-text-muted)] opacity-50 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} 
-            d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-    </svg>
-    <h3 className="text-lg font-medium text-[var(--color-text-primary)] mb-2">No Namespaces Found</h3>
-    <p className="text-sm text-[var(--color-text-muted)] text-center max-w-md">
+  <div className="flex flex-col items-center justify-center h-full p-8 gap-3 text-center">
+    <div className="w-10 h-10 rounded-full grid place-items-center bg-[var(--color-surface-muted)] text-[var(--color-text-faint)]">
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+        <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+      </svg>
+    </div>
+    <h3 className="text-[13.5px] font-medium text-[var(--color-text-primary)]">No namespaces found</h3>
+    <p className="text-xs text-[var(--color-text-faint)] max-w-md">
       No namespaces are available in the cluster. Make sure resources are being monitored.
     </p>
+  </div>
+);
+
+const LEGEND_ITEMS = [
+  { label: 'Healthy', color: 'var(--color-status-ok)' },
+  { label: 'Degraded', color: 'var(--color-status-warn)' },
+  { label: 'Failing', color: 'var(--color-status-err)' },
+  { label: 'Causal path', color: 'var(--color-accent)' },
+];
+
+/**
+ * Compact legend shown next to the zoom controls
+ */
+const GraphLegend: React.FC = () => (
+  <div className="absolute bottom-4 left-[60px] h-[30px] px-3 flex items-center gap-3.5 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface-elevated)]/90 text-[11.5px] text-[var(--color-text-faint)] z-10">
+    {LEGEND_ITEMS.map(item => (
+      <span key={item.label} className="inline-flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-sm" style={{ background: item.color }} />
+        {item.label}
+      </span>
+    ))}
   </div>
 );
 
@@ -389,12 +410,13 @@ export default function NamespaceGraphPage() {
                 onFitToView={() => graphRef.current?.fitToView()}
                 onResetZoom={() => graphRef.current?.resetZoom()}
               />
+              <GraphLegend />
               {/* Overlay loading indicator when refreshing with existing data */}
               {isLoading && data && (
                 <div className="absolute inset-0 bg-[var(--color-app-bg)]/60 backdrop-blur-sm flex items-center justify-center z-20">
-                  <div className="flex flex-col items-center gap-3 p-4 rounded-lg bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] shadow-xl">
-                    <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm text-[var(--color-text-muted)]">Updating graph...</span>
+                  <div className="ui-popover flex items-center gap-2.5 px-4 py-3">
+                    <div className="w-4 h-4 rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-accent)] animate-spin" />
+                    <span className="text-[12.5px] text-[var(--color-text-secondary)]">Updating graph...</span>
                   </div>
                 </div>
               )}
@@ -424,40 +446,36 @@ export default function NamespaceGraphPage() {
 
       {/* Metadata footer */}
       {filteredData && (
-        <div className="px-4 py-2 border-t border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]
-                        text-xs text-[var(--color-text-muted)] flex items-center gap-4">
-          <span>
+        <footer className="ui-statusbar">
+          <span className="tabular-nums">
             {filteredData.metadata.nodeCount} resources
             {hasMore && ' (loading more...)'}
           </span>
-          <span>{filteredData.metadata.edgeCount} relationships</span>
+          <span className="tabular-nums">{filteredData.metadata.edgeCount} relationships</span>
           {data && data.anomalies && data.anomalies.length > 0 && (
-            <span className="text-red-400">{data.anomalies.length} anomalies</span>
+            <span className="tabular-nums"><i className="dot" style={{ background: 'var(--color-status-err)' }} />{data.anomalies.length} anomalies</span>
           )}
           {data && data.causalPaths && data.causalPaths.length > 0 && (
-            <span className="text-blue-400">{data.causalPaths.length} causal paths</span>
+            <span className="tabular-nums"><i className="dot" style={{ background: 'var(--color-accent)' }} />{data.causalPaths.length} causal paths</span>
           )}
           {isLoadingMore && (
-            <span className="text-blue-400 flex items-center gap-1">
-              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>
+            <span className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">
+              <span className="w-3 h-3 rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-accent)] animate-spin" />
               Loading page {pagesLoaded + 1}...
             </span>
           )}
-          <span className="ml-auto flex items-center gap-3">
+          <span className="ml-auto flex items-center gap-3 tabular-nums">
             {isLiveMode ? (
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
                 Live
               </span>
             ) : (
-              <span>Snapshot: {formatDateTimeForDisplay(graphTimestamp)}</span>
+              <span>Snapshot {formatDateTimeForDisplay(graphTimestamp)}</span>
             )}
-            <span>Query: {filteredData.metadata.queryExecutionMs}ms</span>
+            <span>query {filteredData.metadata.queryExecutionMs} ms</span>
           </span>
-        </div>
+        </footer>
       )}
     </div>
   );

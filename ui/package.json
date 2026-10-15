@@ -47,6 +47,7 @@
     "dev": "vite",
     "lint": "eslint src --ext .ts,.tsx",
     "preview": "vite preview",
+    "screenshots": "node --experimental-strip-types scripts/screenshots/capture.ts",
     "test": "vitest --run",
     "test:ct": "playwright test -c playwright-ct.config.ts",
     "test:ct:ui": "playwright test -c playwright-ct.config.ts --ui",
