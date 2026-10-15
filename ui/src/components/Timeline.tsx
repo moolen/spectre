@@ -411,6 +411,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('y', barY)
         .attr('height', barHeight)
         .attr('rx', 2)
+        .attr('data-status', s => s.status)
         .style('fill', s => STATUS_COLORS[s.status])
         .attr('opacity', 1)
         .attr('stroke', 'none')
@@ -751,6 +752,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     svg.selectAll('.segment')
         .attr('y', (d: any) => isSelected(d) ? baseY - 2 : baseY)
         .attr('height', (d: any) => isSelected(d) ? barHeight + 4 : barHeight)
+        // Set both the attribute and the style: the e2e tests read the attribute
+        .attr('stroke', (d: any) => isSelected(d) ? 'var(--color-text-primary)' : 'none')
         .style('stroke', (d: any) => isSelected(d) ? 'var(--color-text-primary)' : 'none')
         .attr('stroke-width', (d: any) => isSelected(d) ? 1.5 : 0);
 
