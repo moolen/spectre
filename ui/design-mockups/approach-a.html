@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Spectre — Approach A · Graphite</title>
+<script src="common.js"></script>
+<style>
+  /* Approach A — "Graphite": flat, hairline-separated panes, one cobalt accent. */
+  :root {
+    --bg: #0d0e10;
+    --panel: #111214;
+    --raised: #17181b;
+    --hover: #1c1e21;
+    --border: #212327;
+    --border-strong: #2c2f34;
+    --text: #e6e7e9;
+    --text-2: #9ea2a9;
+    --text-3: #676b73;
+    --accent: #5b8def;
+    --accent-strong: #7aa3f5;
+    --accent-soft: rgba(91, 141, 239, 0.12);
+    --accent-line: rgba(91, 141, 239, 0.45);
+    --ok: #3fb67f;
+    --warn: #e0a23a;
+    --err: #e5534b;
+    --ok-soft: rgba(63, 182, 127, 0.12);
+    --warn-soft: rgba(224, 162, 58, 0.12);
+    --err-soft: rgba(229, 83, 75, 0.12);
+    --mono: 'JetBrains Mono', 'DejaVu Sans Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.45 Inter, system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    display: flex; overflow: hidden;
+  }
+
+  /* ---------- Rail ---------- */
+  .rail { width: 56px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px; }
+  .logo { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; margin-bottom: 16px;
+    background: linear-gradient(150deg, #86aaf8 0%, #5b8def 45%, #3561cf 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 0 0 1px rgba(91,141,239,.35); }
+  .rail a { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: var(--text-3); position: relative; }
+  .rail a.active { color: var(--text); background: var(--hover); }
+  .rail a.active::before { content: ''; position: absolute; left: -10px; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--accent); }
+  .rail .spacer { flex: 1; }
+  .avatar-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); margin: 10px 0 4px; }
+
+  /* ---------- Main ---------- */
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--border); }
+  .crumbs { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .crumbs .page { font-weight: 600; font-size: 13.5px; }
+  .crumbs .sep { color: var(--text-3); }
+  .crumbs .ctx { color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+  .crumbs .ctx .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+
+  .query { flex: 1; max-width: 720px; height: 32px; margin-left: 12px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 10px;
+    background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text-3); }
+  .query .ph { flex: 1; color: var(--text-3); }
+  .tok { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px 0 7px; border-radius: 5px; background: var(--hover); color: var(--text); font-size: 12px; white-space: nowrap; }
+  .tok b { font-weight: 500; color: var(--text-3); }
+  .tok .x { color: var(--text-3); display: grid; place-items: center; }
+  .kbd { font: 11px/1 var(--mono); color: var(--text-3); border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 5px; }
+
+  .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .seg { display: flex; height: 32px; padding: 3px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel); }
+  .seg button { all: unset; padding: 0 9px; border-radius: 5px; font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+  .seg button.on { background: var(--hover); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
+  .btn { height: 32px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--panel); color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+  .btn.icon { width: 32px; padding: 0; justify-content: center; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; padding: 0 4px; }
+  .live i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+  .body { flex: 1; display: flex; min-height: 0; }
+  .statusbar { height: 28px; flex: none; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 18px; padding: 0 20px; color: var(--text-3); font-size: 11.5px; }
+  .statusbar .s { display: inline-flex; align-items: center; gap: 6px; }
+  .statusbar .s i { width: 6px; height: 6px; border-radius: 2px; }
+  .statusbar .end { margin-left: auto; }
+
+  /* ---------- Timeline ---------- */
+  .tl { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .tl-head { height: 36px; flex: none; display: grid; grid-template-columns: 300px 1fr; border-bottom: 1px solid var(--border); }
+  .tl-head .lbl { padding: 0 20px; display: flex; align-items: center; color: var(--text-3); font-size: 11.5px; gap: 6px; border-right: 1px solid var(--border); }
+  .axis { position: relative; margin: 0 24px 0 16px; }
+  .axis span { position: absolute; top: 11px; transform: translateX(-50%); font: 11px/1 var(--mono); color: var(--text-3); }
+  .tl-rows { flex: 1; overflow: hidden; position: relative; }
+  .grp { height: 30px; display: grid; grid-template-columns: 300px 1fr; }
+  .grp .lbl { padding: 12px 20px 0; font-size: 11px; font-weight: 500; letter-spacing: .02em; color: var(--text-3); border-right: 1px solid var(--border); display: flex; gap: 8px; }
+  .grp .lbl em { font-style: normal; color: var(--text-3); opacity: .7; }
+  .row { height: 40px; display: grid; grid-template-columns: 300px 1fr; }
+  .row .lbl { padding: 0 20px; display: flex; flex-direction: column; justify-content: center; border-right: 1px solid var(--border); min-width: 0; }
+  .row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--text); }
+  .row .ns { font-size: 11px; color: var(--text-3); line-height: 1.2; }
+  .row.sel { background: var(--accent-soft); }
+  .row.sel .lbl { box-shadow: inset 2px 0 0 var(--accent); }
+  .track { position: relative; margin: 0 24px 0 16px; }
+  .bar { position: absolute; top: 16px; height: 8px; border-radius: 2px; }
+  .bar.ok { background: var(--ok); } .bar.warn { background: var(--warn); } .bar.err { background: var(--err); }
+  .ev { position: absolute; top: 16px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--bg); }
+  .row.sel .ev { box-shadow: 0 0 0 2px #121827; }
+  .burst { position: absolute; top: 10px; height: 20px; border-radius: 4px; background: var(--err-soft); border: 1px solid rgba(229,83,75,.55); display: flex; align-items: center; justify-content: center; font: 500 10.5px/1 var(--mono); color: #f19790; }
+  .gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); opacity: .55; }
+  .nowline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent-line); }
+  .cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-3); }
+  .cursor-tag { position: absolute; top: 9px; transform: translateX(-50%); font: 500 10.5px/1 var(--mono); background: var(--text); color: var(--bg); padding: 4px 5px; border-radius: 4px; }
+
+  /* ---------- Detail pane ---------- */
+  .detail { width: 400px; flex: none; border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .d-head { padding: 16px 20px 0; }
+  .d-top { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 11.5px; }
+  .d-top .acts { margin-left: auto; display: flex; gap: 2px; }
+  .ib { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--text-3); }
+  .d-name { font-size: 16px; font-weight: 600; margin: 8px 0 6px; letter-spacing: -.01em; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 11px; font-size: 11.5px; font-weight: 500; }
+  .pill i { width: 6px; height: 6px; border-radius: 50%; }
+  .pill.ok { background: var(--ok-soft); color: #6fd3a3; } .pill.ok i { background: var(--ok); }
+  .pill.warn { background: var(--warn-soft); color: #eabd6c; } .pill.warn i { background: var(--warn); }
+  .pill.err { background: var(--err-soft); color: #f08c86; } .pill.err i { background: var(--err); }
+  .tabs { display: flex; gap: 18px; margin-top: 16px; border-bottom: 1px solid var(--border); padding: 0 20px; }
+  .tabs span { padding: 0 0 10px; color: var(--text-3); font-size: 12.5px; }
+  .tabs span.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+  .tabs span em { font-style: normal; color: var(--text-3); margin-left: 4px; font-size: 11px; }
+  .d-body { padding: 4px 20px 20px; overflow: hidden; }
+  .sec { padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .sec:last-child { border-bottom: 0; }
+  .sec h4 { font-size: 11.5px; font-weight: 500; color: var(--text-3); margin-bottom: 10px; display: flex; align-items: center; }
+  .sec h4 span { margin-left: auto; color: var(--text-3); font-weight: 400; }
+  .kv { display: grid; grid-template-columns: 96px 1fr; row-gap: 8px; font-size: 12.5px; }
+  .kv dt { color: var(--text-3); } .kv dd { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kv dd a { color: var(--accent-strong); text-decoration: none; }
+  .mini { display: flex; height: 6px; gap: 2px; border-radius: 2px; overflow: hidden; }
+  .mini div { height: 100%; }
+  .mini-ax { display: flex; justify-content: space-between; font: 10.5px var(--mono); color: var(--text-3); margin-top: 6px; }
+  .evt { display: grid; grid-template-columns: 58px 1fr; gap: 10px; padding: 7px 0; }
+  .evt .t { font: 11px/18px var(--mono); color: var(--text-3); }
+  .evt .r { font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+  .evt .r i { width: 6px; height: 6px; border-radius: 50%; }
+  .evt .m { font-size: 12px; color: var(--text-2); margin-top: 1px; }
+  .diff { font: 11.5px/1.65 var(--mono); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 0; overflow: hidden; }
+  .diff div { padding: 0 12px; white-space: pre; color: var(--text-2); }
+  .diff .add { background: rgba(63,182,127,.10); color: #8fdcb6; }
+  .diff .del { background: rgba(229,83,75,.10); color: #f0a19c; }
+
+  /* ---------- Graph ---------- */
+  .canvas { flex: 1; position: relative; overflow: hidden;
+    background-image: radial-gradient(circle at 1px 1px, #1d1f23 1px, transparent 0); background-size: 22px 22px; }
+  .canvas svg.g { position: absolute; inset: 0; }
+  .zoom { position: absolute; left: 16px; bottom: 16px; display: flex; flex-direction: column; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel); overflow: hidden; }
+  .zoom span { width: 30px; height: 30px; display: grid; place-items: center; color: var(--text-2); }
+  .zoom span + span { border-top: 1px solid var(--border); }
+  .legend { position: absolute; left: 60px; bottom: 16px; display: flex; gap: 14px; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(17,18,20,.85); color: var(--text-3); font-size: 11.5px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 8px; height: 8px; border-radius: 2px; }
+  .paths { width: 380px; flex: none; border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; }
+  .p-head { padding: 16px 20px 14px; border-bottom: 1px solid var(--border); }
+  .p-head h3 { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .p-head h3 span { font-weight: 400; color: var(--text-3); font-size: 12px; }
+  .p-head p { color: var(--text-3); font-size: 12px; margin-top: 2px; }
+  .path { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .path.on { background: var(--raised); box-shadow: inset 2px 0 0 var(--accent); }
+  .path .ln1 { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-3); }
+  .path .rank { font: 500 11px var(--mono); color: var(--text-2); }
+  .conf { display: inline-flex; align-items: center; gap: 6px; }
+  .conf .meter { width: 44px; height: 4px; border-radius: 2px; background: var(--border-strong); overflow: hidden; }
+  .conf .meter div { height: 100%; background: var(--accent); }
+  .path .sev { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
+  .path .sev i { width: 6px; height: 6px; border-radius: 50%; }
+  .path .root { font-size: 13px; font-weight: 500; margin: 8px 0 8px; }
+  .chain { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-2); }
+  .chain span { padding: 2px 6px; border-radius: 4px; background: var(--hover); }
+  .chain svg { color: var(--text-3); }
+  .path .sum { margin-top: 10px; font-size: 12px; color: var(--text-2); line-height: 1.55; }
+  .tags { display: flex; gap: 4px; margin-top: 10px; }
+  .tags span { font-size: 11px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-strong); color: var(--text-2); }
+
+  /* ---------- Settings ---------- */
+  .settings { flex: 1; display: flex; min-height: 0; }
+  .s-nav { width: 220px; flex: none; border-right: 1px solid var(--border); padding: 20px 12px; }
+  .s-nav a { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; color: var(--text-2); font-size: 13px; text-decoration: none; }
+  .s-nav a.on { background: var(--hover); color: var(--text); }
+  .s-nav a svg { color: var(--text-3); }
+  .s-nav a.on svg { color: var(--accent); }
+  .s-main { flex: 1; overflow: hidden; padding: 32px 48px; }
+  .s-wrap { max-width: 760px; }
+  .s-main h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .s-main .sub { color: var(--text-3); font-size: 12.5px; margin-bottom: 20px; }
+  .s-group + .s-group { margin-top: 36px; }
+  .srow { display: flex; align-items: center; gap: 24px; padding: 16px 0; border-top: 1px solid var(--border); }
+  .srow:last-child { border-bottom: 1px solid var(--border); }
+  .srow .l { flex: 1; }
+  .srow .l b { font-weight: 500; display: block; font-size: 13px; }
+  .srow .l span { color: var(--text-3); font-size: 12px; }
+  .switch { width: 32px; height: 18px; border-radius: 9px; background: var(--border-strong); position: relative; flex: none; }
+  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #c9ccd1; }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { left: 16px; background: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chip { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--text-2); font-size: 12px; }
+  .chip.on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--text); }
+  .chip.on svg { color: var(--accent-strong); }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 12px; color: var(--text-2); }
+  .input { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); font-size: 12.5px; }
+  .input.ph { color: var(--text-3); }
+  .input svg { color: var(--text-3); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+  .linkbtn { color: var(--text-2); font-size: 12px; }
+</style>
+</head>
+<body>
+<nav class="rail">
+  <div class="logo"></div>
+  <a data-v="timeline"></a>
+  <a data-v="graph"></a>
+  <div class="spacer"></div>
+  <a data-v="settings"></a>
+  <div class="avatar-dot" title="Connected"></div>
+</nav>
+<main id="main"></main>
+
+<script>
+const view = currentView();
+document.querySelector('.logo').innerHTML = ghostSvg(18);
+document.querySelectorAll('.rail a').forEach(a => {
+  a.innerHTML = icon(a.dataset.v, 18, 1.75);
+  if (a.dataset.v === view) a.classList.add('active');
+});
+const pct = m => (m / TL_SPAN) * 100;
+const statusColor = s => ({ ok: 'var(--ok)', warn: 'var(--warn)', err: 'var(--err)' }[s]);
+
+function topbar(page, middle, right) {
+  return `<header class="topbar">
+    <div class="crumbs"><span class="page">${page}</span><span class="sep">/</span><span class="ctx"><span class="dot"></span>prod-eu-1</span></div>
+    ${middle}
+    <div class="right">${right}</div>
+  </header>`;
+}
+const tok = (k, v) => `<span class="tok"><b>${k}</b>${v}<span class="x">${icon('x', 12, 2)}</span></span>`;
+
+function timelineView() {
+  const query = `<div class="query">${icon('search', 14)}
+      ${tok('ns', 'external-secrets, cert-manager, monitoring, n8n')}
+      ${tok('kind', 'Pod +6')}
+      ${tok('status', 'problematic')}
+      <span class="ph">Filter…</span><span class="kbd">⌘K</span></div>`;
+  const right = `<div class="seg"><button>15m</button><button class="on">1h</button><button>6h</button><button>24h</button><button>${icon('calendar', 13)}</button></div>
+      <span class="live"><i></i>Live</span>`;
+
+  // group rows by kind
+  const groups = [];
+  TIMELINE_ROWS.forEach(r => {
+    let g = groups.find(g => g.kind === r.kind);
+    if (!g) groups.push(g = { kind: r.kind, rows: [] });
+    g.rows.push(r);
+  });
+  const grid = TL_TICKS.map(t => `<div class="gridline" style="left:${pct(t)}%"></div>`).join('');
+  let rows = '';
+  groups.forEach(g => {
+    rows += `<div class="grp"><div class="lbl">${g.kind}s <em>${g.rows.length}</em></div><div class="track">${grid}</div></div>`;
+    g.rows.forEach(r => {
+      let bars = r.segs.map(([a, b, s]) => `<div class="bar ${s}" style="left:calc(${pct(a)}% + ${a ? 1 : 0}px);width:calc(${pct(b - a)}% - ${a ? 1 : 0}px)"></div>`).join('');
+      if (r.burst) bars += `<div class="burst" style="left:${pct(r.burst.from)}%;width:${pct(r.burst.to - r.burst.from)}%">${r.burst.count} restarts</div>`;
+      const evs = (r.events || []).map(e => `<div class="ev" style="left:${pct(e)}%"></div>`).join('');
+      rows += `<div class="row ${r.selected ? 'sel' : ''}"><div class="lbl"><span class="nm">${r.name}</span><span class="ns">${r.ns}</span></div>
+        <div class="track">${grid}${bars}${evs}</div></div>`;
+    });
+  });
+
+  const d = DETAIL;
+  const sel = TIMELINE_ROWS.find(r => r.selected);
+  const mini = sel.segs.map(([a, b, s]) => `<div style="flex:${b - a};background:${statusColor(s)}"></div>`).join('');
+  const detail = `<aside class="detail">
+    <div class="d-head">
+      <div class="d-top">${icon('layers', 13)} ${d.kind} <span style="color:var(--border-strong)">·</span> ${d.ns}
+        <span class="acts"><span class="ib">${icon('copy', 14)}</span><span class="ib">${icon('external', 14)}</span><span class="ib">${icon('x', 15)}</span></span></div>
+      <div class="d-name">${d.name}</div>
+      <span class="pill ok"><i></i>Ready</span>
+    </div>
+    <div class="tabs"><span class="on">Overview</span><span>Events<em>14</em></span><span>Changes<em>6</em></span><span>YAML</span></div>
+    <div class="d-body">
+      <div class="sec"><h4>Status over window <span>06:10 – 06:50</span></h4><div class="mini">${mini}</div>
+        <div class="mini-ax"><span>06:10</span><span>06:30</span><span>06:50</span></div></div>
+      <div class="sec"><dl class="kv">${d.meta.map(([k, v]) => `<dt>${k}</dt><dd>${k === 'Owner' ? `<a>${v}</a>` : v}</dd>`).join('')}</dl></div>
+      <div class="sec"><h4>Recent events <span>View all</span></h4>
+        ${d.events.slice(0, 3).map(e => `<div class="evt"><span class="t">${e.t}</span><div><div class="r"><i style="background:${e.type === 'Warning' ? 'var(--warn)' : 'var(--text-3)'}"></i>${e.reason}</div><div class="m">${e.msg}</div></div></div>`).join('')}
+      </div>
+      <div class="sec"><h4>Last change <span>06:36:24</span></h4>
+        <div class="diff">${d.diff.slice(4).map(([s, l]) => `<div class="${s === '+' ? 'add' : s === '-' ? 'del' : ''}">${s} ${l.trimStart().replace(/^/, '  ')}</div>`).join('')}</div></div>
+    </div>
+  </aside>`;
+
+  return topbar('Timeline', query, right) + `
+    <div class="body">
+      <section class="tl">
+        <div class="tl-head"><div class="lbl">${icon('sliders', 12)} Group by kind ${icon('chevron', 12)}</div>
+          <div class="axis">${TL_TICKS.map(t => `<span style="left:${pct(t)}%">${tlLabel(t)}</span>`).join('')}</div></div>
+        <div class="tl-rows">${rows}
+          <div style="position:absolute;top:0;bottom:0;left:300px;right:0"><div class="track" style="position:absolute;inset:0">
+            <div class="cursor" style="left:${pct(26.4)}%"></div></div></div>
+        </div>
+      </section>
+      ${detail}
+    </div>
+    <footer class="statusbar"><span class="s">16 resources</span><span class="s"><i style="background:var(--err)"></i>5 failing</span><span class="s"><i style="background:var(--warn)"></i>3 degraded</span><span class="s">247 events</span><span class="end">Updated 4s ago</span></footer>`;
+}
+
+function graphView() {
+  const query = `<div class="query">${icon('search', 14)}${tok('ns', 'external-secrets')}${tok('kind', 'Pod +2')}<span class="ph">Find resource…</span><span class="kbd">⌘K</span></div>`;
+  const right = `<button class="btn">${icon('clock', 14)} now − 16h ${icon('chevron', 13)}</button>
+    <div class="seg"><button style="color:var(--text-3)">Lookback</button><button>1h</button><button class="on">6h</button><button>24h</button></div>`;
+
+  const W = 1060, H = 680, NW = 176, NH = 42;
+  const byId = Object.fromEntries(GRAPH_NODES.map(n => [n.id, n]));
+  const trunc = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
+  const edges = GRAPH_EDGES.map(([a, b, p]) => {
+    const A = byId[a], B = byId[b];
+    const x1 = A.x + NW / 2, x2 = B.x - NW / 2 - (p ? 3 : 0), mx = (x1 + x2) / 2;
+    return `<path d="M${x1} ${A.y} C${mx} ${A.y} ${mx} ${B.y} ${x2} ${B.y}" fill="none" stroke="${p ? 'var(--accent)' : '#2a2d32'}" stroke-width="${p ? 1.75 : 1}" ${p ? 'marker-end="url(#arr)"' : ''} />`;
+  }).join('');
+  const nodes = GRAPH_NODES.map(n => {
+    const dim = !n.path, c = statusColor(n.status);
+    const bw = n.badge ? n.badge.length * 6 + 10 : 0;
+    return `<g transform="translate(${n.x - NW / 2},${n.y - NH / 2})">
+      <rect width="${NW}" height="${NH}" rx="8" fill="${dim ? '#121315' : '#18191c'}" stroke="${n.id === 'hr' ? 'var(--accent)' : dim ? '#202226' : '#34373d'}" stroke-width="${n.id === 'hr' ? 1.5 : 1}"/>
+      <circle cx="14" cy="${NH / 2}" r="3.5" fill="${c}" opacity="${dim ? .55 : 1}"/>
+      <text x="26" y="17" font-size="10" fill="${dim ? '#4f535a' : '#7a7e86'}" font-family="Inter">${n.kind}</text>
+      <text x="26" y="31" font-size="11.5" fill="${dim ? '#7d828a' : '#e6e7e9'}" font-family="Inter" font-weight="500">${trunc(n.name, n.badge ? 20 : 24)}</text>
+      ${n.badge ? `<rect x="${NW - bw - 8}" y="${NH / 2 - 8}" width="${bw}" height="16" rx="4" fill="${n.status === 'err' ? 'rgba(229,83,75,.16)' : 'rgba(224,162,58,.16)'}"/><text x="${NW - 8 - bw / 2}" y="${NH / 2 + 3.5}" font-size="10" font-weight="600" text-anchor="middle" fill="${n.status === 'err' ? '#f08c86' : '#eabd6c'}" font-family="Inter">${n.badge}</text>` : ''}
+    </g>`;
+  }).join('');
+  const svg = `<svg class="g" viewBox="-30 0 ${W + 60} ${H}" preserveAspectRatio="xMidYMid meet">
+    <defs><marker id="arr" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--accent)"/></marker></defs>
+    ${edges}${nodes}</svg>`;
+
+  const paths = CAUSAL_PATHS.map((p, i) => `<div class="path ${i === 0 ? 'on' : ''}">
+      <div class="ln1"><span class="rank">#${p.rank}</span><span class="conf"><span class="meter"><div style="width:${p.confidence}%"></div></span>${p.confidence}%</span>
+        <span class="sev"><i style="background:${p.severity === 'critical' ? 'var(--err)' : 'var(--warn)'}"></i>${p.severity}</span></div>
+      <div class="root">${p.root}</div>
+      <div class="chain">${p.chain.map(c => `<span>${c}</span>`).join(icon('chevronRight', 12))}</div>
+      ${i === 0 ? `<div class="sum">${p.summary}</div><div class="tags">${p.tags.map(t => `<span>${t}</span>`).join('')}</div>` : ''}
+    </div>`).join('');
+
+  return topbar('Graph', query, right) + `
+    <div class="body">
+      <section class="canvas">${svg}
+        <div class="zoom"><span>${icon('plus', 15)}</span><span>${icon('minus', 15)}</span><span>${icon('maximize', 14)}</span></div>
+        <div class="legend"><span><i style="background:var(--ok)"></i>Healthy</span><span><i style="background:var(--warn)"></i>Degraded</span><span><i style="background:var(--err)"></i>Failing</span><span><i style="background:var(--accent)"></i>Causal path</span></div>
+      </section>
+      <aside class="paths">
+        <div class="p-head"><h3>Causal paths <span>3 candidates</span></h3><p>Ranked root-cause candidates for the selected window</p></div>
+        ${paths}
+      </aside>
+    </div>
+    <footer class="statusbar"><span class="s">24 resources</span><span class="s">47 relationships</span><span class="s"><i style="background:var(--err)"></i>150 anomalies</span><span class="end">Snapshot 2026-10-15 06:50 · query 612 ms</span></footer>`;
+}
+
+function settingsView() {
+  const nav = [['sliders', 'General', true], ['clock', 'Time & date'], ['filter', 'Default filters'], ['database', 'Data']];
+  return topbar('Settings', '', `<span style="color:var(--text-3);font-size:12px">Stored in this browser</span>`) + `
+    <div class="body settings">
+      <nav class="s-nav">${nav.map(([i, l, on]) => `<a class="${on ? 'on' : ''}">${icon(i, 15)}${l}</a>`).join('')}</nav>
+      <div class="s-main"><div class="s-wrap">
+        <div class="s-group">
+          <h2>Appearance</h2><p class="sub">How Spectre looks on this device.</p>
+          <div class="srow"><div class="l"><b>Theme</b><span>Dark is the default; light is available for bright rooms.</span></div>
+            <div class="seg"><button class="on">${icon('moon', 13)} Dark</button><button>${icon('sun', 13)} Light</button><button>${icon('monitor', 13)} System</button></div></div>
+          <div class="srow"><div class="l"><b>Compact rows</b><span>Reduce row height on the timeline for dense overviews.</span></div><div class="switch"></div></div>
+          <div class="srow"><div class="l"><b>Time format</b><span>Example: 14:30:00</span></div>
+            <div class="seg"><button class="on">24-hour</button><button>12-hour</button></div></div>
+        </div>
+        <div class="s-group">
+          <h2>Default filters</h2><p class="sub">Applied when you open the Timeline or Graph. Changing them resets your current filters.</p>
+          <div class="srow" style="display:block"><div style="display:flex;align-items:center"><div class="l"><b>Resource kinds</b><span>${DEFAULT_KINDS.length} of ${RESOURCE_KINDS.length} selected</span></div>
+            <span class="linkbtn">Select all</span><span class="linkbtn" style="margin-left:14px">Reset</span></div>
+            <div class="chips">${RESOURCE_KINDS.map(k => DEFAULT_KINDS.includes(k) ? `<span class="chip on">${icon('check', 12, 2.2)}${k}</span>` : `<span class="chip">${k}</span>`).join('')}</div></div>
+          <div class="srow"><div class="l"><b>Hide inactive ReplicaSets</b><span>Hide ReplicaSets with spec.replicas = 0 in the Graph view.</span></div><div class="switch on"></div></div>
+        </div>
+        <div class="s-group">
+          <h2>Export data</h2><p class="sub">Download timeline data for offline analysis or backup.</p>
+          <div class="grid2">
+            <div class="field"><label>From</label><div class="input">${icon('calendar', 14)}1d ago</div></div>
+            <div class="field"><label>Until</label><div class="input">${icon('calendar', 14)}now</div></div>
+            <div class="field"><label>Cluster ID <span style="color:var(--text-3)">optional</span></label><div class="input ph">e.g. production</div></div>
+            <div class="field"><label>Instance ID <span style="color:var(--text-3)">optional</span></label><div class="input ph">e.g. instance-1</div></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:16px"><span class="btn primary">${icon('download', 14, 2)} Download export</span><span class="btn">${icon('upload', 14)} Import…</span></div>
+        </div>
+      </div></div>
+    </div>`;
+}
+
+document.getElementById('main').innerHTML = view === 'graph' ? graphView() : view === 'settings' ? settingsView() : timelineView();
+</script>
+</body>
+</html>
