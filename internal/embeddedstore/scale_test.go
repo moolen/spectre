@@ -15,6 +15,8 @@ package embeddedstore
 //	SPECTRE_SCALE_LIVE_EVENTS  events pushed one-by-one through ProcessEvent after load (default 5000)
 //	SPECTRE_SCALE_DIR          data dir (default t.TempDir())
 //	SPECTRE_SCALE_OUT          write a JSON report here
+//	SPECTRE_SCALE_CKPT_TAIL_EVENTS  override checkpoint tail event budget (bytes budget scales with it)
+//	SPECTRE_SCALE_NO_COMPACTION     disable auto-compaction
 //	SPECTRE_SCALE_HEAPPROFILE  write a heap profile after load
 
 import (
@@ -131,11 +133,17 @@ func TestTimelineScale(t *testing.T) {
 	// Production defaults: chart values (15m checkpoint interval, retentionDays 0) on top
 	// of the backend defaults for everything else.
 	reg := prometheus.NewRegistry()
-	backend, err := Open(Config{
+	cfg := Config{
 		DataDir:            dataDir,
 		CheckpointInterval: 15 * time.Minute,
 		MetricsRegisterer:  reg,
-	})
+	}
+	if v := os.Getenv("SPECTRE_SCALE_CKPT_TAIL_EVENTS"); v != "" {
+		cfg.CheckpointMaxTailEvents = mustAtoi(t, v)
+		cfg.CheckpointMaxTailBytes = int64(cfg.CheckpointMaxTailEvents) * 16 << 10
+	}
+	cfg.DisableAutoCompaction = os.Getenv("SPECTRE_SCALE_NO_COMPACTION") != ""
+	backend, err := Open(cfg)
 	require.NoError(t, err)
 	engine := backend.engine
 	require.NoError(t, engine.Start(context.Background()))
