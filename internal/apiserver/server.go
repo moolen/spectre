@@ -99,7 +99,7 @@ func NewWithStorageGraphAndPipeline(
 			RefreshTTL:  nsGraphCacheConfig.RefreshTTL,
 			MaxMemoryMB: nsGraphCacheConfig.MaxMemoryMB,
 		}
-		s.nsGraphCache = namespacegraph.NewCache(cacheConfig, analyzer, s.metadataCache, s.logger)
+		s.nsGraphCache = namespacegraph.NewCache(cacheConfig, analyzer, s.logger)
 		s.logger.Info(
 			"Namespace graph cache created with refresh TTL %v, max memory %dMB (will initialize on server start)",
 			nsGraphCacheConfig.RefreshTTL,

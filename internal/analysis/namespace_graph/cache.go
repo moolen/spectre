@@ -5,50 +5,59 @@ import (
 	"time"
 
 	"github.com/moolen/spectre/internal/logging"
-	"github.com/moolen/spectre/internal/models"
 )
 
-// MetadataProvider interface for getting namespace list from metadata cache
-type MetadataProvider interface {
-	Get() (*models.MetadataResponse, error)
-}
-
 // CacheInvalidator interface for event-driven cache invalidation
-// Implemented by Cache to allow the NamespaceChangeDetector to mark namespaces as stale
 type CacheInvalidator interface {
-	// InvalidateNamespaces marks the given namespaces as stale
-	// The cache will recompute these on next request
+	// InvalidateNamespaces drops the cached responses of the given namespaces
 	InvalidateNamespaces(namespaces []string)
 
-	// InvalidateAll marks all cached entries as stale
-	// Used for cluster-scoped resource changes that may affect all namespaces
+	// InvalidateAll drops every cached response
 	InvalidateAll()
 }
 
 // CacheConfig contains configuration for the namespace graph cache
 type CacheConfig struct {
-	// RefreshTTL is how long cached entries are valid before periodic refresh kicks in
-	// With event-driven invalidation, this can be much longer (default 5 minutes)
-	// Event-driven invalidation will mark namespaces dirty when changes occur
+	// RefreshTTL is how long a cached response is served. Requests for "now" are
+	// bucketed to TimestampBucketSize, so a live view is at most this much older than
+	// a freshly computed one.
 	RefreshTTL time.Duration
 
 	// MaxMemoryMB is the maximum memory to use for cache (default 256MB)
 	MaxMemoryMB int64
-
-	// PeriodicSyncPeriod is how often to sync with metadata for namespace discovery
-	// This is independent of RefreshTTL and handles new/deleted namespace detection
-	// Default: 5 minutes (same as RefreshTTL)
-	PeriodicSyncPeriod time.Duration
 }
 
 // DefaultCacheConfig returns the default cache configuration
-// With event-driven invalidation enabled, the default TTL is much longer
-// since cache freshness is maintained by the NamespaceChangeDetector
 func DefaultCacheConfig() CacheConfig {
 	return CacheConfig{
-		RefreshTTL:         5 * time.Minute, // Was 20s - now event-driven handles freshness
-		MaxMemoryMB:        256,
-		PeriodicSyncPeriod: 5 * time.Minute,
+		RefreshTTL:  2 * time.Minute,
+		MaxMemoryMB: 256,
+	}
+}
+
+// cacheKey identifies a request. Inputs are normalized by PrepareAnalyzeInput first, so
+// requests for "now" within one timestamp bucket share a key.
+type cacheKey struct {
+	namespace          string
+	timestamp          int64
+	includeAnomalies   bool
+	includeCausalPaths bool
+	lookback           time.Duration
+	maxDepth           int
+	limit              int
+	cursor             string
+}
+
+func newCacheKey(input AnalyzeInput) cacheKey {
+	return cacheKey{
+		namespace:          input.Namespace,
+		timestamp:          input.Timestamp,
+		includeAnomalies:   input.IncludeAnomalies,
+		includeCausalPaths: input.IncludeCausalPaths,
+		lookback:           input.Lookback,
+		maxDepth:           input.MaxDepth,
+		limit:              input.Limit,
+		cursor:             input.Cursor,
 	}
 }
 
@@ -60,19 +69,17 @@ type CachedEntry struct {
 	UpdatedAt time.Time
 }
 
-// Cache provides fast in-memory access to namespace graph responses
-// It caches one "view" per namespace and refreshes in the background
-// Implements CacheInvalidator for event-driven invalidation
+// Cache keeps recent namespace graph responses, keyed by the full request, so repeated
+// loads of the same view (page reloads, several users) are computed once per TTL.
+// Implements CacheInvalidator for event-driven invalidation.
 type Cache struct {
 	mu         sync.RWMutex
-	cache      map[string]*CachedEntry
-	dirtySet   map[string]bool // Namespaces marked for recomputation by event-driven invalidation
+	cache      map[cacheKey]*CachedEntry
 	usedMemory int64
 
-	config        CacheConfig
-	analyzer      *Analyzer
-	metadataCache MetadataProvider // For discovering namespaces to pre-warm
-	logger        *logging.Logger
+	config   CacheConfig
+	analyzer *Analyzer
+	logger   *logging.Logger
 
 	stopCh chan struct{}
 	wg     sync.WaitGroup

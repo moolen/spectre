@@ -164,7 +164,7 @@ func init() {
 	serverCmd.Flags().BoolVar(&namespaceGraphCacheEnabled, "namespace-graph-cache-enabled", true,
 		"Enable namespace graph caching for fast responses (default: true)")
 	serverCmd.Flags().IntVar(&namespaceGraphCacheRefreshSeconds, "namespace-graph-cache-refresh-seconds", 120,
-		"Namespace graph cache refresh period in seconds (default: 120)")
+		"How long a cached namespace graph response is reused, in seconds (default: 120)")
 	serverCmd.Flags().IntVar(&namespaceGraphCacheMemoryMB, "namespace-graph-cache-memory-mb", 256,
 		"Maximum memory for namespace graph cache in MB (default: 256)")
 
