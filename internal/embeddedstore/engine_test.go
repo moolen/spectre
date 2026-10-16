@@ -309,11 +309,13 @@ func TestEngine_StartPeriodicCheckpointFlushesAndPersistsRestartableState(t *tes
 	}))
 
 	rootDir := embeddedRootDir(dir)
+	// Poll the engine's manifest rather than the file: loadOrCreateManifest reconciles
+	// checkpoint directories into the manifest and writes it back, which would race with
+	// a checkpoint that is between writing its directory and publishing it.
 	require.Eventually(t, func() bool {
-		manifest, err := loadOrCreateManifest(rootDir)
-		if err != nil {
-			return false
-		}
+		engine.mu.Lock()
+		manifest := engine.manifest
+		engine.mu.Unlock()
 		if len(manifest.Checkpoints) == 0 {
 			return false
 		}
