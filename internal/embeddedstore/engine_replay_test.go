@@ -364,14 +364,14 @@ func TestEngine_OpenRepairFromLegacyManifestCreatesTailAtRecoveredHighWaterMark(
 		require.NoError(t, reopened.Close())
 	})
 
-	require.Equal(t, uint64(2), reopened.manifest.ActiveTail.BaseHighWaterMark)
-	require.Equal(t, uint64(2), reopened.manifest.ActiveTail.LastHighWaterMark)
+	require.Equal(t, uint64(2), lockedActiveTail(reopened).BaseHighWaterMark)
+	require.Equal(t, uint64(2), lockedActiveTail(reopened).LastHighWaterMark)
 
 	newEvent := testReplayEvent("legacy-new", 3)
 	newEvent.Resource.UID = checkpointEvent.Resource.UID
 	newEvent.Resource.Name = checkpointEvent.Resource.Name
 	require.NoError(t, reopened.ProcessBatch(context.Background(), []models.Event{newEvent}))
-	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.LastHighWaterMark)
+	require.Equal(t, uint64(3), lockedActiveTail(reopened).LastHighWaterMark)
 }
 
 func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {
@@ -525,4 +525,12 @@ func writeReplayTestSegment(t *testing.T) *segmentReader {
 	reader, err := openSegmentReader(rootDir, segment)
 	require.NoError(t, err)
 	return reader
+}
+
+// lockedActiveTail reads the active tail under the engine lock; a background
+// startup migration may publish a new manifest concurrently.
+func lockedActiveTail(engine *Engine) TailJournalMeta {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	return engine.manifest.ActiveTail
 }
