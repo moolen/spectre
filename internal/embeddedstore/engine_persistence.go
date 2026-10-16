@@ -55,7 +55,7 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 	}()
 
 	segmentID := newSegmentID(e.nextHighWaterMark)
-	meta, err := writeSegment(e.rootDir, segmentID, batch.Events)
+	meta, locations, err := writeSegmentLocated(e.rootDir, segmentID, batch.Events)
 	if err != nil {
 		return fmt.Errorf("flush embedded engine: write segment: %w", err)
 	}
@@ -79,6 +79,7 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 
 	e.manifest = updatedManifest
 	e.segmentReaders = append(e.segmentReaders, reader)
+	e.projection.AttachSegmentLocations(segmentID, locations)
 	if reader.MayContainKind("Event") {
 		if warmErr := reader.ensureAssociatedIndexLoaded(); warmErr != nil && e.logger != nil {
 			e.logger.WarnWithFields(
@@ -90,34 +91,36 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 	}
 	e.refreshQueryPlanner()
 	e.metrics.SetActiveSegments(len(e.segmentReaders))
+	e.scheduleCompactionLocked()
 	return nil
 }
 
 func (e *Engine) shouldFlushHotBySizeLocked() bool {
+	if e.config.HotMaxEvents > 0 && e.hot.Len() >= e.config.HotMaxEvents {
+		return true
+	}
 	if e.config.SegmentTargetBytes <= 0 {
 		return false
 	}
-
-	batch := e.hot.ExtractFlushBatch(0)
-	if len(batch.Events) == 0 {
-		return false
-	}
-
-	return estimatedEventsSizeBytes(batch.Events) >= e.config.SegmentTargetBytes
+	return e.hot.SizeBytes() >= e.config.SegmentTargetBytes
 }
 
 func estimatedEventsSizeBytes(events []models.Event) int64 {
 	var total int64
 	for i := range events {
-		// Estimate serialized footprint; exact framing size is unnecessary for threshold triggering.
-		total += int64(len(events[i].ID) + len(events[i].Type))
-		total += int64(len(events[i].Resource.UID) + len(events[i].Resource.Namespace) + len(events[i].Resource.Kind))
-		total += int64(len(events[i].Resource.Name) + len(events[i].Resource.Group) + len(events[i].Resource.Version))
-		total += int64(len(events[i].Data))
-		total += 32
+		total += estimatedEventSizeBytes(&events[i])
 	}
-
 	return total
+}
+
+// estimatedEventSizeBytes approximates an event's serialized footprint; exact framing
+// size is unnecessary for threshold triggering.
+func estimatedEventSizeBytes(event *models.Event) int64 {
+	total := int64(len(event.ID) + len(event.Type))
+	total += int64(len(event.Resource.UID) + len(event.Resource.Namespace) + len(event.Resource.Kind))
+	total += int64(len(event.Resource.Name) + len(event.Resource.Group) + len(event.Resource.Version))
+	total += int64(len(event.Data))
+	return total + 32
 }
 
 func (e *Engine) logAutoFlushError(message string, err error) {
@@ -162,6 +165,13 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 		return nil
 	}
 
+	// Flush first so every version at or below the checkpoint's high-water mark is in a
+	// segment: the checkpoint then stores references instead of payloads, and nothing
+	// that only lived in the hot store is lost when the tail rotates.
+	if err := e.flushLocked(ctx); err != nil {
+		return fmt.Errorf("checkpoint embedded engine: flush: %w", err)
+	}
+
 	start := time.Now()
 	defer func() {
 		e.metrics.RecordCheckpoint(time.Since(start), err)
@@ -202,6 +212,9 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 		}
 		e.manifest = updatedManifest
 	}
+	if err := e.removeRetiredSegmentsLocked(); err != nil {
+		return fmt.Errorf("checkpoint embedded engine: remove retired segments: %w", err)
+	}
 	if err := e.applyRetentionLocked(ctx, retentionCutoffTimestamp); err != nil {
 		return fmt.Errorf("checkpoint embedded engine: apply retention: %w", err)
 	}
@@ -209,11 +222,7 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 		return fmt.Errorf("checkpoint embedded engine: prune checkpoint history: %w", err)
 	}
 	e.logStaleTailCleanupWarning(pruneStaleTailJournals(e.rootDir, e.manifest.ActiveTail.ID))
-	if e.shouldAutoCompactLocked() {
-		if compactErr := e.compactLocked(ctx); compactErr != nil {
-			e.logAutoFlushError("checkpoint-triggered compaction failed", compactErr)
-		}
-	}
+	e.scheduleCompactionLocked()
 
 	e.setActiveTailMetricsLocked()
 	return nil

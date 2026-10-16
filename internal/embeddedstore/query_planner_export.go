@@ -40,15 +40,14 @@ func (p *QueryPlanner) exportTimeRange(
 		if err := ctx.Err(); err != nil {
 			return nil, stats, err
 		}
-		events, err := reader.ScanTimeRange(ctx, startTimeNs, endTimeNs)
+		events, err := reader.scanTimeRangeLazy(ctx, startTimeNs, endTimeNs, func(event *models.Event) bool {
+			return filters.Matches(event.Resource)
+		}, true)
 		if err != nil {
 			return nil, stats, fmt.Errorf("scan segment %q by time: %w", reader.ID(), err)
 		}
 		for i := range events {
-			if !filters.Matches(events[i].Resource) {
-				continue
-			}
-			exported = append(exported, cloneEvent(events[i]))
+			exported = append(exported, events[i].event)
 		}
 	}
 

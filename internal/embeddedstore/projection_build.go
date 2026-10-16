@@ -196,20 +196,9 @@ func (p *Projection) appendResourceVersion(record *resourceRecord, event models.
 		return
 	}
 
-	var previousData []byte
-	if len(record.versions) > 0 {
-		previousData = record.versions[len(record.versions)-1].data
-	}
-
-	version := resourceVersion{
-		eventID:   event.ID,
-		timestamp: event.Timestamp,
-		eventType: event.Type,
-		data:      cloneBytes(event.Data),
-	}
-	version.identity = buildResourceIdentity(event, parseObject(event.Data), record.versions, previousData)
-	version.changeEvent = buildChangeEventInfo(event, version.data, previousData)
+	version, state := buildResourceVersion(event, record.versions, record.latestChangeState())
 	record.versions = append(record.versions, version)
+	record.latest = state
 }
 
 func canAppendResourceVersion(record *resourceRecord, event models.Event) bool {
@@ -371,27 +360,15 @@ func (p *Projection) rebuildRecordFromEvents(uid string, events []models.Event) 
 	}
 
 	versions := make([]resourceVersion, 0, len(events))
+	state := recordChangeState{known: true}
 	for i := range events {
-		event := events[i]
-		object := parseObject(event.Data)
-
-		var previousData []byte
-		if len(versions) > 0 {
-			previousData = versions[len(versions)-1].data
-		}
-
-		version := resourceVersion{
-			eventID:   event.ID,
-			timestamp: event.Timestamp,
-			eventType: event.Type,
-			data:      cloneBytes(event.Data),
-		}
-		version.identity = buildResourceIdentity(event, object, versions, previousData)
-		version.changeEvent = buildChangeEventInfo(event, version.data, previousData)
+		var version resourceVersion
+		version, state = buildResourceVersion(events[i], versions, state)
 		versions = append(versions, version)
 	}
 
 	record.versions = versions
+	record.latest = state
 }
 
 func resourceVersionEvent(version resourceVersion) models.Event {
@@ -407,7 +384,7 @@ func resourceVersionEvent(version resourceVersion) models.Event {
 			Name:      version.identity.Name,
 			UID:       version.identity.UID,
 		},
-		Data: cloneBytes(version.data),
+		Data: versionPayloadCopy(&version),
 	}
 }
 

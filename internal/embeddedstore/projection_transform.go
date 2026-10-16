@@ -2,10 +2,15 @@ package embeddedstore
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
+	"strings"
 	"time"
+
+	"github.com/cespare/xxhash/v2"
 
 	"github.com/moolen/spectre/internal/analysis"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
@@ -14,18 +19,71 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
-func buildResourceIdentity(event models.Event, object map[string]any, priorVersions []resourceVersion, previousData []byte) graph.ResourceIdentity {
-	labels := extractLabels(object)
-	if len(labels) == 0 && len(previousData) > 0 {
-		labels = extractLabels(parseObject(previousData))
+// recordChangeState summarises the latest version's object so the next version can be
+// classified without re-reading or re-parsing the previous payload.
+type recordChangeState struct {
+	known       bool
+	hasData     bool
+	fingerprint changeFingerprint
+	labels      map[string]string
+}
+
+// changeFingerprint holds order-independent hashes of the top-level fields that drive
+// change classification. Two objects with equal fingerprints are treated as equal for
+// those fields, matching reflect.DeepEqual on the parsed JSON up to hash collisions.
+type changeFingerprint struct {
+	valid        bool
+	spec         uint64
+	status       uint64
+	kindSpecific uint64
+}
+
+func newRecordChangeState(data []byte, object map[string]any) recordChangeState {
+	if len(data) == 0 {
+		return recordChangeState{known: true}
+	}
+	return recordChangeState{
+		known:       true,
+		hasData:     true,
+		fingerprint: computeChangeFingerprint(object),
+		labels:      extractLabels(object),
+	}
+}
+
+// buildResourceVersion derives a version (identity and change info) from an event and the
+// change state of the version before it. It parses the payload exactly once.
+func buildResourceVersion(event models.Event, priorVersions []resourceVersion, previous recordChangeState) (resourceVersion, recordChangeState) {
+	object := parseObject(event.Data)
+	current := newRecordChangeState(event.Data, object)
+
+	labels := current.labels
+	if len(labels) == 0 && previous.hasData {
+		labels = previous.labels
+	} else if previous.hasData && stringMapsEqual(labels, previous.labels) {
+		// Share the previous map: identities never mutate labels in place.
+		labels = previous.labels
+		current.labels = previous.labels
 	}
 
+	version := resourceVersion{
+		eventID:   event.ID,
+		timestamp: event.Timestamp,
+		eventType: event.Type,
+		data:      cloneBytes(event.Data),
+		dataHash:  payloadHash(event.Data),
+	}
+	version.identity = buildResourceIdentityWithLabels(event, labels, priorVersions)
+	version.changeEvent = buildChangeEventInfoFromObject(event, object, previous, current)
+	return version, current
+}
+
+func buildResourceIdentityWithLabels(event models.Event, labels map[string]string, priorVersions []resourceVersion) graph.ResourceIdentity {
 	firstSeen := event.Timestamp
 	if len(priorVersions) > 0 {
 		firstSeen = priorVersions[0].timestamp
 	}
 
-	return graph.ResourceIdentity{
+	identity := graph.ResourceIdentity{
 		UID:       event.Resource.UID,
 		Kind:      event.Resource.Kind,
 		APIGroup:  event.Resource.Group,
@@ -36,23 +94,38 @@ func buildResourceIdentity(event models.Event, object map[string]any, priorVersi
 		FirstSeen: firstSeen,
 		LastSeen:  event.Timestamp,
 		Deleted:   event.Type == models.EventTypeDelete,
-		DeletedAt: func() int64 {
-			if event.Type == models.EventTypeDelete {
-				return event.Timestamp
-			}
-			return 0
-		}(),
 	}
+	if event.Type == models.EventTypeDelete {
+		identity.DeletedAt = event.Timestamp
+	}
+	if len(priorVersions) > 0 {
+		// Reuse the previous version's strings so long histories share one copy.
+		prior := priorVersions[len(priorVersions)-1].identity
+		identity.UID = internEqual(identity.UID, prior.UID)
+		identity.Kind = internEqual(identity.Kind, prior.Kind)
+		identity.APIGroup = internEqual(identity.APIGroup, prior.APIGroup)
+		identity.Version = internEqual(identity.Version, prior.Version)
+		identity.Namespace = internEqual(identity.Namespace, prior.Namespace)
+		identity.Name = internEqual(identity.Name, prior.Name)
+	}
+	return identity
 }
 
-func buildChangeEventInfo(event models.Event, data, previousData []byte) analysisstore.ChangeEventInfo {
+func internEqual(value, prior string) string {
+	if value == prior {
+		return prior
+	}
+	return value
+}
+
+func buildChangeEventInfoFromObject(event models.Event, object map[string]any, previous, current recordChangeState) analysisstore.ChangeEventInfo {
 	var parsed *analyzerpkg.ResourceData
-	if len(data) > 0 {
-		parsed, _ = analyzerpkg.ParseResourceData(data)
+	if object != nil {
+		parsed = analyzerpkg.ResourceDataFromObject(object)
 	}
 
 	status := analyzerpkg.InferStatusFromParsedData(event.Resource.Kind, parsed, string(event.Type))
-	configChanged, statusChanged := detectChangeKinds(previousData, data)
+	configChanged, statusChanged := changeKindsFromStates(previous, current)
 
 	return analysisstore.ChangeEventInfo{
 		EventID:       event.ID,
@@ -61,12 +134,151 @@ func buildChangeEventInfo(event models.Event, data, previousData []byte) analysi
 		Status:        status,
 		ConfigChanged: configChanged,
 		StatusChanged: statusChanged,
-		Description:   fmt.Sprintf("%s event", event.Type),
-		Data:          nil,
-		FullSnapshot:  nil,
-		Significance:  nil,
-		Diff:          nil,
+		Description:   changeDescription(event.Type),
 	}
+}
+
+func changeDescription(eventType models.EventType) string {
+	switch eventType {
+	case models.EventTypeCreate:
+		return "CREATE event"
+	case models.EventTypeUpdate:
+		return "UPDATE event"
+	case models.EventTypeDelete:
+		return "DELETE event"
+	default:
+		return fmt.Sprintf("%s event", eventType)
+	}
+}
+
+// changeKindsFromStates reports whether spec-like and status-like top-level fields differ
+// between two consecutive versions. A version without a payload (or with an unparsable
+// one) never counts as a change.
+func changeKindsFromStates(previous, current recordChangeState) (bool, bool) {
+	if !previous.hasData || !current.hasData {
+		return false, false
+	}
+	prev, cur := previous.fingerprint, current.fingerprint
+	if !prev.valid || !cur.valid {
+		return false, false
+	}
+	configChanged := prev.spec != cur.spec || prev.kindSpecific != cur.kindSpecific
+	statusChanged := prev.status != cur.status
+	return configChanged, statusChanged
+}
+
+func computeChangeFingerprint(object map[string]any) changeFingerprint {
+	if object == nil {
+		return changeFingerprint{}
+	}
+	fp := changeFingerprint{valid: true}
+	specificKeys := kindSpecificConfigKeys(getString(object, "kind"))
+	for key, value := range object {
+		var target *uint64
+		switch {
+		case strings.HasPrefix(key, "spec"):
+			target = &fp.spec
+		case strings.HasPrefix(key, "status"):
+			target = &fp.status
+		default:
+			for _, specific := range specificKeys {
+				if key == specific {
+					target = &fp.kindSpecific
+					break
+				}
+			}
+		}
+		if target == nil {
+			continue
+		}
+		*target += hashKeyedValue(key, value)
+	}
+	return fp
+}
+
+func kindSpecificConfigKeys(kind string) []string {
+	switch kind {
+	case "ConfigMap", "Secret":
+		return []string{"data", "binaryData", "stringData"}
+	case "Role", "ClusterRole":
+		return []string{"rules", "aggregationRule"}
+	case "RoleBinding", "ClusterRoleBinding":
+		return []string{"roleRef", "subjects"}
+	default:
+		return nil
+	}
+}
+
+// hashKeyedValue hashes one map entry. Entries are summed by callers, which keeps the
+// map hash independent of iteration order.
+func hashKeyedValue(key string, value any) uint64 {
+	h := xxhash.New()
+	_, _ = h.WriteString(key)
+	_, _ = h.Write([]byte{0})
+	hashJSONValue(h, value)
+	return mix64(h.Sum64())
+}
+
+func hashJSONValue(h *xxhash.Digest, value any) {
+	var scratch [9]byte
+	switch typed := value.(type) {
+	case nil:
+		_, _ = h.Write([]byte{'n'})
+	case bool:
+		if typed {
+			_, _ = h.Write([]byte{'t'})
+		} else {
+			_, _ = h.Write([]byte{'f'})
+		}
+	case float64:
+		scratch[0] = 'd'
+		binary.LittleEndian.PutUint64(scratch[1:], math.Float64bits(typed))
+		_, _ = h.Write(scratch[:])
+	case string:
+		scratch[0] = 's'
+		binary.LittleEndian.PutUint64(scratch[1:], uint64(len(typed)))
+		_, _ = h.Write(scratch[:])
+		_, _ = h.WriteString(typed)
+	case []any:
+		scratch[0] = 'a'
+		binary.LittleEndian.PutUint64(scratch[1:], uint64(len(typed)))
+		_, _ = h.Write(scratch[:])
+		for i := range typed {
+			hashJSONValue(h, typed[i])
+		}
+	case map[string]any:
+		var sum uint64
+		for key, item := range typed {
+			sum += hashKeyedValue(key, item)
+		}
+		scratch[0] = 'm'
+		binary.LittleEndian.PutUint64(scratch[1:], sum)
+		_, _ = h.Write(scratch[:])
+	default:
+		_, _ = fmt.Fprintf(h, "?%v", typed)
+	}
+}
+
+// mix64 is the splitmix64 finalizer; it spreads entry hashes before they are summed.
+func mix64(x uint64) uint64 {
+	x ^= x >> 30
+	x *= 0xbf58476d1ce4e5b9
+	x ^= x >> 27
+	x *= 0x94d049bb133111eb
+	x ^= x >> 31
+	return x
+}
+
+func stringMapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if other, ok := b[key]; !ok || other != value {
+			return false
+		}
+	}
+	return true
 }
 
 func buildK8sEventInfo(event models.Event) analysisstore.K8sEventInfo {
@@ -247,7 +459,7 @@ func parsedVersionObject(version *resourceVersion) map[string]any {
 		return nil
 	}
 
-	return parseObject(version.data)
+	return parseObject(versionPayload(version))
 }
 
 func timeFromNs(value int64) time.Time {

@@ -19,6 +19,7 @@ func TestCompaction_MergesOldSegmentsAndPreservesQueryResults(t *testing.T) {
 		HotMaxEvents:           128,
 		HotMaxResourceVersions: 16,
 		CompactionMinSegments:  2,
+		DisableAutoCompaction:  true, // compacted explicitly below
 	})
 
 	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-a", 0, 3)))
@@ -50,6 +51,8 @@ func TestCompaction_MergesOldSegmentsAndPreservesQueryResults(t *testing.T) {
 
 	compactedSegmentDir := filepath.Join(engine.rootDir, segmentsDirName, engine.manifest.ActiveSegments[0].ID)
 	require.DirExists(t, compactedSegmentDir)
+	// Replaced segments are removed by the next checkpoint.
+	require.NoError(t, engine.Checkpoint(context.Background()))
 	for _, segmentID := range oldSegmentIDs {
 		_, err := os.Stat(filepath.Join(engine.rootDir, segmentsDirName, segmentID))
 		require.Truef(t, errors.Is(err, os.ErrNotExist), "segment %q should be removed after compaction", segmentID)
@@ -70,7 +73,11 @@ func TestEngine_CheckpointAutoCompactsByDefault(t *testing.T) {
 
 	require.Len(t, engine.manifest.ActiveSegments, 2)
 	require.NoError(t, engine.Checkpoint(context.Background()))
-	require.Len(t, engine.manifest.ActiveSegments, 1)
+	require.Eventually(t, func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		return len(engine.manifest.ActiveSegments) == 1
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestEngine_CheckpointSkipsAutoCompactionWhenDisabled(t *testing.T) {
@@ -213,34 +220,44 @@ func TestEngine_ProcessBatchKeepsAcceptedEventsWhenSizeTriggeredFlushFails(t *te
 	require.Equal(t, events[0].ID, result.Events[0].ID)
 }
 
-func TestCompaction_KeepsUpdatedManifestWhenCleanupSyncFails(t *testing.T) {
+func TestCompaction_DefersRetiredSegmentRemovalUntilCheckpoint(t *testing.T) {
 	engine := newCompactionTestEngine(t, EngineConfig{
 		HotMaxEvents:           128,
 		HotMaxResourceVersions: 16,
 		CompactionMinSegments:  2,
+		DisableAutoCompaction:  true, // compacted explicitly below
 	})
 
 	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-a", 0, 3)))
 	require.NoError(t, engine.Flush(context.Background()))
 	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-b", 100, 3)))
 	require.NoError(t, engine.Flush(context.Background()))
+	oldSegmentIDs := []string{engine.manifest.ActiveSegments[0].ID, engine.manifest.ActiveSegments[1].ID}
 
+	require.NoError(t, engine.Compact(context.Background()))
+	require.Len(t, engine.manifest.ActiveSegments, 1)
+	require.Len(t, engine.manifest.RetiredSegments, 2)
 	segmentsRoot := filepath.Join(engine.rootDir, segmentsDirName)
+	for _, id := range oldSegmentIDs {
+		require.DirExists(t, filepath.Join(segmentsRoot, id), "retired segments stay until the next checkpoint")
+	}
+
 	segmentsSyncCalls := 0
 	restoreSyncPath := setSyncPathFnForTest(func(path string) error {
 		if path == segmentsRoot {
 			segmentsSyncCalls++
-			if segmentsSyncCalls == 2 {
-				return errors.New("sync segments dir: injected failure")
-			}
+			return errors.New("sync segments dir: injected failure")
 		}
 		return syncPathDirect(path)
 	})
-	defer restoreSyncPath()
-
-	err := engine.Compact(context.Background())
-	require.EqualError(t, err, "compact embedded engine: sync segments dir: sync segments dir: injected failure")
-	require.Len(t, engine.manifest.ActiveSegments, 1)
+	err := engine.Checkpoint(context.Background())
+	restoreSyncPath()
+	require.EqualError(t, err, "checkpoint embedded engine: remove retired segments: sync segments dir: sync segments dir: injected failure")
+	require.Empty(t, engine.manifest.RetiredSegments)
+	for _, id := range oldSegmentIDs {
+		_, statErr := os.Stat(filepath.Join(segmentsRoot, id))
+		require.Truef(t, errors.Is(statErr, os.ErrNotExist), "segment %q should be removed after checkpoint", id)
+	}
 
 	require.NoError(t, engine.Checkpoint(context.Background()))
 	require.NoError(t, engine.Close())
@@ -248,6 +265,51 @@ func TestCompaction_KeepsUpdatedManifestWhenCleanupSyncFails(t *testing.T) {
 	reopened, openErr := OpenEngine(EngineConfig{DataDir: filepath.Dir(engine.rootDir), HotMaxEvents: 128, HotMaxResourceVersions: 16})
 	require.NoError(t, openErr)
 	require.NoError(t, reopened.Close())
+}
+
+func TestCompaction_RestartFromOlderCheckpointReadsPayloadsFromReplacement(t *testing.T) {
+	dataDir := t.TempDir()
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                dataDir,
+		HotMaxEvents:           128,
+		HotMaxResourceVersions: 16,
+		CompactionMinSegments:  2,
+		DisableAutoCompaction:  true,
+		CheckpointOnShutdown:   false,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-a", 0, 3)))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.ProcessBatch(context.Background(), makeCompactionTestEvents("seg-b", 100, 3)))
+	require.NoError(t, engine.Checkpoint(context.Background()))
+	require.Len(t, engine.manifest.ActiveSegments, 2)
+
+	require.NoError(t, engine.Compact(context.Background()))
+	require.Len(t, engine.manifest.ActiveSegments, 1)
+	require.NoError(t, engine.Close())
+
+	reopened, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 128, HotMaxResourceVersions: 16, DisableAutoCompaction: true})
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, reopened.Close())
+	}()
+
+	record := reopened.projection.resourcesByUID["pod-1"]
+	require.NotNil(t, record)
+	compacted := reopened.manifest.ActiveSegments[0].ID
+	for i := range record.versions {
+		version := &record.versions[i]
+		require.True(t, version.ref.valid(), "version %s should reference a segment", version.eventID)
+		require.Equal(t, compacted, version.ref.segment.id)
+		require.NotEmpty(t, versionPayload(version))
+	}
+
+	require.NoError(t, reopened.Checkpoint(context.Background()))
+	require.Empty(t, reopened.manifest.RetiredSegments)
+	for i := range record.versions {
+		require.NotEmpty(t, versionPayload(&record.versions[i]))
+	}
 }
 
 func newCompactionTestEngine(t *testing.T, cfg EngineConfig) *Engine {

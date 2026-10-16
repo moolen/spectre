@@ -448,7 +448,7 @@ func replayTestEventIDs(events []models.Event) []string {
 func seedStoreWithCheckpointAndTail(t *testing.T, dataDir string) models.Event {
 	t.Helper()
 
-	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4, DisableAutoCompaction: true}) // abandoned below; no background work
 	require.NoError(t, err)
 
 	checkpointed := testReplayEvent("checkpointed", 1)
@@ -467,7 +467,7 @@ func seedStoreWithCheckpointAndStaleTail(t *testing.T, dataDir string) (models.E
 	t.Helper()
 
 	rootDir := embeddedRootDir(dataDir)
-	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4, DisableAutoCompaction: true}) // abandoned below; no background work
 	require.NoError(t, err)
 
 	checkpointEvent := testReplayEvent("repair-checkpointed", 1)

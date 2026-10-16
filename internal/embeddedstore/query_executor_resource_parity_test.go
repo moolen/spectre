@@ -111,7 +111,7 @@ func TestQueryExecutor_ResourceTimelineRecentWindowParity(t *testing.T) {
 		plannerParityEvent("b-delete", 70, models.EventTypeDelete, deletedInWindow),
 	}))
 
-	resources, pagination, stats, ok, err := engine.QueryExecutor().collectPaginatedRecentWindowResources(
+	resources, pagination, stats, err := engine.QueryExecutor().collectPaginatedResources(
 		context.Background(),
 		50*1e9,
 		80*1e9,
@@ -123,7 +123,6 @@ func TestQueryExecutor_ResourceTimelineRecentWindowParity(t *testing.T) {
 		10,
 	)
 	require.NoError(t, err)
-	require.True(t, ok)
 	require.True(t, stats.projectionUsed)
 	require.NotNil(t, pagination)
 	require.False(t, pagination.HasMore)

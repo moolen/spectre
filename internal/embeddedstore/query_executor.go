@@ -173,7 +173,7 @@ func (qe *QueryExecutor) AppendRecentEventTimelineCache(events []models.Event) {
 func (qe *QueryExecutor) recentEventTimelineEvents(
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
-) ([]models.Event, queryPlanStats, bool) {
+) ([]lazyEvent, queryPlanStats, bool) {
 	if qe == nil || endTimeNs < startTimeNs {
 		return nil, queryPlanStats{}, false
 	}
@@ -184,36 +184,32 @@ func (qe *QueryExecutor) recentEventTimelineEvents(
 	}
 
 	qe.recentEventCacheMu.RLock()
+	defer qe.recentEventCacheMu.RUnlock()
 	horizon := qe.recentEventCacheHorizon
 	coverageStartNs := qe.recentEventCacheCoverageStartNs
 	coverageEndNs := qe.recentEventCacheCoverageEndNs
 	if horizon <= 0 || endTimeNs-startTimeNs > horizon.Nanoseconds() ||
 		coverageEndNs <= 0 || startTimeNs < coverageStartNs || endTimeNs > coverageEndNs {
-		qe.recentEventCacheMu.RUnlock()
 		return nil, queryPlanStats{}, false
 	}
-	cached := cloneEvents(qe.recentEventCache)
-	qe.recentEventCacheMu.RUnlock()
 
-	if len(cached) == 0 {
-		return nil, queryPlanStats{hotUsed: true}, true
-	}
-
-	filtered := make([]models.Event, 0, len(cached))
-	for i := range cached {
-		event := cached[i]
-		if event.Timestamp < startTimeNs || event.Timestamp > endTimeNs {
+	// The cache is time ordered and its events are never mutated in place, so matches
+	// can share their payloads; callers copy what they return.
+	cache := qe.recentEventCache
+	first := sort.Search(len(cache), func(i int) bool {
+		return cache[i].Timestamp >= startTimeNs
+	})
+	var filtered []lazyEvent
+	for i := first; i < len(cache) && cache[i].Timestamp <= endTimeNs; i++ {
+		if !filters.Matches(cache[i].Resource) {
 			continue
 		}
-		if !filters.Matches(event.Resource) {
-			continue
-		}
-		filtered = append(filtered, event)
+		filtered = append(filtered, loadedLazyEvent(cache[i]))
 	}
 	if len(filtered) == 0 {
 		return nil, queryPlanStats{hotUsed: true}, true
 	}
-	return dedupeEventsByID(filtered), queryPlanStats{hotUsed: true}, true
+	return dedupeLazyEventsByID(filtered), queryPlanStats{hotUsed: true}, true
 }
 
 func (qe *QueryExecutor) pruneRecentEventTimelineCacheLocked(cutoffTimestamp int64) {

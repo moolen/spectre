@@ -47,3 +47,18 @@ func (r *resourceRecord) visibleVersionWithinWindow(failureTimestampNs, windowSt
 	}
 	return nil
 }
+
+// latestChangeState returns the change state of the newest version, deriving it from the
+// stored payload when the record was restored without one (older checkpoints).
+func (r *resourceRecord) latestChangeState() recordChangeState {
+	if r == nil || len(r.versions) == 0 {
+		return recordChangeState{known: true}
+	}
+	if r.latest.known {
+		return r.latest
+	}
+	latest := &r.versions[len(r.versions)-1]
+	data := versionPayload(latest)
+	r.latest = newRecordChangeState(data, parseObject(data))
+	return r.latest
+}

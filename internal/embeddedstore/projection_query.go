@@ -47,6 +47,48 @@ func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs
 	return dedupeEventsByID(result)
 }
 
+// resourceRecordHasWindowEvents reports whether resourceRecordTimelineEvents would return
+// anything for the window, without materialising events or reading payloads.
+func resourceRecordHasWindowEvents(record *resourceRecord, startTimeNs, endTimeNs int64) bool {
+	if record == nil || len(record.versions) == 0 || endTimeNs < startTimeNs {
+		return false
+	}
+	versions := record.versions
+	if versions[0].timestamp > endTimeNs {
+		return false
+	}
+	startIdx := sort.Search(len(versions), func(i int) bool {
+		return versions[i].timestamp >= startTimeNs
+	})
+	if startIdx < len(versions) && versions[startIdx].timestamp <= endTimeNs {
+		return true
+	}
+	return startIdx > 0 && versions[startIdx-1].eventType != models.EventTypeDelete
+}
+
+// resourceRecordWindowBounds returns the earliest and latest timestamps of the events
+// resourceRecordTimelineEvents would return, and false when there are none.
+func resourceRecordWindowBounds(record *resourceRecord, startTimeNs, endTimeNs int64) (int64, int64, bool) {
+	if !resourceRecordHasWindowEvents(record, startTimeNs, endTimeNs) {
+		return 0, 0, false
+	}
+	versions := record.versions
+	startIdx := sort.Search(len(versions), func(i int) bool {
+		return versions[i].timestamp >= startTimeNs
+	})
+	endIdx := sort.Search(len(versions), func(i int) bool {
+		return versions[i].timestamp > endTimeNs
+	})
+	first, last := startIdx, endIdx-1
+	if startIdx > 0 && versions[startIdx-1].eventType != models.EventTypeDelete {
+		first = startIdx - 1
+	}
+	if last < first {
+		last = first
+	}
+	return versions[first].timestamp, versions[last].timestamp, true
+}
+
 func resourceRecordCurrentKey(record *resourceRecord) orderedResourceKey {
 	if record == nil || len(record.versions) == 0 {
 		return orderedResourceKey{}

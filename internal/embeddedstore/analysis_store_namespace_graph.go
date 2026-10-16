@@ -174,7 +174,7 @@ func (s *Store) specDiffWithinLookback(uid string, timestampNs, lookbackNs int64
 	startNs := timestampNs - lookbackNs
 	for i := range record.versions {
 		version := &record.versions[i]
-		if version.timestamp > timestampNs || len(version.data) == 0 {
+		if version.timestamp > timestampNs || !versionHasPayload(version) {
 			continue
 		}
 		if latest == nil || version.timestamp > latest.timestamp {
@@ -188,7 +188,7 @@ func (s *Store) specDiffWithinLookback(uid string, timestampNs, lookbackNs int64
 		return ""
 	}
 
-	diffs, err := analysis.ComputeJSONDiff(earliest.data, latest.data)
+	diffs, err := analysis.ComputeJSONDiff(versionPayload(earliest), versionPayload(latest))
 	if err != nil {
 		return ""
 	}

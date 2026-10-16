@@ -18,22 +18,36 @@ const storageFormatVersion = 1
 const manifestFileName = "manifest.json"
 
 type Manifest struct {
-	FormatVersion          int              `json:"format_version"`
-	SegmentIndexGeneration int              `json:"segment_index_generation,omitempty"`
-	ActiveSegments         []SegmentMeta    `json:"active_segments"`
-	ActiveCheckpoint       CheckpointMeta   `json:"active_checkpoint"`
-	ActiveTail             TailJournalMeta  `json:"active_tail"`
-	Checkpoints            []CheckpointMeta `json:"checkpoints"`
-	FlushHighWaterMark     uint64           `json:"flush_high_water_mark"`
+	FormatVersion          int           `json:"format_version"`
+	SegmentIndexGeneration int           `json:"segment_index_generation,omitempty"`
+	ActiveSegments         []SegmentMeta `json:"active_segments"`
+	// PinnedSegments hold payloads of versions older than the retention cutoff that the
+	// projection still needs (each resource's state when the retained window starts).
+	// They are only read through version references, never scanned by time.
+	PinnedSegments []SegmentMeta `json:"pinned_segments,omitempty"`
+	// RetiredSegments were replaced by compaction or retention but may still be
+	// referenced by the active checkpoint. They are deleted once a newer checkpoint is
+	// written; on startup, references into them are moved to their replacements.
+	RetiredSegments    []RetiredSegment `json:"retired_segments,omitempty"`
+	ActiveCheckpoint   CheckpointMeta   `json:"active_checkpoint"`
+	ActiveTail         TailJournalMeta  `json:"active_tail"`
+	Checkpoints        []CheckpointMeta `json:"checkpoints"`
+	FlushHighWaterMark uint64           `json:"flush_high_water_mark"`
 }
 
 type SegmentMeta struct {
 	ID             string              `json:"id"`
 	HighWaterMark  uint64              `json:"high_water_mark"`
+	SizeBytes      int64               `json:"size_bytes,omitempty"`
 	EventCount     int                 `json:"event_count,omitempty"`
 	MinTimestamp   int64               `json:"min_timestamp,omitempty"`
 	MaxTimestamp   int64               `json:"max_timestamp,omitempty"`
 	NamespaceKinds map[string][]string `json:"namespace_kinds,omitempty"`
+}
+
+type RetiredSegment struct {
+	ID         string   `json:"id"`
+	ReplacedBy []string `json:"replaced_by,omitempty"`
 }
 
 type CheckpointMeta struct {
@@ -241,6 +255,7 @@ func normalizeManifest(manifest Manifest) Manifest {
 func (m SegmentMeta) bundleMeta() segmentBundleMeta {
 	return segmentBundleMeta{
 		ID:             m.ID,
+		SizeBytes:      m.SizeBytes,
 		EventCount:     m.EventCount,
 		MinTimestamp:   m.MinTimestamp,
 		MaxTimestamp:   m.MaxTimestamp,
@@ -256,6 +271,7 @@ func segmentMetaFromBundle(meta segmentBundleMeta, highWaterMark uint64) Segment
 	return SegmentMeta{
 		ID:             meta.ID,
 		HighWaterMark:  highWaterMark,
+		SizeBytes:      meta.SizeBytes,
 		EventCount:     meta.EventCount,
 		MinTimestamp:   meta.MinTimestamp,
 		MaxTimestamp:   meta.MaxTimestamp,

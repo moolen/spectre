@@ -320,7 +320,7 @@ func TestEngine_OpenAppliesEmbeddedRetentionAndPreservesCurrentResourceState(t *
 	require.Equal(t, "pod-old", resource.UID)
 }
 
-func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *testing.T) {
+func TestEngine_StartPeriodicCheckpointFlushesAndPersistsRestartableState(t *testing.T) {
 	dir := t.TempDir()
 
 	engine, err := OpenEngine(EngineConfig{
@@ -367,18 +367,20 @@ func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *t
 			manifest.ActiveTail.EventCount == 0
 	}, time.Second, 10*time.Millisecond)
 
+	// Checkpoints flush first, so the hot event is durable in a segment and the
+	// checkpoint references it instead of inlining the payload.
 	manifest, err := loadOrCreateManifest(rootDir)
 	require.NoError(t, err)
-	require.Empty(t, manifest.ActiveSegments)
+	require.Len(t, manifest.ActiveSegments, 1)
 	require.NotEmpty(t, manifest.Checkpoints)
-	require.Equal(t, uint64(0), manifest.FlushHighWaterMark)
+	require.Equal(t, uint64(1), manifest.FlushHighWaterMark)
 	require.Equal(t, uint64(1), latestCheckpointMeta(manifest.Checkpoints).HighWaterMark)
 	require.Equal(t, latestCheckpointMeta(manifest.Checkpoints).HighWaterMark, manifest.ActiveTail.BaseHighWaterMark)
 	require.Zero(t, manifest.ActiveTail.EventCount)
 
 	readers, tail, recoveredHighWaterMark, projection, recoveredHot, mode, replayedTailEvents, err := loadEngineState(rootDir, manifest)
 	require.NoError(t, err)
-	require.Empty(t, readers)
+	require.Len(t, readers, 1)
 	require.Equal(t, startupModeFast, mode)
 	require.Equal(t, 0, replayedTailEvents)
 	require.Equal(t, uint64(1), recoveredHighWaterMark)

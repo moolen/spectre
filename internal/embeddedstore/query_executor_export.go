@@ -95,34 +95,28 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 			return nil, nil, 0, 0, err
 		}
 
+		stats.projectionUsed = true
+		qe.projection.mu.RLock()
 		for _, key := range orderedResources {
 			meta, ok := metaByUID[key.uid]
 			if !ok {
 				continue
 			}
-
-			resourceEvents, resourceStats, resourceErr := qe.resourceEvents(ctx, key.uid, meta, startTimeNs, endTimeNs)
-			stats = stats.merge(resourceStats)
-			if resourceErr != nil {
-				qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, resourceErr)
-				return nil, nil, 0, 0, resourceErr
-			}
-			if len(resourceEvents) == 0 {
+			first, last, ok := resourceRecordWindowBounds(qe.projection.resourcesByUID[key.uid], startTimeNs, endTimeNs)
+			if !ok {
 				continue
 			}
 
 			namespacesSet[meta.Namespace] = struct{}{}
 			kindsSet[meta.Kind] = struct{}{}
-			for i := range resourceEvents {
-				event := resourceEvents[i]
-				if minTime < 0 || event.Timestamp < minTime {
-					minTime = event.Timestamp
-				}
-				if maxTime < 0 || event.Timestamp > maxTime {
-					maxTime = event.Timestamp
-				}
+			if minTime < 0 || first < minTime {
+				minTime = first
+			}
+			if maxTime < 0 || last > maxTime {
+				maxTime = last
 			}
 		}
+		qe.projection.mu.RUnlock()
 	}
 
 	if minTime < 0 {

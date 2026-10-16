@@ -31,7 +31,7 @@ func (p *Projection) ExportSnapshot() ProjectionSnapshot {
 		if record == nil {
 			continue
 		}
-		resources = append(resources, snapshotResourceRecord(record, 0))
+		resources = append(resources, snapshotResourceRecord(record, 0, true))
 	}
 
 	return ProjectionSnapshot{
@@ -74,7 +74,7 @@ func (p *Projection) StreamCheckpointResourcesWithRetention(
 		if retentionCutoff <= 0 {
 			retentionCutoff = checkpointRetentionCutoffTimestamp(checkpointMaxTimestamp, p.retentionWindowLocked())
 		}
-		snapshot := snapshotResourceRecord(record, retentionCutoff)
+		snapshot := snapshotResourceRecord(record, retentionCutoff, false)
 		p.mu.RUnlock()
 		if err := emit(snapshot); err != nil {
 			return fmt.Errorf("stream checkpoint resources: emit %q: %w", uid, err)
@@ -87,11 +87,26 @@ func (p *Projection) CheckpointState(highWaterMark uint64) checkpointState {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	// Number the segments versions point into; snapshotResourceRecord writes these
+	// indexes. Callers serialise checkpoints against segment changes (engine mutex).
+	segmentTable := make([]string, 0, len(p.segmentHandles))
+	for id := range p.segmentHandles {
+		segmentTable = append(segmentTable, id)
+	}
+	sort.Strings(segmentTable)
+	for i, id := range segmentTable {
+		handle := p.segmentHandles[id]
+		handle.mu.Lock()
+		handle.checkpointIndex = uint32(i + 1)
+		handle.mu.Unlock()
+	}
+
 	return checkpointState{
 		FormatVersion:  checkpointFormatVersion,
 		HighWaterMark:  highWaterMark,
 		MinTimestampNs: p.minTimestampNs,
 		MaxTimestampNs: p.maxTimestampNs,
+		SegmentTable:   segmentTable,
 	}
 }
 
@@ -144,7 +159,7 @@ func ProjectionFromCheckpointStream(state checkpointState, resources io.Reader, 
 			return nil, fmt.Errorf("projection checkpoint stream: decode resources stream: %w", err)
 		}
 
-		record := restoreResourceRecord(snapshot)
+		record := restoreResourceRecord(snapshot, projection.checkpointSegmentResolver(state.SegmentTable))
 		if record == nil || len(record.versions) == 0 {
 			continue
 		}
@@ -173,6 +188,7 @@ func ProjectionFromCheckpointBinaryStream(state checkpointState, resources io.Re
 	projection.maxTimestampNs = state.MaxTimestampNs
 	projection.k8sEventsByInvolvedUID = k8sEvents
 
+	resolveSegment := projection.checkpointSegmentResolver(state.SegmentTable)
 	decoder := gob.NewDecoder(resources)
 	for {
 		var snapshot ProjectionResourceSnapshot
@@ -183,7 +199,7 @@ func ProjectionFromCheckpointBinaryStream(state checkpointState, resources io.Re
 			return nil, fmt.Errorf("projection checkpoint binary stream: decode resources stream: %w", err)
 		}
 
-		record := restoreResourceRecord(snapshot)
+		record := restoreResourceRecord(snapshot, resolveSegment)
 		if record == nil || len(record.versions) == 0 {
 			continue
 		}
@@ -192,6 +208,16 @@ func ProjectionFromCheckpointBinaryStream(state checkpointState, resources io.Re
 	sortRecentResourceChanges(projection.recentResourceChanges)
 
 	return projection, nil
+}
+
+// checkpointSegmentResolver maps checkpoint segment indexes to this projection's handles.
+func (p *Projection) checkpointSegmentResolver(table []string) func(uint32) *segmentDataHandle {
+	return func(index uint32) *segmentDataHandle {
+		if index == 0 || int(index) > len(table) {
+			return nil
+		}
+		return p.segmentHandleLocked(table[index-1])
+	}
 }
 
 func (p *Projection) ImportSnapshot(snapshot ProjectionSnapshot) error {
@@ -246,7 +272,7 @@ func projectionFromCompactSnapshot(snapshot ProjectionSnapshot) *Projection {
 	projection.k8sEventsByInvolvedUID = cloneK8sEventsByUID(snapshot.K8sEventsByInvolvedUID)
 
 	for i := range snapshot.Resources {
-		record := restoreResourceRecord(snapshot.Resources[i])
+		record := restoreResourceRecord(snapshot.Resources[i], nil)
 		if record == nil || len(record.versions) == 0 {
 			continue
 		}
@@ -319,7 +345,10 @@ func sortRecentResourceChanges(changes []recentResourceChange) {
 	})
 }
 
-func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int64) ProjectionResourceSnapshot {
+// snapshotResourceRecord copies a record for serialisation. With hydrate the payloads are
+// inlined (exports); otherwise flushed payloads are written as segment references and
+// only unflushed payloads are inlined (checkpoints).
+func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int64, hydrate bool) ProjectionResourceSnapshot {
 	if record == nil {
 		return ProjectionResourceSnapshot{}
 	}
@@ -328,8 +357,8 @@ func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int
 	var lastCheckpointVersion *resourceVersion
 	var retainedWindowSentinel *ProjectionResourceVersionSnapshot
 	for i := range record.versions {
-		version := record.versions[i]
-		if lastCheckpointVersion != nil && checkpointEquivalentState(*lastCheckpointVersion, version) {
+		version := &record.versions[i]
+		if lastCheckpointVersion != nil && checkpointEquivalentState(*lastCheckpointVersion, *version) {
 			continue
 		}
 
@@ -337,15 +366,32 @@ func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int
 			EventID:     version.eventID,
 			Timestamp:   version.timestamp,
 			EventType:   version.eventType,
-			Identity:    copyIdentity(&version),
-			Data:        cloneBytes(version.data),
+			Identity:    copyIdentity(version),
 			ChangeEvent: cloneChangeEventInfo(version.changeEvent),
+			DataHash:    version.dataHash,
+		}
+		switch {
+		case hydrate:
+			snapshotVersion.Data = versionPayloadCopy(version)
+		case len(version.data) > 0 || !version.ref.valid():
+			snapshotVersion.Data = cloneBytes(version.data)
+		default:
+			version.ref.segment.mu.Lock()
+			snapshotVersion.DataSegment = version.ref.segment.checkpointIndex
+			version.ref.segment.mu.Unlock()
+			snapshotVersion.DataOffset = version.ref.offset
+			snapshotVersion.DataLength = version.ref.length
+			if snapshotVersion.DataSegment == 0 {
+				// The segment appeared after the table was built; inline instead.
+				snapshotVersion.Data = versionPayloadCopy(version)
+				snapshotVersion.DataOffset = 0
+				snapshotVersion.DataLength = 0
+			}
 		}
 		if retentionCutoffTimestamp > 0 && version.timestamp < retentionCutoffTimestamp {
 			snapshotCopy := snapshotVersion
 			retainedWindowSentinel = &snapshotCopy
-			copied := version
-			lastCheckpointVersion = &copied
+			lastCheckpointVersion = version
 			continue
 		}
 
@@ -354,8 +400,7 @@ func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int
 			retainedWindowSentinel = nil
 		}
 		versions = append(versions, snapshotVersion)
-		copied := version
-		lastCheckpointVersion = &copied
+		lastCheckpointVersion = version
 	}
 	if len(versions) == 0 && retainedWindowSentinel != nil {
 		versions = append(versions, *retainedWindowSentinel)
@@ -377,7 +422,7 @@ func checkpointRetentionCutoffTimestamp(checkpointMaxTimestamp, retentionWindowN
 	return checkpointMaxTimestamp - retentionWindowNs
 }
 
-func restoreResourceRecord(snapshot ProjectionResourceSnapshot) *resourceRecord {
+func restoreResourceRecord(snapshot ProjectionResourceSnapshot, resolveSegment func(uint32) *segmentDataHandle) *resourceRecord {
 	if len(snapshot.Versions) == 0 {
 		return nil
 	}
@@ -395,7 +440,16 @@ func restoreResourceRecord(snapshot ProjectionResourceSnapshot) *resourceRecord 
 			eventType:   version.EventType,
 			identity:    version.Identity,
 			data:        version.Data,
+			dataHash:    version.DataHash,
 			changeEvent: version.ChangeEvent,
+		}
+		if len(version.Data) == 0 && version.DataSegment != 0 && resolveSegment != nil {
+			if handle := resolveSegment(version.DataSegment); handle != nil {
+				restoredVersion.ref = versionDataRef{segment: handle, offset: version.DataOffset, length: version.DataLength}
+			}
+		}
+		if restoredVersion.dataHash == 0 {
+			restoredVersion.dataHash = payloadHash(version.Data)
 		}
 		if lastCheckpointVersion != nil && checkpointEquivalentState(*lastCheckpointVersion, restoredVersion) {
 			continue
@@ -414,7 +468,9 @@ func checkpointEquivalentState(previous, current resourceVersion) bool {
 	if previousDeleted != currentDeleted {
 		return false
 	}
-
+	if previous.dataHash != 0 || current.dataHash != 0 {
+		return previous.dataHash == current.dataHash
+	}
 	return bytes.Equal(previous.data, current.data)
 }
 

@@ -32,6 +32,10 @@ type Engine struct {
 	periodicCheckpointStop func()
 	backgroundTasks        sync.WaitGroup
 	closed                 bool
+
+	// compactionMu serialises compactions; it is always taken before mu.
+	compactionMu      sync.Mutex
+	compactionRunning bool
 }
 
 var (
@@ -71,6 +75,10 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 
 	if projection == nil {
 		projection = NewProjection()
+	}
+	projection.SetDataRoot(rootDir)
+	if err := remapRetiredSegmentReferences(rootDir, projection, manifest.RetiredSegments); err != nil {
+		return nil, fmt.Errorf("open embedded engine: remap retired segments: %w", err)
 	}
 	projection.SetRetentionWindowDays(cfg.EmbeddedRetentionDays)
 	if cfg.ProjectionHistoryFallback {

@@ -104,49 +104,58 @@ func (qe *QueryExecutor) executeEventQuery(
 		return nil, nil, err
 	}
 
-	byUID := make(map[string][]models.Event)
-	metaByUID := make(map[string]models.ResourceMetadata)
-
+	// Group, sort and paginate on metadata; payloads are read for the page only.
+	type eventGroup struct {
+		key    orderedResourceKey
+		events []*lazyEvent
+	}
+	groupIndex := make(map[string]int)
+	groups := make([]eventGroup, 0)
 	for i := range eventTimeline {
-		event := eventTimeline[i]
-		uid := event.Resource.UID
+		event := &eventTimeline[i]
+		uid := event.event.Resource.UID
 		if uid == "" {
 			continue
 		}
-
-		byUID[uid] = append(byUID[uid], cloneEvent(event))
-		if _, ok := metaByUID[uid]; !ok {
-			metaByUID[uid] = event.Resource
-		}
-	}
-
-	eventResources := make([]filteredResource, 0, len(metaByUID))
-	for uid, meta := range metaByUID {
-		events := byUID[uid]
-		sort.SliceStable(events, func(i, j int) bool {
-			return compareEventOrder(events[i], events[j]) < 0
-		})
-		eventResources = append(eventResources, filteredResource{
-			orderedResourceKey: orderedResourceKey{
+		position, ok := groupIndex[uid]
+		if !ok {
+			position = len(groups)
+			groupIndex[uid] = position
+			meta := event.event.Resource
+			groups = append(groups, eventGroup{key: orderedResourceKey{
 				kind:      meta.Kind,
 				namespace: meta.Namespace,
 				name:      meta.Name,
 				uid:       uid,
-			},
-			events: events,
-		})
+			}})
+		}
+		groups[position].events = append(groups[position].events, event)
 	}
-
-	sort.SliceStable(eventResources, func(i, j int) bool {
-		return compareOrderedResourceKey(eventResources[i].orderedResourceKey, eventResources[j].orderedResourceKey) < 0
+	sort.SliceStable(groups, func(i, j int) bool {
+		return compareOrderedResourceKey(groups[i].key, groups[j].key) < 0
 	})
 
-	startIdx := qe.cursorStartIndex(eventResources, pagination)
-	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(eventResources, startIdx, pageSize)
+	keys := make([]filteredResource, len(groups))
+	for i := range groups {
+		keys[i] = filteredResource{orderedResourceKey: groups[i].key}
+	}
+	startIdx := qe.cursorStartIndex(keys, pagination)
+	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(keys, startIdx, pageSize)
 
-	var resultEvents []models.Event
-	for _, resource := range eventResources[startIdx:endIdx] {
-		resultEvents = append(resultEvents, resource.events...)
+	var pageEvents []*lazyEvent
+	for _, group := range groups[startIdx:endIdx] {
+		sort.SliceStable(group.events, func(i, j int) bool {
+			return compareEventOrder(group.events[i].event, group.events[j].event) < 0
+		})
+		pageEvents = append(pageEvents, group.events...)
+	}
+	if err := hydrateLazyEvents(pageEvents); err != nil {
+		qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, err)
+		return nil, nil, err
+	}
+	resultEvents := make([]models.Event, 0, len(pageEvents))
+	for _, event := range pageEvents {
+		resultEvents = append(resultEvents, cloneEvent(event.event))
 	}
 
 	executionTime := time.Since(start)
@@ -172,14 +181,14 @@ func (qe *QueryExecutor) eventTimelineEvents(
 	ctx context.Context,
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
-) ([]models.Event, queryPlanStats, error) {
+) ([]lazyEvent, queryPlanStats, error) {
 	if cached, stats, ok := qe.recentEventTimelineEvents(startTimeNs, endTimeNs, filters); ok {
 		return cached, stats, nil
 	}
 
 	planner := qe.sharedPlanner()
 	if planner != nil {
-		return planner.exportTimeRange(ctx, startTimeNs, endTimeNs, filters)
+		return planner.exportTimeRangeLazy(ctx, startTimeNs, endTimeNs, filters)
 	}
 	if !qe.projectionHistoryFallbackEnabled {
 		return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")
@@ -206,7 +215,12 @@ func (qe *QueryExecutor) eventTimelineEvents(
 		return compareEventOrder(timeline[i], timeline[j]) < 0
 	})
 
-	return dedupeEventsByID(timeline), queryPlanStats{projectionUsed: true}, nil
+	deduped := dedupeEventsByID(timeline)
+	lazy := make([]lazyEvent, len(deduped))
+	for i := range deduped {
+		lazy[i] = loadedLazyEvent(deduped[i])
+	}
+	return lazy, queryPlanStats{projectionUsed: true}, nil
 }
 
 func resourceLookupInputs(resources []filteredResource) ([]string, []string) {

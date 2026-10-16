@@ -27,17 +27,23 @@ type recentResourceChange struct {
 }
 
 type resourceVersion struct {
-	eventID     string
-	timestamp   int64
-	eventType   models.EventType
-	identity    graph.ResourceIdentity
+	eventID   string
+	timestamp int64
+	eventType models.EventType
+	identity  graph.ResourceIdentity
+	// data holds the payload until the event is flushed; afterwards ref locates it.
+	// Read payloads through versionPayload rather than these fields.
 	data        []byte
+	ref         versionDataRef
+	dataHash    uint64
 	changeEvent analysisstore.ChangeEventInfo
 }
 
 type resourceRecord struct {
 	uid      string
 	versions []resourceVersion
+	// latest summarises versions[len-1] for classifying the next appended version.
+	latest recordChangeState
 }
 
 // Projection maintains shared mutable embedded indexes for timeline and analysis reads.
@@ -62,6 +68,9 @@ type Projection struct {
 	recentResourceChanges     []recentResourceChange
 	minTimestampNs            int64
 	maxTimestampNs            int64
+
+	dataRoot       string
+	segmentHandles map[string]*segmentDataHandle
 }
 
 type ProjectionSnapshot struct {
@@ -84,6 +93,12 @@ type ProjectionResourceVersionSnapshot struct {
 	Identity    graph.ResourceIdentity        `json:"identity"`
 	Data        []byte                        `json:"data,omitempty"`
 	ChangeEvent analysisstore.ChangeEventInfo `json:"change_event"`
+	// DataSegment is a 1-based index into the checkpoint's segment table; together with
+	// DataOffset/DataLength it locates a payload that is not stored inline.
+	DataSegment uint32 `json:"data_segment,omitempty"`
+	DataOffset  int64  `json:"data_offset,omitempty"`
+	DataLength  uint32 `json:"data_length,omitempty"`
+	DataHash    uint64 `json:"data_hash,omitempty"`
 }
 
 func NewProjection() *Projection {

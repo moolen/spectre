@@ -235,8 +235,8 @@ func (s *Store) GetChangeEvents(_ context.Context, resourceUIDs []string, window
 				continue
 			}
 			changeEvent := version.changeEvent
-			if len(changeEvent.Data) == 0 && len(version.data) > 0 {
-				changeEvent.Data = cloneBytes(version.data)
+			if len(changeEvent.Data) == 0 && versionHasPayload(&version) {
+				changeEvent.Data = versionPayloadCopy(&version)
 			}
 			if version.changeEvent.ConfigChanged {
 				configEvents = append(configEvents, changeEvent)

@@ -34,6 +34,7 @@ type checkpointState struct {
 	HighWaterMark  uint64             `json:"high_water_mark"`
 	MinTimestampNs int64              `json:"min_timestamp_ns"`
 	MaxTimestampNs int64              `json:"max_timestamp_ns"`
+	SegmentTable   []string           `json:"segment_table,omitempty"`
 	Snapshot       ProjectionSnapshot `json:"snapshot,omitempty"`
 }
 
@@ -43,6 +44,7 @@ func (s checkpointState) MarshalJSON() ([]byte, error) {
 		HighWaterMark  uint64              `json:"high_water_mark"`
 		MinTimestampNs int64               `json:"min_timestamp_ns"`
 		MaxTimestampNs int64               `json:"max_timestamp_ns"`
+		SegmentTable   []string            `json:"segment_table,omitempty"`
 		Snapshot       *ProjectionSnapshot `json:"snapshot,omitempty"`
 	}
 
@@ -51,6 +53,7 @@ func (s checkpointState) MarshalJSON() ([]byte, error) {
 		HighWaterMark:  s.HighWaterMark,
 		MinTimestampNs: s.MinTimestampNs,
 		MaxTimestampNs: s.MaxTimestampNs,
+		SegmentTable:   s.SegmentTable,
 	}
 	if len(s.Snapshot.Events) > 0 || len(s.Snapshot.Resources) > 0 || len(s.Snapshot.K8sEventsByInvolvedUID) > 0 {
 		snapshot := s.Snapshot
@@ -163,6 +166,7 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 		if err != nil {
 			return nil, 0, fmt.Errorf("load checkpoint: restore projection: %w", err)
 		}
+		projection.SetDataRoot(rootDir)
 		return projection, state.HighWaterMark, nil
 	}
 
@@ -184,6 +188,7 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 	if err != nil {
 		return nil, 0, fmt.Errorf("load checkpoint: restore projection: %w", err)
 	}
+	projection.SetDataRoot(rootDir)
 	return projection, state.HighWaterMark, nil
 }
 

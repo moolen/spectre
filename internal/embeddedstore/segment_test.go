@@ -223,7 +223,9 @@ func TestSegment_WriteStoresCompressedEventFrames(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(payload), 4)
 	recordLen := binary.BigEndian.Uint32(payload[:4])
-	require.NotZero(t, recordLen&(1<<31))
+	require.Zero(t, recordLen&(1<<31), "binary records compress the data section, not the frame")
+	require.Equal(t, segmentRecordMagic, payload[4])
+	require.Less(t, int(recordLen), len(events[0].Data))
 
 	reader, err := openSegmentReader(dir, meta)
 	require.NoError(t, err)
