@@ -15,8 +15,8 @@ import (
 // sequence of bounded, time-ordered segments: retention can drop whole segments, and no
 // single rewrite ever has to touch the full history.
 var (
-	compactionMaxMergedBytes int64 = 256 << 20
-	compactionMaxMergedSpan        = 6 * time.Hour
+	compactionMaxMergedBytes int64 = 512 << 20
+	compactionMaxMergedSpan        = 24 * time.Hour
 )
 
 type compactionPlan struct {

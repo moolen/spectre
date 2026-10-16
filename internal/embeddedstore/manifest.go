@@ -45,7 +45,10 @@ type SegmentMeta struct {
 	EventCount     int                 `json:"event_count,omitempty"`
 	MinTimestamp   int64               `json:"min_timestamp,omitempty"`
 	MaxTimestamp   int64               `json:"max_timestamp,omitempty"`
-	NamespaceKinds map[string][]string `json:"namespace_kinds,omitempty"`
+	// NamespaceKinds is kept in memory only: with hundreds of segments it would make the
+	// manifest, rewritten on every flush, megabytes large. Readers opened from a loaded
+	// manifest read it from the segment's stats file on demand.
+	NamespaceKinds map[string][]string `json:"-"`
 }
 
 type RetiredSegment struct {
@@ -241,7 +244,9 @@ func normalizeManifest(manifest Manifest) Manifest {
 	segments := make([]SegmentMeta, len(manifest.ActiveSegments))
 	for i := range manifest.ActiveSegments {
 		segments[i] = manifest.ActiveSegments[i]
-		segments[i].NamespaceKinds = normalizeNamespaceKinds(manifest.ActiveSegments[i].NamespaceKinds)
+		if manifest.ActiveSegments[i].NamespaceKinds != nil {
+			segments[i].NamespaceKinds = normalizeNamespaceKinds(manifest.ActiveSegments[i].NamespaceKinds)
+		}
 	}
 	manifest.ActiveSegments = segments
 	if manifest.Checkpoints == nil {
@@ -264,7 +269,7 @@ func (m SegmentMeta) bundleMeta() segmentBundleMeta {
 		EventCount:     m.EventCount,
 		MinTimestamp:   m.MinTimestamp,
 		MaxTimestamp:   m.MaxTimestamp,
-		NamespaceKinds: normalizeNamespaceKinds(m.NamespaceKinds),
+		NamespaceKinds: m.NamespaceKinds,
 	}
 }
 

@@ -3,6 +3,8 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/moolen/spectre/internal/models"
@@ -154,4 +156,34 @@ func TestProjection_OutOfOrderInsertMatchesInOrderHistoryAndKeepsReferences(t *t
 			require.NotEmpty(t, version.inlinePayload(), "%s is unflushed", version.eventID())
 		}
 	}
+}
+
+func TestManifest_OmitsNamespaceKindsAndReopenedSegmentsStillMatchFilters(t *testing.T) {
+	dir := t.TempDir()
+	cfg := EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 8, DisableAutoCompaction: true}
+	engine, err := OpenEngine(cfg)
+	require.NoError(t, err)
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		plannerParityK8sEvent("k-a", "evt-a", "a.1", "ns-a", "pod-a", 10, "Pulled", "pulled", "Normal", 1, "kubelet"),
+		plannerParityK8sEvent("k-b", "evt-b", "b.1", "ns-b", "pod-b", 20, "BackOff", "backoff", "Warning", 1, "kubelet"),
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.Close())
+
+	payload, err := os.ReadFile(filepath.Join(embeddedRootDir(dir), manifestFileName))
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "namespace_kinds")
+
+	reopened, err := OpenEngine(cfg)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, reopened.Close())
+	}()
+	result, err := reopened.QueryExecutor().Execute(context.Background(), &models.QueryRequest{
+		StartTimestamp: 0,
+		EndTimestamp:   100,
+		Filters:        models.QueryFilters{Kinds: []string{"Event"}, Version: "v1", Namespaces: []string{"ns-b"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"k-b"}, eventIDs(result.Events))
 }

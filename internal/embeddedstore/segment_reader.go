@@ -41,6 +41,8 @@ func openSegmentReader(rootDir string, meta segmentBundleMeta) (*segmentReader, 
 	}
 
 	segmentDir := filepath.Join(rootDir, segmentsDirName, meta.ID)
+	// Without namespace kinds the metadata came from a manifest and is loaded lazily.
+	complete := meta.NamespaceKinds != nil && segmentBundleMetaComplete(meta)
 	meta.NamespaceKinds = normalizeNamespaceKinds(meta.NamespaceKinds)
 
 	return &segmentReader{
@@ -49,7 +51,7 @@ func openSegmentReader(rootDir string, meta segmentBundleMeta) (*segmentReader, 
 		timeIndexPath:       filepath.Join(segmentDir, segmentTimeIndexFile),
 		resourceIndexPath:   filepath.Join(segmentDir, segmentUIDIndexFile),
 		associatedIndexPath: filepath.Join(segmentDir, segmentAssociatedUIDIndexFile),
-		metaLoaded:          segmentBundleMetaComplete(meta),
+		metaLoaded:          complete,
 	}, nil
 }
 
