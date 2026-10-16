@@ -66,49 +66,31 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 		return nil, nil, 0, 0, err
 	}
 
-	orderedResources, metaByUID, projectionMinTime, projectionMaxTime := qe.snapshotResourceMetadata()
 	namespacesSet := make(map[string]struct{})
 	kindsSet := make(map[string]struct{})
 	minTime = -1
 	maxTime = -1
-	stats := queryPlanStats{}
+	stats := queryPlanStats{projectionUsed: true}
 	planner := qe.sharedPlanner()
 
+	projection := qe.projection
+	projection.mu.RLock()
+	projectionMinTime, projectionMaxTime := projection.minTimestampNs, projection.maxTimestampNs
 	// Full-range metadata warmups only need projection state: scanning per-resource
 	// history is unnecessary when the caller asks for the entire persisted range.
-	if projectionMinTime >= 0 && startTimeNs <= projectionMinTime && endTimeNs >= projectionMaxTime {
-		stats.projectionUsed = true
-		for _, key := range orderedResources {
-			meta, ok := metaByUID[key.uid]
+	fullRange := projectionMinTime >= 0 && startTimeNs <= projectionMinTime && endTimeNs >= projectionMaxTime
+	if !fullRange && planner == nil && !qe.projectionHistoryFallbackEnabled {
+		projection.mu.RUnlock()
+		err := fmt.Errorf("projection history fallback disabled")
+		qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, err)
+		return nil, nil, 0, 0, err
+	}
+	for uid, meta := range projection.resourceMetaByUID {
+		if !fullRange {
+			first, last, ok := resourceRecordWindowBounds(projection.resourcesByUID[uid], startTimeNs, endTimeNs)
 			if !ok {
 				continue
 			}
-			namespacesSet[meta.Namespace] = struct{}{}
-			kindsSet[meta.Kind] = struct{}{}
-		}
-		minTime = projectionMinTime
-		maxTime = projectionMaxTime
-	} else {
-		if planner == nil && !qe.projectionHistoryFallbackEnabled {
-			err := fmt.Errorf("projection history fallback disabled")
-			qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, err)
-			return nil, nil, 0, 0, err
-		}
-
-		stats.projectionUsed = true
-		qe.projection.mu.RLock()
-		for _, key := range orderedResources {
-			meta, ok := metaByUID[key.uid]
-			if !ok {
-				continue
-			}
-			first, last, ok := resourceRecordWindowBounds(qe.projection.resourcesByUID[key.uid], startTimeNs, endTimeNs)
-			if !ok {
-				continue
-			}
-
-			namespacesSet[meta.Namespace] = struct{}{}
-			kindsSet[meta.Kind] = struct{}{}
 			if minTime < 0 || first < minTime {
 				minTime = first
 			}
@@ -116,7 +98,13 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 				maxTime = last
 			}
 		}
-		qe.projection.mu.RUnlock()
+		namespacesSet[meta.Namespace] = struct{}{}
+		kindsSet[meta.Kind] = struct{}{}
+	}
+	projection.mu.RUnlock()
+	if fullRange {
+		minTime = projectionMinTime
+		maxTime = projectionMaxTime
 	}
 
 	if minTime < 0 {
@@ -140,15 +128,3 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 	return namespaces, kinds, minTime, maxTime, nil
 }
 
-func (qe *QueryExecutor) snapshotResourceMetadata() ([]orderedResourceKey, map[string]models.ResourceMetadata, int64, int64) {
-	qe.projection.mu.RLock()
-	defer qe.projection.mu.RUnlock()
-
-	orderedResources := append([]orderedResourceKey(nil), qe.projection.orderedResources...)
-	metaByUID := make(map[string]models.ResourceMetadata, len(qe.projection.resourceMetaByUID))
-	for uid, meta := range qe.projection.resourceMetaByUID {
-		metaByUID[uid] = meta
-	}
-
-	return orderedResources, metaByUID, qe.projection.minTimestampNs, qe.projection.maxTimestampNs
-}

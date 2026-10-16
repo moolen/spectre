@@ -63,7 +63,7 @@ func resourceRecordHasWindowEvents(record *resourceRecord, startTimeNs, endTimeN
 	if startIdx < len(versions) && versions[startIdx].timestamp <= endTimeNs {
 		return true
 	}
-	return startIdx > 0 && versions[startIdx-1].eventType != models.EventTypeDelete
+	return startIdx > 0 && versions[startIdx-1].eventType() != models.EventTypeDelete
 }
 
 // resourceRecordWindowBounds returns the earliest and latest timestamps of the events
@@ -80,7 +80,7 @@ func resourceRecordWindowBounds(record *resourceRecord, startTimeNs, endTimeNs i
 		return versions[i].timestamp > endTimeNs
 	})
 	first, last := startIdx, endIdx-1
-	if startIdx > 0 && versions[startIdx-1].eventType != models.EventTypeDelete {
+	if startIdx > 0 && versions[startIdx-1].eventType() != models.EventTypeDelete {
 		first = startIdx - 1
 	}
 	if last < first {
@@ -95,10 +95,10 @@ func resourceRecordCurrentKey(record *resourceRecord) orderedResourceKey {
 	}
 	latest := record.versions[len(record.versions)-1]
 	return orderedResourceKey{
-		kind:      latest.identity.Kind,
-		namespace: latest.identity.Namespace,
-		name:      latest.identity.Name,
-		uid:       latest.identity.UID,
+		kind:      latest.meta.Kind,
+		namespace: latest.meta.Namespace,
+		name:      latest.meta.Name,
+		uid:       latest.meta.UID,
 	}
 }
 
@@ -106,7 +106,7 @@ func resourceRecordLatestMeta(record *resourceRecord) models.ResourceMetadata {
 	if record == nil || len(record.versions) == 0 {
 		return models.ResourceMetadata{}
 	}
-	return resourceMetadataFromIdentity(record.versions[len(record.versions)-1].identity)
+	return resourceMetadataFromIdentity(record.versions[len(record.versions)-1].identity())
 }
 
 func resourceRecordPreExistingEvent(record *resourceRecord) (models.Event, bool) {
@@ -114,7 +114,7 @@ func resourceRecordPreExistingEvent(record *resourceRecord) (models.Event, bool)
 		return models.Event{}, false
 	}
 	latest := record.latestVersion()
-	if latest == nil || latest.eventType == models.EventTypeDelete {
+	if latest == nil || latest.eventType() == models.EventTypeDelete {
 		return models.Event{}, false
 	}
 	event := resourceVersionEvent(*latest)
@@ -167,7 +167,7 @@ func (p *Projection) resolveByName(namespace, kind, name string, failureTimestam
 		if windowStartNs == 0 {
 			continue
 		}
-		if deleted := record.visibleVersionWithinWindow(failureTimestampNs, windowStartNs); deleted != nil && deleted.eventType == models.EventTypeDelete {
+		if deleted := record.visibleVersionWithinWindow(failureTimestampNs, windowStartNs); deleted != nil && deleted.eventType() == models.EventTypeDelete {
 			if deletedCandidate == nil || deleted.timestamp > deletedCandidate.timestamp {
 				deletedCandidate = deleted
 			}
@@ -180,20 +180,20 @@ func (p *Projection) activeResourcesInNamespace(namespace string, timestampNs in
 	var result []*resourceVersion
 	for _, record := range p.resourcesByUID {
 		version := record.activeVersionAt(timestampNs)
-		if version == nil || version.identity.Kind == "Event" || version.identity.Namespace != namespace {
+		if version == nil || version.meta.Kind == "Event" || version.meta.Namespace != namespace {
 			continue
 		}
 		result = append(result, version)
 	}
 
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].identity.Kind != result[j].identity.Kind {
-			return result[i].identity.Kind < result[j].identity.Kind
+		if result[i].meta.Kind != result[j].meta.Kind {
+			return result[i].meta.Kind < result[j].meta.Kind
 		}
-		if result[i].identity.Name != result[j].identity.Name {
-			return result[i].identity.Name < result[j].identity.Name
+		if result[i].meta.Name != result[j].meta.Name {
+			return result[i].meta.Name < result[j].meta.Name
 		}
-		return result[i].identity.UID < result[j].identity.UID
+		return result[i].meta.UID < result[j].meta.UID
 	})
 
 	return result

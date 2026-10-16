@@ -30,11 +30,29 @@ func (qe *QueryExecutor) collectK8sEventsForResources(
 		return nil, queryPlanStats{}, nil
 	}
 
-	if projectionEvents := qe.collectAssociatedK8sEventsFromProjection(involvedUIDs, startTimeNs, endTimeNs); projectionEvents != nil {
+	planner := qe.sharedPlanner()
+	projectionEvents, incomplete := qe.collectAssociatedK8sEventsFromProjectionWithGaps(involvedUIDs, startTimeNs, endTimeNs)
+	if len(incomplete) > 0 && planner != nil {
+		// The in-memory summaries are capped per object; read older windows from the
+		// segments' associated-UID index for the objects that hit the cap.
+		eventsByUID, stats, err := planner.collectAssociatedEvents(ctx, incomplete, namespaces, startTimeNs, endTimeNs)
+		if err != nil {
+			return nil, stats, err
+		}
+		if projectionEvents == nil {
+			projectionEvents = make(map[string][]models.K8sEvent)
+		}
+		for uid, events := range convertAssociatedEventsToK8sEvents(eventsByUID) {
+			projectionEvents[uid] = events
+		}
+		stats.projectionUsed = true
+		return projectionEvents, stats, nil
+	}
+	if projectionEvents != nil {
 		return projectionEvents, queryPlanStats{projectionUsed: true}, nil
 	}
 
-	planner := qe.sharedPlanner()
+
 	if planner != nil {
 		eventsByUID, stats, err := planner.collectAssociatedEvents(ctx, involvedUIDs, namespaces, startTimeNs, endTimeNs)
 		if err != nil {
@@ -380,16 +398,31 @@ func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjection(
 	involvedUIDs []string,
 	startTimeNs, endTimeNs int64,
 ) map[string][]models.K8sEvent {
+	events, _ := qe.collectAssociatedK8sEventsFromProjectionWithGaps(involvedUIDs, startTimeNs, endTimeNs)
+	return events
+}
+
+// collectAssociatedK8sEventsFromProjectionWithGaps also returns the involved UIDs whose
+// capped in-memory summaries do not cover the whole window.
+func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjectionWithGaps(
+	involvedUIDs []string,
+	startTimeNs, endTimeNs int64,
+) (map[string][]models.K8sEvent, []string) {
 	if len(involvedUIDs) == 0 || endTimeNs < startTimeNs {
-		return nil
+		return nil, nil
 	}
 
 	qe.projection.mu.RLock()
 	defer qe.projection.mu.RUnlock()
 
+	var incomplete []string
 	eventsByUID := make(map[string][]models.K8sEvent, len(involvedUIDs))
 	for i := range involvedUIDs {
 		uid := involvedUIDs[i]
+		if !qe.projection.k8sEventInfosComplete(uid, startTimeNs) {
+			incomplete = append(incomplete, uid)
+			continue
+		}
 		events := qe.projection.k8sEventsByInvolvedUID[uid]
 		if len(events) == 0 {
 			continue
@@ -421,8 +454,8 @@ func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjection(
 	}
 
 	if len(eventsByUID) == 0 {
-		return nil
+		return nil, incomplete
 	}
 
-	return eventsByUID
+	return eventsByUID, incomplete
 }

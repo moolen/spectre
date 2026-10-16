@@ -3,7 +3,6 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/moolen/spectre/internal/models"
@@ -84,35 +83,28 @@ func (qe *QueryExecutor) collectPaginatedResources(
 	projection.mu.RLock()
 	defer projection.mu.RUnlock()
 
-	ordered := projection.orderedResources
-	idx := 0
-	if cursor != nil {
-		idx = sort.Search(len(ordered), func(i int) bool {
-			return compareOrderedResourceKeyToCursor(ordered[i], cursor) > 0
-		})
-	}
-
 	type pageEntry struct {
 		key    orderedResourceKey
 		record *resourceRecord
 	}
 	page := make([]pageEntry, 0, pageSize)
 	var paginationResp *models.PaginationResponse
-	for checked := 0; idx < len(ordered); idx++ {
+	var walkErr error
+	checked := 0
+	projection.orderedResources.AscendAfterCursor(cursor, func(key orderedResourceKey) bool {
 		if checked++; checked%4096 == 0 {
 			if err := ctx.Err(); err != nil {
-				return nil, nil, stats, err
+				walkErr = err
+				return false
 			}
 		}
-		key := ordered[idx]
 		record := projection.resourcesByUID[key.uid]
 		if record == nil || !resourceRecordHasWindowEvents(record, startTimeNs, endTimeNs) {
-			continue
+			return true
 		}
 		if !filters.Matches(resourceRecordLatestMeta(record)) {
-			continue
+			return true
 		}
-
 		if len(page) >= pageSize {
 			last := page[len(page)-1].key
 			lastCursor := models.NewResourceCursor(last.kind, last.namespace, last.name)
@@ -122,10 +114,14 @@ func (qe *QueryExecutor) collectPaginatedResources(
 					HasMore:    true,
 					PageSize:   pageSize,
 				}
-				break
+				return false
 			}
 		}
 		page = append(page, pageEntry{key: key, record: record})
+		return true
+	})
+	if walkErr != nil {
+		return nil, nil, stats, walkErr
 	}
 	if paginationResp == nil {
 		paginationResp = &models.PaginationResponse{HasMore: false, PageSize: pageSize}

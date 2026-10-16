@@ -747,7 +747,7 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	var snapshot ProjectionResourceSnapshot
 	require.NoError(t, gob.NewDecoder(stream).Decode(&snapshot))
 	require.Len(t, snapshot.Versions, 2)
-	snapshot.Versions[0].ChangeEvent.Description = "checkpoint-sentinel"
+	snapshot.Versions[0].ChangeEvent.Status = "checkpoint-sentinel"
 
 	file, encoder, err := openCompressedCheckpointWriter(resourcesPath)
 	require.NoError(t, err)
@@ -788,7 +788,7 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	record := reopened.projection.resourcesByUID["pod-1"]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 3)
-	require.Equal(t, "checkpoint-sentinel", record.versions[0].changeEvent.Description)
+	require.Equal(t, "checkpoint-sentinel", record.versions[0].changeEventInfo().Status)
 }
 
 func TestEngine_ReopenRestoresTailEventsWithoutColdReplay(t *testing.T) {

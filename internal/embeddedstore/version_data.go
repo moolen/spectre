@@ -276,7 +276,7 @@ func retainedVersionsBefore(record *resourceRecord, cutoffTimestamp int64) []*re
 	}
 	if retainedStart >= len(record.versions) {
 		latest := &record.versions[len(record.versions)-1]
-		if latest.eventType == models.EventTypeDelete {
+		if latest.eventType() == models.EventTypeDelete {
 			return nil
 		}
 		return []*resourceVersion{latest}

@@ -3,29 +3,29 @@ package embeddedstore
 import "sort"
 
 func (s *Store) selectingResourcesForTarget(target *resourceVersion, timestampNs int64) []*resourceVersion {
-	if target.identity.Kind != "Pod" {
+	if target.meta.Kind != "Pod" {
 		return nil
 	}
 
 	var result []*resourceVersion
 	for _, record := range s.projection.resourcesByUID {
 		version := record.activeVersionAt(timestampNs)
-		if version == nil || version.identity.Namespace != target.identity.Namespace {
+		if version == nil || version.meta.Namespace != target.meta.Namespace {
 			continue
 		}
-		if !resourceUsesPodSelector(version.identity.Kind) {
+		if !resourceUsesPodSelector(version.meta.Kind) {
 			continue
 		}
-		if selectorMatches(selectorSpec(version), target.identity.Labels) {
+		if selectorMatches(selectorSpec(version), target.labels) {
 			result = append(result, version)
 		}
 	}
 
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].identity.Kind != result[j].identity.Kind {
-			return result[i].identity.Kind < result[j].identity.Kind
+		if result[i].meta.Kind != result[j].meta.Kind {
+			return result[i].meta.Kind < result[j].meta.Kind
 		}
-		return result[i].identity.Name < result[j].identity.Name
+		return result[i].meta.Name < result[j].meta.Name
 	})
 
 	return result
@@ -35,11 +35,11 @@ func (s *Store) ingressesReferencingService(service *resourceVersion, failureTim
 	var result []*resourceVersion
 	for _, record := range s.projection.resourcesByUID {
 		version := record.visibleVersionWithinWindow(failureTimestampNs, windowStartNs)
-		if version == nil || version.identity.Kind != "Ingress" || version.identity.Namespace != service.identity.Namespace {
+		if version == nil || version.meta.Kind != "Ingress" || version.meta.Namespace != service.meta.Namespace {
 			continue
 		}
 		for _, ref := range ingressReferences(version) {
-			if ref.kind == "Service" && ref.name == service.identity.Name {
+			if ref.kind == "Service" && ref.name == service.meta.Name {
 				result = append(result, version)
 				break
 			}
@@ -53,15 +53,15 @@ func (s *Store) roleBindingsGrantingToServiceAccount(serviceAccount *resourceVer
 	var result []*resourceVersion
 	for _, record := range s.projection.resourcesByUID {
 		version := record.visibleVersionWithinWindow(failureTimestampNs, windowStartNs)
-		if version == nil || (version.identity.Kind != "RoleBinding" && version.identity.Kind != "ClusterRoleBinding") {
+		if version == nil || (version.meta.Kind != "RoleBinding" && version.meta.Kind != "ClusterRoleBinding") {
 			continue
 		}
 		for _, ref := range roleBindingReferences(version) {
 			if ref.relType != "GRANTS_TO" {
 				continue
 			}
-			namespace := ref.namespaceFor(version.identity.Namespace)
-			if ref.kind == "ServiceAccount" && ref.name == serviceAccount.identity.Name && namespace == serviceAccount.identity.Namespace {
+			namespace := ref.namespaceFor(version.meta.Namespace)
+			if ref.kind == "ServiceAccount" && ref.name == serviceAccount.meta.Name && namespace == serviceAccount.meta.Namespace {
 				result = append(result, version)
 				break
 			}
@@ -69,10 +69,10 @@ func (s *Store) roleBindingsGrantingToServiceAccount(serviceAccount *resourceVer
 	}
 
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].identity.Kind != result[j].identity.Kind {
-			return result[i].identity.Kind < result[j].identity.Kind
+		if result[i].meta.Kind != result[j].meta.Kind {
+			return result[i].meta.Kind < result[j].meta.Kind
 		}
-		return result[i].identity.Name < result[j].identity.Name
+		return result[i].meta.Name < result[j].meta.Name
 	})
 
 	return result
@@ -89,7 +89,7 @@ func resourceUsesPodSelector(kind string) bool {
 
 func selectorSpec(version *resourceVersion) map[string]any {
 	spec := getMap(parsedVersionObject(version), "spec")
-	switch version.identity.Kind {
+	switch version.meta.Kind {
 	case "Service":
 		selector := getMap(spec, "selector")
 		if selector == nil {

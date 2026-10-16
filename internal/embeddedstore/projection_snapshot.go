@@ -25,14 +25,13 @@ func (p *Projection) ExportSnapshot() ProjectionSnapshot {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	resources := make([]ProjectionResourceSnapshot, 0, len(p.orderedResources))
-	for i := range p.orderedResources {
-		record := p.resourcesByUID[p.orderedResources[i].uid]
-		if record == nil {
-			continue
+	resources := make([]ProjectionResourceSnapshot, 0, p.orderedResources.Len())
+	p.orderedResources.Ascend(func(key orderedResourceKey) bool {
+		if record := p.resourcesByUID[key.uid]; record != nil {
+			resources = append(resources, snapshotResourceRecord(record, 0, true))
 		}
-		resources = append(resources, snapshotResourceRecord(record, 0, true))
-	}
+		return true
+	})
 
 	return ProjectionSnapshot{
 		Resources:              resources,
@@ -55,10 +54,11 @@ func (p *Projection) StreamCheckpointResourcesWithRetention(
 	}
 
 	p.mu.RLock()
-	orderedUIDs := make([]string, 0, len(p.orderedResources))
-	for i := range p.orderedResources {
-		orderedUIDs = append(orderedUIDs, p.orderedResources[i].uid)
-	}
+	orderedUIDs := make([]string, 0, p.orderedResources.Len())
+	p.orderedResources.Ascend(func(key orderedResourceKey) bool {
+		orderedUIDs = append(orderedUIDs, key.uid)
+		return true
+	})
 	checkpointMaxTimestamp := p.maxTimestampNs
 	p.mu.RUnlock()
 
@@ -165,7 +165,6 @@ func ProjectionFromCheckpointStream(state checkpointState, resources io.Reader, 
 		}
 		restoreProjectionResourceRecord(projection, record)
 	}
-	sortRecentResourceChanges(projection.recentResourceChanges)
 
 	return projection, nil
 }
@@ -205,7 +204,6 @@ func ProjectionFromCheckpointBinaryStream(state checkpointState, resources io.Re
 		}
 		restoreProjectionResourceRecord(projection, record)
 	}
-	sortRecentResourceChanges(projection.recentResourceChanges)
 
 	return projection, nil
 }
@@ -242,10 +240,8 @@ func (p *Projection) replaceStateLocked(other *Projection) {
 	p.resourcesByKey = other.resourcesByKey
 	p.k8sRawEventsByInvolvedUID = other.k8sRawEventsByInvolvedUID
 	p.k8sEventsByInvolvedUID = other.k8sEventsByInvolvedUID
+	p.k8sEventsTruncatedThrough = other.k8sEventsTruncatedThrough
 	p.orderedResources = other.orderedResources
-	p.activeOrderedResources = other.activeOrderedResources
-	p.activeResourceKeyByUID = other.activeResourceKeyByUID
-	p.recentResourceChanges = other.recentResourceChanges
 	p.minTimestampNs = other.minTimestampNs
 	p.maxTimestampNs = other.maxTimestampNs
 	p.retainHistoricalEventArrays = retainHistoricalEventArrays || other.retainHistoricalEventArrays
@@ -258,9 +254,10 @@ func (p *Projection) snapshotEventsLocked() []models.Event {
 	}
 
 	events := make([]models.Event, 0)
-	for i := range p.orderedResources {
-		events = append(events, p.resourceEventsForUID(p.orderedResources[i].uid)...)
-	}
+	p.orderedResources.Ascend(func(key orderedResourceKey) bool {
+		events = append(events, p.resourceEventsForUID(key.uid)...)
+		return true
+	})
 	sortEventsIfNeeded(events)
 	return events
 }
@@ -278,7 +275,6 @@ func projectionFromCompactSnapshot(snapshot ProjectionSnapshot) *Projection {
 		}
 		restoreProjectionResourceRecord(projection, record)
 	}
-	sortRecentResourceChanges(projection.recentResourceChanges)
 
 	return projection
 }
@@ -315,7 +311,7 @@ func decodeCheckpointK8sEventsGob(reader io.Reader) (map[string][]analysisstore.
 
 func restoreProjectionResourceRecord(projection *Projection, record *resourceRecord) {
 	latest := record.versions[len(record.versions)-1]
-	meta := resourceMetadataFromIdentity(latest.identity)
+	meta := resourceMetadataFromIdentity(latest.identity())
 	projection.resourcesByUID[record.uid] = record
 	projection.resourceMetaByUID[record.uid] = meta
 	key := resourceKey{
@@ -324,26 +320,15 @@ func restoreProjectionResourceRecord(projection *Projection, record *resourceRec
 		name:      meta.Name,
 	}
 	projection.resourcesByKey[key] = append(projection.resourcesByKey[key], record)
-	projection.orderedResources = insertOrderedResourceKey(projection.orderedResources, orderedResourceKey{
+	projection.orderedResources.Insert(orderedResourceKey{
 		kind:      meta.Kind,
 		namespace: meta.Namespace,
 		name:      meta.Name,
 		uid:       meta.UID,
 	})
-	projection.updateActiveResourceIndex(record)
-	for i := range record.versions {
-		projection.appendRecentResourceChange(record.uid, record.versions[i].timestamp)
-	}
 }
 
-func sortRecentResourceChanges(changes []recentResourceChange) {
-	sort.SliceStable(changes, func(i, j int) bool {
-		if changes[i].timestamp != changes[j].timestamp {
-			return changes[i].timestamp < changes[j].timestamp
-		}
-		return changes[i].uid < changes[j].uid
-	})
-}
+
 
 // snapshotResourceRecord copies a record for serialisation. With hydrate the payloads are
 // inlined (exports); otherwise flushed payloads are written as segment references and
@@ -365,9 +350,9 @@ func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int
 		snapshotVersion := ProjectionResourceVersionSnapshot{
 			EventID:     version.eventID,
 			Timestamp:   version.timestamp,
-			EventType:   version.eventType,
+			EventType:   version.eventType(),
 			Identity:    copyIdentity(version),
-			ChangeEvent: cloneChangeEventInfo(version.changeEvent),
+			ChangeEvent: cloneChangeEventInfo(version.changeEventInfo()),
 			DataHash:    version.dataHash,
 		}
 		switch {
@@ -435,14 +420,23 @@ func restoreResourceRecord(snapshot ProjectionResourceSnapshot, resolveSegment f
 	for i := range snapshot.Versions {
 		version := snapshot.Versions[i]
 		restoredVersion := resourceVersion{
-			eventID:     version.EventID,
-			timestamp:   version.Timestamp,
-			eventType:   version.EventType,
-			identity:    version.Identity,
-			data:        version.Data,
-			dataHash:    version.DataHash,
-			changeEvent: version.ChangeEvent,
+			eventID:   version.EventID,
+			timestamp: version.Timestamp,
+			typeCode:  versionEventTypes.code(string(version.EventType)),
+			data:      version.Data,
+			dataHash:  version.DataHash,
 		}
+		var previousMeta *versionMeta
+		var previousLabels map[string]string
+		if len(record.versions) > 0 {
+			previousMeta = record.versions[len(record.versions)-1].meta
+			previousLabels = record.versions[len(record.versions)-1].labels
+		}
+		restoredVersion.setIdentity(version.Identity, previousMeta)
+		if previousLabels != nil && stringMapsEqual(restoredVersion.labels, previousLabels) {
+			restoredVersion.labels = previousLabels
+		}
+		restoredVersion.setChangeInfo(version.ChangeEvent)
 		if len(version.Data) == 0 && version.DataSegment != 0 && resolveSegment != nil {
 			if handle := resolveSegment(version.DataSegment); handle != nil {
 				restoredVersion.ref = versionDataRef{segment: handle, offset: version.DataOffset, length: version.DataLength}
@@ -463,8 +457,8 @@ func restoreResourceRecord(snapshot ProjectionResourceSnapshot, resolveSegment f
 }
 
 func checkpointEquivalentState(previous, current resourceVersion) bool {
-	previousDeleted := previous.eventType == models.EventTypeDelete
-	currentDeleted := current.eventType == models.EventTypeDelete
+	previousDeleted := previous.eventType() == models.EventTypeDelete
+	currentDeleted := current.eventType() == models.EventTypeDelete
 	if previousDeleted != currentDeleted {
 		return false
 	}

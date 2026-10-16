@@ -58,7 +58,7 @@ func TestProjection_DoesNotRetainHistoricalEventArrays(t *testing.T) {
 
 	require.Len(t, projection.resourcesByUID, 1)
 	require.Len(t, projection.resourceMetaByUID, 1)
-	require.Len(t, projection.orderedResources, 1)
+	require.Equal(t, 1, projection.orderedResources.Len())
 	require.Len(t, projection.k8sEventsByInvolvedUID, 1)
 	require.Len(t, projection.k8sEventsByInvolvedUID["pod-1"], 1)
 

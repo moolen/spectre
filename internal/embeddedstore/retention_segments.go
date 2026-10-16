@@ -224,8 +224,8 @@ func versionAsEvent(version *resourceVersion) models.Event {
 	return models.Event{
 		ID:        version.eventID,
 		Timestamp: version.timestamp,
-		Type:      version.eventType,
-		Resource:  resourceMetadataFromIdentity(version.identity),
+		Type:      version.eventType(),
+		Resource:  resourceMetadataFromIdentity(version.identity()),
 		Data:      versionPayload(version),
 	}
 }

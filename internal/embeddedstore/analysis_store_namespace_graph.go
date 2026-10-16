@@ -33,10 +33,10 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 
 	selectedUIDs := make(map[string]*resourceVersion, len(pagedResources))
 	for _, version := range pagedResources {
-		selectedUIDs[version.identity.UID] = version
+		selectedUIDs[version.meta.UID] = version
 	}
 	for _, version := range s.clusterScopedReachableFrom(pagedResources, query.TimestampNs, query.LookbackNs, query.MaxDepth) {
-		selectedUIDs[version.identity.UID] = version
+		selectedUIDs[version.meta.UID] = version
 	}
 
 	allVersions := make([]*resourceVersion, 0, len(selectedUIDs))
@@ -44,31 +44,31 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 		allVersions = append(allVersions, version)
 	}
 	sort.Slice(allVersions, func(i, j int) bool {
-		if allVersions[i].identity.Kind != allVersions[j].identity.Kind {
-			return allVersions[i].identity.Kind < allVersions[j].identity.Kind
+		if allVersions[i].meta.Kind != allVersions[j].meta.Kind {
+			return allVersions[i].meta.Kind < allVersions[j].meta.Kind
 		}
-		if allVersions[i].identity.Name != allVersions[j].identity.Name {
-			return allVersions[i].identity.Name < allVersions[j].identity.Name
+		if allVersions[i].meta.Name != allVersions[j].meta.Name {
+			return allVersions[i].meta.Name < allVersions[j].meta.Name
 		}
-		return allVersions[i].identity.UID < allVersions[j].identity.UID
+		return allVersions[i].meta.UID < allVersions[j].meta.UID
 	})
 
 	nodes := make([]analysisstore.NamespaceGraphNode, 0, len(allVersions))
 	for _, version := range allVersions {
 		node := analysisstore.NamespaceGraphNode{
-			UID:       version.identity.UID,
-			Kind:      version.identity.Kind,
-			APIGroup:  version.identity.APIGroup,
-			Namespace: version.identity.Namespace,
-			Name:      version.identity.Name,
-			Status:    version.changeEvent.Status,
-			Labels:    copyStringMap(version.identity.Labels),
+			UID:       version.meta.UID,
+			Kind:      version.meta.Kind,
+			APIGroup:  version.meta.APIGroup,
+			Namespace: version.meta.Namespace,
+			Name:      version.meta.Name,
+			Status:    version.status(),
+			Labels:    copyStringMap(version.labels),
 		}
 		latestEvent := analysisstore.NamespaceGraphChangeEvent{
 			TimestampNs:  version.timestamp,
-			EventType:    string(version.eventType),
-			Status:       version.changeEvent.Status,
-			SpecChanges:  s.specDiffWithinLookback(version.identity.UID, query.TimestampNs, query.LookbackNs),
+			EventType:    string(version.eventType()),
+			Status:       version.status(),
+			SpecChanges:  s.specDiffWithinLookback(version.meta.UID, query.TimestampNs, query.LookbackNs),
 			SpecReplicas: specReplicasForVersion(version),
 		}
 		node.LatestEvent = &latestEvent
@@ -81,8 +81,8 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 	if hasMore && len(pagedResources) > 0 {
 		last := pagedResources[len(pagedResources)-1]
 		nextCursor = encodeCursor(namespaceCursor{
-			LastKind: last.identity.Kind,
-			LastName: last.identity.Name,
+			LastKind: last.meta.Kind,
+			LastName: last.meta.Name,
 		})
 	}
 
@@ -157,7 +157,7 @@ func applyCursor(resources []*resourceVersion, cursor namespaceCursor) []*resour
 	}
 	result := make([]*resourceVersion, 0, len(resources))
 	for _, version := range resources {
-		if version.identity.Kind > cursor.LastKind || (version.identity.Kind == cursor.LastKind && version.identity.Name > cursor.LastName) {
+		if version.meta.Kind > cursor.LastKind || (version.meta.Kind == cursor.LastKind && version.meta.Name > cursor.LastName) {
 			result = append(result, version)
 		}
 	}
@@ -236,11 +236,11 @@ func (s *Store) clusterScopedReachableFrom(start []*resourceVersion, timestampNs
 		depth int
 	}, 0, len(start))
 	for _, version := range start {
-		seen[version.identity.UID] = true
+		seen[version.meta.UID] = true
 		queue = append(queue, struct {
 			uid   string
 			depth int
-		}{uid: version.identity.UID})
+		}{uid: version.meta.UID})
 	}
 
 	var result []*resourceVersion
@@ -259,7 +259,7 @@ func (s *Store) clusterScopedReachableFrom(start []*resourceVersion, timestampNs
 			if next == nil {
 				continue
 			}
-			if next.identity.Namespace == "" {
+			if next.meta.Namespace == "" {
 				result = append(result, next)
 			}
 			queue = append(queue, struct {
@@ -303,42 +303,42 @@ func (s *Store) currentEdgesForVersions(versionsByUID map[string]*resourceVersio
 
 	for _, version := range versionsByUID {
 		for _, ownerUID := range ownerUIDs(parsedVersionObject(version)) {
-			add(ownerUID, version.identity.UID, "OWNS")
+			add(ownerUID, version.meta.UID, "OWNS")
 		}
 		for _, ref := range directReferences(version) {
-			target := s.projection.resolveByName(ref.namespaceFor(version.identity.Namespace), ref.kind, ref.name, timestampNs, windowStartNs)
+			target := s.projection.resolveByName(ref.namespaceFor(version.meta.Namespace), ref.kind, ref.name, timestampNs, windowStartNs)
 			if target == nil {
 				continue
 			}
-			add(version.identity.UID, target.identity.UID, ref.relType)
+			add(version.meta.UID, target.meta.UID, ref.relType)
 		}
 		if manager := managerReference(version); manager != nil {
 			managerVersion := s.projection.resolveByName(manager.namespace, manager.kind, manager.name, timestampNs, windowStartNs)
 			if managerVersion == nil && manager.namespace == "" {
-				managerVersion = s.projection.resolveByName(version.identity.Namespace, manager.kind, manager.name, timestampNs, windowStartNs)
+				managerVersion = s.projection.resolveByName(version.meta.Namespace, manager.kind, manager.name, timestampNs, windowStartNs)
 			}
 			if managerVersion != nil {
-				add(managerVersion.identity.UID, version.identity.UID, "MANAGES")
+				add(managerVersion.meta.UID, version.meta.UID, "MANAGES")
 			}
 		}
 	}
 
 	pods := make([]*resourceVersion, 0)
 	for _, version := range versionsByUID {
-		if version.identity.Kind == "Pod" && version.eventType != models.EventTypeDelete {
+		if version.meta.Kind == "Pod" && version.eventType() != models.EventTypeDelete {
 			pods = append(pods, version)
 		}
 	}
 	for _, version := range versionsByUID {
-		if !resourceUsesPodSelector(version.identity.Kind) || version.eventType == models.EventTypeDelete {
+		if !resourceUsesPodSelector(version.meta.Kind) || version.eventType() == models.EventTypeDelete {
 			continue
 		}
 		for _, pod := range pods {
-			if pod.identity.Namespace != version.identity.Namespace {
+			if pod.meta.Namespace != version.meta.Namespace {
 				continue
 			}
-			if selectorMatches(selectorSpec(version), pod.identity.Labels) {
-				add(version.identity.UID, pod.identity.UID, "SELECTS")
+			if selectorMatches(selectorSpec(version), pod.labels) {
+				add(version.meta.UID, pod.meta.UID, "SELECTS")
 			}
 		}
 	}

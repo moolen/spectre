@@ -127,7 +127,7 @@ func (s *Store) GetManagers(_ context.Context, resourceUIDs []string, minConfide
 		}
 		targetNamespace := managerRef.namespace
 		if targetNamespace == "" {
-			targetNamespace = version.identity.Namespace
+			targetNamespace = version.meta.Namespace
 		}
 		managerVersion := s.projection.resolveByName(targetNamespace, managerRef.kind, managerRef.name, version.timestamp, 0)
 		if managerVersion == nil {
@@ -167,7 +167,7 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 			if target == nil {
 				return
 			}
-			key := relType + ":" + target.identity.UID + ":" + referenceTargetUID
+			key := relType + ":" + target.meta.UID + ":" + referenceTargetUID
 			if added[key] {
 				return
 			}
@@ -180,7 +180,7 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 		}
 
 		for _, ref := range directReferences(version) {
-			target := s.projection.resolveByName(ref.namespaceFor(version.identity.Namespace), ref.kind, ref.name, window.FailureTimestampNs, startNs)
+			target := s.projection.resolveByName(ref.namespaceFor(version.meta.Namespace), ref.kind, ref.name, window.FailureTimestampNs, startNs)
 			add(target, ref.relType, "")
 			if ref.relType == "USES_SERVICE_ACCOUNT" && target != nil {
 				for _, binding := range s.roleBindingsGrantingToServiceAccount(target, window.FailureTimestampNs, startNs) {
@@ -190,7 +190,7 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 							continue
 						}
 						role := s.projection.resolveByName(
-							roleRef.namespaceFor(binding.identity.Namespace),
+							roleRef.namespaceFor(binding.meta.Namespace),
 							roleRef.kind,
 							roleRef.name,
 							window.FailureTimestampNs,
@@ -204,9 +204,9 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 
 		for _, selector := range s.selectingResourcesForTarget(version, window.FailureTimestampNs) {
 			add(selector, "SELECTS", "")
-			if selector.identity.Kind == "Service" {
+			if selector.meta.Kind == "Service" {
 				for _, ingress := range s.ingressesReferencingService(selector, window.FailureTimestampNs, startNs) {
-					add(ingress, edgeTypeIngress, selector.identity.UID)
+					add(ingress, edgeTypeIngress, selector.meta.UID)
 				}
 			}
 		}
@@ -234,11 +234,11 @@ func (s *Store) GetChangeEvents(_ context.Context, resourceUIDs []string, window
 			if version.timestamp < startNs || version.timestamp > window.FailureTimestampNs {
 				continue
 			}
-			changeEvent := version.changeEvent
+			changeEvent := version.changeEventInfo()
 			if len(changeEvent.Data) == 0 && versionHasPayload(&version) {
 				changeEvent.Data = versionPayloadCopy(&version)
 			}
-			if version.changeEvent.ConfigChanged {
+			if version.configChanged() {
 				configEvents = append(configEvents, changeEvent)
 			}
 			if len(recentEvents) < maxRecentEvents {

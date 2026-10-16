@@ -28,7 +28,7 @@ func (r *resourceRecord) versionAt(timestamp int64) *resourceVersion {
 
 func (r *resourceRecord) activeVersionAt(timestamp int64) *resourceVersion {
 	version := r.versionAt(timestamp)
-	if version == nil || version.eventType == models.EventTypeDelete {
+	if version == nil || version.eventType() == models.EventTypeDelete {
 		return nil
 	}
 	return version
@@ -39,7 +39,7 @@ func (r *resourceRecord) visibleVersionWithinWindow(failureTimestampNs, windowSt
 	if version == nil {
 		return nil
 	}
-	if version.eventType != models.EventTypeDelete {
+	if version.eventType() != models.EventTypeDelete {
 		return version
 	}
 	if version.timestamp >= windowStartNs {

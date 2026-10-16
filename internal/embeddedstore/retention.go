@@ -88,7 +88,6 @@ func (p *Projection) SetRetentionWindowDays(days int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.retentionWindowNs = embeddedRetentionWindowNs(days)
-	p.pruneRecentResourceChangesLocked()
 }
 
 func (p *Projection) retentionWindowLocked() int64 {
@@ -123,90 +122,73 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 		return
 	}
 
-	newResourcesByUID := make(map[string]*resourceRecord, len(p.resourcesByUID))
-	newResourceMetaByUID := make(map[string]models.ResourceMetadata, len(p.resourceMetaByUID))
-	newResourcesByKey := make(map[resourceKey][]*resourceRecord, len(p.resourcesByKey))
-	newOrderedResources := make([]orderedResourceKey, 0, len(p.orderedResources))
-	newActiveOrderedResources := make([]orderedResourceKey, 0, len(p.activeOrderedResources))
-	newActiveResourceKeyByUID := make(map[string]orderedResourceKey, len(p.activeResourceKeyByUID))
-	newRecentResourceChanges := make([]recentResourceChange, 0, len(p.recentResourceChanges))
-
+	// Trim in place: most records only hold versions inside the window and are left
+	// untouched, so a pass costs O(records) rather than O(versions).
+	removed := make(map[string]struct{})
 	minTimestampNs := int64(-1)
 	maxTimestampNs := int64(-1)
-
-	for i := range p.orderedResources {
-		uid := p.orderedResources[i].uid
-		record := p.resourcesByUID[uid]
-		retained := retainResourceRecordVersions(record, cutoffTimestamp)
-		if len(retained) == 0 {
+	for uid, record := range p.resourcesByUID {
+		if record == nil || len(record.versions) == 0 {
+			removed[uid] = struct{}{}
 			continue
 		}
-
-		clonedRecord := &resourceRecord{
-			uid:      uid,
-			versions: retained,
-		}
-		newResourcesByUID[uid] = clonedRecord
-
-		latest := clonedRecord.latestVersion()
-		if latest == nil {
-			continue
-		}
-		meta := resourceMetadataFromIdentity(latest.identity)
-		newResourceMetaByUID[uid] = meta
-		key := resourceKey{
-			namespace: meta.Namespace,
-			kind:      meta.Kind,
-			name:      meta.Name,
-		}
-		newResourcesByKey[key] = append(newResourcesByKey[key], clonedRecord)
-		newOrderedResources = append(newOrderedResources, orderedResourceKey{
-			kind:      meta.Kind,
-			namespace: meta.Namespace,
-			name:      meta.Name,
-			uid:       meta.UID,
-		})
-		if latest.eventType != models.EventTypeDelete {
-			activeKey := orderedResourceKey{
-				kind:      meta.Kind,
-				namespace: meta.Namespace,
-				name:      meta.Name,
-				uid:       meta.UID,
+		if record.versions[0].timestamp < cutoffTimestamp {
+			retained := retainResourceRecordVersions(record, cutoffTimestamp)
+			if len(retained) == 0 {
+				removed[uid] = struct{}{}
+				continue
 			}
-			newActiveOrderedResources = append(newActiveOrderedResources, activeKey)
-			newActiveResourceKeyByUID[uid] = activeKey
+			record.versions = retained
 		}
-
-		for j := range clonedRecord.versions {
-			version := clonedRecord.versions[j]
-			if minTimestampNs < 0 || version.timestamp < minTimestampNs {
-				minTimestampNs = version.timestamp
-			}
-			if maxTimestampNs < 0 || version.timestamp > maxTimestampNs {
-				maxTimestampNs = version.timestamp
-			}
-			if version.timestamp >= cutoffTimestamp {
-				newRecentResourceChanges = append(newRecentResourceChanges, recentResourceChange{
-					timestamp: version.timestamp,
-					uid:       uid,
-				})
-			}
+		first, last := record.versions[0].timestamp, record.versions[len(record.versions)-1].timestamp
+		if minTimestampNs < 0 || first < minTimestampNs {
+			minTimestampNs = first
+		}
+		if maxTimestampNs < 0 || last > maxTimestampNs {
+			maxTimestampNs = last
 		}
 	}
 
-	sort.Slice(newActiveOrderedResources, func(i, j int) bool {
-		return compareOrderedResourceKey(newActiveOrderedResources[i], newActiveOrderedResources[j]) < 0
-	})
+	if len(removed) > 0 {
+		for uid := range removed {
+			record := p.resourcesByUID[uid]
+			delete(p.resourcesByUID, uid)
+			delete(p.resourceMetaByUID, uid)
+			if record == nil {
+				continue
+			}
+			for key, records := range p.resourceKeysForRecord(record) {
+				kept := records[:0]
+				for _, candidate := range records {
+					if candidate != record {
+						kept = append(kept, candidate)
+					}
+				}
+				if len(kept) == 0 {
+					delete(p.resourcesByKey, key)
+				} else {
+					p.resourcesByKey[key] = kept
+				}
+			}
+		}
+		var gone []orderedResourceKey
+		p.orderedResources.Ascend(func(key orderedResourceKey) bool {
+			if _, ok := removed[key.uid]; ok {
+				gone = append(gone, key)
+			}
+			return true
+		})
+		for _, key := range gone {
+			p.orderedResources.Delete(key)
+		}
+	}
 
-	p.resourcesByUID = newResourcesByUID
-	p.resourceMetaByUID = newResourceMetaByUID
-	p.resourcesByKey = newResourcesByKey
-	p.orderedResources = newOrderedResources
-	p.activeOrderedResources = newActiveOrderedResources
-	p.activeResourceKeyByUID = newActiveResourceKeyByUID
-	p.k8sEventsByInvolvedUID = filterK8sEventInfosByTimestamp(p.k8sEventsByInvolvedUID, cutoffTimestamp)
-	p.recentResourceChanges = newRecentResourceChanges
-	sortRecentResourceChanges(p.recentResourceChanges)
+	trimK8sEventInfosBefore(p.k8sEventsByInvolvedUID, cutoffTimestamp)
+	for uid, truncated := range p.k8sEventsTruncatedThrough {
+		if truncated < cutoffTimestamp {
+			delete(p.k8sEventsTruncatedThrough, uid)
+		}
+	}
 	p.minTimestampNs = minTimestampNs
 	p.maxTimestampNs = maxTimestampNs
 
@@ -231,8 +213,44 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 		}
 		p.k8sRawEventsByInvolvedUID = filteredK8sRaw
 	}
+}
 
-	p.pruneRecentResourceChangesLocked()
+// resourceKeysForRecord returns the resourcesByKey entries that may hold record.
+func (p *Projection) resourceKeysForRecord(record *resourceRecord) map[resourceKey][]*resourceRecord {
+	keys := make(map[resourceKey][]*resourceRecord, 1)
+	seen := make(map[*versionMeta]struct{}, 1)
+	for i := range record.versions {
+		meta := record.versions[i].meta
+		if meta == nil {
+			continue
+		}
+		if _, ok := seen[meta]; ok {
+			continue
+		}
+		seen[meta] = struct{}{}
+		key := resourceKey{namespace: meta.Namespace, kind: meta.Kind, name: meta.Name}
+		if records, ok := p.resourcesByKey[key]; ok {
+			keys[key] = records
+		}
+	}
+	return keys
+}
+
+// trimK8sEventInfosBefore drops event infos older than cutoff. Lists are kept newest
+// first, so only their tails are cut.
+func trimK8sEventInfosBefore(eventsByUID map[string][]analysisstore.K8sEventInfo, cutoffTimestamp int64) {
+	for uid, events := range eventsByUID {
+		keep := len(events)
+		for keep > 0 && events[keep-1].Timestamp.UnixNano() < cutoffTimestamp {
+			keep--
+		}
+		switch {
+		case keep == 0:
+			delete(eventsByUID, uid)
+		case keep < len(events):
+			eventsByUID[uid] = append([]analysisstore.K8sEventInfo(nil), events[:keep]...)
+		}
+	}
 }
 
 func retainResourceRecordVersions(record *resourceRecord, cutoffTimestamp int64) []resourceVersion {
@@ -249,7 +267,7 @@ func retainResourceRecordVersions(record *resourceRecord, cutoffTimestamp int64)
 
 	if retainedStart >= len(record.versions) {
 		latest := record.versions[len(record.versions)-1]
-		if latest.eventType == models.EventTypeDelete {
+		if latest.eventType() == models.EventTypeDelete {
 			return nil
 		}
 		return []resourceVersion{cloneResourceVersion(latest)}
@@ -281,10 +299,10 @@ func cloneResourceVersions(versions []resourceVersion) []resourceVersion {
 }
 
 func cloneResourceVersion(version resourceVersion) resourceVersion {
+	// Versions are immutable apart from payload references, so the clone can share
+	// meta and labels.
 	cloned := version
-	cloned.identity = copyIdentity(&version)
 	cloned.data = cloneBytes(version.data)
-	cloned.changeEvent = cloneChangeEventInfo(version.changeEvent)
 	return cloned
 }
 

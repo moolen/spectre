@@ -218,7 +218,7 @@ func (b *Backend) HasUsableResourceState() bool {
 	b.engine.projection.mu.RLock()
 	defer b.engine.projection.mu.RUnlock()
 
-	return len(b.engine.projection.orderedResources) > 0
+	return b.engine.projection.orderedResources.Len() > 0
 }
 
 func (b *Backend) Name() string {

@@ -2,7 +2,6 @@ package embeddedstore
 
 import (
 	"sort"
-	"time"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/models"
@@ -34,13 +33,6 @@ func (p *Projection) appendReplayEvent(event models.Event) {
 }
 
 func (p *Projection) finalizeReplayBuild() {
-	sort.Slice(p.orderedResources, func(i, j int) bool {
-		return compareOrderedResourceKey(p.orderedResources[i], p.orderedResources[j]) < 0
-	})
-	sort.Slice(p.activeOrderedResources, func(i, j int) bool {
-		return compareOrderedResourceKey(p.activeOrderedResources[i], p.activeOrderedResources[j]) < 0
-	})
-
 	if p.retainHistoricalEventArrays {
 		for uid := range p.resourcesByUID {
 			p.rebuildRecord(uid)
@@ -55,6 +47,7 @@ func (p *Projection) finalizeReplayBuild() {
 			}
 			return left.Timestamp.After(right.Timestamp)
 		})
+		p.k8sEventsByInvolvedUID[involvedUID] = p.capK8sEventInfos(involvedUID, p.k8sEventsByInvolvedUID[involvedUID])
 	}
 
 	if !p.retainHistoricalEventArrays {
@@ -62,7 +55,6 @@ func (p *Projection) finalizeReplayBuild() {
 		clear(p.eventsByResourceUID)
 		clear(p.k8sRawEventsByInvolvedUID)
 	}
-	p.pruneRecentResourceChangesLocked()
 }
 
 func (p *Projection) Apply(event models.Event) error {
@@ -185,10 +177,10 @@ func (p *Projection) applyK8sEvent(event models.Event) {
 	if p.retainHistoricalEventArrays {
 		p.k8sRawEventsByInvolvedUID[involvedUID] = insertEventSorted(p.k8sRawEventsByInvolvedUID[involvedUID], event)
 	}
-	p.k8sEventsByInvolvedUID[involvedUID] = insertK8sEventInfoDescending(
+	p.k8sEventsByInvolvedUID[involvedUID] = p.capK8sEventInfos(involvedUID, insertK8sEventInfoDescending(
 		p.k8sEventsByInvolvedUID[involvedUID],
 		buildK8sEventInfo(event),
-	)
+	))
 }
 
 func (p *Projection) appendResourceVersion(record *resourceRecord, event models.Event) {
@@ -223,11 +215,8 @@ func (p *Projection) finishAppliedResourceEvent(
 		return
 	}
 
-	p.updateActiveResourceIndex(record)
-	p.appendRecentResourceChange(uid, event.Timestamp)
 	p.resourceMetaByUID[uid] = latestMeta
 	p.updateTimestampBounds(event.Timestamp)
-	p.pruneRecentResourceChangesLocked()
 }
 
 func (p *Projection) ensureResourceRecord(event models.Event) {
@@ -244,7 +233,7 @@ func (p *Projection) ensureResourceRecord(event models.Event) {
 		name:      event.Resource.Name,
 	}
 	p.resourcesByKey[key] = append(p.resourcesByKey[key], record)
-	p.orderedResources = insertOrderedResourceKey(p.orderedResources, orderedResourceKey{
+	p.orderedResources.Insert(orderedResourceKey{
 		kind:      event.Resource.Kind,
 		namespace: event.Resource.Namespace,
 		name:      event.Resource.Name,
@@ -266,78 +255,6 @@ func latestResourceMeta(events []models.Event) models.ResourceMetadata {
 		return models.ResourceMetadata{}
 	}
 	return events[len(events)-1].Resource
-}
-
-func (p *Projection) updateActiveResourceIndex(record *resourceRecord) {
-	if p == nil || record == nil {
-		return
-	}
-
-	latest := record.latestVersion()
-	existing, hasExisting := p.activeResourceKeyByUID[record.uid]
-	if latest == nil || latest.eventType == models.EventTypeDelete {
-		if hasExisting {
-			p.activeOrderedResources = removeOrderedResourceKey(p.activeOrderedResources, existing)
-			delete(p.activeResourceKeyByUID, record.uid)
-		}
-		return
-	}
-
-	key := orderedResourceKey{
-		kind:      latest.identity.Kind,
-		namespace: latest.identity.Namespace,
-		name:      latest.identity.Name,
-		uid:       latest.identity.UID,
-	}
-	if hasExisting && existing == key {
-		return
-	}
-	if hasExisting {
-		p.activeOrderedResources = removeOrderedResourceKey(p.activeOrderedResources, existing)
-	}
-	p.activeOrderedResources = insertOrderedResourceKey(p.activeOrderedResources, key)
-	p.activeResourceKeyByUID[record.uid] = key
-}
-
-func (p *Projection) appendRecentResourceChange(uid string, timestamp int64) {
-	if p == nil || uid == "" || timestamp <= 0 {
-		return
-	}
-	p.recentResourceChanges = append(p.recentResourceChanges, recentResourceChange{
-		timestamp: timestamp,
-		uid:       uid,
-	})
-}
-
-func (p *Projection) pruneRecentResourceChanges() {
-	p.pruneRecentResourceChangesLocked()
-}
-
-func (p *Projection) pruneRecentResourceChangesLocked() {
-	if p == nil || len(p.recentResourceChanges) == 0 || p.maxTimestampNs <= 0 {
-		return
-	}
-
-	if p.retentionWindowNs <= 0 {
-		return
-	}
-
-	cutoff := time.Now().UTC().Add(-time.Duration(p.retentionWindowNs)).UnixNano()
-	if cutoff <= 0 {
-		return
-	}
-
-	pruneIdx := sort.Search(len(p.recentResourceChanges), func(i int) bool {
-		return p.recentResourceChanges[i].timestamp >= cutoff
-	})
-	if pruneIdx <= 0 {
-		return
-	}
-	if pruneIdx >= len(p.recentResourceChanges) {
-		p.recentResourceChanges = nil
-		return
-	}
-	p.recentResourceChanges = append([]recentResourceChange(nil), p.recentResourceChanges[pruneIdx:]...)
 }
 
 func (p *Projection) resourceEventsForUID(uid string) []models.Event {
@@ -375,14 +292,14 @@ func resourceVersionEvent(version resourceVersion) models.Event {
 	return models.Event{
 		ID:        version.eventID,
 		Timestamp: version.timestamp,
-		Type:      version.eventType,
+		Type:      version.eventType(),
 		Resource: models.ResourceMetadata{
-			Group:     version.identity.APIGroup,
-			Version:   version.identity.Version,
-			Kind:      version.identity.Kind,
-			Namespace: version.identity.Namespace,
-			Name:      version.identity.Name,
-			UID:       version.identity.UID,
+			Group:     version.meta.APIGroup,
+			Version:   version.meta.Version,
+			Kind:      version.meta.Kind,
+			Namespace: version.meta.Namespace,
+			Name:      version.meta.Name,
+			UID:       version.meta.UID,
 		},
 		Data: versionPayloadCopy(&version),
 	}
@@ -400,4 +317,28 @@ func insertK8sEventInfoDescending(events []analysisstore.K8sEventInfo, event ana
 	copy(events[idx+1:], events[idx:])
 	events[idx] = event
 	return events
+}
+
+// maxK8sEventInfosPerUID bounds the event summaries kept in memory per involved object.
+// Older summaries stay in segments and are found through the associated-UID index.
+const maxK8sEventInfosPerUID = 64
+
+// capK8sEventInfos trims a newest-first list to the cap and records what was dropped.
+func (p *Projection) capK8sEventInfos(involvedUID string, events []analysisstore.K8sEventInfo) []analysisstore.K8sEventInfo {
+	if len(events) <= maxK8sEventInfosPerUID {
+		return events
+	}
+	newestDropped := events[maxK8sEventInfosPerUID].Timestamp.UnixNano()
+	if newestDropped > p.k8sEventsTruncatedThrough[involvedUID] {
+		p.k8sEventsTruncatedThrough[involvedUID] = newestDropped
+	}
+	clear(events[maxK8sEventInfosPerUID:])
+	return events[:maxK8sEventInfosPerUID]
+}
+
+// k8sEventInfosComplete reports whether the in-memory infos for uid cover every event
+// at or after startTimeNs.
+func (p *Projection) k8sEventInfosComplete(uid string, startTimeNs int64) bool {
+	truncated, ok := p.k8sEventsTruncatedThrough[uid]
+	return !ok || startTimeNs > truncated
 }

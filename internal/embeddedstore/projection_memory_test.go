@@ -33,7 +33,7 @@ func TestProjection_GetChangeEventsHydratesDataWithoutRetainingDuplicateCopy(t *
 	record := projection.resourcesByUID["pod-uid"]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 1)
-	require.Nil(t, record.versions[0].changeEvent.Data)
+	require.Nil(t, record.versions[0].changeEventInfo().Data)
 
 	events, err := NewAnalysisStore(projection).GetChangeEvents(context.Background(), []string{"pod-uid"}, analysisstore.ResourceWindow{
 		FailureTimestampNs: 10,

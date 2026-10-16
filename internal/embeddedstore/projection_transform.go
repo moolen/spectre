@@ -68,12 +68,16 @@ func buildResourceVersion(event models.Event, priorVersions []resourceVersion, p
 	version := resourceVersion{
 		eventID:   event.ID,
 		timestamp: event.Timestamp,
-		eventType: event.Type,
+		typeCode:  versionEventTypes.code(string(event.Type)),
 		data:      cloneBytes(event.Data),
 		dataHash:  payloadHash(event.Data),
 	}
-	version.identity = buildResourceIdentityWithLabels(event, labels, priorVersions)
-	version.changeEvent = buildChangeEventInfoFromObject(event, object, previous, current)
+	var previousMeta *versionMeta
+	if len(priorVersions) > 0 {
+		previousMeta = priorVersions[len(priorVersions)-1].meta
+	}
+	version.setIdentity(buildResourceIdentityWithLabels(event, labels, priorVersions), previousMeta)
+	version.setChangeInfo(buildChangeEventInfoFromObject(event, object, previous, current))
 	return version, current
 }
 
@@ -100,7 +104,7 @@ func buildResourceIdentityWithLabels(event models.Event, labels map[string]strin
 	}
 	if len(priorVersions) > 0 {
 		// Reuse the previous version's strings so long histories share one copy.
-		prior := priorVersions[len(priorVersions)-1].identity
+		prior := priorVersions[len(priorVersions)-1].identity()
 		identity.UID = internEqual(identity.UID, prior.UID)
 		identity.Kind = internEqual(identity.Kind, prior.Kind)
 		identity.APIGroup = internEqual(identity.APIGroup, prior.APIGroup)
@@ -427,7 +431,7 @@ func getInt(object map[string]any, key string) (int64, bool) {
 }
 
 func copyIdentity(version *resourceVersion) graph.ResourceIdentity {
-	identity := version.identity
+	identity := version.identity()
 	identity.Labels = copyStringMap(identity.Labels)
 	return identity
 }
