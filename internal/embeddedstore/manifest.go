@@ -39,12 +39,12 @@ type Manifest struct {
 }
 
 type SegmentMeta struct {
-	ID             string              `json:"id"`
-	HighWaterMark  uint64              `json:"high_water_mark"`
-	SizeBytes      int64               `json:"size_bytes,omitempty"`
-	EventCount     int                 `json:"event_count,omitempty"`
-	MinTimestamp   int64               `json:"min_timestamp,omitempty"`
-	MaxTimestamp   int64               `json:"max_timestamp,omitempty"`
+	ID            string `json:"id"`
+	HighWaterMark uint64 `json:"high_water_mark"`
+	SizeBytes     int64  `json:"size_bytes,omitempty"`
+	EventCount    int    `json:"event_count,omitempty"`
+	MinTimestamp  int64  `json:"min_timestamp,omitempty"`
+	MaxTimestamp  int64  `json:"max_timestamp,omitempty"`
 	// NamespaceKinds is kept in memory only: with hundreds of segments it would make the
 	// manifest, rewritten on every flush, megabytes large. Readers opened from a loaded
 	// manifest read it from the segment's stats file on demand.

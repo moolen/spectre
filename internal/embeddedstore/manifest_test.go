@@ -109,10 +109,10 @@ func TestManifest_StoresSegmentIndexGeneration(t *testing.T) {
 	dir := t.TempDir()
 
 	require.NoError(t, storeManifest(dir, Manifest{
-		FormatVersion:           storageFormatVersion,
-		SegmentIndexGeneration:  1,
-		ActiveSegments:          []SegmentMeta{},
-		Checkpoints:             []CheckpointMeta{},
+		FormatVersion:          storageFormatVersion,
+		SegmentIndexGeneration: 1,
+		ActiveSegments:         []SegmentMeta{},
+		Checkpoints:            []CheckpointMeta{},
 	}))
 
 	reloaded, err := loadOrCreateManifest(dir)
