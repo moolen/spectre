@@ -45,68 +45,33 @@
                 850: '#1a202c',
                 950: '#0d1117',
               },
+              // Ember accent scale (see src/theme.css for the full token set)
               brand: {
-                500: '#6366f1',
-                600: '#4f46e5',
+                50: '#fdf3ee',
+                100: '#fbe3d6',
+                200: '#f6c4a8',
+                300: '#f0a57d',
+                400: '#ea8d5e',
+                500: '#e07a47',
+                600: '#c9632f',
+                700: '#a64e24',
+                800: '#843f1f',
+                900: '#5e2d16',
               }
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+              mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
             }
           }
         }
       }
     </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
-      :root {
-        --color-app-bg: #0f172a;
-        --color-surface-elevated: #111827;
-        --color-surface-muted: #1f2937;
-        --color-surface-active: #2f3a4d;
-        --color-surface-secondary: #0d1117;
-        --color-border-soft: #374151;
-        --color-input-bg: #1f2937;
-        --color-text-primary: #f8fafc;
-        --color-text-muted: #94a3b8;
-        --color-mascot-bg: #0f172a;
-        --color-sidebar-bg: #0d1117;
-        --color-grid-line: rgba(148, 163, 184, 0.3);
-      }
-
-      :root[data-theme='light'] {
-        --color-app-bg: #f8f6f1;
-        --color-surface-elevated: #ffffff;
-        --color-surface-muted: #f0ede4;
-        --color-surface-active: #e3ddcc;
-        --color-surface-secondary: #ffffff;
-        --color-border-soft: #d6d3cd;
-        --color-input-bg: #ffffff;
-        --color-text-primary: #1e293b;
-        --color-text-muted: #475569;
-        --color-mascot-bg: #f8f6f1;
-        --color-sidebar-bg: #f2eee3;
-        --color-grid-line: rgba(71, 85, 105, 0.3);
-      }
-
-      body {
-        background-color: var(--color-app-bg);
-        color: var(--color-text-primary);
-        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        transition: background-color 0.3s ease, color 0.3s ease;
-      }
-
-      /* Custom scrollbar for a cleaner UI */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: var(--color-surface-muted);
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #4b5563;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #6b7280;
-      }
+      /* Theme tokens and base styles live in src/theme.css */
 
       /* Prism.js Base Styles */
       pre[class*="language-"],
@@ -116,7 +81,7 @@
         border-radius: 4px;
         padding: 1rem;
         overflow-x: auto;
-        font-family: 'Fira Code', 'Courier New', monospace;
+        font-family: var(--font-mono);
         font-size: 0.9rem;
         line-height: 1.6;
         tab-size: 2;
@@ -128,7 +93,7 @@
       pre code[class*="yaml"],
       .codeBlockLines,
       .codeBlockLines_e6Vv {
-        font-family: 'Fira Code', 'Courier New', monospace;
+        font-family: var(--font-mono);
       }
 
       /* Prism.js Token Styles - Base */
@@ -136,19 +101,19 @@
       .token.prolog,
       .token.doctype,
       .token.cdata {
-        color: #546e7a;
+        color: #7a746b;
         font-style: italic;
       }
 
       .token.punctuation {
-        color: #89ddff;
+        color: #9a948a;
       }
 
       /* YAML Key-Value pairs */
       .token.keyword,
       code .token.keyword,
       pre .token.keyword {
-        color: #c792ea;
+        color: #f0956a;
         font-weight: 500;
       }
 
@@ -161,7 +126,7 @@
       pre .token.property,
       code span[data-yaml-key],
       pre span[data-yaml-key] {
-        color: #82aaff;
+        color: #e6c879;
         font-weight: 500;
       }
 
@@ -171,7 +136,7 @@
       pre .token.string,
       code span[data-yaml-string],
       pre span[data-yaml-string] {
-        color: #c3e88d;
+        color: #93d1a8;
       }
 
       /* YAML numbers */
@@ -180,7 +145,7 @@
       pre .token.number,
       code span[data-yaml-number],
       pre span[data-yaml-number] {
-        color: #f78c6c;
+        color: #f0a57d;
       }
 
       /* YAML booleans */
@@ -189,7 +154,7 @@
       pre .token.boolean,
       code span[data-yaml-boolean],
       pre span[data-yaml-boolean] {
-        color: #ff5370;
+        color: #f0928a;
       }
 
       /* YAML null values */
@@ -198,7 +163,7 @@
       pre .token.null,
       code span[data-yaml-null],
       pre span[data-yaml-null] {
-        color: #ff5370;
+        color: #f0928a;
         font-style: italic;
       }
 
@@ -208,7 +173,7 @@
       pre .token.comment,
       code span[data-yaml-comment],
       pre span[data-yaml-comment] {
-        color: #546e7a;
+        color: #7a746b;
         font-style: italic;
       }
 
@@ -216,14 +181,14 @@
       .token.punctuation,
       code .token.punctuation,
       pre .token.punctuation {
-        color: #89ddff;
+        color: #9a948a;
       }
 
       /* YAML operators */
       .token.operator,
       code .token.operator,
       pre .token.operator {
-        color: #89ddff;
+        color: #9a948a;
       }
 
       /* YAML document separators (---, ...) */
@@ -231,7 +196,7 @@
       pre span:contains("---"),
       code span:contains("..."),
       pre span:contains("...") {
-        color: #546e7a;
+        color: #7a746b;
         font-weight: 600;
       }
 
@@ -240,23 +205,23 @@
       /* YAML-specific highlighting patterns using attribute selectors */
       code[data-language="yaml"] .yaml-key,
       pre[data-language="yaml"] .yaml-key {
-        color: #82aaff;
+        color: #e6c879;
         font-weight: 500;
       }
 
       code[data-language="yaml"] .yaml-string,
       pre[data-language="yaml"] .yaml-string {
-        color: #c3e88d;
+        color: #93d1a8;
       }
 
       code[data-language="yaml"] .yaml-number,
       pre[data-language="yaml"] .yaml-number {
-        color: #f78c6c;
+        color: #f0a57d;
       }
 
       code[data-language="yaml"] .yaml-comment,
       pre[data-language="yaml"] .yaml-comment {
-        color: #546e7a;
+        color: #7a746b;
         font-style: italic;
       }
 
@@ -264,31 +229,31 @@
       :root[data-theme='light'] .token.keyword,
       :root[data-theme='light'] code .token.keyword,
       :root[data-theme='light'] pre .token.keyword {
-        color: #9c27b0;
+        color: #b4521f;
       }
 
       :root[data-theme='light'] .token.attr-name,
       :root[data-theme='light'] code .token.attr-name,
       :root[data-theme='light'] pre .token.attr-name {
-        color: #1976d2;
+        color: #8a6a12;
       }
 
       :root[data-theme='light'] .token.string,
       :root[data-theme='light'] code .token.string,
       :root[data-theme='light'] pre .token.string {
-        color: #388e3c;
+        color: #2f7a4a;
       }
 
       :root[data-theme='light'] .token.number,
       :root[data-theme='light'] code .token.number,
       :root[data-theme='light'] pre .token.number {
-        color: #f57c00;
+        color: #c8602f;
       }
 
       :root[data-theme='light'] .token.boolean,
       :root[data-theme='light'] code .token.boolean,
       :root[data-theme='light'] pre .token.boolean {
-        color: #d32f2f;
+        color: #b3362b;
       }
 
       :root[data-theme='light'] .token.comment,
@@ -300,7 +265,7 @@
       :root[data-theme='light'] .token.punctuation,
       :root[data-theme='light'] code .token.punctuation,
       :root[data-theme='light'] pre .token.punctuation {
-        color: #0288d1;
+        color: #6b665e;
       }
 
       /* Generic code block line styling */

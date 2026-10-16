@@ -49,7 +49,7 @@ export const CausalArrow: React.FC<CausalArrowProps> = ({
       {/* Arrow path - no arrowhead */}
       <path
         d={path}
-        stroke="#3b82f6"
+        stroke="var(--color-accent)"
         strokeWidth={2}
         fill="none"
         strokeDasharray="5,5"
@@ -62,7 +62,7 @@ export const CausalArrow: React.FC<CausalArrowProps> = ({
         <text
           x={x + controlPointOffset / 2}
           y={midY}
-          fill="#3b82f6"
+          fill="var(--color-accent)"
           fontSize="10"
           textAnchor="middle"
           className="pointer-events-none"

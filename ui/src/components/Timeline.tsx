@@ -18,9 +18,13 @@ interface TimelineProps {
   onLoadMore?: () => void;
 }
 
-const MARGIN = { top: 40, right: 30, bottom: 20, left: 240 };
-const ROW_HEIGHT_DEFAULT = 48;
-const ROW_HEIGHT_COMPACT = 24;
+const MARGIN = { top: 36, right: 24, bottom: 20, left: 300 };
+const ROW_HEIGHT_DEFAULT = 40;
+const ROW_HEIGHT_COMPACT = 26;
+// Status bars are drawn thinner than the row; the full row stays clickable.
+const BAR_HEIGHT_DEFAULT = 8;
+const BAR_HEIGHT_COMPACT = 6;
+const LABEL_PADDING_X = 20;
 
 export const Timeline: React.FC<TimelineProps> = ({
     resources,
@@ -44,7 +48,9 @@ export const Timeline: React.FC<TimelineProps> = ({
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const rowHeight = compactMode ? ROW_HEIGHT_COMPACT : ROW_HEIGHT_DEFAULT;
-  const bandPadding = compactMode ? 0.15 : 0.4;
+  const barHeight = compactMode ? BAR_HEIGHT_COMPACT : BAR_HEIGHT_DEFAULT;
+  const eventRadius = compactMode ? 3 : 4;
+  const bandPadding = 0;
 
   const themeColors = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -260,10 +266,11 @@ export const Timeline: React.FC<TimelineProps> = ({
     // Sidebar Background - read from CSS to ensure theme is applied
     labelGroup.append('rect')
         .attr('data-element', 'sidebar-bg')
-        .attr('width', MARGIN.left - 2)
+        .attr('width', MARGIN.left - 1)
         .attr('height', Math.max(height, contentHeight + MARGIN.top + MARGIN.bottom))
         .attr('y', -MARGIN.top)
         .attr('fill', sidebarBg)
+        .style('fill', 'var(--color-sidebar-bg)')
         .attr('stroke', 'none');
 
     // Border color - read from CSS to ensure theme is applied
@@ -274,6 +281,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('y1', -MARGIN.top)
         .attr('y2', Math.max(height, contentHeight + MARGIN.top + MARGIN.bottom))
         .attr('stroke', borderColor)
+        .style('stroke', 'var(--color-border-soft)')
         .attr('stroke-width', 1);
 
     // --- Draw Labels ---
@@ -282,7 +290,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       .enter()
       .append('g')
       .attr('class', 'label cursor-pointer group')
-      .attr('transform', d => `translate(20, ${yScale(d.id)})`)
+      .attr('transform', d => `translate(${LABEL_PADDING_X}, ${yScale(d.id)})`)
       .on('click', (event, d) => {
         if (d.statusSegments.length > 0) {
             onSegmentClick(d, d.statusSegments.length - 1);
@@ -290,32 +298,44 @@ export const Timeline: React.FC<TimelineProps> = ({
       });
 
     labels.append('rect')
-        .attr('x', -20)
+        .attr('class', 'label-bg')
+        .attr('x', -LABEL_PADDING_X)
         .attr('y', 0)
-        .attr('width', MARGIN.left - 2)
+        .attr('width', MARGIN.left - 1)
         .attr('height', yScale.bandwidth())
         .attr('fill', 'transparent');
 
+    // Accent edge for the selected row (toggled in the selection effect)
+    labels.append('rect')
+        .attr('class', 'label-accent')
+        .attr('x', -LABEL_PADDING_X)
+        .attr('y', 0)
+        .attr('width', 2)
+        .attr('height', yScale.bandwidth())
+        .style('fill', 'var(--color-accent)')
+        .attr('opacity', 0);
+
     // Calculate max width for text (leave padding on right)
-    const maxTextWidth = MARGIN.left - 40;
+    const maxTextWidth = MARGIN.left - LABEL_PADDING_X * 2;
 
     // Text colors - re-read from CSS to ensure theme is applied
     const textPrimary = getComputedStyle(document.documentElement).getPropertyValue('--color-text-primary').trim() || themeColors.textPrimary;
     const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || themeColors.textMuted;
 
     // Resource name with truncation and tooltip
-    const nameFontSize = compactMode ? '10px' : '13px';
-    const kindFontSize = compactMode ? '8px' : '11px';
-    const nameY = compactMode ? yScale.bandwidth() / 2 - 2 : yScale.bandwidth() / 2 - 6;
-    const kindY = compactMode ? yScale.bandwidth() / 2 + 6 : yScale.bandwidth() / 2 + 10;
+    const nameFontSize = compactMode ? '11px' : '12.5px';
+    const kindFontSize = compactMode ? '9.5px' : '11px';
+    const nameY = compactMode ? yScale.bandwidth() / 2 - 5 : yScale.bandwidth() / 2 - 7;
+    const kindY = compactMode ? yScale.bandwidth() / 2 + 6 : yScale.bandwidth() / 2 + 8;
 
     const nameText = labels.append('text')
       .attr('data-element', 'label-name')
       .attr('x', 0)
       .attr('y', nameY)
       .attr('fill', textPrimary)
+      .style('fill', 'var(--color-text-primary)')
       .style('font-size', nameFontSize)
-      .style('font-weight', '600')
+      .style('font-weight', '500')
       .style('dominant-baseline', 'middle')
       .each(function(d) {
         const text = d3.select(this);
@@ -347,20 +367,13 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     labels.append('text')
       .attr('data-element', 'label-kind-ns')
-      .text(d => `${d.kind} • ${d.namespace}${d.preExisting ? ' • Pre-existing' : ''}`)
+      .text(d => `${d.kind} · ${d.namespace}${d.preExisting ? ' · pre-existing' : ''}`)
       .attr('x', 0)
       .attr('y', kindY)
       .attr('fill', textMuted)
+      .style('fill', 'var(--color-text-faint)')
       .style('font-size', kindFontSize)
       .style('dominant-baseline', 'middle');
-
-    labels.append('line')
-        .attr('x1', 0)
-        .attr('x2', MARGIN.left - 40)
-        .attr('y1', yScale.bandwidth() + yScale.padding() * yScale.step() / 2)
-        .attr('y2', yScale.bandwidth() + yScale.padding() * yScale.step() / 2)
-        .attr('stroke', borderColor)
-        .attr('stroke-width', 1);
 
     // --- Draw Content ---
     const rows = contentGroup.selectAll('.resource-row')
@@ -369,15 +382,17 @@ export const Timeline: React.FC<TimelineProps> = ({
         .append('g')
         .attr('class', 'resource-row')
         .attr('transform', d => `translate(0, ${yScale(d.id)})`);
-    rows.append('line')
-        .attr('class', 'row-guide')
-        .attr('x1', -10000)
-        .attr('x2', 10000)
-        .attr('y1', yScale.bandwidth() / 2)
-        .attr('y2', yScale.bandwidth() / 2)
-        .attr('stroke', themeColors.grid)
-        .attr('stroke-dasharray', '4,4')
-        .attr('opacity', 0.5);
+    // Row background, highlighted when the row is selected
+    rows.append('rect')
+        .attr('class', 'row-bg')
+        .attr('x', -MARGIN.left)
+        .attr('y', 0)
+        .attr('width', 100000)
+        .attr('height', yScale.bandwidth())
+        .attr('fill', 'transparent')
+        .attr('pointer-events', 'none');
+
+    const barY = (yScale.bandwidth() - barHeight) / 2;
 
     // Segments
     rows.selectAll('.segment')
@@ -393,10 +408,11 @@ export const Timeline: React.FC<TimelineProps> = ({
         .attr('class', 'segment')
         // Restrict transition to stroke properties to avoid lag on x/width updates during zoom
         .style('transition', 'stroke 0.2s, stroke-width 0.2s')
-        .attr('y', 0)
-        .attr('height', yScale.bandwidth())
-        .attr('rx', 4)
-        .attr('fill', s => STATUS_COLORS[s.status])
+        .attr('y', barY)
+        .attr('height', barHeight)
+        .attr('rx', 2)
+        .attr('data-status', s => s.status)
+        .style('fill', s => STATUS_COLORS[s.status])
         .attr('opacity', 1)
         .attr('stroke', 'none')
         .attr('stroke-width', 0);
@@ -414,10 +430,10 @@ export const Timeline: React.FC<TimelineProps> = ({
         .enter()
         .append('rect')
         .attr('class', 'segment-continuation')
-        .attr('y', 0)
-        .attr('height', yScale.bandwidth())
-        .attr('rx', 4)
-        .attr('fill', s => STATUS_COLORS[s.status])
+        .attr('y', barY)
+        .attr('height', barHeight)
+        .attr('rx', 2)
+        .style('fill', s => STATUS_COLORS[s.status])
         .attr('opacity', 0.35)
         .attr('pointer-events', 'none')
         .each(function() {
@@ -433,9 +449,9 @@ export const Timeline: React.FC<TimelineProps> = ({
         .append('circle')
         .attr('class', 'event-dot')
         .attr('cy', yScale.bandwidth() / 2)
-        .attr('r', 5)
-        .attr('fill', '#f8fafc')
-        .attr('stroke', '#1e293b') // Dark outline for visibility in both themes
+        .attr('r', eventRadius)
+        .style('fill', 'var(--color-text-primary)')
+        .style('stroke', 'var(--color-app-bg)')
         .attr('stroke-width', 2)
         .style('cursor', 'pointer')
         .style('pointer-events', 'all')
@@ -470,12 +486,13 @@ export const Timeline: React.FC<TimelineProps> = ({
 
             stickyAxisGroup.call(axis)
                 .call(g => g.select('.domain').remove())
-                .call(g => g.selectAll('.tick line').attr('stroke', themeColors.grid).attr('stroke-width', 2).attr('y2', -5))
+                .call(g => g.selectAll('.tick line').remove())
                 .call(g => g.selectAll('.tick text')
-                    .attr('fill', themeColors.textPrimary)
-                    .attr('font-weight', '600')
-                    .attr('font-size', '12px')
-                    .attr('dy', '-8px')
+                    .style('fill', 'var(--color-text-faint)')
+                    .attr('font-weight', '400')
+                    .attr('font-size', '11px')
+                    .style('font-family', 'var(--font-mono)')
+                    .attr('dy', '-12px')
                 );
         }
 
@@ -487,9 +504,8 @@ export const Timeline: React.FC<TimelineProps> = ({
         gridGroup.call(gridAxis)
             .call(g => g.select('.domain').remove())
             .call(g => g.selectAll('.tick line')
-                .attr('stroke', themeColors.grid)
-                .attr('stroke-opacity', 0.5)
-                .attr('stroke-dasharray', '2,2')
+                .style('stroke', 'var(--color-grid-line)')
+                .attr('stroke-opacity', 1)
             );
 
         contentGroup.selectAll<SVGRectElement, any>('.segment')
@@ -512,6 +528,66 @@ export const Timeline: React.FC<TimelineProps> = ({
 
         contentGroup.selectAll<SVGCircleElement, any>('.event-dot')
             .attr('cx', d => newXScale(d.timestamp));
+
+        clusterEvents();
+    };
+
+    // Collapse event dots that would overlap at the current zoom level into a
+    // single pill with a count (e.g. a crash-looping pod), instead of drawing
+    // dozens of overlapping dots.
+    const clusterMinGap = eventRadius * 2 + 2;
+    const clusterEvents = () => {
+        contentGroup.selectAll<SVGGElement, K8sResource>('.resource-row').each(function() {
+            const row = d3.select(this);
+            const items = row.selectAll<SVGCircleElement, unknown>('.event-dot').nodes()
+                .map(node => ({ node, x: Number(node.getAttribute('cx')) }))
+                .sort((a, b) => a.x - b.x);
+
+            const clusters: Array<{ x0: number; x1: number; count: number; nodes: SVGCircleElement[] }> = [];
+            for (const item of items) {
+                const current = clusters[clusters.length - 1];
+                if (current && item.x - current.x1 < clusterMinGap) {
+                    current.x1 = item.x;
+                    current.count++;
+                    current.nodes.push(item.node);
+                } else {
+                    clusters.push({ x0: item.x, x1: item.x, count: 1, nodes: [item.node] });
+                }
+            }
+            for (const cluster of clusters) {
+                const display = cluster.count > 1 ? 'none' : null;
+                cluster.nodes.forEach(node => d3.select(node).style('display', display));
+            }
+
+            const pillHeight = Math.max(12, eventRadius * 2 + 6);
+            const pills = row.selectAll<SVGGElement, (typeof clusters)[number]>('.event-cluster')
+                .data(clusters.filter(c => c.count > 1))
+                .join(enter => {
+                    const g = enter.append('g').attr('class', 'event-cluster').style('pointer-events', 'none');
+                    g.append('rect')
+                        .attr('height', pillHeight)
+                        .attr('rx', pillHeight / 2)
+                        .style('fill', 'var(--color-app-bg)')
+                        .attr('fill-opacity', 0.6)
+                        .style('stroke', 'var(--color-text-secondary)')
+                        .attr('stroke-width', 1);
+                    g.append('text')
+                        .attr('text-anchor', 'middle')
+                        .attr('dominant-baseline', 'central')
+                        .style('fill', 'var(--color-text-primary)')
+                        .style('font-size', compactMode ? '9px' : '10px')
+                        .style('font-weight', '600');
+                    return g;
+                });
+            pills.attr('transform', `translate(0, ${(yScale.bandwidth() - pillHeight) / 2})`);
+            pills.select('rect')
+                .attr('x', c => c.x0 - pillHeight / 2)
+                .attr('width', c => Math.max(c.x1 - c.x0 + pillHeight, String(c.count).length * 6 + 14));
+            pills.select('text')
+                .attr('x', c => c.x0 - pillHeight / 2 + Math.max(c.x1 - c.x0 + pillHeight, String(c.count).length * 6 + 14) / 2)
+                .attr('y', pillHeight / 2)
+                .text(c => `${c.count}`);
+        });
     };
 
     zoom.on('zoom', (event) => {
@@ -612,13 +688,13 @@ export const Timeline: React.FC<TimelineProps> = ({
                     );
 
                     // Check if hovering over an event dot
-                    const eventRadius = 8; // Slightly larger hit area for easier hovering
+                    const hitRadius = 8; // Slightly larger hit area for easier hovering
                     const eventDot = resource.events.find(e => {
                         const eventX = currentXScale(e.timestamp);
                         const eventY = bandTop + bandHeight / 2;
                         const dx = x - eventX;
                         const dy = y - eventY;
-                        return Math.sqrt(dx * dx + dy * dy) <= eventRadius;
+                        return Math.sqrt(dx * dx + dy * dy) <= hitRadius;
                     });
 
                     if (eventDot) {
@@ -648,64 +724,10 @@ export const Timeline: React.FC<TimelineProps> = ({
     // Apply initial transform if exists
     svg.call(zoom.transform, currentTransform);
 
-  }, [sortedResources, width, height, timeDomain, themeColors, theme, rowHeight, bandPadding]); // Only re-run if data/layout or display settings change
+  }, [sortedResources, width, height, timeDomain, themeColors, theme, rowHeight, bandPadding, barHeight, eventRadius]); // Only re-run if data/layout or display settings change
 
-  // Theme Update Effect: Update all theme-dependent colors when theme changes
-  useEffect(() => {
-    if (!svgRef.current) return;
-
-    // Use requestAnimationFrame to ensure CSS has been applied
-    const frame = requestAnimationFrame(() => {
-      const svg = d3.select(svgRef.current);
-
-      // Read current CSS values directly from document
-      const styles = getComputedStyle(document.documentElement);
-      const sidebarBg = styles.getPropertyValue('--color-sidebar-bg').trim();
-      const borderColor = styles.getPropertyValue('--color-border-soft').trim();
-      const textPrimary = styles.getPropertyValue('--color-text-primary').trim();
-      const textMuted = styles.getPropertyValue('--color-text-muted').trim();
-      const gridLine = styles.getPropertyValue('--color-grid-line').trim();
-      const appBg = styles.getPropertyValue('--color-app-bg').trim();
-
-      // Update sidebar background
-      svg.selectAll('[data-element="sidebar-bg"]')
-        .attr('fill', sidebarBg || themeColors.sidebar);
-
-      // Update sidebar border
-      svg.selectAll('[data-element="sidebar-border"]')
-        .attr('stroke', borderColor || themeColors.border);
-
-      // Update sidebar text colors
-      svg.selectAll('[data-element="label-name"]')
-        .attr('fill', textPrimary || themeColors.textPrimary);
-
-      svg.selectAll('[data-element="label-kind-ns"]')
-        .attr('fill', textMuted || themeColors.textMuted);
-
-      // Update axis tick lines and text
-      svg.selectAll('.tick line')
-        .attr('stroke', gridLine || themeColors.grid);
-
-      svg.selectAll('.tick text')
-        .attr('fill', textPrimary || themeColors.textPrimary);
-
-      // Update sticky axis text color
-      if (stickyAxisRef.current) {
-        d3.select(stickyAxisRef.current).selectAll('.tick text')
-          .attr('fill', textPrimary || themeColors.textPrimary);
-      }
-
-      // Update row guide lines
-      svg.selectAll('.row-guide')
-        .attr('stroke', borderColor || themeColors.border);
-
-      // Update event dot appearance
-      svg.selectAll('.event-dot')
-        .attr('stroke', appBg || themeColors.appBg);
-    });
-
-    return () => cancelAnimationFrame(frame);
-  }, [theme]);
+  // Theme changes need no redraw: every colour above resolves through CSS
+  // variables (see src/theme.css).
 
   // Secondary Effect: Style Updates (Selection & Highlights)
   // This runs whenever selection changes, without re-drawing the whole chart
@@ -713,30 +735,37 @@ export const Timeline: React.FC<TimelineProps> = ({
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
 
-    // Update Segments
-    // Use theme-aware outline color: dark in dark theme, dark in light theme for visibility
-    const outlineColor = theme === 'light' ? '#1e293b' : '#ffffff';
-    svg.selectAll('.segment')
-        .attr('stroke', (d: any) => {
-          const isSel = selectedPoint && d.resourceId === selectedPoint.resourceId && d.index === selectedPoint.index;
-          return isSel ? outlineColor : 'none';
-        })
-        .attr('stroke-width', (d: any) => {
-          const isSel = selectedPoint && d.resourceId === selectedPoint.resourceId && d.index === selectedPoint.index;
-          return isSel ? 3 : 0;
-        });
+    const selectedResourceId = selectedPoint?.resourceId;
 
-    // Update Events
+    // Selected row: subtle background plus an accent edge on the label
+    svg.selectAll('.row-bg')
+        .style('fill', (d: any) => d.id === selectedResourceId ? 'var(--color-surface-muted)' : 'transparent');
+    svg.selectAll('.label-bg')
+        .style('fill', (d: any) => d.id === selectedResourceId ? 'var(--color-surface-muted)' : 'transparent');
+    svg.selectAll('.label-accent')
+        .attr('opacity', (d: any) => d.id === selectedResourceId ? 1 : 0);
+
+    // Selected segment: outlined and slightly taller
+    const isSelected = (d: any) => Boolean(selectedPoint && d.resourceId === selectedPoint.resourceId && d.index === selectedPoint.index);
+    const bandwidth = rowHeight;
+    const baseY = (bandwidth - barHeight) / 2;
+    svg.selectAll('.segment')
+        .attr('y', (d: any) => isSelected(d) ? baseY - 2 : baseY)
+        .attr('height', (d: any) => isSelected(d) ? barHeight + 4 : barHeight)
+        // Set both the attribute and the style: the e2e tests read the attribute
+        .attr('stroke', (d: any) => isSelected(d) ? 'var(--color-text-primary)' : 'none')
+        .style('stroke', (d: any) => isSelected(d) ? 'var(--color-text-primary)' : 'none')
+        .attr('stroke-width', (d: any) => isSelected(d) ? 1.5 : 0);
+
+    // Events that belong to the selected segment are drawn in the accent colour
     svg.selectAll('.event-dot')
-        .attr('fill', (d: any) => highlightedEventIds.includes(d.id) ? '#fbbf24' : '#f8fafc') // amber-400 vs slate-50
-        .attr('r', (d: any) => highlightedEventIds.includes(d.id) ? 7 : 5)
-        .attr('stroke', (d: any) => highlightedEventIds.includes(d.id) ? '#ffffff' : '#1e293b') // Dark outline for visibility in both themes
-        .attr('stroke-width', (d: any) => highlightedEventIds.includes(d.id) ? 2 : 2)
+        .style('fill', (d: any) => highlightedEventIds.includes(d.id) ? 'var(--color-accent)' : 'var(--color-text-primary)')
+        .attr('r', (d: any) => highlightedEventIds.includes(d.id) ? eventRadius + 1.5 : eventRadius)
         // Bring highlighted events to front
         .filter((d: any) => highlightedEventIds.includes(d.id))
         .raise();
 
-  }, [selectedPoint, highlightedEventIds, themeColors, theme, sortedResources]);
+  }, [selectedPoint, highlightedEventIds, themeColors, theme, sortedResources, rowHeight, barHeight, eventRadius]);
 
   // Track previous sidebar width to detect panel closing
   const prevSidebarWidth = useRef(0);
@@ -858,132 +887,117 @@ export const Timeline: React.FC<TimelineProps> = ({
     prevSidebarWidth.current = sidebarWidth;
   }, [selectedPoint, sidebarWidth, sortedResources, width, xScale, zoom, timeRange]);
 
+  const zoomBy = (factor: number) => {
+    if (!svgRef.current) return;
+    const svg = d3.select(svgRef.current);
+    const currentTransform = d3.zoomTransform(svg.node()!);
+    const newScale = Math.min(30000, Math.max(1, currentTransform.k * factor));
+    const centerX = innerWidth / 2;
+    // Zoom around the center: keep the point at centerX fixed
+    const newTx = centerX - (centerX - currentTransform.x) * (newScale / currentTransform.k);
+    const newTransform = d3.zoomIdentity.translate(newTx, 0).scale(newScale);
+    svg.transition()
+      .duration(300)
+      .ease(d3.easeCubicOut)
+      .call(zoom.transform, newTransform)
+      .on('end', () => {
+        notifyVisibleTimeRange(newTransform);
+        onZoomDetected?.();
+      });
+  };
+
+  const resetZoom = () => {
+    if (!svgRef.current) return;
+    const svg = d3.select(svgRef.current);
+    svg.transition()
+      .duration(300)
+      .ease(d3.easeCubicOut)
+      .call(zoom.transform, d3.zoomIdentity)
+      .on('end', () => {
+        notifyVisibleTimeRange(d3.zoomIdentity);
+        onZoomDetected?.();
+      });
+  };
+
+  const zoomButtonClass =
+    'w-[26px] h-[26px] grid place-items-center rounded-md text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] transition-colors pointer-events-auto';
+
   return (
     <div
       ref={containerRef}
-      className="w-full h-full bg-[var(--color-surface-secondary)] rounded-lg shadow-inner border border-[var(--color-border-soft)] custom-scrollbar relative overflow-y-auto overflow-x-hidden transition-colors duration-300"
+      className="w-full h-full bg-[var(--color-app-bg)] custom-scrollbar relative overflow-y-auto overflow-x-hidden"
     >
-      <svg
-        ref={stickyAxisRef}
-        width={width}
-        height={MARGIN.top}
-        className="sticky top-0 left-0 right-0 block bg-[var(--color-surface-secondary)] border-b border-[var(--color-border-soft)] z-10"
-        style={{ pointerEvents: 'none' }}
+      {/* Sticky header: resource column title + zoom controls, and the time axis */}
+      <div
+        className="sticky top-0 left-0 right-0 z-10 bg-[var(--color-app-bg)] border-b border-[var(--color-border-soft)]"
+        style={{ height: MARGIN.top }}
       >
-        <g
-          id="sticky-axis"
-          transform={`translate(${MARGIN.left},${MARGIN.top})`}
-        />
-      </svg>
-
-      {/* Zoom Controls */}
-      <div className="fixed flex gap-2 z-[10]" style={{ top: `120px`, right: '10px' }}>
-        <button
-          onClick={() => {
-            if (!svgRef.current) return;
-            const svg = d3.select(svgRef.current);
-            const currentTransform = d3.zoomTransform(svg.node()!);
-            const newScale = Math.max(1, currentTransform.k * 0.8); // Zoom out by 20%
-            const centerX = innerWidth / 2;
-            // Zoom around the center: keep the point at centerX fixed
-            const newTx = centerX - (centerX - currentTransform.x) * (newScale / currentTransform.k);
-            const newTransform = d3.zoomIdentity.translate(newTx, 0).scale(newScale);
-            svg.transition()
-              .duration(300)
-              .ease(d3.easeCubicOut)
-              .call(zoom.transform, newTransform)
-              .on('end', () => {
-                notifyVisibleTimeRange(newTransform);
-                onZoomDetected?.();
-              });
-          }}
-          title="Zoom Out"
-          className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
+        <svg
+          ref={stickyAxisRef}
+          width={width}
+          height={MARGIN.top}
+          className="block"
+          style={{ pointerEvents: 'none' }}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
-          </svg>
-        </button>
-
-        <button
-          onClick={() => {
-            if (!svgRef.current) return;
-            const svg = d3.select(svgRef.current);
-            const currentTransform = d3.zoomTransform(svg.node()!);
-            const newScale = Math.min(30000, currentTransform.k * 1.25); // Zoom in by 25%
-            const centerX = innerWidth / 2;
-            // Zoom around the center: keep the point at centerX fixed
-            const newTx = centerX - (centerX - currentTransform.x) * (newScale / currentTransform.k);
-            const newTransform = d3.zoomIdentity.translate(newTx, 0).scale(newScale);
-            svg.transition()
-              .duration(300)
-              .ease(d3.easeCubicOut)
-              .call(zoom.transform, newTransform)
-              .on('end', () => {
-                notifyVisibleTimeRange(newTransform);
-                onZoomDetected?.();
-              });
-          }}
-          title="Zoom In"
-          className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
+          <g
+            id="sticky-axis"
+            transform={`translate(${MARGIN.left},${MARGIN.top})`}
+          />
+        </svg>
+        <div
+          className="absolute top-0 left-0 h-full flex items-center justify-between border-r border-[var(--color-border-soft)] bg-[var(--color-app-bg)]"
+          style={{ width: MARGIN.left, paddingLeft: LABEL_PADDING_X, paddingRight: 10 }}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
-          </svg>
-        </button>
-
-        <button
-          onClick={() => {
-            if (!svgRef.current) return;
-            const svg = d3.select(svgRef.current);
-            svg.transition()
-              .duration(300)
-              .ease(d3.easeCubicOut)
-              .call(zoom.transform, d3.zoomIdentity)
-              .on('end', () => {
-                notifyVisibleTimeRange(d3.zoomIdentity);
-                onZoomDetected?.();
-              });
-          }}
-          title="Reset Zoom"
-          className="p-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-active)] transition-colors shadow-md"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8V6a2 2 0 012-2h2M3 16v2a2 2 0 002 2h2m10-16h2a2 2 0 012 2v2m0 8v2a2 2 0 01-2 2h-2" />
-          </svg>
-        </button>
+          <span className="text-[11.5px] text-[var(--color-text-faint)]">
+            Resources <span className="opacity-70 tabular-nums">{sortedResources.length}{hasMore ? '+' : ''}</span>
+          </span>
+          <div className="flex items-center gap-0.5">
+            <button type="button" onClick={() => zoomBy(0.8)} title="Zoom Out" aria-label="Zoom Out" className={zoomButtonClass}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M8 11h6" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button type="button" onClick={() => zoomBy(1.25)} title="Zoom In" aria-label="Zoom In" className={zoomButtonClass}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M11 8v6M8 11h6" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button type="button" onClick={resetZoom} title="Reset Zoom" aria-label="Reset Zoom" className={zoomButtonClass}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" strokeLinecap="round">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
+
       <svg
         ref={svgRef}
         width={width}
         height={Math.max(height, sortedResources.length * rowHeight + MARGIN.top + MARGIN.bottom)}
         className="block"
-        style={{ overflow: 'visible' }}
+        style={{ overflow: 'visible', marginTop: -MARGIN.top }}
       />
       {tooltip && (
         <div
-          className="fixed z-50 bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)] rounded-lg shadow-xl p-3 pointer-events-none max-w-sm"
+          className="ui-popover fixed z-50 px-3 py-2.5 pointer-events-none max-w-sm"
           style={{
             left: `${tooltip.x + 10}px`,
             top: `${tooltip.y + 10}px`,
             transform: 'translate(0, 0)'
           }}
         >
-          <pre className="text-xs text-[var(--color-text-primary)] whitespace-pre-wrap font-sans">
+          <pre className="text-xs leading-relaxed text-[var(--color-text-primary)] whitespace-pre-wrap font-sans">
             {tooltip.content}
           </pre>
         </div>
       )}
       {/* Loading indicator for pagination */}
       {loadingMore && (
-        <div className="sticky bottom-0 left-0 right-0 flex items-center justify-center py-4 bg-[var(--color-surface-secondary)] border-t border-[var(--color-border-soft)] z-10">
-          <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
-            <div className="animate-spin">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
-              </svg>
-            </div>
-            <span className="text-sm">Loading more resources...</span>
+        <div className="sticky bottom-0 left-0 right-0 flex items-center justify-center py-3 bg-[var(--color-app-bg)] border-t border-[var(--color-border-soft)] z-10">
+          <div className="flex items-center gap-2 text-[var(--color-text-faint)]">
+            <div className="w-3.5 h-3.5 rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-accent)] animate-spin" />
+            <span className="text-xs">Loading more resources...</span>
           </div>
         </div>
       )}

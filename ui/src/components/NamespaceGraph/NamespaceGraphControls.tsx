@@ -3,6 +3,8 @@ import { SelectDropdown } from '../SelectDropdown';
 import { TimestampPicker } from '../TimestampPicker';
 import { LOOKBACK_OPTIONS } from '../../hooks/usePersistedGraphLookback';
 import { formatNamespaceFilterOption } from '../../utils/namespaceFilters';
+import { PageHeader } from '../Common/PageHeader';
+import { Icon } from '../Common/Icon';
 
 // Create a lookup map for formatting lookback values to labels
 const LOOKBACK_LABELS: Record<string, string> = Object.fromEntries(
@@ -62,52 +64,65 @@ export const NamespaceGraphControls: React.FC<NamespaceGraphControlsProps> = ({
   };
 
   return (
-    <div className="w-full bg-[var(--color-surface-elevated)]/95 backdrop-blur border-b border-[var(--color-border-soft)] p-4 flex flex-row gap-6 items-center shadow-lg z-30 text-[var(--color-text-primary)] transition-colors duration-300">
-      {/* Namespace Dropdown */}
-      <SelectDropdown
-        label="Select Namespace"
-        options={namespaces}
-        selected={namespace}
-        onChange={handleNamespaceChange}
-        multiple={false}
-        formatOption={formatNamespaceFilterOption}
-        minWidth="200px"
-      />
+    <PageHeader
+      title="Graph"
+      actions={
+        <>
+          {/* Timestamp Picker */}
+          <TimestampPicker
+            expression={timestampExpression}
+            onChange={onTimestampChange}
+            resolvedTimestamp={resolvedTimestamp}
+          />
 
-      {/* Kind Filter Dropdown */}
-      <SelectDropdown
-        label="All Kinds"
-        options={availableKinds}
-        selected={kinds}
-        onChange={handleKindsChange}
-        multiple={true}
-        minWidth="200px"
-      />
+          {/* Lookback Dropdown */}
+          <SelectDropdown
+            label="Lookback"
+            options={LOOKBACK_OPTIONS.map(opt => opt.value)}
+            selected={lookback}
+            onChange={(value) => {
+              if (value && typeof value === 'string') {
+                onLookbackChange(value);
+              }
+            }}
+            multiple={false}
+            searchable={false}
+            sortOptions={false}
+            formatOption={(value) => LOOKBACK_LABELS[value] || value}
+            prefix={<span className="text-[var(--color-text-faint)]">Lookback</span>}
+            minWidth="0"
+          />
+        </>
+      }
+    >
+      {/* Query bar with the namespace and kind tokens */}
+      <div className="flex items-center gap-1 h-8 flex-1 max-w-[560px] ml-3 pl-2.5 pr-1.5 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface-elevated)]">
+        <Icon name="filter" size={14} className="text-[var(--color-text-faint)] mr-1" />
 
-      {/* Timestamp Picker */}
-      <TimestampPicker
-        expression={timestampExpression}
-        onChange={onTimestampChange}
-        resolvedTimestamp={resolvedTimestamp}
-      />
+        {/* Namespace Dropdown */}
+        <SelectDropdown
+          label="Select Namespace"
+          tokenLabel="ns"
+          variant="token"
+          options={namespaces}
+          selected={namespace}
+          onChange={handleNamespaceChange}
+          multiple={false}
+          formatOption={formatNamespaceFilterOption}
+        />
 
-      {/* Lookback Dropdown */}
-      <SelectDropdown
-        label="Lookback"
-        options={LOOKBACK_OPTIONS.map(opt => opt.value)}
-        selected={lookback}
-        onChange={(value) => {
-          if (value && typeof value === 'string') {
-            onLookbackChange(value);
-          }
-        }}
-        multiple={false}
-        searchable={false}
-        sortOptions={false}
-        formatOption={(value) => LOOKBACK_LABELS[value] || value}
-        minWidth="140px"
-      />
-    </div>
+        {/* Kind Filter Dropdown */}
+        <SelectDropdown
+          label="All Kinds"
+          tokenLabel="kind"
+          variant="token"
+          options={availableKinds}
+          selected={kinds}
+          onChange={handleKindsChange}
+          multiple={true}
+        />
+      </div>
+    </PageHeader>
   );
 };
 

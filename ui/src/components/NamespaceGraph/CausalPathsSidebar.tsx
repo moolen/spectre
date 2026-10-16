@@ -28,21 +28,14 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
     [causalPaths]
   );
 
-  // Get confidence color based on score
-  const getConfidenceColor = (score: number): string => {
-    if (score >= 0.7) return 'text-green-400 bg-green-500/20';
-    if (score >= 0.4) return 'text-amber-400 bg-amber-500/20';
-    return 'text-red-400 bg-red-500/20';
-  };
-
-  // Get severity color
+  // Severity dot color
   const getSeverityColor = (severity: string): string => {
     switch (severity) {
-      case 'critical': return 'bg-red-500';
-      case 'high': return 'bg-orange-500';
-      case 'medium': return 'bg-yellow-500';
-      case 'low': return 'bg-blue-400';
-      default: return 'bg-gray-500';
+      case 'critical': return 'var(--color-status-err)';
+      case 'high': return 'var(--color-status-err)';
+      case 'medium': return 'var(--color-status-warn)';
+      case 'low': return 'var(--color-text-faint)';
+      default: return 'var(--color-text-faint)';
     }
   };
 
@@ -52,24 +45,22 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
   };
 
   return (
-    <div
-      className="h-full flex flex-col bg-[var(--color-surface-elevated)] border-l border-[var(--color-border-soft)]"
-      style={{ width: '220px', minWidth: '220px' }}
+    <aside
+      className="h-full flex flex-col bg-[var(--color-surface-elevated)] border-l border-[var(--color-border-soft)] text-[var(--color-text-primary)]"
+      style={{ width: '380px', minWidth: '380px' }}
     >
-      {/* Sidebar Header */}
-      <div className="px-4 py-3 border-b border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[var(--color-text-primary)] uppercase tracking-wider">
-            Causal Paths
-          </h3>
+      {/* Header */}
+      <div className="px-5 pt-4 pb-3.5 border-b border-[var(--color-border-soft)]">
+        <h3 className="text-[13.5px] font-semibold flex items-center gap-2">
+          Causal paths
           {causalPaths.length > 0 && (
-            <span className="text-[10px] text-[var(--color-text-muted)] bg-[var(--color-surface-active)] px-2 py-0.5 rounded-full">
-              {causalPaths.length} path{causalPaths.length !== 1 ? 's' : ''}
+            <span className="text-xs font-normal text-[var(--color-text-faint)]">
+              {causalPaths.length} candidate{causalPaths.length !== 1 ? 's' : ''}
             </span>
           )}
-        </div>
-        <p className="text-[10px] text-[var(--color-text-muted)] mt-1">
-          Ranked candidate root causes
+        </h3>
+        <p className="text-xs text-[var(--color-text-faint)] mt-0.5">
+          Ranked root-cause candidates for this snapshot
         </p>
       </div>
 
@@ -77,161 +68,171 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
-            <div className="flex flex-col items-center gap-2">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
-              <span className="text-[10px] text-[var(--color-text-muted)]">Loading paths...</span>
+            <div className="flex flex-col items-center gap-2.5">
+              <div className="w-5 h-5 rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-accent)] animate-spin" />
+              <span className="text-xs text-[var(--color-text-faint)]">Loading paths...</span>
             </div>
           </div>
         ) : sortedPaths.length > 0 ? (
-          <div className="divide-y divide-[var(--color-border-soft)]">
+          <div>
             {sortedPaths.map((path, index) => {
               const isSelected = selectedPathId === path.id;
               const confidencePercent = Math.round(path.confidenceScore * 100);
+              const rootAnomalies = path.candidateRoot.anomalies ?? [];
 
               return (
                 <div
                   key={path.id}
+                  data-causal-path={path.id}
                   onClick={() => handlePathClick(path.id)}
-                  className={`p-3 cursor-pointer transition-colors ${
+                  className={`px-5 py-4 cursor-pointer border-b border-[var(--color-border-soft)] transition-colors ${
                     isSelected
-                      ? 'bg-blue-500/20 border-l-2 border-l-blue-500'
-                      : 'hover:bg-[var(--color-surface-hover)] border-l-2 border-l-transparent'
+                      ? 'bg-[var(--color-surface-muted)] shadow-[inset_2px_0_0_var(--color-accent)]'
+                      : 'hover:bg-[var(--color-surface-muted)]'
                   }`}
                 >
-                  {/* Path header */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase">
-                        #{index + 1}
+                  {/* Rank, confidence and severity */}
+                  <div className="flex items-center gap-2 text-[11.5px] text-[var(--color-text-faint)]">
+                    <span className="font-mono font-medium text-[var(--color-text-secondary)]">#{index + 1}</span>
+                    <span className="inline-flex items-center gap-1.5" title="Confidence">
+                      <span className="w-11 h-1 rounded-full bg-[var(--color-border-strong)] overflow-hidden">
+                        <span className="block h-full bg-[var(--color-accent)]" style={{ width: `${confidencePercent}%` }} />
                       </span>
-                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${getConfidenceColor(path.confidenceScore)}`}>
-                        {confidencePercent}%
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className={`w-1.5 h-1.5 rounded-full ${getSeverityColor(path.ranking.maxAnomalySeverity)}`} />
-                      <span className="text-[9px] text-[var(--color-text-muted)]">
-                        {path.ranking.maxAnomalySeverity}
-                      </span>
-                    </div>
+                      <span className="tabular-nums">{confidencePercent}%</span>
+                    </span>
+                    <span className="ml-auto inline-flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: getSeverityColor(path.ranking.maxAnomalySeverity) }} />
+                      {path.ranking.maxAnomalySeverity}
+                    </span>
                   </div>
 
                   {/* Root cause resource */}
-                  <div className="mb-2">
-                    <div className="text-xs font-semibold text-[var(--color-text-primary)]">
-                      {path.candidateRoot.resource.kind}/{path.candidateRoot.resource.name}
-                    </div>
+                  <div className="text-[13px] font-medium mt-2 mb-2 break-all">
+                    {path.candidateRoot.resource.kind}/{path.candidateRoot.resource.name}
                   </div>
 
-                  {/* Anomalies at root */}
-                  {path.candidateRoot.anomalies && path.candidateRoot.anomalies.length > 0 && (
-                    <div className="mb-2">
-                      <div className="flex flex-wrap gap-1">
-                        {path.candidateRoot.anomalies.slice(0, 2).map((anomaly, i) => (
-                          <span
-                            key={i}
-                            className="text-[8px] px-1.5 py-0.5 bg-red-500/20 text-red-400 rounded truncate max-w-full"
-                            title={anomaly.summary}
-                          >
-                            {anomaly.type}
-                          </span>
-                        ))}
-                        {path.candidateRoot.anomalies.length > 2 && (
-                          <span className="text-[8px] px-1.5 py-0.5 bg-gray-500/20 text-gray-400 rounded">
-                            +{path.candidateRoot.anomalies.length - 2}
-                          </span>
+                  {/* Chain of kinds */}
+                  <div className="flex items-center flex-wrap gap-1 text-[11.5px] text-[var(--color-text-secondary)]">
+                    {path.steps.map((step, stepIndex) => (
+                      <React.Fragment key={stepIndex}>
+                        {stepIndex > 0 && (
+                          <svg className="w-3 h-3 text-[var(--color-text-faint)]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" strokeLinecap="round"><path d="m9 6 6 6-6 6" /></svg>
                         )}
-                      </div>
+                        <span className="px-1.5 py-0.5 rounded bg-[var(--color-surface-active)]">{step.node.resource.kind}</span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+
+                  {/* Anomalies at root and path metrics */}
+                  {!isSelected && (
+                    <div className="mt-2.5 text-[11.5px] text-[var(--color-text-faint)]">
+                      <span title="Effective causal distance (cause-introducing edges)">
+                        {path.ranking.effectiveCausalDistance} hop{path.ranking.effectiveCausalDistance !== 1 ? 's' : ''}
+                      </span>
+                      <span className="mx-1.5">·</span>
+                      <span title="Number of steps in path">
+                        {path.steps.length} step{path.steps.length !== 1 ? 's' : ''}
+                      </span>
+                      {rootAnomalies.length > 0 && (
+                        <>
+                          <span className="mx-1.5">·</span>
+                          <span>{rootAnomalies.length} anomal{rootAnomalies.length !== 1 ? 'ies' : 'y'} at root</span>
+                        </>
+                      )}
                     </div>
                   )}
 
-                  {/* Path metrics */}
-                  <div className="flex items-center gap-3 text-[9px] text-[var(--color-text-muted)]">
-                    <span title="Effective causal distance (cause-introducing edges)">
-                      {path.ranking.effectiveCausalDistance} hop{path.ranking.effectiveCausalDistance !== 1 ? 's' : ''}
-                    </span>
-                    <span>-</span>
-                    <span title="Number of steps in path">
-                      {path.steps.length} step{path.steps.length !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-
                   {/* Expanded details when selected */}
                   {isSelected && (
-                    <div className="mt-3 pt-3 border-t border-[var(--color-border-soft)]">
+                    <div className="mt-3">
                       {/* Explanation */}
-                      <div className="text-[10px] text-[var(--color-text-primary)] mb-3 leading-relaxed">
+                      <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
                         {path.explanation}
-                      </div>
+                      </p>
+
+                      {rootAnomalies.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2.5">
+                          {rootAnomalies.slice(0, 2).map((anomaly, i) => (
+                            <span
+                              key={i}
+                              className="text-[11px] px-1.5 py-0.5 rounded border border-[var(--color-border-strong)] text-[var(--color-text-secondary)] truncate max-w-full"
+                              title={anomaly.summary}
+                            >
+                              {anomaly.type}
+                            </span>
+                          ))}
+                          {rootAnomalies.length > 2 && (
+                            <span className="text-[11px] px-1.5 py-0.5 rounded border border-[var(--color-border-strong)] text-[var(--color-text-faint)]">
+                              +{rootAnomalies.length - 2}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       {/* Path steps */}
-                      <div className="text-[9px] text-[var(--color-text-muted)] uppercase mb-2">
-                        Path Steps
-                      </div>
-                      <div className="space-y-1">
+                      <div className="ui-section-label mt-4 mb-1.5">Path steps</div>
+                      <div>
                         {path.steps.map((step, stepIndex) => {
                           // Check if step has spec changes to display
                           const hasSpecChanges = step.node.primaryEvent?.diff && step.node.primaryEvent.diff.length > 0;
+                          const hasAnomalies = step.node.anomalies && step.node.anomalies.length > 0;
 
                           return (
                             <div
                               key={stepIndex}
-                              className="group relative flex items-center gap-2"
+                              className="group relative flex items-start gap-2.5 py-1"
                             >
                               {/* Step indicator */}
-                              <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
-                                stepIndex === 0
-                                  ? 'bg-red-500 text-white'
-                                  : stepIndex === path.steps.length - 1
-                                    ? 'bg-blue-500 text-white'
-                                    : 'bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
-                              }`}>
-                                {stepIndex + 1}
+                              <div className="relative flex flex-col items-center pt-1">
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full border-2 bg-[var(--color-surface-muted)]"
+                                  style={{ borderColor: stepIndex === 0 ? 'var(--color-accent)' : hasAnomalies ? 'var(--color-status-err)' : 'var(--color-text-faint)' }}
+                                />
                               </div>
 
                               {/* Resource info */}
                               <div className="flex-1 min-w-0">
-                                <div className="text-[10px] text-[var(--color-text-primary)] truncate flex items-center gap-1">
-                                  {step.node.resource.kind}/{step.node.resource.name}
+                                <div className="text-xs truncate flex items-center gap-1.5">
+                                  <span className="text-[var(--color-text-faint)]">{step.node.resource.kind}</span>
+                                  <span className="truncate">{step.node.resource.name}</span>
                                   {hasSpecChanges && (
-                                    <span className="text-[8px] px-1 py-0.5 bg-blue-500/20 text-blue-400 rounded" title="Has spec changes">
+                                    <span className="text-[10px] px-1 rounded bg-[var(--color-accent-soft)] text-[var(--color-accent-strong)]" title="Has spec changes">
                                       Δ
                                     </span>
                                   )}
                                 </div>
                                 {step.edge && (
-                                  <div className="text-[8px] text-[var(--color-text-muted)]">
-                                    via {step.edge.relationshipType}
-                                    <span className={`ml-1 ${
-                                      step.edge.edgeCategory === 'CAUSE_INTRODUCING'
-                                        ? 'text-orange-400'
-                                        : 'text-gray-500'
-                                    }`}>
-                                      ({step.edge.edgeCategory === 'CAUSE_INTRODUCING' ? 'causal' : 'ownership'})
-                                    </span>
+                                  <div className="text-[11px] text-[var(--color-text-faint)]">
+                                    via {step.edge.relationshipType.toLowerCase()}
+                                    {' · '}
+                                    {step.edge.edgeCategory === 'CAUSE_INTRODUCING' ? 'causal' : 'ownership'}
                                   </div>
                                 )}
                               </div>
 
                               {/* Anomaly indicator */}
-                              {step.node.anomalies && step.node.anomalies.length > 0 && (
-                                <div
-                                  className="w-2 h-2 rounded-full bg-red-500"
+                              {hasAnomalies && (
+                                <span
+                                  className="text-[10.5px] tabular-nums text-[var(--color-status-err-text)] mt-0.5"
                                   title={`${step.node.anomalies.length} anomal${step.node.anomalies.length > 1 ? 'ies' : 'y'}`}
-                                />
+                                >
+                                  {step.node.anomalies.length}
+                                </span>
                               )}
 
                               {/* Hover tooltip for spec changes */}
                               {hasSpecChanges && (
-                                <div className="absolute z-50 hidden group-hover:block left-0 top-full mt-1 p-2
-                                                bg-[var(--color-surface-elevated)] border border-[var(--color-border-soft)]
-                                                rounded shadow-lg max-w-xs max-h-48 overflow-auto">
-                                  <div className="text-[9px] text-[var(--color-text-muted)] uppercase mb-1">
-                                    Spec Changes
+                                <div className="ui-popover absolute z-50 hidden group-hover:block left-0 top-full mt-1 p-2.5 max-w-xs max-h-48 overflow-auto">
+                                  <div className="ui-section-label mb-1">
+                                    Spec changes
                                   </div>
-                                  <pre className="text-[9px] font-mono whitespace-pre-wrap break-words">
+                                  <pre className="text-[11px] font-mono whitespace-pre-wrap break-words">
                                     {step.node.primaryEvent!.diff!.map((d, i) => {
-                                      const opColor = d.op === 'add' ? 'text-green-500' : d.op === 'remove' ? 'text-red-500' : 'text-amber-500';
+                                      const opColor = d.op === 'add'
+                                        ? 'text-[var(--color-status-ok-text)]'
+                                        : d.op === 'remove'
+                                          ? 'text-[var(--color-status-err-text)]'
+                                          : 'text-[var(--color-status-warn-text)]';
                                       return (
                                         <div key={i} className={opColor}>
                                           {d.op === 'add' ? '+' : d.op === 'remove' ? '-' : '~'} {d.path}: {
@@ -253,19 +254,14 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
                       </div>
 
                       {/* Ranking breakdown */}
-                      <div className="mt-3 pt-2 border-t border-[var(--color-border-soft)]">
-                        <div className="text-[9px] text-[var(--color-text-muted)] uppercase mb-1">
-                          Ranking Factors
+                      <div className="mt-3 pt-3 border-t border-[var(--color-border-soft)] grid grid-cols-2 gap-x-4 text-[11.5px]">
+                        <div className="flex justify-between">
+                          <span className="text-[var(--color-text-faint)]">Temporal</span>
+                          <span className="tabular-nums">{Math.round(path.ranking.temporalScore * 100)}%</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[9px]">
-                          <div className="flex justify-between">
-                            <span className="text-[var(--color-text-muted)]">Temporal</span>
-                            <span className="text-[var(--color-text-primary)]">{Math.round(path.ranking.temporalScore * 100)}%</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-[var(--color-text-muted)]">Severity</span>
-                            <span className="text-[var(--color-text-primary)]">{Math.round(path.ranking.severityScore * 100)}%</span>
-                          </div>
+                        <div className="flex justify-between">
+                          <span className="text-[var(--color-text-faint)]">Severity</span>
+                          <span className="tabular-nums">{Math.round(path.ranking.severityScore * 100)}%</span>
                         </div>
                       </div>
                     </div>
@@ -277,21 +273,13 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
         ) : (
           <div className="flex items-center justify-center h-full p-6">
             <div className="text-center">
-              <svg
-                className="w-12 h-12 mx-auto mb-3 text-[var(--color-text-muted)] opacity-40"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-              <p className="text-sm text-[var(--color-text-muted)]">No causal paths found</p>
-              <p className="text-[10px] text-[var(--color-text-muted)] mt-1">
+              <div className="w-10 h-10 mx-auto mb-3 rounded-full grid place-items-center bg-[var(--color-surface-muted)] text-[var(--color-text-faint)]">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              </div>
+              <p className="text-[12.5px] text-[var(--color-text-secondary)]">No causal paths found</p>
+              <p className="text-xs text-[var(--color-text-faint)] mt-1">
                 No anomalies detected in this namespace
               </p>
             </div>
@@ -299,15 +287,13 @@ export const CausalPathsSidebar: React.FC<CausalPathsSidebarProps> = ({
         )}
       </div>
 
-      {/* Keyboard hint */}
+      {/* Hint */}
       {selectedPathId && (
-        <div className="px-3 py-2 border-t border-[var(--color-border-soft)] bg-[var(--color-surface-muted)]">
-          <p className="text-[9px] text-[var(--color-text-muted)] text-center">
-            Click path again to deselect
-          </p>
+        <div className="px-5 h-8 flex items-center justify-center border-t border-[var(--color-border-soft)] text-[11px] text-[var(--color-text-faint)]">
+          Click the path again to deselect
         </div>
       )}
-    </div>
+    </aside>
   );
 };
 

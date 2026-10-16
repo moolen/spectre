@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Timeline } from '../components/Timeline';
-import { DetailPanel } from '../components/DetailPanel';
+import { DetailPanel, DEFAULT_DETAIL_PANEL_WIDTH } from '../components/DetailPanel';
 import { useTimeline } from '../hooks/useTimeline';
 import { useMetadata } from '../hooks/useMetadata';
 import { usePersistedFilters } from '../hooks/usePersistedFilters';
@@ -379,6 +379,20 @@ function TimelinePage() {
     });
   }, [resources, filters.search, filters.hasProblematicStatus, timeRange]);
 
+  // Counts for the status bar, based on each resource's latest status
+  const statusSummary = useMemo(() => {
+    let failing = 0;
+    let degraded = 0;
+    let events = 0;
+    for (const r of filteredResources) {
+      const latest = r.statusSegments[r.statusSegments.length - 1]?.status;
+      if (latest === ResourceStatus.Error) failing++;
+      else if (latest === ResourceStatus.Warning) degraded++;
+      events += r.events.length;
+    }
+    return { failing, degraded, events };
+  }, [filteredResources]);
+
   // Derived selected resource object
   const selectedResource = useMemo(() => {
     if (!selectedPoint) return null;
@@ -429,19 +443,15 @@ function TimelinePage() {
   // Show loading state if time range hasn't been set yet (waiting for auto-set)
   if (!timeRange) {
     return (
-      <div className="flex flex-col h-screen bg-[var(--color-app-bg)] text-[var(--color-text-primary)] overflow-hidden font-sans transition-colors duration-300 items-center justify-center">
-        <div className="animate-spin mb-4">
-          <svg className="w-12 h-12 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
-          </svg>
-        </div>
-        <p className="text-[var(--color-text-muted)]">Loading timeline...</p>
+      <div className="flex flex-col h-screen bg-[var(--color-app-bg)] text-[var(--color-text-primary)] overflow-hidden items-center justify-center gap-3">
+        <Spinner />
+        <p className="text-[12.5px] text-[var(--color-text-faint)]">Loading timeline...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[var(--color-app-bg)] text-[var(--color-text-primary)] overflow-hidden font-sans transition-colors duration-300">
+    <div className="flex flex-col h-screen bg-[var(--color-app-bg)] text-[var(--color-text-primary)] overflow-hidden">
       <FilterBar
         filters={filters}
         setFilters={setFilters}
@@ -457,78 +467,49 @@ function TimelinePage() {
         <div className="flex-1 overflow-hidden flex flex-col relative">
           {/* Loading indicator overlay when loading all resources for problematic filter */}
           {loadingAllForProblematic && (
-            <div className="absolute inset-0 bg-[var(--color-surface-elevated)]/80 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="flex flex-col items-center gap-4 text-[var(--color-text-primary)]">
-                <div className="animate-spin">
-                  <svg className="w-12 h-12 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
-                  </svg>
+            <div className="absolute inset-0 bg-[var(--color-app-bg)]/80 backdrop-blur-sm flex items-center justify-center z-50">
+              <div className="flex flex-col items-center gap-3 text-[var(--color-text-primary)]">
+                <Spinner />
+                <p className="text-[13.5px] font-medium">Loading all resources...</p>
+                <p className="text-xs text-[var(--color-text-faint)]">
+                  Fetching remaining resources for problematic filter
+                </p>
+                <div className="w-56 h-1 bg-[var(--color-border-strong)] rounded-full overflow-hidden mt-1">
+                  <div
+                    className={`h-full bg-[var(--color-accent)] transition-all duration-300 ${hasMore ? 'animate-pulse' : ''}`}
+                    style={{ width: hasMore ? '90%' : '100%' }}
+                  />
                 </div>
-                <div className="flex flex-col items-center gap-2">
-                  <p className="text-lg font-medium">Loading all resources...</p>
-                  <p className="text-sm text-[var(--color-text-muted)]">
-                    Fetching remaining resources for problematic filter
-                  </p>
-                  <div className="flex flex-col items-center gap-2 mt-2">
-                    {hasMore ? (
-                      <>
-                        <div className="w-64 h-2 bg-gray-700 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-brand-500 transition-all duration-300 animate-pulse"
-                            style={{ width: '90%' }}
-                          />
-                        </div>
-                        <p className="text-sm text-[var(--color-text-muted)]">{loadedCount} resources loaded</p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-64 h-2 bg-gray-700 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-brand-500 transition-all duration-300"
-                            style={{ width: '100%' }}
-                          />
-                        </div>
-                        <p className="text-sm text-[var(--color-text-muted)]">{loadedCount} resources loaded</p>
-                      </>
-                    )}
-                  </div>
-                </div>
+                <p className="text-xs text-[var(--color-text-faint)] tabular-nums">{loadedCount} resources loaded</p>
               </div>
             </div>
           )}
           {error ? (
-            <div className="flex-1 flex items-center justify-center text-red-400 flex-col gap-4">
-              <svg className="w-16 h-16 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 9v2m0 4v2m0 0v2m0-6V9m0 0V7m0 2V5m0 0h-2m2 0h2m-6 0h2m-2 0h-2m0 6h2m-2 0h-2m0 0v2m0-2v-2m0 0h2m-2 0h-2m6 0h2m-2 0h-2" />
-              </svg>
-              <div className="text-center">
-                <p className="text-lg font-semibold mb-2">Failed to load resources</p>
-                <p className="text-sm text-gray-400 mb-4">{error.message}</p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
-                >
-                  Retry
-                </button>
-              </div>
-            </div>
-          ) : loading ? (
-            <div className="flex-1 flex items-center justify-center text-gray-400 flex-col gap-4">
-              <div className="animate-spin">
-                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+            <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center">
+              <div className="w-10 h-10 rounded-full grid place-items-center bg-[var(--color-status-err-soft)] text-[var(--color-status-err)]">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" strokeLinecap="round">
+                  <circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" />
                 </svg>
               </div>
-              <p>Loading resources...</p>
+              <p className="text-[13.5px] font-medium">Failed to load resources</p>
+              <p className="text-xs text-[var(--color-text-faint)] max-w-sm">{error.message}</p>
+              <button onClick={() => window.location.reload()} className="ui-control mt-1">
+                Retry
+              </button>
+            </div>
+          ) : loading ? (
+            <div className="flex-1 flex items-center justify-center flex-col gap-3 text-[var(--color-text-faint)]">
+              <Spinner />
+              <p className="text-[12.5px]">Loading resources...</p>
               {totalCount > 0 && (
                 <div className="flex flex-col items-center gap-2">
-                  <div className="w-64 h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="w-56 h-1 bg-[var(--color-border-strong)] rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-blue-500 transition-all duration-300"
+                      className="h-full bg-[var(--color-accent)] transition-all duration-300"
                       style={{ width: `${(loadedCount / totalCount) * 100}%` }}
                     />
                   </div>
-                  <p className="text-sm text-gray-500">{loadedCount} / {totalCount} resources</p>
+                  <p className="text-xs tabular-nums">{loadedCount} / {totalCount} resources</p>
                 </div>
               )}
             </div>
@@ -539,7 +520,7 @@ function TimelinePage() {
                 onSegmentClick={handleSegmentClick}
                 selectedPoint={selectedPoint}
                 highlightedEventIds={relevantEventIds}
-                sidebarWidth={selectedPoint ? 384 : 0}
+                sidebarWidth={selectedPoint ? DEFAULT_DETAIL_PANEL_WIDTH : 0}
                 timeRange={timeRange}
                 onVisibleTimeRangeChange={handleVisibleTimeRangeChange}
                 onZoomDetected={handleZoomDetected}
@@ -549,9 +530,13 @@ function TimelinePage() {
               />
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-gray-500 flex-col">
-                <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
-                <p>No resources match your filters.</p>
+            <div className="flex-1 flex items-center justify-center flex-col gap-3 text-[var(--color-text-faint)]">
+              <div className="w-10 h-10 rounded-full grid place-items-center bg-[var(--color-surface-muted)]">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" strokeLinecap="round">
+                  <path d="M3 5h18M6 12h12M10 19h4" />
+                </svg>
+              </div>
+              <p className="text-[12.5px]">No resources match your filters.</p>
             </div>
           )}
         </div>
@@ -562,7 +547,23 @@ function TimelinePage() {
           onClose={handleClosePanel}
         />
       </div>
+
+      <footer className="ui-statusbar">
+        <span className="tabular-nums">{filteredResources.length}{hasMore ? '+' : ''} resources</span>
+        <span className="tabular-nums"><i className="dot" style={{ background: 'var(--color-status-err)' }} />{statusSummary.failing} failing</span>
+        <span className="tabular-nums"><i className="dot" style={{ background: 'var(--color-status-warn)' }} />{statusSummary.degraded} degraded</span>
+        <span className="tabular-nums">{statusSummary.events} events</span>
+        <span className="ml-auto">
+          {autoRefresh !== 'off' ? `Auto-refresh every ${autoRefresh}` : 'Auto-refresh off'}
+        </span>
+      </footer>
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <div className="w-6 h-6 rounded-full border-2 border-[var(--color-border-strong)] border-t-[var(--color-accent)] animate-spin" />
   );
 }
 

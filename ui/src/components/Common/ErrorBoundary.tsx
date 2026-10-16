@@ -39,25 +39,25 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex items-center justify-center min-h-screen bg-gray-950">
-          <div className="bg-gray-900 border border-red-500 rounded-lg p-8 max-w-md w-full mx-4">
-            <h1 className="text-2xl font-bold text-red-400 mb-4">Something went wrong</h1>
-            <p className="text-gray-300 mb-4">
+        <div className="flex items-center justify-center min-h-screen bg-[var(--color-app-bg)]">
+          <div className="bg-[var(--color-surface-elevated)] border border-[var(--color-border-strong)] rounded-lg p-8 max-w-md w-full mx-4">
+            <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-4">Something went wrong</h1>
+            <p className="text-[var(--color-text-secondary)] mb-4">
               An unexpected error occurred. Please try refreshing the page.
             </p>
             {process.env.NODE_ENV === 'development' && this.state.error && (
               <details className="mb-4 text-sm">
-                <summary className="cursor-pointer text-gray-400 hover:text-gray-300 mb-2">
+                <summary className="cursor-pointer text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] mb-2">
                   Error Details
                 </summary>
-                <pre className="bg-gray-800 p-3 rounded text-xs text-red-300 overflow-auto">
+                <pre className="bg-[var(--color-app-bg)] p-3 rounded-lg text-xs text-[var(--color-status-err-text)] overflow-auto">
                   {this.state.error.toString()}
                 </pre>
               </details>
             )}
             <button
               onClick={this.handleReset}
-              className="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold py-2 px-4 rounded transition-colors"
+              className="w-full ui-btn-primary"
             >
               Try Again
             </button>

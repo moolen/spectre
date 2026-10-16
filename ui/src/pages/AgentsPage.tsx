@@ -24,7 +24,7 @@ const ACTIVE_TOOL_CALLS = [
  * Animated spinner component for tool calls
  */
 const ToolSpinner: React.FC = () => (
-  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+  <div className="w-4 h-4 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
 );
 
 /**
@@ -34,7 +34,7 @@ const ToolCallCard: React.FC<{ name: string }> = ({ name }) => (
   <div className="flex items-center gap-3 px-4 py-3 bg-[var(--color-surface-muted)] rounded-lg border border-[var(--color-border-soft)]">
     <ToolSpinner />
     <div className="flex flex-col">
-      <span className="text-sm font-mono text-blue-400">{name}</span>
+      <span className="text-sm font-mono text-[var(--color-accent-strong)]">{name}</span>
       <span className="text-xs text-[var(--color-text-muted)]">Executing...</span>
     </div>
   </div>
@@ -70,7 +70,7 @@ export default function AgentsPage() {
           <div className="max-w-3xl mx-auto space-y-6">
             {/* User message */}
             <div className="flex gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-[var(--color-accent)] flex items-center justify-center">
                 <svg
                   className="w-4 h-4 text-white"
                   fill="none"
@@ -96,7 +96,7 @@ export default function AgentsPage() {
 
             {/* Agent response with tool calls */}
             <div className="flex gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-[var(--color-surface-active)] flex items-center justify-center">
                 <svg
                   className="w-4 h-4 text-white"
                   fill="none"
@@ -132,15 +132,15 @@ export default function AgentsPage() {
                 <div className="flex items-center gap-2 text-[var(--color-text-muted)] text-sm">
                   <div className="flex gap-1">
                     <span
-                      className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"
+                      className="w-2 h-2 bg-[var(--color-text-faint)] rounded-full animate-bounce"
                       style={{ animationDelay: '0ms' }}
                     />
                     <span
-                      className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"
+                      className="w-2 h-2 bg-[var(--color-text-faint)] rounded-full animate-bounce"
                       style={{ animationDelay: '150ms' }}
                     />
                     <span
-                      className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"
+                      className="w-2 h-2 bg-[var(--color-text-faint)] rounded-full animate-bounce"
                       style={{ animationDelay: '300ms' }}
                     />
                   </div>
@@ -165,7 +165,7 @@ export default function AgentsPage() {
               />
               <button
                 disabled
-                className="absolute right-3 bottom-5 p-1 rounded-lg bg-blue-600 opacity-50 cursor-not-allowed"
+                className="absolute right-3 bottom-5 p-1 rounded-lg bg-[var(--color-accent)] opacity-50 cursor-not-allowed"
               >
                 <svg
                   className="w-4 h-4 text-white"

@@ -32,10 +32,43 @@ export interface NamespaceGraphHandle {
   focusOnNodes: (nodeUids: Set<string>) => void;
 }
 
-// Node radius
-const NODE_RADIUS = 24;
-// Collision radius (larger to prevent overlap and allow space for labels)
-const COLLISION_RADIUS = 60;
+// Nodes are drawn as compact cards (kind + name)
+const NODE_WIDTH = 196;
+const NODE_HEIGHT = 42;
+// Padding (around node centres) used when fitting nodes into view
+const FIT_PADDING = NODE_WIDTH * 0.75;
+// Collision radius (cards are wide, keep them from overlapping)
+const COLLISION_RADIUS = 110;
+// Gap between an edge's end and the card border
+const EDGE_GAP = 4;
+
+/**
+ * Clip the straight line between two node centres to the card borders so
+ * edges (and their arrowheads) start and end at the card edge.
+ */
+function clipToCard(fromX: number, fromY: number, toX: number, toY: number, gap: number): [number, number] {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  if (dx === 0 && dy === 0) return [fromX, fromY];
+  const halfW = NODE_WIDTH / 2 + gap;
+  const halfH = NODE_HEIGHT / 2 + gap;
+  const scale = Math.min(halfW / Math.abs(dx || 1e-9), halfH / Math.abs(dy || 1e-9));
+  return [fromX + dx * Math.min(1, scale), fromY + dy * Math.min(1, scale)];
+}
+
+function positionLinks(selection: d3.Selection<d3.BaseType | SVGLineElement, D3GraphLink, SVGGElement, unknown>) {
+  selection.each(function (d) {
+    const source = d.source as D3GraphNode;
+    const target = d.target as D3GraphNode;
+    const sx = source.x ?? 0;
+    const sy = source.y ?? 0;
+    const tx = target.x ?? 0;
+    const ty = target.y ?? 0;
+    const [x1, y1] = clipToCard(sx, sy, tx, ty, EDGE_GAP);
+    const [x2, y2] = clipToCard(tx, ty, sx, sy, EDGE_GAP);
+    d3.select(this).attr('x1', x1).attr('y1', y1).attr('x2', x2).attr('y2', y2);
+  });
+}
 // Zoom scale factor for zoom in/out buttons
 const ZOOM_SCALE_FACTOR = 1.3;
 
@@ -46,7 +79,7 @@ const ZOOM_SCALE_FACTOR = 1.3;
  * - D3 force simulation with repulsion, centering, and collision
  * - Pan and zoom support
  * - Draggable nodes
- * - Status-based coloring with glow effect for errors
+ * - Card nodes with a status dot
  * - Anomaly count badges
  * - Dotted border for cluster-scoped resources
  * - Incremental updates for pagination (new nodes added without full rebuild)
@@ -119,9 +152,9 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
     }, []);
 
     // Truncate name for display
-    const truncateName = useCallback((name: string, maxLen: number = 20): string => {
+    const truncateName = useCallback((name: string, maxLen: number = 24): string => {
       if (name.length <= maxLen) return name;
-      return name.slice(0, maxLen - 3) + '...';
+      return name.slice(0, maxLen - 1) + '…';
     }, []);
 
     // Create drag behavior
@@ -161,63 +194,87 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
             onNodeClickRef.current?.(d);
           });
 
-        // Node circle
-        g.append('circle')
-          .attr('r', NODE_RADIUS)
-          .attr('fill', d => getNodeColor(d))
-          .attr('stroke', d => (d.isClusterScoped ? '#9ca3af' : 'none'))
-          .attr('stroke-width', d => (d.isClusterScoped ? 2 : 0))
-          .attr('stroke-dasharray', d => (d.isClusterScoped ? '4,2' : 'none'))
-          .attr('filter', d => (d.status === 'Error' ? 'url(#glow-error)' : 'none'));
+        // Card
+        g.append('rect')
+          .attr('class', 'node-card')
+          .attr('x', -NODE_WIDTH / 2)
+          .attr('y', -NODE_HEIGHT / 2)
+          .attr('width', NODE_WIDTH)
+          .attr('height', NODE_HEIGHT)
+          .attr('rx', 8)
+          .style('fill', 'var(--color-surface-elevated)')
+          .style('stroke', 'var(--color-border-strong)')
+          .attr('stroke-width', 1)
+          .attr('stroke-dasharray', d => (d.isClusterScoped ? '4,3' : 'none'));
 
-        // Selection ring
-        g.append('circle')
-          .attr('r', NODE_RADIUS + 4)
+        // Selection ring (accent outline around the card)
+        g.append('rect')
+          .attr('class', 'selection-ring')
+          .attr('x', -NODE_WIDTH / 2 - 3)
+          .attr('y', -NODE_HEIGHT / 2 - 3)
+          .attr('width', NODE_WIDTH + 6)
+          .attr('height', NODE_HEIGHT + 6)
+          .attr('rx', 10)
           .attr('fill', 'none')
-          .attr('stroke', '#3b82f6')
-          .attr('stroke-width', 2)
-          .attr('opacity', d => (d.uid === selectedNodeIdRef.current ? 1 : 0))
-          .attr('class', 'selection-ring');
+          .style('stroke', 'var(--color-accent)')
+          .attr('stroke-width', 1.5)
+          .attr('opacity', d => (d.uid === selectedNodeIdRef.current ? 1 : 0));
 
-        // Kind label (above node)
+        // Status dot
+        g.append('circle')
+          .attr('class', 'node-status')
+          .attr('cx', -NODE_WIDTH / 2 + 14)
+          .attr('cy', 0)
+          .attr('r', 3.5)
+          .style('fill', d => getNodeColor(d));
+
+        // Kind label
         g.append('text')
-          .attr('y', -NODE_RADIUS - 8)
-          .attr('text-anchor', 'middle')
-          .attr('fill', '#9ca3af')
+          .attr('x', -NODE_WIDTH / 2 + 26)
+          .attr('y', -4)
+          .style('fill', 'var(--color-text-faint)')
           .attr('font-size', '10px')
-          .attr('font-weight', 'bold')
           .text(d => d.kind);
 
-        // Name label (below node)
+        // Name label
         g.append('text')
-          .attr('y', NODE_RADIUS + 16)
-          .attr('text-anchor', 'middle')
-          .attr('fill', '#f8fafc')
-          .attr('font-size', '11px')
-          .text(d => truncateName(d.name));
+          .attr('x', -NODE_WIDTH / 2 + 26)
+          .attr('y', 11)
+          .style('fill', 'var(--color-text-primary)')
+          .attr('font-size', '11.5px')
+          .attr('font-weight', 500)
+          .text(d => truncateName(d.name, d.anomalyCount > 0 ? 23 : 28))
+          .append('title')
+          .text(d => `${d.kind}/${d.name}`);
 
         // Anomaly badge (only for nodes with anomalies)
         const badgeGroup = g
           .filter(d => d.anomalyCount > 0)
           .append('g')
-          .attr('class', 'anomaly-badge')
-          .attr('transform', `translate(${NODE_RADIUS - 6}, ${-NODE_RADIUS + 6})`);
+          .attr('class', 'anomaly-badge');
+
+        const badgeLabel = (d: D3GraphNode) => (d.anomalyCount > 9 ? '9+' : d.anomalyCount.toString());
+        const badgeWidth = (d: D3GraphNode) => badgeLabel(d).length * 6 + 10;
+        const isError = (d: D3GraphNode) => d.status === 'Error';
 
         badgeGroup
-          .append('circle')
-          .attr('r', 10)
-          .attr('fill', '#ef4444')
-          .attr('stroke', '#1f2937')
-          .attr('stroke-width', 2);
+          .append('rect')
+          .attr('x', d => NODE_WIDTH / 2 - 8 - badgeWidth(d))
+          .attr('y', -8)
+          .attr('width', badgeWidth)
+          .attr('height', 16)
+          .attr('rx', 4)
+          .style('fill', d => (isError(d) ? 'var(--color-status-err-soft)' : 'var(--color-status-warn-soft)'));
 
         badgeGroup
           .append('text')
+          .attr('x', d => NODE_WIDTH / 2 - 8 - badgeWidth(d) / 2)
           .attr('text-anchor', 'middle')
           .attr('dominant-baseline', 'central')
-          .attr('fill', 'white')
-          .attr('font-size', '9px')
-          .attr('font-weight', 'bold')
-          .text(d => (d.anomalyCount > 9 ? '9+' : d.anomalyCount.toString()));
+          .style('fill', d => (isError(d) ? 'var(--color-status-err-text)' : 'var(--color-status-warn-text)'))
+          .attr('font-size', '10px')
+          .attr('font-weight', 600)
+          .text(badgeLabel);
 
         return g;
       },
@@ -261,7 +318,7 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
           });
 
           // Add padding for node size and labels
-          const padding = NODE_RADIUS * 3;
+          const padding = FIT_PADDING;
           minX -= padding;
           maxX += padding;
           minY -= padding;
@@ -321,7 +378,7 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
           });
 
           // Add padding for node size and labels
-          const padding = NODE_RADIUS * 4;
+          const padding = FIT_PADDING * 1.3;
           minX -= padding;
           maxX += padding;
           minY -= padding;
@@ -382,38 +439,24 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
         // Create defs for filters and markers
         const defs = svg.append('defs');
 
-        // Error glow filter
-        const glowFilter = defs
-          .append('filter')
-          .attr('id', 'glow-error')
-          .attr('x', '-50%')
-          .attr('y', '-50%')
-          .attr('width', '200%')
-          .attr('height', '200%');
-
-        glowFilter.append('feGaussianBlur').attr('stdDeviation', '4').attr('result', 'blur');
-
-        glowFilter.append('feFlood').attr('flood-color', '#ef4444').attr('flood-opacity', '0.6').attr('result', 'color');
-
-        glowFilter.append('feComposite').attr('in', 'color').attr('in2', 'blur').attr('operator', 'in').attr('result', 'coloredBlur');
-
-        const glowMerge = glowFilter.append('feMerge');
-        glowMerge.append('feMergeNode').attr('in', 'coloredBlur');
-        glowMerge.append('feMergeNode').attr('in', 'SourceGraphic');
-
-        // Arrow marker for edges
-        defs
-          .append('marker')
-          .attr('id', 'arrow')
-          .attr('viewBox', '0 -5 10 10')
-          .attr('refX', NODE_RADIUS + 8)
-          .attr('refY', 0)
-          .attr('markerWidth', 6)
-          .attr('markerHeight', 6)
-          .attr('orient', 'auto')
-          .append('path')
-          .attr('d', 'M0,-5L10,0L0,5')
-          .attr('fill', '#6b7280');
+        // Arrow markers for edges (default and causal-path accent)
+        [
+          { id: 'arrow', color: 'var(--color-text-faint)' },
+          { id: 'arrow-accent', color: 'var(--color-accent)' },
+        ].forEach(({ id, color }) => {
+          defs
+            .append('marker')
+            .attr('id', id)
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 9)
+            .attr('refY', 0)
+            .attr('markerWidth', 6)
+            .attr('markerHeight', 6)
+            .attr('orient', 'auto')
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .style('fill', color);
+        });
 
         // Create container group for zoom/pan
         const container = svg.append('g').attr('class', 'graph-container');
@@ -468,8 +511,8 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
           .selectAll('line')
           .data(simulationLinks, (d: D3GraphLink) => d.id)
           .join('line')
-          .attr('stroke', '#6b7280')
-          .attr('stroke-width', 1.5)
+          .style('stroke', 'var(--color-text-faint)')
+          .attr('stroke-width', 1.25)
           .attr('stroke-opacity', 0.6)
           .attr('marker-end', 'url(#arrow)');
 
@@ -488,21 +531,13 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
 
         // Simulation tick handler (for drag interactions)
         simulation.on('tick', () => {
-          link
-            .attr('x1', d => (d.source as D3GraphNode).x ?? 0)
-            .attr('y1', d => (d.source as D3GraphNode).y ?? 0)
-            .attr('x2', d => (d.target as D3GraphNode).x ?? 0)
-            .attr('y2', d => (d.target as D3GraphNode).y ?? 0);
+          positionLinks(link);
 
           nodeSelection.attr('transform', d => `translate(${d.x ?? 0}, ${d.y ?? 0})`);
         });
 
         // Set initial positions from pre-computed simulation
-        link
-          .attr('x1', d => (d.source as D3GraphNode).x ?? 0)
-          .attr('y1', d => (d.source as D3GraphNode).y ?? 0)
-          .attr('x2', d => (d.target as D3GraphNode).x ?? 0)
-          .attr('y2', d => (d.target as D3GraphNode).y ?? 0);
+        positionLinks(link);
 
         nodeSelection.attr('transform', d => `translate(${d.x ?? 0}, ${d.y ?? 0})`);
 
@@ -523,7 +558,7 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
           });
 
           // Add padding for node size and labels
-          const padding = NODE_RADIUS * 3;
+          const padding = FIT_PADDING;
           minX -= padding;
           maxX += padding;
           minY -= padding;
@@ -620,8 +655,8 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
             enter =>
               enter
                 .append('line')
-                .attr('stroke', '#6b7280')
-                .attr('stroke-width', 1.5)
+                .style('stroke', 'var(--color-text-faint)')
+                .attr('stroke-width', 1.25)
                 .attr('stroke-opacity', 0)
                 .attr('marker-end', 'url(#arrow)')
                 .call(enter => enter.transition().duration(300).attr('stroke-opacity', 0.6)),
@@ -652,12 +687,7 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
 
         // Update tick handler with new selections
         simulation.on('tick', () => {
-          linkGroup
-            .selectAll<SVGLineElement, D3GraphLink>('line')
-            .attr('x1', d => (d.source as D3GraphNode).x ?? 0)
-            .attr('y1', d => (d.source as D3GraphNode).y ?? 0)
-            .attr('x2', d => (d.target as D3GraphNode).x ?? 0)
-            .attr('y2', d => (d.target as D3GraphNode).y ?? 0);
+          positionLinks(linkGroup.selectAll<SVGLineElement, D3GraphLink>('line'));
 
           nodeGroup.selectAll<SVGGElement, D3GraphNode>('g.node').attr('transform', d => `translate(${d.x ?? 0}, ${d.y ?? 0})`);
         });
@@ -666,12 +696,7 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
         simulation.alpha(0.3).restart();
 
         // Set initial positions for new elements
-        linkGroup
-          .selectAll<SVGLineElement, D3GraphLink>('line')
-          .attr('x1', d => (d.source as D3GraphNode).x ?? 0)
-          .attr('y1', d => (d.source as D3GraphNode).y ?? 0)
-          .attr('x2', d => (d.target as D3GraphNode).x ?? 0)
-          .attr('y2', d => (d.target as D3GraphNode).y ?? 0);
+        positionLinks(linkGroup.selectAll<SVGLineElement, D3GraphLink>('line'));
 
         nodeGroup.selectAll<SVGGElement, D3GraphNode>('g.node').attr('transform', d => `translate(${d.x ?? 0}, ${d.y ?? 0})`);
       }
@@ -701,8 +726,25 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
         .duration(300)
         .attr('opacity', d => {
           if (!highlighted) return 1;
-          return highlighted.has(d.uid) ? 1 : 0.15;
+          return highlighted.has(d.uid) ? 1 : 0.3;
         });
+
+      // Causal path nodes get an accent border
+      svg
+        .selectAll<SVGRectElement, D3GraphNode>('.node-card')
+        .style('stroke', d => (highlighted?.has(d.uid) ? 'var(--color-accent-line)' : 'var(--color-border-strong)'));
+
+      const isPathLink = (d: D3GraphLink) => {
+        if (!highlighted) return false;
+        const sourceUid = typeof d.source === 'string' ? d.source : (d.source as D3GraphNode).uid;
+        const targetUid = typeof d.target === 'string' ? d.target : (d.target as D3GraphNode).uid;
+        return highlighted.has(sourceUid) && highlighted.has(targetUid);
+      };
+
+      svg
+        .selectAll<SVGLineElement, D3GraphLink>('line')
+        .style('stroke', d => (isPathLink(d) ? 'var(--color-accent)' : 'var(--color-text-faint)'))
+        .attr('marker-end', d => (isPathLink(d) ? 'url(#arrow-accent)' : 'url(#arrow)'));
 
       // Update link opacity
       svg
@@ -711,27 +753,32 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
         .duration(300)
         .attr('stroke-opacity', d => {
           if (!highlighted) return 0.6;
-          const sourceUid = typeof d.source === 'string' ? d.source : (d.source as D3GraphNode).uid;
-          const targetUid = typeof d.target === 'string' ? d.target : (d.target as D3GraphNode).uid;
-          return highlighted.has(sourceUid) && highlighted.has(targetUid) ? 0.9 : 0.05;
+          return isPathLink(d) ? 1 : 0.12;
         })
         .attr('stroke-width', d => {
-          if (!highlighted) return 1.5;
-          const sourceUid = typeof d.source === 'string' ? d.source : (d.source as D3GraphNode).uid;
-          const targetUid = typeof d.target === 'string' ? d.target : (d.target as D3GraphNode).uid;
-          return highlighted.has(sourceUid) && highlighted.has(targetUid) ? 2.5 : 1;
+          if (!highlighted) return 1.25;
+          return isPathLink(d) ? 1.75 : 1;
         });
     }, [highlightedNodeUids]);
 
     return (
-      <div ref={containerRef} className="w-full h-full bg-[var(--color-app-bg)] relative overflow-hidden" style={{ minHeight: 400 }}>
+      <div
+        ref={containerRef}
+        className="w-full h-full relative overflow-hidden"
+        style={{
+          minHeight: 400,
+          backgroundColor: 'var(--color-app-bg)',
+          backgroundImage: 'radial-gradient(circle at 1px 1px, var(--color-border-soft) 1px, transparent 0)',
+          backgroundSize: '22px 22px',
+        }}
+      >
         <svg ref={svgRef} className="block w-full h-full" style={{ position: 'absolute', top: 0, left: 0 }} />
 
         {/* Empty state */}
         {nodes.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center text-[var(--color-text-muted)]">
+          <div className="absolute inset-0 flex items-center justify-center text-[var(--color-text-faint)]">
             <div className="text-center">
-              <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-10 h-10 mx-auto mb-3 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -739,7 +786,7 @@ export const NamespaceGraph = forwardRef<NamespaceGraphHandle, NamespaceGraphPro
                   d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
                 />
               </svg>
-              <p>No resources found in this namespace</p>
+              <p className="text-[12.5px]">No resources found in this namespace</p>
             </div>
           </div>
         )}

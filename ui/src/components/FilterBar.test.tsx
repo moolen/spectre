@@ -481,7 +481,6 @@ describe('FilterBar - Problematic Status Toggle', () => {
     render(<FilterBar {...propsWithProblematic} />);
 
     const button = screen.getByRole('button', { name: /problematic only/i });
-    expect(button).toHaveClass('bg-[var(--color-surface-active)]');
-    expect(button).toHaveClass('border-brand-500');
+    expect(button).toHaveAttribute('aria-pressed', 'true');
   });
 });

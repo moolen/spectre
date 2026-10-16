@@ -1049,13 +1049,11 @@ func (s *UIStage) erroneous_timeline_segment_is_clicked(deploymentName string) *
 		// Find all segments
 		const segments = document.querySelectorAll('rect.segment');
 
-		// Look for segments with error colors (red, orange, etc.)
-		// Error segments typically have fills like #ef4444, #f97316, etc.
+		// Look for segments in an error state (segments carry their status in data-status)
 		for (let i = 0; i < segments.length; i++) {
 			const segment = segments[i];
-			const fill = segment.getAttribute('fill');
-			// Check if this is an error color (red/orange hues)
-			if (fill && (fill.includes('#ef') || fill.includes('#f9') || fill.includes('red') || fill.includes('orange'))) {
+			const fill = segment.getAttribute('data-status') || '';
+			if (fill === 'Error') {
 				// Check if this segment's parent resource contains the deployment name
 				let parent = segment.parentElement;
 				while (parent) {
@@ -1096,7 +1094,7 @@ func (s *UIStage) erroneous_timeline_segment_is_clicked(deploymentName string) *
 					goto fallback
 				}
 				fill := infoMap["fill"].(string)
-				s.t.Logf("✓ Found error segment at index %d with fill color %s", index, fill)
+				s.t.Logf("✓ Found error segment at index %d with status %s", index, fill)
 
 				// Get the segment using Playwright locator for proper click handling
 				allSegments := s.browserTest.Page.Locator("rect.segment")
@@ -1111,8 +1109,8 @@ fallback:
 		// Fallback: try to find any red/orange segment using Playwright selectors
 		s.t.Logf("⚠ Could not find error segment via JavaScript, trying CSS selector approach")
 
-		// Try to select segments with red-ish colors
-		redSegments := s.browserTest.Page.Locator("rect.segment[fill*='#ef'], rect.segment[fill*='#f9']")
+		// Try to select segments in an error state
+		redSegments := s.browserTest.Page.Locator("rect.segment[data-status='Error']")
 		count, _ := redSegments.Count()
 		s.t.Logf("Found %d segments with error colors", count)
 

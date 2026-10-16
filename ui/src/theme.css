@@ -1,0 +1,320 @@
+/*
+ * Spectre design tokens.
+ *
+ * Warm graphite neutrals with a single ember accent. Status colours are kept
+ * separate from the accent: the accent marks interaction (active nav, focus,
+ * selection edges, primary actions, causal paths); status colours mark health.
+ */
+:root {
+  /* Surfaces */
+  --color-app-bg: #181715;
+  --color-surface-elevated: #1d1c1a;
+  --color-surface-muted: #23221f;
+  --color-surface-active: #2a2926;
+  --color-surface-hover: #2a2926;
+  --color-surface-secondary: #181715;
+  --color-sidebar-bg: #181715;
+  --color-input-bg: #1d1c1a;
+  --color-mascot-bg: #181715;
+
+  /* Lines */
+  --color-border-soft: #2a2825;
+  --color-border-strong: #373531;
+  --color-grid-line: rgba(255, 255, 255, 0.045);
+
+  /* Text */
+  --color-text-primary: #ece8e1;
+  --color-text-secondary: #aba59b;
+  --color-text-muted: #9a948a;
+  --color-text-faint: #7a746b;
+
+  /* Accent (ember) */
+  --color-accent: #e07a47;
+  --color-accent-strong: #f0956a;
+  --color-accent-soft: rgba(224, 122, 71, 0.13);
+  --color-accent-line: rgba(224, 122, 71, 0.5);
+  --color-on-accent: #1a0f08;
+
+  /* Status */
+  --color-status-ok: #6dbb88;
+  --color-status-warn: #d8b150;
+  --color-status-err: #e2574c;
+  --color-status-neutral: #7a746b;
+  --color-status-ok-soft: rgba(109, 187, 136, 0.13);
+  --color-status-warn-soft: rgba(216, 177, 80, 0.13);
+  --color-status-err-soft: rgba(226, 87, 76, 0.13);
+  --color-status-ok-text: #93d1a8;
+  --color-status-warn-text: #e6c879;
+  --color-status-err-text: #f0928a;
+
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace;
+  --shadow-popover: 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.35);
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --color-app-bg: #faf8f5;
+  --color-surface-elevated: #ffffff;
+  --color-surface-muted: #f3f0eb;
+  --color-surface-active: #ebe7e0;
+  --color-surface-hover: #ebe7e0;
+  --color-surface-secondary: #faf8f5;
+  --color-sidebar-bg: #faf8f5;
+  --color-input-bg: #ffffff;
+  --color-mascot-bg: #faf8f5;
+
+  --color-border-soft: #e7e2da;
+  --color-border-strong: #d6d0c6;
+  --color-grid-line: rgba(0, 0, 0, 0.06);
+
+  --color-text-primary: #1f1d1a;
+  --color-text-secondary: #5f5a52;
+  --color-text-muted: #6b665e;
+  --color-text-faint: #948e84;
+
+  --color-accent: #c8602f;
+  --color-accent-strong: #b4521f;
+  --color-accent-soft: rgba(200, 96, 47, 0.1);
+  --color-accent-line: rgba(200, 96, 47, 0.45);
+  --color-on-accent: #ffffff;
+
+  --color-status-ok: #3f9a5f;
+  --color-status-warn: #b8901f;
+  --color-status-err: #cf3f33;
+  --color-status-neutral: #948e84;
+  --color-status-ok-soft: rgba(63, 154, 95, 0.12);
+  --color-status-warn-soft: rgba(184, 144, 31, 0.14);
+  --color-status-err-soft: rgba(207, 63, 51, 0.1);
+  --color-status-ok-text: #2f7a4a;
+  --color-status-warn-text: #8a6a12;
+  --color-status-err-text: #b3362b;
+
+  --shadow-popover: 0 12px 32px -8px rgba(40, 30, 20, 0.18), 0 2px 6px rgba(40, 30, 20, 0.08);
+
+  color-scheme: light;
+}
+
+html,
+body {
+  background-color: var(--color-app-bg);
+  color: var(--color-text-primary);
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+/* Quiet scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 5px;
+  border: 2px solid var(--color-app-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-faint);
+}
+
+.font-mono,
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Shared primitives ---------- */
+
+/* 32px control used by buttons, inputs and segmented controls in the top bar */
+.ui-control {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+.ui-control:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-faint);
+}
+.ui-control:focus-visible {
+  outline: none;
+  border-color: var(--color-accent-line);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+.ui-control.is-icon {
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+.ui-btn-primary {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: filter 0.15s ease;
+}
+.ui-btn-primary:hover {
+  filter: brightness(1.08);
+}
+.ui-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-segmented {
+  height: 32px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-elevated);
+}
+.ui-segmented > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.ui-segmented > button:hover {
+  color: var(--color-text-primary);
+}
+.ui-segmented > button[aria-pressed='true'] {
+  background: var(--color-surface-active);
+  color: var(--color-text-primary);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+
+.ui-input {
+  height: 32px;
+  width: 100%;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-input-bg);
+  color: var(--color-text-primary);
+  font-size: 12.5px;
+}
+.ui-input::placeholder {
+  color: var(--color-text-faint);
+}
+.ui-input:focus {
+  outline: none;
+  border-color: var(--color-accent-line);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.ui-popover {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-popover);
+}
+
+.ui-kbd {
+  font: 11px/1 var(--font-mono);
+  color: var(--color-text-faint);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  padding: 3px 5px;
+}
+
+.ui-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex: none;
+  border-radius: 9px;
+  background: var(--color-border-strong);
+  transition: background-color 0.15s ease;
+}
+.ui-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #d8d3cb;
+  transition: left 0.15s ease;
+}
+.ui-switch[aria-checked='true'] {
+  background: var(--color-accent);
+}
+.ui-switch[aria-checked='true']::after {
+  left: 16px;
+  background: #fff;
+}
+
+.ui-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.ui-pill > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.ui-section-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-text-faint);
+}
+
+/* Status bar at the bottom of the main views */
+.ui-statusbar {
+  height: 28px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 20px;
+  border-top: 1px solid var(--color-border-soft);
+  color: var(--color-text-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ui-statusbar .dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  margin-right: 6px;
+}

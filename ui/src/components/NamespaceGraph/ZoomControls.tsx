@@ -13,7 +13,7 @@ interface ZoomControlsProps {
 
 /**
  * Zoom controls for the namespace graph
- * Positioned in the bottom-right corner of the graph area
+ * Positioned in the bottom-left corner of the graph area
  */
 export const ZoomControls: React.FC<ZoomControlsProps> = ({
   onZoomIn,
@@ -22,58 +22,25 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({
   onResetZoom,
 }) => {
   return (
-    <div className="absolute bottom-4 right-4 flex flex-col gap-1 bg-[var(--color-surface-elevated)] 
-                    border border-[var(--color-border-soft)] rounded-lg shadow-lg p-1 z-10">
-      {/* Zoom In */}
-      <button
-        onClick={onZoomIn}
-        title="Zoom In (+)"
-        className="p-2 rounded hover:bg-[var(--color-surface-muted)] transition-colors
-                   text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-      >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
+    <div className="absolute bottom-4 left-4 flex flex-col rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface-elevated)] overflow-hidden z-10 divide-y divide-[var(--color-border-soft)]">
+      <button type="button" onClick={onZoomIn} title="Zoom In (+)" aria-label="Zoom In" className="w-[30px] h-[30px] grid place-items-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] transition-colors">
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round">
+          <path d="M12 5v14M5 12h14" />
         </svg>
       </button>
-
-      {/* Zoom Out */}
-      <button
-        onClick={onZoomOut}
-        title="Zoom Out (-)"
-        className="p-2 rounded hover:bg-[var(--color-surface-muted)] transition-colors
-                   text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-      >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
+      <button type="button" onClick={onZoomOut} title="Zoom Out (-)" aria-label="Zoom Out" className="w-[30px] h-[30px] grid place-items-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] transition-colors">
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round">
+          <path d="M5 12h14" />
         </svg>
       </button>
-
-      {/* Divider */}
-      <div className="h-px bg-[var(--color-border-soft)] my-1" />
-
-      {/* Fit to View */}
-      <button
-        onClick={onFitToView}
-        title="Fit to View (F)"
-        className="p-2 rounded hover:bg-[var(--color-surface-muted)] transition-colors
-                   text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-      >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+      <button type="button" onClick={onFitToView} title="Fit to View (F)" aria-label="Fit to View" className="w-[30px] h-[30px] grid place-items-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] transition-colors">
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
         </svg>
       </button>
-
-      {/* Reset Zoom */}
-      <button
-        onClick={onResetZoom}
-        title="Reset Zoom (0)"
-        className="p-2 rounded hover:bg-[var(--color-surface-muted)] transition-colors
-                   text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-      >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      <button type="button" onClick={onResetZoom} title="Reset Zoom (0)" aria-label="Reset Zoom" className="w-[30px] h-[30px] grid place-items-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-muted)] transition-colors">
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round">
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" />
         </svg>
       </button>
     </div>
