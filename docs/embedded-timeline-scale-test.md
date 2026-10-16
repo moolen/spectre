@@ -22,22 +22,22 @@ changes kept, and 7–30 days are practical for large clusters:
 These figures come from the [sizing formula](#sizing). Measure your own rates and plug
 them in; the churn assumptions above are rough.
 
-What we measured, on 4 vCPUs (details below):
+What we measured on 4 vCPUs. Details are under [Results](#results).
 
-- **30 days, 5.07M events** over 970k distinct objects (17.4 GB of object JSON):
-  - 1.6 GB live heap, 4.6 GB on disk
-  - ingest 5,150 events/s in batches and 1,360 events/s one at a time
-  - timeline pages in 16–120 ms for any window from 15 minutes to 30 days
-  - restart in 8.8 s
-- **Reference workload, 7 days** (500 nodes, 108k objects, 335k events), against the
-  code before this work:
+| Run | Events / objects | Live heap | Disk | Ingest (batch / single) | Timeline page, any window |
+|---|---|---:|---:|---|---|
+| 7 days, `large` (500 nodes) | 335k / 108k | 231 MB | 0.4 GB | 7,258 / 2,169 ev/s | 3–9 ms |
+| 14 days, `xlarge` (1000 nodes) | 2.4M / 490k | 722 MB | 2.3 GB | 5,381 / 1,518 ev/s | 4–36 ms |
+| 30 days, `xlarge` (1000 nodes) | 5.07M / 970k | 1.34 GB | 4.0 GB | 5,029 / 1,113 ev/s | 11–60 ms |
 
-  | | Before | After |
-  |---|---|---|
-  | Live heap | 2.2 GB | 188 MB |
-  | Bulk ingest | 430 ev/s | 7,025 ev/s |
-  | Longest ingest stall | 36 s | 0.4 s |
-  | Full-window timeline page | 1.1 s | 5 ms |
+The same 7-day workload against the code before this work:
+
+| | Before | After |
+|---|---|---|
+| Live heap | 2.2 GB | 231 MB |
+| Bulk ingest | 430 ev/s | 7,258 ev/s |
+| Longest ingest stall | 36 s | 0.28 s |
+| Full-window timeline page | 1.1 s | 9 ms |
 
 ## What changed
 
@@ -99,7 +99,16 @@ Each item below names the limit it removed.
    - Older windows read them from each segment's associated-UID index, for both the
      timeline and the analysis store.
    - Kept for 30 days, they would be the largest part of the heap: ~450 bytes each.
-9. **Smaller items.**
+9. **Long-window scans and responses bounded.**
+   - Segment scans read each record's timestamp, kind and namespace without allocating,
+     skip non-matching records before decoding them, and run across segments in
+     parallel.
+   - When a resource has more than 256 versions in the window, the timeline page leaves
+     out versions that repeat the previous status without a configuration change, such
+     as Node heartbeats. Creates, deletes, configuration changes, status transitions and
+     the last version are always kept, so the UI's version diffs still cover every
+     change. A 30-day page of 100 Nodes went from 61,821 versions (~300 MB) to 200.
+10. **Smaller items.**
    - The recent-Event cache is gone. It held 4 hours of Event payloads and gave no
      latency benefit.
    - Kinds, namespaces and labels are interned.
@@ -118,71 +127,86 @@ All runs use the harness described under
 
 | Metric | Before | After |
 |---|---:|---:|
-| Bulk ingest (batches of 256) | 430 ev/s | 7,025 ev/s |
-| Longest batch stall | 32.7 s | 0.42 s |
-| Live ingest (one `ProcessEvent` per event) | 87 ev/s | 1,694 ev/s |
-| Live ingest p99 / max | 14.5 ms / 36 s | 2.3 ms / 145 ms |
-| Checkpoints (count × mean) | 145 × 4.6 s | 6 × 0.96 s (off the lock) |
-| Compactions (count × mean) | 26 × 17.2 s | 15 × 0.19 s (background) |
-| Live heap / peak heap | 2,235 / 5,495 MB | 188 / 395 MB |
+| Bulk ingest (batches of 256) | 430 ev/s | 7,258 ev/s |
+| Longest batch stall | 32.7 s | 0.28 s |
+| Live ingest (one `ProcessEvent` per event) | 87 ev/s | 2,169 ev/s |
+| Live ingest p99 / max | 14.5 ms / 36 s | 1.2 ms / 153 ms |
+| Checkpoints (count × mean) | 145 × 4.6 s | 6 × 1.0 s (off the lock) |
+| Compactions (count × mean) | 26 × 17.2 s | 14 × 0.13 s (background) |
+| Live heap / peak heap | 2,235 / 5,495 MB | 231 / 452 MB |
 | Disk | 277 MB | 376 MB |
-| Close / reopen | 5.2 s / 4.2 s | 1.0 s / 0.75 s |
-| Resources, last 1h (page of 100) | 6.4 ms | 2.1 ms |
-| Resources, last 24h | – | 3.2 ms |
-| Resources, full 7 days | 1,147 ms | 4.9 ms |
-| Resources, full 7 days, one namespace | 61 ms | 10.2 ms |
-| Walk every page of the last hour (82 × 500) | 607 ms | 622 ms |
-| 8 concurrent timeline requests, 1h | 431 ms | 21 ms |
-| Event query, full 7 days* | 15.0 s | 420 ms |
+| Close / reopen | 5.2 s / 4.2 s | 1.0 s / 0.83 s |
+| Resources, last 1h (page of 100) | 6.4 ms | 3.7 ms |
+| Resources, last 24h | – | 2.7 ms |
+| Resources, full 7 days | 1,147 ms | 8.7 ms |
+| Resources, full 7 days, one namespace | 61 ms | 9.4 ms |
+| Resources, full 7 days, `kind=Node` | 156 ms | 84 ms |
+| Walk every page of the last hour (82 × 500) | 607 ms | 630 ms |
+| 8 concurrent timeline requests, 1h | 431 ms | 4.7 ms |
+| Event query, full 7 days / one namespace* | 15.0 s / 15.4 s | 213 ms / 28 ms |
 
 \* Before this work, every timeline request also ran this query. It is now only used
 when someone asks for the `Event` kind explicitly.
 
-### 30 days: `xlarge` profile, 5M churn events, 10% core/v1 Events, `retentionDays: 30`
+### 14 and 30 days: `xlarge` profile, 10% core/v1 Events
 
-1000 nodes, 400 namespaces. 5.07M events touching 970k distinct objects; most are pods
-replaced over the month, plus 500k Event objects. 17.4 GB of object JSON.
+1000 nodes, 400 namespaces, with retention set to the window:
 
-| Metric | Value |
-|---|---:|
-| Bulk ingest (batches of 256) | 5,152 ev/s |
-| Batch latency p50 / p99 / max | 28 ms / 256 ms / 1.2 s |
-| Live ingest (one `ProcessEvent` per event) | 1,361 ev/s, p99 5.5 ms, max 176 ms |
-| Checkpoints (count × mean) | 90 × 9.0 s, encoded off the lock |
-| Compactions (count × mean) | 348 × 0.58 s, in the background |
-| Live heap / peak heap (no `GOMEMLIMIT`) | 1,578 / 3,131 MB |
-| Disk: segments / checkpoints / tail | 3.7 GB / 0.44 GB / 0.36 GB |
-| Close / reopen / first query after reopen | 6.8 s / 8.8 s / 54 ms |
+- **14 days:** 2.33M churn events, 2.4M events in total over 490k distinct objects,
+  8.3 GB of object JSON.
+- **30 days:** 5M churn events, 5.07M events over 970k distinct objects, 17.4 GB of
+  object JSON.
 
-| Timeline query (page of 100 resources) | p50 |
-|---|---:|
-| Resources, last 15m / 1h / 6h | 16 / 18 / 18 ms |
-| Resources, last 24h / 7d | 21 / 17 ms |
-| Resources, full 30 days (Event summaries read from segments) | 121 ms |
-| Resources, full 30 days, one namespace | 48 ms |
-| Resources, full 30 days, `kind=Node` (61,821 versions returned) | 839 ms |
-| Walk every page of the last hour (327 × 500) | 5.9 s |
-| 8 concurrent timeline requests, 1h | 190 ms |
-| Explicit `kind=Event` query, 24h / 7d / 30d | 0.15 / 1.4 / 6.1 s |
+Most of the objects are pods replaced over the window; the rest include 250k and 500k
+Event objects respectively.
 
-Heap profile after load (pprof `inuse_space`, 1.19 GB sampled):
+| Metric | 14 days | 30 days |
+|---|---:|---:|
+| Bulk ingest (batches of 256) | 5,381 ev/s | 5,029 ev/s |
+| Batch latency p50 / p99 / max | 27 / 251 / 560 ms | 29 / 256 / 1,177 ms |
+| Live ingest (one `ProcessEvent` per event) | 1,518 ev/s | 1,113 ev/s |
+| Live ingest p99 / max | 3.5 / 319 ms | 5.8 / 563 ms |
+| Checkpoints (count × mean, off the lock) | 47 × 6.3 s | 90 × 9.4 s |
+| Compactions (count × mean, background) | 168 × 0.54 s | 348 × 0.57 s |
+| Live heap / peak heap (no `GOMEMLIMIT`) | 722 / 1,653 MB | 1,342 / 3,316 MB |
+| Disk: segments / checkpoints / tail | 1.9 / 0.22 / 0.15 GB | 3.5 / 0.44 / 0.15 GB |
+| Close / reopen / first query after reopen | 3.4 s / 4.2 s / 24 ms | 6.8 s / 8.3 s / 69 ms |
+
+| Timeline query, page of 100 resources (p50) | 14 days | 30 days |
+|---|---:|---:|
+| Resources, last 15m / 1h / 6h | 7.5 / 4.3 / 4.6 ms | 12 / 11 / 11 ms |
+| Resources, last 24h / 7d | 6.4 / 11.5 ms | 21 / 27 ms |
+| Resources, full window | 17 ms | 41 ms |
+| Resources, full window, one namespace | 36 ms | 60 ms |
+| Resources, full window, `kind=Node` (versions returned) | 31 ms (451) | 51 ms (200) |
+| 8 concurrent timeline requests, 1h | 29 ms | 190 ms |
+| Explicit `kind=Event` query, 24h / 7d | 84 / 439 ms | 68 / 386 ms |
+| Explicit `kind=Event` query, full window / one namespace | 1.3 s / 0.20 s | 2.9 s / 0.34 s |
+
+Heap profile after the 30-day load (pprof `inuse_space`, ~1.2 GB sampled):
 
 | Holder | Size |
 |---|---:|
-| Version slices | 406 MB |
-| Label maps | 198 MB |
-| Resource records and indexes | 159 MB |
-| Shared identity blocks | 85 MB |
-| Ordered B-tree | 55 MB |
-| In-flight checkpoint snapshot | 58 MB |
+| Version slices | ~400 MB |
+| Label maps | ~200 MB |
+| Resource records and indexes | ~160 MB |
+| Shared identity blocks | ~85 MB |
+| Ordered B-tree | ~55 MB |
+| In-flight checkpoint snapshot | ~58 MB |
 
-An earlier run of the same workload had a 2.1 GB live heap, a 2.7 s worst batch stall
-and a 6.8 s Event query on every 30-day timeline request. That run came before:
+An earlier 30-day run had:
+
+- a 2.1 GB live heap and a 2.7 s worst batch stall
+- a 6.8 s Event query on every timeline request
+- 61,821 versions on a 100-Node page
+
+That run came before:
 
 - inline event IDs and string interning
 - the Event summary horizon
 - dropping the per-request Event query
 - retention without rewrites
+- bounded per-resource histories
 
 ## Sizing
 
@@ -196,9 +220,14 @@ heap ≈ 150 MB
 ```
 
 - **Objects** includes deleted ones still inside the window, such as replaced pods.
-  Labels make up a third of the per-object cost. Fitted to the 30-day run, the formula
-  gives 1.46 GB against the measured 1.58 GB; the gap is mostly the in-flight checkpoint
-  snapshot. For the reference workload it overestimates: 253 MB against 188 MB.
+  Labels make up a third of the per-object cost. Against the measured runs the formula
+  is slightly conservative:
+
+  | Run | Formula | Measured live heap |
+  |---|---:|---:|
+  | 7 days | 253 MB | 231 MB |
+  | 14 days | 825 MB | 722 MB |
+  | 30 days | 1.46 GB | 1.34 GB |
 - **Changes** count after duplicate removal; `spectre_embedded_ingest_events_total`
   counts exactly these.
 - **The Event term** is bounded by `K8sEventSummaryHorizon` and by 64 summaries per
@@ -233,33 +262,32 @@ Measuring your rates:
 
 ## Limits and caveats
 
-- **Response size of long windows.**
-  - A timeline page carries every version of each resource in the window, with its full
-    object, because the UI diffs neighbouring versions.
-  - Objects that change often add up: a 30-day page of 100 Nodes held 61,821 versions,
-    about 300 MB of JSON, and took ~1 s.
-  - The planned fix is to load `resourceData` per version on demand: send segments
-    without payloads and fetch a version when the detail panel opens. That needs an API
-    and UI change.
-  - Until then, the UI's long presets work best with namespace or kind filters.
-- **Node heartbeats dominate history.** Kubelets rewrite Node status (heartbeat
-  timestamps) every few minutes even when nothing changes: 1000 nodes produce
-  ~290k versions a day. Not storing heartbeat-only status changes would cut memory and
-  response size for Nodes substantially. It is lossy for the detail view, so it is
-  left as a follow-up decision.
-- **Explicit Event-kind queries** (`kind=Event` in the timeline) scan Event metadata for
-  the whole window. That took 0.4 s for 7 days on the reference workload, and 1.4 s for
-  7 days and 6.1 s for 30 days with 500k Events. Default timeline requests no longer run
-  this query.
+- **Per-resource history on long windows is thinned.**
+  - Past 256 versions in the window, a timeline page leaves out status-only updates
+    that keep the same status. The same applies to the MCP timeline tools, which share
+    the query path.
+  - Changes inside those updates, such as a restart count or a heartbeat time, appear
+    only in the diff between the kept neighbours.
+  - Objects whose status really flips hundreds of times in a window still return every
+    transition.
+- **Node heartbeats still cost memory.** Kubelets rewrite Node status (heartbeat
+  timestamps) every few minutes even when nothing changes: 1000 nodes produce ~290k
+  versions a day, all kept in the version index for the whole retention window. Not
+  storing heartbeat-only status changes at ingest would save that memory, but it would
+  also lose them from history, so it is left as a decision for later.
+- **Explicit Event-kind queries** (`kind=Event` in the timeline) read Event metadata
+  for the whole window. That is 0.2 s for 7 days on the reference workload and 2.9 s
+  for 30 days with 500k Events, or 0.34 s with a namespace filter. Default timeline
+  requests no longer run this query.
 - **Older Event summaries are read from disk.**
   - The first query reaching back more than 48h loads the associated-UID index of each
     segment in its window.
   - Those indexes stay cached, and their memory grows with the number of Events in them.
 - **Checkpoint CPU grows with history.** A checkpoint encodes the whole projection
-  without blocking ingest, but still costs CPU: ~9 s each at the 30-day scale, every
-  50k events.
+  without blocking ingest, but still costs CPU: ~9 s each at the 30-day scale (6 s at
+  14 days), every 50k events.
 - **Bulk-load stalls.** While loading at thousands of events per second, the longest
-  batch stall at 30 days was 1.2 s, while a single live event waited at most 176 ms.
+  batch stall at 30 days was 1.2 s, while a single live event waited at most 563 ms.
   Flushes, and compaction and retention commits, hold the engine lock briefly. Real ingest rates are far below the measured ceiling.
 - **Storage format.**
   - Segments, tail and checkpoints use new binary formats (segment record magic `0xB1`,
