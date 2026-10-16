@@ -328,8 +328,6 @@ func restoreProjectionResourceRecord(projection *Projection, record *resourceRec
 	})
 }
 
-
-
 // snapshotResourceRecord copies a record for serialisation. With hydrate the payloads are
 // inlined (exports); otherwise flushed payloads are written as segment references and
 // only unflushed payloads are inlined (checkpoints).

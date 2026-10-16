@@ -52,7 +52,6 @@ func (qe *QueryExecutor) collectK8sEventsForResources(
 		return projectionEvents, queryPlanStats{projectionUsed: true}, nil
 	}
 
-
 	if planner != nil {
 		eventsByUID, stats, err := planner.collectAssociatedEvents(ctx, involvedUIDs, namespaces, startTimeNs, endTimeNs)
 		if err != nil {

@@ -127,4 +127,3 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 	qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, nil)
 	return namespaces, kinds, minTime, maxTime, nil
 }
-
