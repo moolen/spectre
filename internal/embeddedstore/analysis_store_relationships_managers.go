@@ -1,7 +1,7 @@
 package embeddedstore
 
 func managerReference(version *resourceVersion) *managerRef {
-	labels := version.identity.Labels
+	labels := version.labels()
 	switch {
 	case labels["helm.toolkit.fluxcd.io/name"] != "":
 		return &managerRef{
@@ -21,7 +21,7 @@ func managerReference(version *resourceVersion) *managerRef {
 		return &managerRef{
 			kind:       "Application",
 			name:       labels["argocd.argoproj.io/instance"],
-			namespace:  version.identity.Namespace,
+			namespace:  version.meta.Namespace,
 			confidence: 1.0,
 		}
 	default:

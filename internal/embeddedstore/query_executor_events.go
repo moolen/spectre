@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -30,11 +31,28 @@ func (qe *QueryExecutor) collectK8sEventsForResources(
 		return nil, queryPlanStats{}, nil
 	}
 
-	if projectionEvents := qe.collectAssociatedK8sEventsFromProjection(involvedUIDs, startTimeNs, endTimeNs); projectionEvents != nil {
+	planner := qe.sharedPlanner()
+	projectionEvents, incomplete := qe.collectAssociatedK8sEventsFromProjectionWithGaps(involvedUIDs, startTimeNs, endTimeNs)
+	if len(incomplete) > 0 && planner != nil {
+		// The in-memory summaries are capped per object; read older windows from the
+		// segments' associated-UID index for the objects that hit the cap.
+		eventsByUID, stats, err := planner.collectAssociatedEvents(ctx, incomplete, namespaces, startTimeNs, endTimeNs)
+		if err != nil {
+			return nil, stats, err
+		}
+		if projectionEvents == nil {
+			projectionEvents = make(map[string][]models.K8sEvent)
+		}
+		for uid, events := range convertAssociatedEventsToK8sEvents(eventsByUID) {
+			projectionEvents[uid] = events
+		}
+		stats.projectionUsed = true
+		return projectionEvents, stats, nil
+	}
+	if projectionEvents != nil {
 		return projectionEvents, queryPlanStats{projectionUsed: true}, nil
 	}
 
-	planner := qe.sharedPlanner()
 	if planner != nil {
 		eventsByUID, stats, err := planner.collectAssociatedEvents(ctx, involvedUIDs, namespaces, startTimeNs, endTimeNs)
 		if err != nil {
@@ -104,49 +122,58 @@ func (qe *QueryExecutor) executeEventQuery(
 		return nil, nil, err
 	}
 
-	byUID := make(map[string][]models.Event)
-	metaByUID := make(map[string]models.ResourceMetadata)
-
+	// Group, sort and paginate on metadata; payloads are read for the page only.
+	type eventGroup struct {
+		key    orderedResourceKey
+		events []*lazyEvent
+	}
+	groupIndex := make(map[string]int)
+	groups := make([]eventGroup, 0)
 	for i := range eventTimeline {
-		event := eventTimeline[i]
-		uid := event.Resource.UID
+		event := &eventTimeline[i]
+		uid := event.event.Resource.UID
 		if uid == "" {
 			continue
 		}
-
-		byUID[uid] = append(byUID[uid], cloneEvent(event))
-		if _, ok := metaByUID[uid]; !ok {
-			metaByUID[uid] = event.Resource
-		}
-	}
-
-	eventResources := make([]filteredResource, 0, len(metaByUID))
-	for uid, meta := range metaByUID {
-		events := byUID[uid]
-		sort.SliceStable(events, func(i, j int) bool {
-			return compareEventOrder(events[i], events[j]) < 0
-		})
-		eventResources = append(eventResources, filteredResource{
-			orderedResourceKey: orderedResourceKey{
+		position, ok := groupIndex[uid]
+		if !ok {
+			position = len(groups)
+			groupIndex[uid] = position
+			meta := event.event.Resource
+			groups = append(groups, eventGroup{key: orderedResourceKey{
 				kind:      meta.Kind,
 				namespace: meta.Namespace,
 				name:      meta.Name,
 				uid:       uid,
-			},
-			events: events,
-		})
+			}})
+		}
+		groups[position].events = append(groups[position].events, event)
 	}
-
-	sort.SliceStable(eventResources, func(i, j int) bool {
-		return compareOrderedResourceKey(eventResources[i].orderedResourceKey, eventResources[j].orderedResourceKey) < 0
+	sort.SliceStable(groups, func(i, j int) bool {
+		return compareOrderedResourceKey(groups[i].key, groups[j].key) < 0
 	})
 
-	startIdx := qe.cursorStartIndex(eventResources, pagination)
-	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(eventResources, startIdx, pageSize)
+	keys := make([]filteredResource, len(groups))
+	for i := range groups {
+		keys[i] = filteredResource{orderedResourceKey: groups[i].key}
+	}
+	startIdx := qe.cursorStartIndex(keys, pagination)
+	endIdx, hasMore, nextCursor := qe.pageBoundsWithCursor(keys, startIdx, pageSize)
 
-	var resultEvents []models.Event
-	for _, resource := range eventResources[startIdx:endIdx] {
-		resultEvents = append(resultEvents, resource.events...)
+	var pageEvents []*lazyEvent
+	for _, group := range groups[startIdx:endIdx] {
+		sort.SliceStable(group.events, func(i, j int) bool {
+			return compareEventOrder(group.events[i].event, group.events[j].event) < 0
+		})
+		pageEvents = append(pageEvents, group.events...)
+	}
+	if err := hydrateLazyEvents(pageEvents); err != nil {
+		qe.recordQueryMetrics(queryFamilyResourceEvents, stats, start, err)
+		return nil, nil, err
+	}
+	resultEvents := make([]models.Event, 0, len(pageEvents))
+	for _, event := range pageEvents {
+		resultEvents = append(resultEvents, cloneEvent(event.event))
 	}
 
 	executionTime := time.Since(start)
@@ -172,14 +199,10 @@ func (qe *QueryExecutor) eventTimelineEvents(
 	ctx context.Context,
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
-) ([]models.Event, queryPlanStats, error) {
-	if cached, stats, ok := qe.recentEventTimelineEvents(startTimeNs, endTimeNs, filters); ok {
-		return cached, stats, nil
-	}
-
+) ([]lazyEvent, queryPlanStats, error) {
 	planner := qe.sharedPlanner()
 	if planner != nil {
-		return planner.exportTimeRange(ctx, startTimeNs, endTimeNs, filters)
+		return planner.exportTimeRangeLazy(ctx, startTimeNs, endTimeNs, filters)
 	}
 	if !qe.projectionHistoryFallbackEnabled {
 		return nil, queryPlanStats{}, fmt.Errorf("projection history fallback disabled")
@@ -206,7 +229,12 @@ func (qe *QueryExecutor) eventTimelineEvents(
 		return compareEventOrder(timeline[i], timeline[j]) < 0
 	})
 
-	return dedupeEventsByID(timeline), queryPlanStats{projectionUsed: true}, nil
+	deduped := dedupeEventsByID(timeline)
+	lazy := make([]lazyEvent, len(deduped))
+	for i := range deduped {
+		lazy[i] = loadedLazyEvent(deduped[i])
+	}
+	return lazy, queryPlanStats{projectionUsed: true}, nil
 }
 
 func resourceLookupInputs(resources []filteredResource) ([]string, []string) {
@@ -366,16 +394,54 @@ func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjection(
 	involvedUIDs []string,
 	startTimeNs, endTimeNs int64,
 ) map[string][]models.K8sEvent {
+	events, _ := qe.collectAssociatedK8sEventsFromProjectionWithGaps(involvedUIDs, startTimeNs, endTimeNs)
+	return events
+}
+
+// k8sEventInfosFromSegments reads the summaries of core/v1 Events about the given objects
+// from segments, newest first. It serves windows the projection's in-memory summaries
+// no longer cover.
+func (qe *QueryExecutor) k8sEventInfosFromSegments(ctx context.Context, involvedUIDs []string, startNs, endNs int64) (map[string][]analysisstore.K8sEventInfo, error) {
+	planner := qe.sharedPlanner()
+	if planner == nil {
+		return nil, nil
+	}
+	eventsByUID, _, err := planner.collectAssociatedEvents(ctx, involvedUIDs, nil, startNs, endNs)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]analysisstore.K8sEventInfo, len(eventsByUID))
+	for uid, events := range eventsByUID {
+		infos := make([]analysisstore.K8sEventInfo, 0, len(events))
+		for i := len(events) - 1; i >= 0; i-- {
+			infos = append(infos, buildK8sEventInfo(events[i]))
+		}
+		result[uid] = infos
+	}
+	return result, nil
+}
+
+// collectAssociatedK8sEventsFromProjectionWithGaps also returns the involved UIDs whose
+// capped in-memory summaries do not cover the whole window.
+func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjectionWithGaps(
+	involvedUIDs []string,
+	startTimeNs, endTimeNs int64,
+) (map[string][]models.K8sEvent, []string) {
 	if len(involvedUIDs) == 0 || endTimeNs < startTimeNs {
-		return nil
+		return nil, nil
 	}
 
 	qe.projection.mu.RLock()
 	defer qe.projection.mu.RUnlock()
 
+	var incomplete []string
 	eventsByUID := make(map[string][]models.K8sEvent, len(involvedUIDs))
 	for i := range involvedUIDs {
 		uid := involvedUIDs[i]
+		if !qe.projection.k8sEventInfosComplete(uid, startTimeNs) {
+			incomplete = append(incomplete, uid)
+			continue
+		}
 		events := qe.projection.k8sEventsByInvolvedUID[uid]
 		if len(events) == 0 {
 			continue
@@ -407,8 +473,8 @@ func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjection(
 	}
 
 	if len(eventsByUID) == 0 {
-		return nil
+		return nil, incomplete
 	}
 
-	return eventsByUID
+	return eventsByUID, incomplete
 }

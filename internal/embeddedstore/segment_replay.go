@@ -1,6 +1,7 @@
 package embeddedstore
 
 import (
+	"bufio"
 	"container/heap"
 	"context"
 	"errors"
@@ -22,6 +23,7 @@ type segmentReplayCursor struct {
 	source     replaySegmentReader
 	nextOffset int64
 	file       *os.File
+	reader     *bufio.Reader
 	exhausted  bool
 }
 
@@ -47,41 +49,55 @@ func newSegmentReplayCursor(source replaySegmentReader) *segmentReplayCursor {
 	}
 }
 
+// replayLocation is where a replayed event's record lives, so the projection can
+// reference the payload instead of keeping it.
+type replayLocation struct {
+	segmentID string
+	offset    int64
+	length    uint32
+}
+
 func (c *segmentReplayCursor) next(ctx context.Context) (models.Event, bool, error) {
+	event, _, ok, err := c.nextLocated(ctx)
+	return event, ok, err
+}
+
+func (c *segmentReplayCursor) nextLocated(ctx context.Context) (models.Event, replayLocation, bool, error) {
 	if c == nil || c.source.reader == nil {
-		return models.Event{}, false, fmt.Errorf("replay cursor reader is nil")
+		return models.Event{}, replayLocation{}, false, fmt.Errorf("replay cursor reader is nil")
 	}
 	if c.exhausted {
-		return models.Event{}, false, nil
+		return models.Event{}, replayLocation{}, false, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return models.Event{}, false, err
+		return models.Event{}, replayLocation{}, false, err
 	}
 
 	if err := c.ensureOpen(); err != nil {
-		return models.Event{}, false, err
+		return models.Event{}, replayLocation{}, false, err
 	}
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return models.Event{}, false, err
+			return models.Event{}, replayLocation{}, false, err
 		}
 
-		event, size, err := decodeFramedEvent(c.file)
+		event, size, err := decodeFramedEvent(c.reader)
 		if err == nil {
 			// Continue below.
 		} else if errors.Is(err, io.EOF) {
 			c.exhausted = true
 			_ = c.close()
-			return models.Event{}, false, nil
+			return models.Event{}, replayLocation{}, false, nil
 		} else {
 			_ = c.close()
-			return models.Event{}, false, fmt.Errorf("decode event: %w", err)
+			return models.Event{}, replayLocation{}, false, fmt.Errorf("decode event: %w", err)
 		}
 
+		location := replayLocation{segmentID: c.source.segmentID, offset: c.nextOffset, length: uint32(size)} // #nosec G115 -- one record, <= maxSegmentRecordSize
 		c.nextOffset += size
 		if event.Timestamp < c.source.startTimestamp {
 			continue
@@ -89,10 +105,10 @@ func (c *segmentReplayCursor) next(ctx context.Context) (models.Event, bool, err
 		if event.Timestamp > c.source.endTimestamp {
 			c.exhausted = true
 			_ = c.close()
-			return models.Event{}, false, nil
+			return models.Event{}, replayLocation{}, false, nil
 		}
 
-		return event, true, nil
+		return event, location, true, nil
 	}
 }
 
@@ -114,6 +130,7 @@ func (c *segmentReplayCursor) ensureOpen() error {
 	}
 
 	c.file = file
+	c.reader = bufio.NewReaderSize(file, 256<<10)
 	return nil
 }
 
@@ -124,12 +141,14 @@ func (c *segmentReplayCursor) close() error {
 
 	err := c.file.Close()
 	c.file = nil
+	c.reader = nil
 	return err
 }
 
 type replayEventHeapItem struct {
-	event  models.Event
-	cursor *segmentReplayCursor
+	event    models.Event
+	location replayLocation
+	cursor   *segmentReplayCursor
 }
 
 type replayEventHeap []*replayEventHeapItem
@@ -158,7 +177,7 @@ func (h *replayEventHeap) Pop() any {
 	return item
 }
 
-func consumeReplaySegmentReaders(ctx context.Context, sources []replaySegmentReader, sink func(models.Event) error) error {
+func consumeReplaySegmentReaders(ctx context.Context, sources []replaySegmentReader, sink func(models.Event, replayLocation) error) error {
 	if sink == nil {
 		return fmt.Errorf("replay sink is nil")
 	}
@@ -189,7 +208,7 @@ func consumeReplaySegmentReaders(ctx context.Context, sources []replaySegmentRea
 
 		cursor := newSegmentReplayCursor(sources[i])
 		cursors = append(cursors, cursor)
-		event, ok, err := cursor.next(ctx)
+		event, location, ok, err := cursor.nextLocated(ctx)
 		if err != nil {
 			return fmt.Errorf("prime active segment %q: %w", sources[i].segmentID, err)
 		}
@@ -198,18 +217,19 @@ func consumeReplaySegmentReaders(ctx context.Context, sources []replaySegmentRea
 		}
 
 		heap.Push(&queue, &replayEventHeapItem{
-			event:  event,
-			cursor: cursor,
+			event:    event,
+			location: location,
+			cursor:   cursor,
 		})
 	}
 
 	for queue.Len() > 0 {
 		item := heap.Pop(&queue).(*replayEventHeapItem)
-		if err := sink(item.event); err != nil {
+		if err := sink(item.event, item.location); err != nil {
 			return fmt.Errorf("replay event %q: %w", item.event.ID, err)
 		}
 
-		nextEvent, ok, err := item.cursor.next(ctx)
+		nextEvent, nextLocation, ok, err := item.cursor.nextLocated(ctx)
 		if err != nil {
 			return fmt.Errorf("replay active segment %q: %w", item.cursor.source.segmentID, err)
 		}
@@ -218,6 +238,7 @@ func consumeReplaySegmentReaders(ctx context.Context, sources []replaySegmentRea
 		}
 
 		item.event = nextEvent
+		item.location = nextLocation
 		heap.Push(&queue, item)
 	}
 
@@ -232,11 +253,18 @@ func replaySegmentReaders(ctx context.Context, projection *Projection, sources [
 		ctx = context.Background()
 	}
 
-	if err := consumeReplaySegmentReaders(ctx, sources, func(event models.Event) error {
+	if err := consumeReplaySegmentReaders(ctx, sources, func(event models.Event, location replayLocation) error {
+		var err error
 		if applyProjectionEventUsesDefaultImplementation() {
-			return projection.ApplyReplayEvent(event)
+			err = projection.ApplyReplayEvent(event)
+		} else {
+			err = applyProjectionEvent(projection, event)
 		}
-		return applyProjectionEvent(projection, event)
+		if err != nil {
+			return err
+		}
+		projection.attachReplayLocation(event, location)
+		return nil
 	}); err != nil {
 		return fmt.Errorf("open embedded engine: %w", err)
 	}
@@ -250,8 +278,9 @@ func buildProjectionFromReplayReaders(ctx context.Context, sources []replaySegme
 	}
 
 	projection := NewProjection()
-	if err := consumeReplaySegmentReaders(ctx, sources, func(event models.Event) error {
+	if err := consumeReplaySegmentReaders(ctx, sources, func(event models.Event, location replayLocation) error {
 		projection.appendReplayEvent(event)
+		projection.attachReplayLocation(event, location)
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("open embedded engine: %w", err)

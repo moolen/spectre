@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/moolen/spectre/internal/models"
@@ -82,15 +83,7 @@ func (t *tailJournal) AppendBatch(ctx context.Context, nextHighWaterMark uint64,
 
 	payloads := make([][]byte, 0, len(events))
 	for i := range events {
-		record := tailJournalRecord{
-			HighWaterMark: nextHighWaterMark + uint64(i),
-			Event:         cloneEvent(events[i]),
-		}
-		payload, err := json.Marshal(record)
-		if err != nil {
-			return TailJournalMeta{}, fmt.Errorf("append tail journal batch: marshal record %d: %w", i, err)
-		}
-		payloads = append(payloads, payload)
+		payloads = append(payloads, appendEventRecord(nil, tailRecordMagic, nextHighWaterMark+uint64(i), &events[i], false)) // #nosec G115 -- i is a slice index
 	}
 
 	if err := t.journal.appendPayloadBatch(ctx, payloads); err != nil {
@@ -118,8 +111,8 @@ func (t *tailJournal) ReplaySince(ctx context.Context, afterHighWaterMark uint64
 	lastHighWaterMark := t.meta.BaseHighWaterMark
 	eventCount := 0
 	if err := t.journal.replayPayloads(ctx, func(payload []byte) error {
-		var record tailJournalRecord
-		if err := json.Unmarshal(payload, &record); err != nil {
+		record, err := decodeTailJournalRecord(payload)
+		if err != nil {
 			return fmt.Errorf("corrupt journal entry: %w", err)
 		}
 		if record.HighWaterMark != expectedHighWaterMark {
@@ -132,7 +125,7 @@ func (t *tailJournal) ReplaySince(ctx context.Context, afterHighWaterMark uint64
 		if record.HighWaterMark <= afterHighWaterMark || apply == nil {
 			return nil
 		}
-		return apply(cloneEvent(record.Event), record.HighWaterMark)
+		return apply(record.Event, record.HighWaterMark)
 	}); err != nil {
 		return err
 	}
@@ -218,7 +211,8 @@ func newTailJournalID(baseHighWaterMark uint64) string {
 	return fmt.Sprintf("tail-%020d-%d", baseHighWaterMark, time.Now().UTC().UnixNano())
 }
 
-func pruneStaleTailJournals(root, activeTailID string) error {
+// pruneStaleTailJournals removes tail journals other than the active one and keepIDs.
+func pruneStaleTailJournals(root, activeTailID string, keepIDs ...string) error {
 	if root == "" || activeTailID == "" {
 		return nil
 	}
@@ -234,7 +228,7 @@ func pruneStaleTailJournals(root, activeTailID string) error {
 
 	removed := false
 	for i := range entries {
-		if !entries[i].IsDir() || entries[i].Name() == activeTailID {
+		if !entries[i].IsDir() || entries[i].Name() == activeTailID || slices.Contains(keepIDs, entries[i].Name()) {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(tailRoot, entries[i].Name())); err != nil {
@@ -249,4 +243,32 @@ func pruneStaleTailJournals(root, activeTailID string) error {
 	}
 
 	return nil
+}
+
+// decodeTailJournalRecord accepts both binary records and the JSON records written by
+// earlier versions. The returned event owns its data.
+func decodeTailJournalRecord(payload []byte) (tailJournalRecord, error) {
+	if len(payload) > 0 && payload[0] == '{' {
+		var record tailJournalRecord
+		if err := json.Unmarshal(payload, &record); err != nil {
+			return tailJournalRecord{}, err
+		}
+		return record, nil
+	}
+	decoded, err := decodeEventRecordHeader(payload)
+	if err != nil {
+		return tailJournalRecord{}, err
+	}
+	if err := decoded.decodeData(); err != nil {
+		return tailJournalRecord{}, err
+	}
+	return tailJournalRecord{HighWaterMark: decoded.highWaterMark, Event: decoded.event}, nil
+}
+
+func previousTailIDs(manifest Manifest) []string {
+	ids := make([]string, 0, len(manifest.PreviousTails))
+	for _, previous := range manifest.PreviousTails {
+		ids = append(ids, previous.ID)
+	}
+	return ids
 }

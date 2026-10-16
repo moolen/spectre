@@ -30,27 +30,34 @@ const (
 var checkpointZstdMagic = [4]byte{0x28, 0xb5, 0x2f, 0xfd}
 
 type checkpointState struct {
-	FormatVersion  int                `json:"format_version"`
-	HighWaterMark  uint64             `json:"high_water_mark"`
-	MinTimestampNs int64              `json:"min_timestamp_ns"`
-	MaxTimestampNs int64              `json:"max_timestamp_ns"`
-	Snapshot       ProjectionSnapshot `json:"snapshot,omitempty"`
+	FormatVersion  int      `json:"format_version"`
+	HighWaterMark  uint64   `json:"high_water_mark"`
+	MinTimestampNs int64    `json:"min_timestamp_ns"`
+	MaxTimestampNs int64    `json:"max_timestamp_ns"`
+	SegmentTable   []string `json:"segment_table,omitempty"`
+	// K8sEventInfosTrimmedThroughNs is Projection.k8sEventInfosTrimmedThrough.
+	K8sEventInfosTrimmedThroughNs int64              `json:"k8s_event_infos_trimmed_through_ns,omitempty"`
+	Snapshot                      ProjectionSnapshot `json:"snapshot,omitempty"`
 }
 
 func (s checkpointState) MarshalJSON() ([]byte, error) {
 	type checkpointStateAlias struct {
-		FormatVersion  int                 `json:"format_version"`
-		HighWaterMark  uint64              `json:"high_water_mark"`
-		MinTimestampNs int64               `json:"min_timestamp_ns"`
-		MaxTimestampNs int64               `json:"max_timestamp_ns"`
-		Snapshot       *ProjectionSnapshot `json:"snapshot,omitempty"`
+		FormatVersion                 int                 `json:"format_version"`
+		HighWaterMark                 uint64              `json:"high_water_mark"`
+		MinTimestampNs                int64               `json:"min_timestamp_ns"`
+		MaxTimestampNs                int64               `json:"max_timestamp_ns"`
+		SegmentTable                  []string            `json:"segment_table,omitempty"`
+		K8sEventInfosTrimmedThroughNs int64               `json:"k8s_event_infos_trimmed_through_ns,omitempty"`
+		Snapshot                      *ProjectionSnapshot `json:"snapshot,omitempty"`
 	}
 
 	encoded := checkpointStateAlias{
-		FormatVersion:  s.FormatVersion,
-		HighWaterMark:  s.HighWaterMark,
-		MinTimestampNs: s.MinTimestampNs,
-		MaxTimestampNs: s.MaxTimestampNs,
+		FormatVersion:                 s.FormatVersion,
+		HighWaterMark:                 s.HighWaterMark,
+		MinTimestampNs:                s.MinTimestampNs,
+		MaxTimestampNs:                s.MaxTimestampNs,
+		SegmentTable:                  s.SegmentTable,
+		K8sEventInfosTrimmedThroughNs: s.K8sEventInfosTrimmedThroughNs,
 	}
 	if len(s.Snapshot.Events) > 0 || len(s.Snapshot.Resources) > 0 || len(s.Snapshot.K8sEventsByInvolvedUID) > 0 {
 		snapshot := s.Snapshot
@@ -163,6 +170,7 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 		if err != nil {
 			return nil, 0, fmt.Errorf("load checkpoint: restore projection: %w", err)
 		}
+		projection.SetDataRoot(rootDir)
 		return projection, state.HighWaterMark, nil
 	}
 
@@ -175,6 +183,8 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 		projection, err = loadCheckpointV1(state, checkpointDir)
 	case checkpointFormatVersionV2:
 		projection, err = loadCheckpointV2(state, checkpointDir)
+	case checkpointFormatVersionV3:
+		projection, err = loadCheckpointV3(state, checkpointDir)
 	default:
 		return nil, 0, fmt.Errorf(
 			"load checkpoint: unsupported checkpoint format version %d",
@@ -184,6 +194,7 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 	if err != nil {
 		return nil, 0, fmt.Errorf("load checkpoint: restore projection: %w", err)
 	}
+	projection.SetDataRoot(rootDir)
 	return projection, state.HighWaterMark, nil
 }
 

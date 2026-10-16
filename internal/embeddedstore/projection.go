@@ -2,6 +2,7 @@ package embeddedstore
 
 import (
 	"sync"
+	"sync/atomic"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/graph"
@@ -21,23 +22,39 @@ type orderedResourceKey struct {
 	uid       string
 }
 
-type recentResourceChange struct {
+// resourceVersion is one observed state of a resource. It is kept compact because the
+// projection holds one per event for the whole retention window: identity strings live
+// in a versionMeta shared by consecutive versions, and identity/change info structs are
+// derived on demand (see version_compact.go).
+type resourceVersion struct {
+	// uuid holds the event ID when it is a canonical UUID (idForm == idFormUUID); read the
+	// ID with eventID().
+	uuid      [16]byte
 	timestamp int64
-	uid       string
+	meta      *versionMeta
+	// extra holds what most versions lack: an event ID that is not a UUID, and the
+	// payload until the event is flushed (afterwards ref locates it). Read payloads
+	// through versionPayload rather than these fields.
+	extra    *versionExtra
+	ref      versionDataRef
+	dataHash uint64
+	typeCode uint8
+	// statusCode indexes versionStatuses; flags holds versionFlag* bits.
+	statusCode uint8
+	flags      uint8
+	idForm     uint8
 }
 
-type resourceVersion struct {
-	eventID     string
-	timestamp   int64
-	eventType   models.EventType
-	identity    graph.ResourceIdentity
-	data        []byte
-	changeEvent analysisstore.ChangeEventInfo
+type versionExtra struct {
+	textID  string
+	pending []byte
 }
 
 type resourceRecord struct {
 	uid      string
 	versions []resourceVersion
+	// latest summarises versions[len-1] for classifying the next appended version.
+	latest recordChangeState
 }
 
 // Projection maintains shared mutable embedded indexes for timeline and analysis reads.
@@ -51,17 +68,33 @@ type Projection struct {
 	// Compact projection state should leave them empty after build/import/apply.
 	events                    []models.Event
 	eventsByResourceUID       map[string][]models.Event
-	resourceMetaByUID         map[string]models.ResourceMetadata
 	resourcesByUID            map[string]*resourceRecord
 	resourcesByKey            map[resourceKey][]*resourceRecord
 	k8sRawEventsByInvolvedUID map[string][]models.Event
 	k8sEventsByInvolvedUID    map[string][]analysisstore.K8sEventInfo
-	orderedResources          []orderedResourceKey
-	activeOrderedResources    []orderedResourceKey
-	activeResourceKeyByUID    map[string]orderedResourceKey
-	recentResourceChanges     []recentResourceChange
-	minTimestampNs            int64
-	maxTimestampNs            int64
+	// k8sEventsTruncatedThrough records, per involved UID whose list hit the cap, the
+	// newest timestamp of an event info that was dropped. The projection only has the
+	// complete set of infos for windows starting after it.
+	k8sEventsTruncatedThrough map[string]int64
+	// k8sEventInfoHorizonNs bounds how far back event summaries are kept in memory
+	// (0 keeps them for the whole retention window). k8sEventInfosTrimmedThrough is the
+	// newest timestamp trimmed by that horizon: like k8sEventsTruncatedThrough, but for
+	// every involved UID.
+	// retentionCutoffNs is the latest retention cutoff applied. Segments straddling it
+	// still hold older records, so segment scans clamp their windows to it.
+	retentionCutoffNs atomic.Int64
+
+	k8sEventInfoHorizonNs       int64
+	k8sEventInfosTrimmedThrough int64
+	// k8sEventHashes remembers recent core/v1 Event payloads for duplicate detection.
+	k8sEventHashes      map[string]k8sEventPayloadHash
+	k8sEventHashPruneAt int
+	orderedResources    *orderedResourceIndex
+	minTimestampNs      int64
+	maxTimestampNs      int64
+
+	dataRoot       string
+	segmentHandles map[string]*segmentDataHandle
 }
 
 type ProjectionSnapshot struct {
@@ -84,17 +117,23 @@ type ProjectionResourceVersionSnapshot struct {
 	Identity    graph.ResourceIdentity        `json:"identity"`
 	Data        []byte                        `json:"data,omitempty"`
 	ChangeEvent analysisstore.ChangeEventInfo `json:"change_event"`
+	// DataSegment is a 1-based index into the checkpoint's segment table; together with
+	// DataOffset/DataLength it locates a payload that is not stored inline.
+	DataSegment uint32 `json:"data_segment,omitempty"`
+	DataOffset  int64  `json:"data_offset,omitempty"`
+	DataLength  uint32 `json:"data_length,omitempty"`
+	DataHash    uint64 `json:"data_hash,omitempty"`
 }
 
 func NewProjection() *Projection {
 	return &Projection{
 		eventsByResourceUID:       make(map[string][]models.Event),
-		resourceMetaByUID:         make(map[string]models.ResourceMetadata),
 		resourcesByUID:            make(map[string]*resourceRecord),
 		resourcesByKey:            make(map[resourceKey][]*resourceRecord),
+		orderedResources:          newOrderedResourceIndex(),
 		k8sRawEventsByInvolvedUID: make(map[string][]models.Event),
 		k8sEventsByInvolvedUID:    make(map[string][]analysisstore.K8sEventInfo),
-		activeResourceKeyByUID:    make(map[string]orderedResourceKey),
+		k8sEventsTruncatedThrough: make(map[string]int64),
 		minTimestampNs:            -1,
 		maxTimestampNs:            -1,
 	}

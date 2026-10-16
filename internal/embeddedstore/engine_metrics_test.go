@@ -44,7 +44,7 @@ func TestEngineMetrics_ProcessBatchAndFlush(t *testing.T) {
 	require.Equal(t, 0.0, gaugeValue(t, findMetricFamily(t, families, "spectre_embedded_hot_events"), nil))
 }
 
-func TestHotStoreMetrics_RecordsUIDAndGlobalEvictions(t *testing.T) {
+func TestHotStoreMetrics_RecordsUIDEvictionsWithoutDroppingQueuedEvents(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
 	store := newHotStore(HotStoreConfig{
@@ -61,9 +61,12 @@ func TestHotStoreMetrics_RecordsUIDAndGlobalEvictions(t *testing.T) {
 
 	families, err := reg.Gather()
 	require.NoError(t, err)
+	// The per-resource recent log is bounded, but every event stays queued for the next
+	// flush: the engine flushes at MaxEvents instead of discarding unflushed events.
 	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_hot_evictions_total"), map[string]string{"scope": "uid"}))
-	require.Equal(t, 1.0, counterValue(t, findMetricFamily(t, families, "spectre_embedded_hot_evictions_total"), map[string]string{"scope": "global"}))
-	require.Equal(t, 2.0, gaugeValue(t, findMetricFamily(t, families, "spectre_embedded_hot_events"), nil))
+	require.Equal(t, 4.0, gaugeValue(t, findMetricFamily(t, families, "spectre_embedded_hot_events"), nil))
+	require.Len(t, store.RecentEventsByUID("pod-a"), 1)
+	require.Len(t, store.ExtractFlushBatch(0).Events, 4)
 }
 
 func TestEngineMetrics_CheckpointAndCompaction(t *testing.T) {

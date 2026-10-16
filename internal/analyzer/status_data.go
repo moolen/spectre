@@ -193,3 +193,12 @@ func normalizeNumber(value any) int64 {
 		return 0
 	}
 }
+
+// ResourceDataFromObject wraps an already-decoded object so callers that parsed the
+// payload once can reuse it for status inference.
+func ResourceDataFromObject(object map[string]any) *ResourceData {
+	if object == nil {
+		return nil
+	}
+	return &ResourceData{object: object}
+}

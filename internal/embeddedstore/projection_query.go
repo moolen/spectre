@@ -2,7 +2,6 @@ package embeddedstore
 
 import (
 	"sort"
-	"time"
 
 	"github.com/moolen/spectre/internal/models"
 )
@@ -12,10 +11,20 @@ func (p *Projection) resourceTimelineEvents(uid string, startTimeNs, endTimeNs i
 	defer p.mu.RUnlock()
 
 	record := p.resourcesByUID[uid]
-	return resourceRecordTimelineEvents(record, startTimeNs, endTimeNs)
+	return resourceRecordTimelineEvents(record, startTimeNs, endTimeNs, 0)
 }
 
-func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs int64) []models.Event {
+// maxTimelineVersionsPerResource is the number of versions above which a timeline page
+// thins a resource's history (see timelineVersionKept). Over long windows objects that
+// report status periodically, such as Nodes, have thousands of versions, each sent with
+// its full object.
+const maxTimelineVersionsPerResource = 256
+
+// resourceRecordTimelineEvents returns the record's versions in the window, preceded by
+// the version current at its start. With maxVersions > 0 and more versions than that in
+// the window, versions that repeat the previous status without a configuration change
+// are left out.
+func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs int64, maxVersions int) []models.Event {
 	if record == nil || len(record.versions) == 0 || endTimeNs < startTimeNs {
 		return nil
 	}
@@ -36,8 +45,14 @@ func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs
 		}
 	}
 
+	thin := maxVersions > 0 && endIdx-startIdx > maxVersions
+	lastKept := startIdx - 1
 	for i := startIdx; i < endIdx; i++ {
+		if thin && !timelineVersionKept(record.versions, i, lastKept, endIdx) {
+			continue
+		}
 		result = append(result, resourceVersionEvent(record.versions[i]))
+		lastKept = i
 	}
 
 	if len(result) == 0 {
@@ -47,16 +62,71 @@ func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs
 	return dedupeEventsByID(result)
 }
 
+// timelineVersionKept reports whether a thinned history keeps versions[i]: the first and
+// last versions of the window, creates and deletes, configuration changes, and versions
+// whose status differs from the last kept one. What is left out are status-only updates
+// that do not change the displayed status, such as heartbeats; the diff between kept
+// neighbours still covers them.
+func timelineVersionKept(versions []resourceVersion, i, lastKept, endIdx int) bool {
+	version := &versions[i]
+	if lastKept < 0 || i == endIdx-1 || version.eventType() != models.EventTypeUpdate || version.configChanged() {
+		return true
+	}
+	return version.statusCode != versions[lastKept].statusCode
+}
+
+// resourceRecordHasWindowEvents reports whether resourceRecordTimelineEvents would return
+// anything for the window, without materialising events or reading payloads.
+func resourceRecordHasWindowEvents(record *resourceRecord, startTimeNs, endTimeNs int64) bool {
+	if record == nil || len(record.versions) == 0 || endTimeNs < startTimeNs {
+		return false
+	}
+	versions := record.versions
+	if versions[0].timestamp > endTimeNs {
+		return false
+	}
+	startIdx := sort.Search(len(versions), func(i int) bool {
+		return versions[i].timestamp >= startTimeNs
+	})
+	if startIdx < len(versions) && versions[startIdx].timestamp <= endTimeNs {
+		return true
+	}
+	return startIdx > 0 && versions[startIdx-1].eventType() != models.EventTypeDelete
+}
+
+// resourceRecordWindowBounds returns the earliest and latest timestamps of the events
+// resourceRecordTimelineEvents would return, and false when there are none.
+func resourceRecordWindowBounds(record *resourceRecord, startTimeNs, endTimeNs int64) (int64, int64, bool) {
+	if !resourceRecordHasWindowEvents(record, startTimeNs, endTimeNs) {
+		return 0, 0, false
+	}
+	versions := record.versions
+	startIdx := sort.Search(len(versions), func(i int) bool {
+		return versions[i].timestamp >= startTimeNs
+	})
+	endIdx := sort.Search(len(versions), func(i int) bool {
+		return versions[i].timestamp > endTimeNs
+	})
+	first, last := startIdx, endIdx-1
+	if startIdx > 0 && versions[startIdx-1].eventType() != models.EventTypeDelete {
+		first = startIdx - 1
+	}
+	if last < first {
+		last = first
+	}
+	return versions[first].timestamp, versions[last].timestamp, true
+}
+
 func resourceRecordCurrentKey(record *resourceRecord) orderedResourceKey {
 	if record == nil || len(record.versions) == 0 {
 		return orderedResourceKey{}
 	}
 	latest := record.versions[len(record.versions)-1]
 	return orderedResourceKey{
-		kind:      latest.identity.Kind,
-		namespace: latest.identity.Namespace,
-		name:      latest.identity.Name,
-		uid:       latest.identity.UID,
+		kind:      latest.meta.Kind,
+		namespace: latest.meta.Namespace,
+		name:      latest.meta.Name,
+		uid:       latest.meta.UID,
 	}
 }
 
@@ -64,7 +134,7 @@ func resourceRecordLatestMeta(record *resourceRecord) models.ResourceMetadata {
 	if record == nil || len(record.versions) == 0 {
 		return models.ResourceMetadata{}
 	}
-	return resourceMetadataFromIdentity(record.versions[len(record.versions)-1].identity)
+	return resourceMetadataFromIdentity(record.versions[len(record.versions)-1].identity())
 }
 
 func resourceRecordPreExistingEvent(record *resourceRecord) (models.Event, bool) {
@@ -72,43 +142,12 @@ func resourceRecordPreExistingEvent(record *resourceRecord) (models.Event, bool)
 		return models.Event{}, false
 	}
 	latest := record.latestVersion()
-	if latest == nil || latest.eventType == models.EventTypeDelete {
+	if latest == nil || latest.eventType() == models.EventTypeDelete {
 		return models.Event{}, false
 	}
 	event := resourceVersionEvent(*latest)
 	event.PreExisting = true
 	return event, true
-}
-
-func (p *Projection) recentWindowChangedUIDs(startTimeNs int64) (map[string]struct{}, bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.recentWindowChangedUIDsLocked(startTimeNs)
-}
-
-func (p *Projection) recentWindowChangedUIDsLocked(startTimeNs int64) (map[string]struct{}, bool) {
-	if p == nil || p.maxTimestampNs <= 0 || len(p.recentResourceChanges) == 0 {
-		return nil, false
-	}
-
-	if p.retentionWindowNs > 0 {
-		retentionStart := time.Now().UTC().Add(-time.Duration(p.retentionWindowNs)).UnixNano()
-		if startTimeNs < retentionStart {
-			return nil, false
-		}
-	}
-
-	idx := sort.Search(len(p.recentResourceChanges), func(i int) bool {
-		return p.recentResourceChanges[i].timestamp >= startTimeNs
-	})
-	if idx >= len(p.recentResourceChanges) {
-		return nil, false
-	}
-	changedUIDs := make(map[string]struct{})
-	for i := idx; i < len(p.recentResourceChanges); i++ {
-		changedUIDs[p.recentResourceChanges[i].uid] = struct{}{}
-	}
-	return changedUIDs, true
 }
 
 func (p *Projection) rebuildRecord(uid string) {
@@ -125,7 +164,7 @@ func (p *Projection) resolveByName(namespace, kind, name string, failureTimestam
 		if windowStartNs == 0 {
 			continue
 		}
-		if deleted := record.visibleVersionWithinWindow(failureTimestampNs, windowStartNs); deleted != nil && deleted.eventType == models.EventTypeDelete {
+		if deleted := record.visibleVersionWithinWindow(failureTimestampNs, windowStartNs); deleted != nil && deleted.eventType() == models.EventTypeDelete {
 			if deletedCandidate == nil || deleted.timestamp > deletedCandidate.timestamp {
 				deletedCandidate = deleted
 			}
@@ -138,20 +177,20 @@ func (p *Projection) activeResourcesInNamespace(namespace string, timestampNs in
 	var result []*resourceVersion
 	for _, record := range p.resourcesByUID {
 		version := record.activeVersionAt(timestampNs)
-		if version == nil || version.identity.Kind == "Event" || version.identity.Namespace != namespace {
+		if version == nil || version.meta.Kind == "Event" || version.meta.Namespace != namespace {
 			continue
 		}
 		result = append(result, version)
 	}
 
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].identity.Kind != result[j].identity.Kind {
-			return result[i].identity.Kind < result[j].identity.Kind
+		if result[i].meta.Kind != result[j].meta.Kind {
+			return result[i].meta.Kind < result[j].meta.Kind
 		}
-		if result[i].identity.Name != result[j].identity.Name {
-			return result[i].identity.Name < result[j].identity.Name
+		if result[i].meta.Name != result[j].meta.Name {
+			return result[i].meta.Name < result[j].meta.Name
 		}
-		return result[i].identity.UID < result[j].identity.UID
+		return result[i].meta.UID < result[j].meta.UID
 	})
 
 	return result

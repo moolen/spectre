@@ -109,10 +109,10 @@ func TestManifest_StoresSegmentIndexGeneration(t *testing.T) {
 	dir := t.TempDir()
 
 	require.NoError(t, storeManifest(dir, Manifest{
-		FormatVersion:           storageFormatVersion,
-		SegmentIndexGeneration:  1,
-		ActiveSegments:          []SegmentMeta{},
-		Checkpoints:             []CheckpointMeta{},
+		FormatVersion:          storageFormatVersion,
+		SegmentIndexGeneration: 1,
+		ActiveSegments:         []SegmentMeta{},
+		Checkpoints:            []CheckpointMeta{},
 	}))
 
 	reloaded, err := loadOrCreateManifest(dir)
@@ -139,8 +139,8 @@ func TestManifest_LoadOrCreatePromotesStaleActiveCheckpointToLatest(t *testing.T
 func TestConfig_EffectiveEngineConfigAppliesTailDefaults(t *testing.T) {
 	cfg, err := Config{DataDir: t.TempDir()}.EffectiveEngineConfig()
 	require.NoError(t, err)
-	require.Equal(t, 2048, cfg.CheckpointMaxTailEvents)
-	require.Equal(t, int64(16<<20), cfg.CheckpointMaxTailBytes)
+	require.Equal(t, 50000, cfg.CheckpointMaxTailEvents)
+	require.Equal(t, int64(256<<20), cfg.CheckpointMaxTailBytes)
 	require.True(t, cfg.CheckpointOnShutdown)
 	require.Equal(t, defaultCheckpointInterval, cfg.CheckpointInterval)
 	require.Equal(t, 30*time.Second, cfg.FlushInterval)

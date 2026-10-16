@@ -1,6 +1,7 @@
 package embeddedstore
 
 import (
+	"bufio"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -18,60 +19,50 @@ type segmentSortableRecord struct {
 	sequence int
 }
 
+// segmentRecordLocation identifies where a resource version's record was written, so the
+// projection can drop the in-memory payload and read it back on demand.
+type segmentRecordLocation struct {
+	UID       string
+	EventID   string
+	Timestamp int64
+	Offset    int64
+	Length    uint32
+}
+
 func writeSegment(rootDir, segmentID string, events []models.Event) (segmentBundleMeta, error) {
-	if rootDir == "" {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: root dir is empty")
-	}
-	if segmentID == "" {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: segment id is empty")
-	}
+	meta, _, err := writeSegmentLocated(rootDir, segmentID, events)
+	return meta, err
+}
 
-	segmentsRoot := filepath.Join(rootDir, segmentsDirName)
-	if err := ensureDirWithParentSync(segmentsRoot); err != nil {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: ensure segments dir: %w", err)
+// writeSegmentLocated sorts events by time and writes them as one segment, returning the
+// location of every resource version (events with a UID that are not core/v1 Events).
+func writeSegmentLocated(rootDir, segmentID string, events []models.Event) (segmentBundleMeta, []segmentRecordLocation, error) {
+	records := make([]segmentSortableRecord, len(events))
+	for i := range events {
+		records[i] = segmentSortableRecord{event: events[i], sequence: i}
 	}
-
-	tmpRoot := filepath.Join(rootDir, segmentTempDirName)
-	if err := ensureDirWithParentSync(tmpRoot); err != nil {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: ensure temp dir: %w", err)
-	}
-
-	finalSegmentDir := filepath.Join(segmentsRoot, segmentID)
-	if _, err := os.Stat(finalSegmentDir); err == nil {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: segment %q already exists", segmentID)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: stat existing segment path: %w", err)
-	}
-
-	tmpSegmentDir, err := os.MkdirTemp(tmpRoot, segmentID+".tmp-*")
-	if err != nil {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: create temp segment dir: %w", err)
-	}
-
-	cleanupTmpDir := true
-	defer func() {
-		if cleanupTmpDir {
-			_ = os.RemoveAll(tmpSegmentDir)
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].event.Timestamp != records[j].event.Timestamp {
+			return records[i].event.Timestamp < records[j].event.Timestamp
 		}
-	}()
+		return records[i].sequence < records[j].sequence
+	})
 
-	meta, err := writeSegmentBundle(tmpSegmentDir, segmentID, events)
+	builder, err := newSegmentBuilder(rootDir, segmentID)
 	if err != nil {
-		return segmentBundleMeta{}, err
+		return segmentBundleMeta{}, nil, err
 	}
-
-	if err := syncPath(tmpSegmentDir); err != nil {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: sync temp segment dir: %w", err)
+	for i := range records {
+		if err := builder.Append(&records[i].event); err != nil {
+			builder.Abort()
+			return segmentBundleMeta{}, nil, err
+		}
 	}
-	if err := os.Rename(tmpSegmentDir, finalSegmentDir); err != nil {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: move segment bundle into place: %w", err)
+	meta, err := builder.Finish()
+	if err != nil {
+		return segmentBundleMeta{}, nil, err
 	}
-	if err := syncPath(segmentsRoot); err != nil {
-		return segmentBundleMeta{}, fmt.Errorf("write segment: sync segments dir: %w", err)
-	}
-
-	cleanupTmpDir = false
-	return meta, nil
+	return meta, builder.Locations(), nil
 }
 
 func ensureDirWithParentSync(path string) error {
@@ -93,12 +84,8 @@ func ensureDirWithParentSync(path string) error {
 func writeSegmentBundle(segmentDir, segmentID string, events []models.Event) (segmentBundleMeta, error) {
 	records := make([]segmentSortableRecord, len(events))
 	for i := range events {
-		records[i] = segmentSortableRecord{
-			event:    events[i],
-			sequence: i,
-		}
+		records[i] = segmentSortableRecord{event: events[i], sequence: i}
 	}
-
 	sort.Slice(records, func(i, j int) bool {
 		if records[i].event.Timestamp != records[j].event.Timestamp {
 			return records[i].event.Timestamp < records[j].event.Timestamp
@@ -106,97 +93,243 @@ func writeSegmentBundle(segmentDir, segmentID string, events []models.Event) (se
 		return records[i].sequence < records[j].sequence
 	})
 
-	eventsPath := filepath.Join(segmentDir, segmentEventsFile)
-	eventsFile, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	builder, err := openSegmentBundleBuilder(segmentDir, segmentID)
 	if err != nil {
-		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: open events file: %w", err)
+		return segmentBundleMeta{}, err
 	}
-
-	writeErr := func(stage string, err error) (segmentBundleMeta, error) {
-		_ = eventsFile.Close()
-		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: %s: %w", stage, err)
-	}
-
-	timeIndexEntries := make([]segmentTimeIndexEntry, 0, len(records)/segmentIndexStride+1)
-	resourceIndex := segmentResourceIndex{UIDOffsets: make(map[string][]int64)}
-	associatedIndex := segmentAssociatedIndex{InvolvedUIDOffsets: make(map[string][]int64)}
-	dimensionSet := make(map[segmentDimensionEntry]struct{})
-	namespaceKindSet := make(map[string]map[string]struct{})
-	recordOffsets := make([]int64, 0, len(records))
-
-	var offset int64
-	var minTimestamp int64
-	var maxTimestamp int64
-	if len(records) > 0 {
-		minTimestamp = records[0].event.Timestamp
-		maxTimestamp = records[len(records)-1].event.Timestamp
-	}
-
 	for i := range records {
-		record := records[i]
-		recordOffsets = append(recordOffsets, offset)
+		if err := builder.Append(&records[i].event); err != nil {
+			builder.closeEvents()
+			return segmentBundleMeta{}, err
+		}
+	}
+	return builder.finishBundle()
+}
 
-		if i%segmentIndexStride == 0 {
-			timeIndexEntries = append(timeIndexEntries, segmentTimeIndexEntry{
-				Timestamp: record.event.Timestamp,
-				Offset:    offset,
+// segmentBuilder streams time-ordered events into a new segment bundle. Callers append
+// events in non-decreasing timestamp order and then Finish (or Abort) the segment.
+type segmentBuilder struct {
+	rootDir      string
+	segmentsRoot string
+	finalDir     string
+	tmpDir       string
+
+	segmentID string
+	dir       string
+	file      *os.File
+	writer    *bufio.Writer
+	offset    int64
+	count     int
+	scratch   []byte
+
+	minTimestamp int64
+	maxTimestamp int64
+	lastOffset   int64
+
+	timeIndexEntries []segmentTimeIndexEntry
+	resourceIndex    segmentResourceIndex
+	associatedIndex  segmentAssociatedIndex
+	dimensionSet     map[segmentDimensionEntry]struct{}
+	namespaceKindSet map[string]map[string]struct{}
+	locations        []segmentRecordLocation
+}
+
+func newSegmentBuilder(rootDir, segmentID string) (*segmentBuilder, error) {
+	if rootDir == "" {
+		return nil, fmt.Errorf("write segment: root dir is empty")
+	}
+	if segmentID == "" {
+		return nil, fmt.Errorf("write segment: segment id is empty")
+	}
+
+	segmentsRoot := filepath.Join(rootDir, segmentsDirName)
+	if err := ensureDirWithParentSync(segmentsRoot); err != nil {
+		return nil, fmt.Errorf("write segment: ensure segments dir: %w", err)
+	}
+	tmpRoot := filepath.Join(rootDir, segmentTempDirName)
+	if err := ensureDirWithParentSync(tmpRoot); err != nil {
+		return nil, fmt.Errorf("write segment: ensure temp dir: %w", err)
+	}
+
+	finalDir := filepath.Join(segmentsRoot, segmentID)
+	if _, err := os.Stat(finalDir); err == nil {
+		return nil, fmt.Errorf("write segment: segment %q already exists", segmentID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("write segment: stat existing segment path: %w", err)
+	}
+
+	tmpDir, err := os.MkdirTemp(tmpRoot, segmentID+".tmp-*")
+	if err != nil {
+		return nil, fmt.Errorf("write segment: create temp segment dir: %w", err)
+	}
+
+	builder, err := openSegmentBundleBuilder(tmpDir, segmentID)
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, err
+	}
+	builder.rootDir = rootDir
+	builder.segmentsRoot = segmentsRoot
+	builder.finalDir = finalDir
+	builder.tmpDir = tmpDir
+	return builder, nil
+}
+
+func openSegmentBundleBuilder(segmentDir, segmentID string) (*segmentBuilder, error) {
+	eventsPath := filepath.Join(segmentDir, segmentEventsFile)
+	file, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) // #nosec G304 -- path under the engine data dir
+	if err != nil {
+		return nil, fmt.Errorf("write segment bundle: open events file: %w", err)
+	}
+	return &segmentBuilder{
+		segmentID:        segmentID,
+		dir:              segmentDir,
+		file:             file,
+		writer:           bufio.NewWriterSize(file, 256<<10),
+		resourceIndex:    segmentResourceIndex{UIDOffsets: make(map[string][]int64)},
+		associatedIndex:  segmentAssociatedIndex{InvolvedUIDOffsets: make(map[string][]int64)},
+		dimensionSet:     make(map[segmentDimensionEntry]struct{}),
+		namespaceKindSet: make(map[string]map[string]struct{}),
+	}, nil
+}
+
+func (b *segmentBuilder) Count() int {
+	return b.count
+}
+
+func (b *segmentBuilder) SizeBytes() int64 {
+	return b.offset
+}
+
+func (b *segmentBuilder) Locations() []segmentRecordLocation {
+	return b.locations
+}
+
+func (b *segmentBuilder) Append(event *models.Event) error {
+	b.scratch = append(b.scratch[:0], 0, 0, 0, 0)
+	b.scratch = appendEventRecord(b.scratch, segmentRecordMagic, 0, event, true)
+	payloadLen := len(b.scratch) - 4
+	if payloadLen > maxSegmentRecordSize {
+		return fmt.Errorf("write segment bundle: encode event: payload size %d exceeds max %d", payloadLen, maxSegmentRecordSize)
+	}
+	binary.BigEndian.PutUint32(b.scratch[:4], uint32(payloadLen)) // #nosec G115 -- checked against maxSegmentRecordSize
+	return b.appendFrame(event, b.scratch)
+}
+
+// appendFrame writes an encoded frame for event and indexes it.
+func (b *segmentBuilder) appendFrame(event *models.Event, frame []byte) error {
+	if b.count > 0 && event.Timestamp < b.maxTimestamp {
+		return fmt.Errorf("write segment bundle: event %q at %d is older than previous record at %d", event.ID, event.Timestamp, b.maxTimestamp)
+	}
+
+	recordOffset := b.offset
+	if b.count%segmentIndexStride == 0 {
+		b.timeIndexEntries = append(b.timeIndexEntries, segmentTimeIndexEntry{Timestamp: event.Timestamp, Offset: recordOffset})
+	}
+	if _, err := b.writer.Write(frame); err != nil {
+		return fmt.Errorf("write segment bundle: write events payload: %w", err)
+	}
+	b.offset += int64(len(frame))
+
+	if b.count == 0 {
+		b.minTimestamp = event.Timestamp
+	}
+	b.maxTimestamp = event.Timestamp
+	b.lastOffset = recordOffset
+	b.count++
+
+	resource := &event.Resource
+	if resource.UID != "" {
+		b.resourceIndex.UIDOffsets[resource.UID] = append(b.resourceIndex.UIDOffsets[resource.UID], recordOffset)
+		if resource.Kind != "Event" {
+			b.locations = append(b.locations, segmentRecordLocation{
+				UID:       resource.UID,
+				EventID:   event.ID,
+				Timestamp: event.Timestamp,
+				Offset:    recordOffset,
+				Length:    uint32(len(frame)), // #nosec G115 -- one record, <= maxSegmentRecordSize
 			})
 		}
-
-		framed, err := encodeFramedEvent(record.event)
-		if err != nil {
-			return writeErr("encode event", err)
-		}
-
-		written, err := writeAll(eventsFile, framed)
-		if err != nil {
-			return writeErr("write events payload", err)
-		}
-		offset += int64(written)
-
-		uid := record.event.Resource.UID
-		if uid != "" {
-			resourceIndex.UIDOffsets[uid] = append(resourceIndex.UIDOffsets[uid], recordOffsets[len(recordOffsets)-1])
-		}
-		if record.event.Resource.Kind == "Event" && record.event.Resource.InvolvedObjectUID != "" {
-			associatedIndex.InvolvedUIDOffsets[record.event.Resource.InvolvedObjectUID] = append(
-				associatedIndex.InvolvedUIDOffsets[record.event.Resource.InvolvedObjectUID],
-				recordOffsets[len(recordOffsets)-1],
-			)
-		}
-
-		dimension := segmentDimensionEntry{
-			Namespace: record.event.Resource.Namespace,
-			Kind:      record.event.Resource.Kind,
-		}
-		dimensionSet[dimension] = struct{}{}
-
-		if _, ok := namespaceKindSet[dimension.Namespace]; !ok {
-			namespaceKindSet[dimension.Namespace] = make(map[string]struct{})
-		}
-		namespaceKindSet[dimension.Namespace][dimension.Kind] = struct{}{}
+	}
+	if resource.Kind == "Event" && resource.InvolvedObjectUID != "" {
+		b.associatedIndex.InvolvedUIDOffsets[resource.InvolvedObjectUID] = append(
+			b.associatedIndex.InvolvedUIDOffsets[resource.InvolvedObjectUID],
+			recordOffset,
+		)
 	}
 
-	if len(records) > 0 {
-		lastOffset := recordOffsets[len(recordOffsets)-1]
-		lastRecord := records[len(records)-1]
-		if len(timeIndexEntries) == 0 || timeIndexEntries[len(timeIndexEntries)-1].Offset != lastOffset {
-			timeIndexEntries = append(timeIndexEntries, segmentTimeIndexEntry{
-				Timestamp: lastRecord.event.Timestamp,
-				Offset:    lastOffset,
-			})
+	dimension := segmentDimensionEntry{Namespace: resource.Namespace, Kind: resource.Kind}
+	if _, ok := b.dimensionSet[dimension]; !ok {
+		b.dimensionSet[dimension] = struct{}{}
+		kinds, ok := b.namespaceKindSet[dimension.Namespace]
+		if !ok {
+			kinds = make(map[string]struct{})
+			b.namespaceKindSet[dimension.Namespace] = kinds
+		}
+		kinds[dimension.Kind] = struct{}{}
+	}
+	return nil
+}
+
+func (b *segmentBuilder) closeEvents() {
+	if b.file != nil {
+		_ = b.file.Close()
+		b.file = nil
+	}
+}
+
+// Abort discards a segment that has not been finished.
+func (b *segmentBuilder) Abort() {
+	b.closeEvents()
+	if b.tmpDir != "" {
+		_ = os.RemoveAll(b.tmpDir)
+	}
+}
+
+// Finish writes the indexes and atomically moves the bundle into the segments directory.
+func (b *segmentBuilder) Finish() (segmentBundleMeta, error) {
+	meta, err := b.finishBundle()
+	if err != nil {
+		b.Abort()
+		return segmentBundleMeta{}, err
+	}
+	if err := syncPath(b.tmpDir); err != nil {
+		b.Abort()
+		return segmentBundleMeta{}, fmt.Errorf("write segment: sync temp segment dir: %w", err)
+	}
+	if err := os.Rename(b.tmpDir, b.finalDir); err != nil {
+		b.Abort()
+		return segmentBundleMeta{}, fmt.Errorf("write segment: move segment bundle into place: %w", err)
+	}
+	b.tmpDir = ""
+	if err := syncPath(b.segmentsRoot); err != nil {
+		return segmentBundleMeta{}, fmt.Errorf("write segment: sync segments dir: %w", err)
+	}
+	return meta, nil
+}
+
+func (b *segmentBuilder) finishBundle() (segmentBundleMeta, error) {
+	if b.count > 0 {
+		if len(b.timeIndexEntries) == 0 || b.timeIndexEntries[len(b.timeIndexEntries)-1].Offset != b.lastOffset {
+			b.timeIndexEntries = append(b.timeIndexEntries, segmentTimeIndexEntry{Timestamp: b.maxTimestamp, Offset: b.lastOffset})
 		}
 	}
-
-	if err := eventsFile.Sync(); err != nil {
-		return writeErr("sync events file", err)
+	if err := b.writer.Flush(); err != nil {
+		b.closeEvents()
+		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: flush events file: %w", err)
 	}
-	if err := eventsFile.Close(); err != nil {
+	if err := b.file.Sync(); err != nil {
+		b.closeEvents()
+		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: sync events file: %w", err)
+	}
+	if err := b.file.Close(); err != nil {
+		b.file = nil
 		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: close events file: %w", err)
 	}
+	b.file = nil
 
-	namespaceKinds := make(map[string][]string, len(namespaceKindSet))
-	for namespace, kindSet := range namespaceKindSet {
+	namespaceKinds := make(map[string][]string, len(b.namespaceKindSet))
+	for namespace, kindSet := range b.namespaceKindSet {
 		kinds := make([]string, 0, len(kindSet))
 		for kind := range kindSet {
 			kinds = append(kinds, kind)
@@ -206,8 +339,8 @@ func writeSegmentBundle(segmentDir, segmentID string, events []models.Event) (se
 	}
 	namespaceKinds = normalizeNamespaceKinds(namespaceKinds)
 
-	dimensions := make([]segmentDimensionEntry, 0, len(dimensionSet))
-	for entry := range dimensionSet {
+	dimensions := make([]segmentDimensionEntry, 0, len(b.dimensionSet))
+	for entry := range b.dimensionSet {
 		dimensions = append(dimensions, entry)
 	}
 	sort.Slice(dimensions, func(i, j int) bool {
@@ -218,26 +351,27 @@ func writeSegmentBundle(segmentDir, segmentID string, events []models.Event) (se
 	})
 
 	meta := segmentBundleMeta{
-		ID:             segmentID,
-		EventCount:     len(records),
-		MinTimestamp:   minTimestamp,
-		MaxTimestamp:   maxTimestamp,
+		ID:             b.segmentID,
+		SizeBytes:      b.offset,
+		EventCount:     b.count,
+		MinTimestamp:   b.minTimestamp,
+		MaxTimestamp:   b.maxTimestamp,
 		NamespaceKinds: namespaceKinds,
 	}
 
-	if err := writeTimeIndex(filepath.Join(segmentDir, segmentTimeIndexFile), timeIndexEntries); err != nil {
+	if err := writeTimeIndex(filepath.Join(b.dir, segmentTimeIndexFile), b.timeIndexEntries); err != nil {
 		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: time index: %w", err)
 	}
-	if err := writeJSONFile(filepath.Join(segmentDir, segmentUIDIndexFile), resourceIndex); err != nil {
+	if err := writeJSONFile(filepath.Join(b.dir, segmentUIDIndexFile), b.resourceIndex); err != nil {
 		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: uid index: %w", err)
 	}
-	if err := writeJSONFile(filepath.Join(segmentDir, segmentAssociatedUIDIndexFile), associatedIndex); err != nil {
+	if err := writeJSONFile(filepath.Join(b.dir, segmentAssociatedUIDIndexFile), b.associatedIndex); err != nil {
 		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: associated uid index: %w", err)
 	}
-	if err := writeJSONFile(filepath.Join(segmentDir, segmentDimIndexFile), segmentDimensionIndex{Entries: dimensions}); err != nil {
+	if err := writeJSONFile(filepath.Join(b.dir, segmentDimIndexFile), segmentDimensionIndex{Entries: dimensions}); err != nil {
 		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: dimension index: %w", err)
 	}
-	if err := writeJSONFile(filepath.Join(segmentDir, segmentStatsFile), meta); err != nil {
+	if err := writeJSONFile(filepath.Join(b.dir, segmentStatsFile), meta); err != nil {
 		return segmentBundleMeta{}, fmt.Errorf("write segment bundle: stats: %w", err)
 	}
 

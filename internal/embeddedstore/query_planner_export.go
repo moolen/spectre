@@ -18,6 +18,7 @@ func (p *QueryPlanner) exportTimeRange(
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
 ) ([]models.Event, queryPlanStats, error) {
+	startTimeNs = p.clampToRetention(startTimeNs)
 	if p == nil || endTimeNs < startTimeNs {
 		return nil, queryPlanStats{}, nil
 	}
@@ -29,6 +30,7 @@ func (p *QueryPlanner) exportTimeRange(
 	}
 
 	stats := queryPlanStats{}
+	prefilter := newRecordPrefilter(filters)
 	var exported []models.Event
 	relevant := p.relevantExportSegments(filters, startTimeNs, endTimeNs)
 	stats.relevantSegments = len(relevant)
@@ -40,15 +42,14 @@ func (p *QueryPlanner) exportTimeRange(
 		if err := ctx.Err(); err != nil {
 			return nil, stats, err
 		}
-		events, err := reader.ScanTimeRange(ctx, startTimeNs, endTimeNs)
+		events, err := reader.scanTimeRangeLazy(ctx, startTimeNs, endTimeNs, prefilter, func(event *models.Event) bool {
+			return filters.Matches(event.Resource)
+		}, true)
 		if err != nil {
 			return nil, stats, fmt.Errorf("scan segment %q by time: %w", reader.ID(), err)
 		}
 		for i := range events {
-			if !filters.Matches(events[i].Resource) {
-				continue
-			}
-			exported = append(exported, cloneEvent(events[i]))
+			exported = append(exported, events[i].event)
 		}
 	}
 

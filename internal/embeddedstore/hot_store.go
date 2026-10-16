@@ -27,6 +27,7 @@ type hotStore struct {
 	config                HotStoreConfig
 	metrics               *Metrics
 	events                []models.Event
+	sizeBytes             int64
 	recentByUID           map[string]*RecentResourceLog
 	recentAssociatedByUID map[string]*RecentResourceLog
 	namespaceCounts       map[string]int
@@ -88,6 +89,28 @@ func (s *hotStore) ScanTimeRange(startTimestampNs, endTimestampNs int64) []model
 	return cloneEvents(s.events[startIdx:endIdx])
 }
 
+// ScanTimeRangeMatching is ScanTimeRange restricted to events accepted by match; only
+// those are copied.
+func (s *hotStore) ScanTimeRangeMatching(startTimestampNs, endTimestampNs int64, match func(*models.Event) bool) []models.Event {
+	if endTimestampNs < startTimestampNs {
+		return nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	startIdx := sort.Search(len(s.events), func(i int) bool {
+		return s.events[i].Timestamp >= startTimestampNs
+	})
+	var matched []models.Event
+	for i := startIdx; i < len(s.events) && s.events[i].Timestamp <= endTimestampNs; i++ {
+		if match(&s.events[i]) {
+			matched = append(matched, cloneEvent(s.events[i]))
+		}
+	}
+	return matched
+}
+
 func (s *hotStore) RecentEventsByUID(uid string) []models.Event {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -134,9 +157,24 @@ func (s *hotStore) ExtractFlushBatch(maxEvents int) HotFlushBatch {
 		limit = maxEvents
 	}
 
+	// Stored events are never mutated in place, so the batch can share payloads.
 	return HotFlushBatch{
-		Events: cloneEvents(s.events[:limit]),
+		Events: append([]models.Event(nil), s.events[:limit]...),
 	}
+}
+
+// Len returns the number of unflushed events.
+func (s *hotStore) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.events)
+}
+
+// SizeBytes returns the estimated serialized size of the unflushed events.
+func (s *hotStore) SizeBytes() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sizeBytes
 }
 
 func (s *hotStore) CommitFlushedBatch(batch HotFlushBatch) int {
@@ -146,6 +184,29 @@ func (s *hotStore) CommitFlushedBatch(batch HotFlushBatch) int {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Flushes run under the engine lock, so the batch is normally still the prefix of
+	// the ordered event list and can be dropped in one step.
+	if len(batch.Events) <= len(s.events) {
+		prefix := true
+		for i := range batch.Events {
+			if s.events[i].ID != batch.Events[i].ID {
+				prefix = false
+				break
+			}
+		}
+		if prefix {
+			for i := range batch.Events {
+				s.forgetEventLocked(s.events[i])
+			}
+			remaining := len(s.events) - len(batch.Events)
+			copy(s.events, s.events[len(batch.Events):])
+			clear(s.events[remaining:])
+			s.events = s.events[:remaining]
+			s.updateHotEventsLocked()
+			return len(batch.Events)
+		}
+	}
 
 	removed := 0
 	for i := range batch.Events {
@@ -157,8 +218,20 @@ func (s *hotStore) CommitFlushedBatch(batch HotFlushBatch) int {
 	return removed
 }
 
+// forgetEventLocked drops an event's index entries and size without touching s.events.
+func (s *hotStore) forgetEventLocked(event models.Event) {
+	if event.Resource.Kind == "Event" {
+		s.removeFromLogLocked(s.recentAssociatedByUID, event.Resource.InvolvedObjectUID, event.ID)
+	} else {
+		s.removeFromLogLocked(s.recentByUID, event.Resource.UID, event.ID)
+	}
+	s.decrementMetadataLocked(event.Resource)
+	s.sizeBytes -= estimatedEventSizeBytes(&event)
+}
+
 func (s *hotStore) appendOneLocked(event models.Event) {
 	s.events = appendOrderedEvent(s.events, event)
+	s.sizeBytes += estimatedEventSizeBytes(&event)
 	s.incrementMetadataLocked(event.Resource)
 
 	if event.Resource.Kind == "Event" {
@@ -170,8 +243,6 @@ func (s *hotStore) appendOneLocked(event models.Event) {
 		s.appendToLogLocked(s.recentByUID, event.Resource.UID, event)
 		s.enforceLogBoundLocked(s.recentByUID, event.Resource.UID)
 	}
-
-	s.enforceGlobalBoundLocked()
 }
 
 func (s *hotStore) appendToLogLocked(logs map[string]*RecentResourceLog, uid string, event models.Event) {
@@ -192,31 +263,16 @@ func (s *hotStore) enforceLogBoundLocked(logs map[string]*RecentResourceLog, uid
 		return
 	}
 
-	for {
-		log := logs[uid]
-		if log == nil || len(log.Events) <= s.config.MaxResourceVersions {
-			return
-		}
-		if !s.removeEventLocked(log.Events[0].ID) {
-			return
-		}
-		if s.metrics != nil {
-			s.metrics.RecordHotEvictions("uid", 1)
-		}
-	}
-}
-
-func (s *hotStore) enforceGlobalBoundLocked() {
-	if s.config.MaxEvents <= 0 {
+	// Only the per-resource recent log is bounded. Every event stays queued until it is
+	// flushed to a segment; the engine flushes once MaxEvents or the size budget is hit.
+	log := logs[uid]
+	if log == nil || len(log.Events) <= s.config.MaxResourceVersions {
 		return
 	}
-	for len(s.events) > s.config.MaxEvents {
-		if !s.removeEventLocked(s.events[0].ID) {
-			return
-		}
-		if s.metrics != nil {
-			s.metrics.RecordHotEvictions("global", 1)
-		}
+	trimmed := len(log.Events) - s.config.MaxResourceVersions
+	log.Events = append(log.Events[:0:0], log.Events[trimmed:]...)
+	if s.metrics != nil {
+		s.metrics.RecordHotEvictions("uid", trimmed)
 	}
 }
 
@@ -246,12 +302,7 @@ func (s *hotStore) removeEventLocked(eventID string) bool {
 	}
 
 	s.events = append(s.events[:idx], s.events[idx+1:]...)
-	if event.Resource.Kind == "Event" {
-		s.removeFromLogLocked(s.recentAssociatedByUID, event.Resource.InvolvedObjectUID, eventID)
-	} else {
-		s.removeFromLogLocked(s.recentByUID, event.Resource.UID, eventID)
-	}
-	s.decrementMetadataLocked(event.Resource)
+	s.forgetEventLocked(event)
 	return true
 }
 

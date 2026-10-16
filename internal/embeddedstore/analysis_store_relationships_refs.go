@@ -28,7 +28,7 @@ func ownerUIDs(object map[string]any) []string {
 func directReferences(version *resourceVersion) []directRef {
 	result := make([]directRef, 0)
 	object := parsedVersionObject(version)
-	switch version.identity.Kind {
+	switch version.meta.Kind {
 	case "Pod":
 		result = append(result, podReferences(version)...)
 	case "Ingress":
@@ -42,7 +42,7 @@ func directReferences(version *resourceVersion) []directRef {
 	case "HTTPRoute":
 		result = append(result, sourceRefReferences(version, "Gateway", "Service")...)
 	}
-	if version.identity.Kind == "Pod" {
+	if version.meta.Kind == "Pod" {
 		if nodeName := getString(getMap(object, "spec"), "nodeName"); nodeName != "" {
 			result = append(result, directRef{kind: "Node", name: nodeName, relType: "SCHEDULED_ON"})
 		}
@@ -51,7 +51,7 @@ func directReferences(version *resourceVersion) []directRef {
 			serviceAccountName = getString(getMap(object, "spec"), "serviceAccount")
 		}
 		if serviceAccountName != "" {
-			result = append(result, directRef{kind: "ServiceAccount", name: serviceAccountName, namespace: version.identity.Namespace, relType: "USES_SERVICE_ACCOUNT"})
+			result = append(result, directRef{kind: "ServiceAccount", name: serviceAccountName, namespace: version.meta.Namespace, relType: "USES_SERVICE_ACCOUNT"})
 		}
 	}
 
@@ -65,12 +65,12 @@ func podReferences(version *resourceVersion) []directRef {
 		volume, _ := volumeItem.(map[string]any)
 		if configMap := getMap(volume, "configMap"); configMap != nil {
 			if name := getString(configMap, "name"); name != "" {
-				result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+				result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 			}
 		}
 		if secret := getMap(volume, "secret"); secret != nil {
 			if name := getString(secret, "secretName"); name != "" {
-				result = append(result, directRef{kind: "Secret", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+				result = append(result, directRef{kind: "Secret", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 			}
 		}
 		if projected := getMap(volume, "projected"); projected != nil {
@@ -78,12 +78,12 @@ func podReferences(version *resourceVersion) []directRef {
 				source, _ := sourceItem.(map[string]any)
 				if configMap := getMap(source, "configMap"); configMap != nil {
 					if name := getString(configMap, "name"); name != "" {
-						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 				if secret := getMap(source, "secret"); secret != nil {
 					if name := getString(secret, "name"); name != "" {
-						result = append(result, directRef{kind: "Secret", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "Secret", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 			}
@@ -96,12 +96,12 @@ func podReferences(version *resourceVersion) []directRef {
 				envFrom, _ := envFromItem.(map[string]any)
 				if configMapRef := getMap(envFrom, "configMapRef"); configMapRef != nil {
 					if name := getString(configMapRef, "name"); name != "" {
-						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 				if secretRef := getMap(envFrom, "secretRef"); secretRef != nil {
 					if name := getString(secretRef, "name"); name != "" {
-						result = append(result, directRef{kind: "Secret", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "Secret", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 			}
@@ -110,12 +110,12 @@ func podReferences(version *resourceVersion) []directRef {
 				valueFrom := getMap(env, "valueFrom")
 				if configMapRef := getMap(valueFrom, "configMapKeyRef"); configMapRef != nil {
 					if name := getString(configMapRef, "name"); name != "" {
-						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 				if secretRef := getMap(valueFrom, "secretKeyRef"); secretRef != nil {
 					if name := getString(secretRef, "name"); name != "" {
-						result = append(result, directRef{kind: "Secret", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "Secret", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 			}
@@ -131,7 +131,7 @@ func ingressReferences(version *resourceVersion) []directRef {
 	if backend := getMap(spec, "defaultBackend"); backend != nil {
 		if service := getMap(backend, "service"); service != nil {
 			if name := getString(service, "name"); name != "" {
-				result = append(result, directRef{kind: "Service", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+				result = append(result, directRef{kind: "Service", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 			}
 		}
 	}
@@ -143,7 +143,7 @@ func ingressReferences(version *resourceVersion) []directRef {
 			backend := getMap(pathMap, "backend")
 			service := getMap(backend, "service")
 			if name := getString(service, "name"); name != "" {
-				result = append(result, directRef{kind: "Service", name: name, namespace: version.identity.Namespace, relType: "REFERENCES_SPEC"})
+				result = append(result, directRef{kind: "Service", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
 			}
 		}
 	}

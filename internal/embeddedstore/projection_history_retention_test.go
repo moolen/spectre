@@ -57,8 +57,7 @@ func TestProjection_DoesNotRetainHistoricalEventArrays(t *testing.T) {
 	require.Empty(t, projection.k8sRawEventsByInvolvedUID)
 
 	require.Len(t, projection.resourcesByUID, 1)
-	require.Len(t, projection.resourceMetaByUID, 1)
-	require.Len(t, projection.orderedResources, 1)
+	require.Equal(t, 1, projection.orderedResources.Len())
 	require.Len(t, projection.k8sEventsByInvolvedUID, 1)
 	require.Len(t, projection.k8sEventsByInvolvedUID["pod-1"], 1)
 
@@ -66,7 +65,7 @@ func TestProjection_DoesNotRetainHistoricalEventArrays(t *testing.T) {
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 2)
 
-	meta := projection.resourceMetaByUID["pod-1"]
+	meta := resourceRecordLatestMeta(record)
 	require.Equal(t, "pod-1", meta.UID)
 	require.Equal(t, "Pod", meta.Kind)
 	require.Equal(t, "default", meta.Namespace)

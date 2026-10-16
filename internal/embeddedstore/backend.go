@@ -29,6 +29,13 @@ type Config struct {
 	DisableAutoCompaction       bool
 	MetricsRegisterer           prometheus.Registerer
 	ProjectionHistoryFallback   bool
+	// KeepUnchangedEvents stores events that repeat an object's latest state verbatim,
+	// such as the copies a watch re-list reports. They are dropped by default.
+	KeepUnchangedEvents bool
+	// K8sEventSummaryHorizon bounds how long core/v1 Event summaries stay in memory
+	// (default DefaultK8sEventSummaryHorizon); older ones are read from segments when a
+	// query reaches back further. Negative keeps them for the whole retention window.
+	K8sEventSummaryHorizon time.Duration
 }
 
 type Backend struct {
@@ -41,8 +48,8 @@ const (
 	defaultFlushInterval            time.Duration = 30 * time.Second
 	defaultCheckpointInterval       time.Duration = 0
 	defaultCheckpointRetentionCount int           = 3
-	defaultCheckpointMaxTailEvents  int           = 2048
-	defaultCheckpointMaxTailBytes   int64         = 16 << 20
+	defaultCheckpointMaxTailEvents  int           = 50000
+	defaultCheckpointMaxTailBytes   int64         = 256 << 20
 	defaultCheckpointOnShutdown     bool          = true
 	defaultSegmentTargetBytes       int64         = 16 << 20
 	defaultCompactionMinSegments    int           = 4
@@ -116,6 +123,14 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 		DisableAutoCompaction:     cfg.DisableAutoCompaction,
 		MetricsRegisterer:         cfg.MetricsRegisterer,
 		ProjectionHistoryFallback: cfg.ProjectionHistoryFallback,
+		DropUnchangedEvents:       !cfg.KeepUnchangedEvents,
+		K8sEventInfoHorizon:       cfg.K8sEventSummaryHorizon,
+	}
+	switch {
+	case engineCfg.K8sEventInfoHorizon == 0:
+		engineCfg.K8sEventInfoHorizon = DefaultK8sEventSummaryHorizon
+	case engineCfg.K8sEventInfoHorizon < 0:
+		engineCfg.K8sEventInfoHorizon = 0
 	}
 	if engineCfg.HotMaxEvents == 0 {
 		engineCfg.HotMaxEvents = defaultHotMaxEvents
@@ -218,7 +233,7 @@ func (b *Backend) HasUsableResourceState() bool {
 	b.engine.projection.mu.RLock()
 	defer b.engine.projection.mu.RUnlock()
 
-	return len(b.engine.projection.orderedResources) > 0
+	return b.engine.projection.orderedResources.Len() > 0
 }
 
 func (b *Backend) Name() string {

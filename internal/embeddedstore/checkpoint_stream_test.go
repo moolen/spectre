@@ -125,7 +125,7 @@ func TestProjectionFromCheckpointStream_LoadsLegacyBase64Payloads(t *testing.T) 
 	record := projection.resourcesByUID["pod-1"]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 1)
-	require.JSONEq(t, string(resourceJSON), string(record.versions[0].data))
+	require.JSONEq(t, string(resourceJSON), string(record.versions[0].inlinePayload()))
 }
 
 func TestProjection_StreamCheckpointResources_DoesNotHoldLockDuringEmit(t *testing.T) {

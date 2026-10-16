@@ -24,33 +24,6 @@ func appendOrInsertEventSorted(events []models.Event, event models.Event) []mode
 	return insertEventSorted(events, event)
 }
 
-func insertOrderedResourceKey(keys []orderedResourceKey, key orderedResourceKey) []orderedResourceKey {
-	idx := sort.Search(len(keys), func(i int) bool {
-		return compareOrderedResourceKey(keys[i], key) >= 0
-	})
-	if idx < len(keys) && compareOrderedResourceKey(keys[idx], key) == 0 {
-		return keys
-	}
-
-	keys = append(keys, orderedResourceKey{})
-	copy(keys[idx+1:], keys[idx:])
-	keys[idx] = key
-	return keys
-}
-
-func removeOrderedResourceKey(keys []orderedResourceKey, key orderedResourceKey) []orderedResourceKey {
-	idx := sort.Search(len(keys), func(i int) bool {
-		return compareOrderedResourceKey(keys[i], key) >= 0
-	})
-	if idx >= len(keys) || compareOrderedResourceKey(keys[idx], key) != 0 {
-		return keys
-	}
-
-	copy(keys[idx:], keys[idx+1:])
-	keys = keys[:len(keys)-1]
-	return keys
-}
-
 func compareEventOrder(left, right models.Event) int {
 	if left.Timestamp != right.Timestamp {
 		if left.Timestamp < right.Timestamp {

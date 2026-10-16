@@ -49,7 +49,7 @@ func TestEngine_ProjectionHistoryFallbackModeKeepsPlannerDisabledAcrossRefreshes
 		require.NoError(t, engine.Close())
 	})
 
-	require.Nil(t, engine.QueryExecutor().planner)
+	require.Nil(t, engine.QueryExecutor().sharedPlanner())
 
 	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{{
 		ID:        "event-1",
@@ -64,7 +64,7 @@ func TestEngine_ProjectionHistoryFallbackModeKeepsPlannerDisabledAcrossRefreshes
 		},
 	}}))
 	require.NoError(t, engine.Flush(context.Background()))
-	require.Nil(t, engine.QueryExecutor().planner)
+	require.Nil(t, engine.QueryExecutor().sharedPlanner())
 
 	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{{
 		ID:        "event-2",
@@ -79,8 +79,8 @@ func TestEngine_ProjectionHistoryFallbackModeKeepsPlannerDisabledAcrossRefreshes
 		},
 	}}))
 	require.NoError(t, engine.Flush(context.Background()))
-	require.Nil(t, engine.QueryExecutor().planner)
+	require.Nil(t, engine.QueryExecutor().sharedPlanner())
 
 	require.NoError(t, engine.Compact(context.Background()))
-	require.Nil(t, engine.QueryExecutor().planner)
+	require.Nil(t, engine.QueryExecutor().sharedPlanner())
 }

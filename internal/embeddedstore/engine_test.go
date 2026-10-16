@@ -51,50 +51,6 @@ func TestEngine_OpenLoadsCheckpointAndReplaysNewerSegments(t *testing.T) {
 	require.Len(t, result.Events, 1)
 }
 
-func TestEngine_OpenDoesNotBlockOnRecentEventTimelineCacheSeed(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	restoreSeed := setRecentEventTimelineCacheSeedFnForTest(
-		func(_ *QueryExecutor, _ context.Context, _ int64, _ time.Duration) error {
-			close(started)
-			<-release
-			return nil
-		},
-	)
-	t.Cleanup(restoreSeed)
-
-	type openResult struct {
-		engine *Engine
-		err    error
-	}
-
-	done := make(chan openResult, 1)
-	go func() {
-		engine, err := OpenEngine(EngineConfig{DataDir: t.TempDir(), HotMaxEvents: 100, HotMaxResourceVersions: 4})
-		done <- openResult{engine: engine, err: err}
-	}()
-
-	var result openResult
-	select {
-	case result = <-done:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("OpenEngine blocked on recent event timeline cache seed")
-	}
-
-	require.NoError(t, result.err)
-	require.NotNil(t, result.engine)
-	require.True(t, result.engine.IsReady())
-
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("recent event timeline cache seed did not start in background")
-	}
-
-	close(release)
-	require.NoError(t, result.engine.Close())
-}
-
 func TestEngine_OpenRecoversCheckpointDiscoveredOnDiskWhenManifestLags(t *testing.T) {
 	dir := t.TempDir()
 
@@ -320,7 +276,7 @@ func TestEngine_OpenAppliesEmbeddedRetentionAndPreservesCurrentResourceState(t *
 	require.Equal(t, "pod-old", resource.UID)
 }
 
-func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *testing.T) {
+func TestEngine_StartPeriodicCheckpointFlushesAndPersistsRestartableState(t *testing.T) {
 	dir := t.TempDir()
 
 	engine, err := OpenEngine(EngineConfig{
@@ -353,11 +309,13 @@ func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *t
 	}))
 
 	rootDir := embeddedRootDir(dir)
+	// Poll the engine's manifest rather than the file: loadOrCreateManifest reconciles
+	// checkpoint directories into the manifest and writes it back, which would race with
+	// a checkpoint that is between writing its directory and publishing it.
 	require.Eventually(t, func() bool {
-		manifest, err := loadOrCreateManifest(rootDir)
-		if err != nil {
-			return false
-		}
+		engine.mu.Lock()
+		manifest := engine.manifest
+		engine.mu.Unlock()
 		if len(manifest.Checkpoints) == 0 {
 			return false
 		}
@@ -367,18 +325,30 @@ func TestEngine_StartPeriodicCheckpointPersistsRestartableStateWithoutFlush(t *t
 			manifest.ActiveTail.EventCount == 0
 	}, time.Second, 10*time.Millisecond)
 
+	// Stop periodic checkpoints and wait out an in-flight one before inspecting the
+	// on-disk state, which a running checkpoint rewrites.
+	engine.mu.Lock()
+	stopPeriodicCheckpoint := engine.periodicCheckpointStop
+	engine.periodicCheckpointStop = nil
+	engine.mu.Unlock()
+	stopPeriodicCheckpoint()
+	engine.checkpointMu.Lock()
+	engine.checkpointMu.Unlock() //nolint:staticcheck,gocritic // waits for an in-flight checkpoint
+
+	// Checkpoints flush first, so the hot event is durable in a segment and the
+	// checkpoint references it instead of inlining the payload.
 	manifest, err := loadOrCreateManifest(rootDir)
 	require.NoError(t, err)
-	require.Empty(t, manifest.ActiveSegments)
+	require.Len(t, manifest.ActiveSegments, 1)
 	require.NotEmpty(t, manifest.Checkpoints)
-	require.Equal(t, uint64(0), manifest.FlushHighWaterMark)
+	require.Equal(t, uint64(1), manifest.FlushHighWaterMark)
 	require.Equal(t, uint64(1), latestCheckpointMeta(manifest.Checkpoints).HighWaterMark)
 	require.Equal(t, latestCheckpointMeta(manifest.Checkpoints).HighWaterMark, manifest.ActiveTail.BaseHighWaterMark)
 	require.Zero(t, manifest.ActiveTail.EventCount)
 
 	readers, tail, recoveredHighWaterMark, projection, recoveredHot, mode, replayedTailEvents, err := loadEngineState(rootDir, manifest)
 	require.NoError(t, err)
-	require.Empty(t, readers)
+	require.Len(t, readers, 1)
 	require.Equal(t, startupModeFast, mode)
 	require.Equal(t, 0, replayedTailEvents)
 	require.Equal(t, uint64(1), recoveredHighWaterMark)
@@ -685,6 +655,14 @@ func TestEngine_AutoCheckpointWhenTailExceedsByteBudget(t *testing.T) {
 		},
 	}))
 
+	// Tail-triggered checkpoints run in the background.
+	require.Eventually(t, func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		return engine.manifest.ActiveCheckpoint.HighWaterMark == 1 && !engine.checkpointRunning
+	}, 5*time.Second, time.Millisecond)
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
 	require.NotEmpty(t, engine.manifest.Checkpoints)
 	require.Equal(t, uint64(1), engine.manifest.ActiveCheckpoint.HighWaterMark)
 	require.Equal(t, uint64(1), engine.manifest.ActiveTail.BaseHighWaterMark)
@@ -730,10 +708,16 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	require.NoError(t, engine.Checkpoint(context.Background()))
 	require.NoError(t, engine.Close())
 
+	// Make the active checkpoint a v2 (gob) one, as written by earlier versions, so the
+	// test can edit it and also covers loading the older format.
 	rootDir := embeddedRootDir(dir)
 	manifest, err := loadOrCreateManifest(rootDir)
 	require.NoError(t, err)
-	checkpointMeta := latestCheckpointMeta(manifest.Checkpoints)
+	checkpointMeta, err := writeCheckpoint(rootDir, engine.projection, manifest.ActiveCheckpoint.HighWaterMark)
+	require.NoError(t, err)
+	manifest.Checkpoints = []CheckpointMeta{checkpointMeta}
+	manifest.ActiveCheckpoint = checkpointMeta
+	require.NoError(t, storeManifest(rootDir, manifest))
 
 	resourcesPath := filepath.Join(rootDir, checkpointsDirName, checkpointMeta.ID, checkpointResourcesFile)
 	stream, err := openCheckpointStream(resourcesPath)
@@ -745,7 +729,7 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	var snapshot ProjectionResourceSnapshot
 	require.NoError(t, gob.NewDecoder(stream).Decode(&snapshot))
 	require.Len(t, snapshot.Versions, 2)
-	snapshot.Versions[0].ChangeEvent.Description = "checkpoint-sentinel"
+	snapshot.Versions[0].ChangeEvent.Status = "checkpoint-sentinel"
 
 	file, encoder, err := openCompressedCheckpointWriter(resourcesPath)
 	require.NoError(t, err)
@@ -786,7 +770,7 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	record := reopened.projection.resourcesByUID["pod-1"]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 3)
-	require.Equal(t, "checkpoint-sentinel", record.versions[0].changeEvent.Description)
+	require.Equal(t, "checkpoint-sentinel", record.versions[0].changeEventInfo().Status)
 }
 
 func TestEngine_ReopenRestoresTailEventsWithoutColdReplay(t *testing.T) {

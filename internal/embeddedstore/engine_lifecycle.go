@@ -92,6 +92,10 @@ func (e *Engine) Close() error {
 	e.mu.Unlock()
 
 	e.backgroundTasks.Wait()
+	// A checkpoint encodes without holding mu; wait for an in-flight one (for example a
+	// periodic checkpoint) so nothing writes to the data directory after Close returns.
+	e.checkpointMu.Lock()
+	e.checkpointMu.Unlock() //nolint:staticcheck,gocritic // waits for an in-flight checkpoint
 
 	if tail != nil {
 		if err := tail.Close(); err != nil {
@@ -138,6 +142,15 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		return fmt.Errorf("process embedded batch: tail journal is nil")
 	}
 
+	if e.config.DropUnchangedEvents {
+		var dropped int
+		events, dropped = e.projection.dropUnchangedEvents(events)
+		e.metrics.RecordUnchangedEventsDropped(dropped)
+		if len(events) == 0 {
+			return nil
+		}
+	}
+
 	wasReady := e.ready.Load()
 	tailMeta, err := e.tail.AppendBatch(ctx, e.nextHighWaterMark+1, events)
 	if err != nil {
@@ -153,7 +166,6 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		}
 		e.hot.Append([]models.Event{events[i]})
 	}
-	e.queryExec.AppendRecentEventTimelineCache(events)
 	if wasReady {
 		e.ready.Store(true)
 	}
@@ -163,9 +175,7 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		}
 	}
 	if e.ready.Load() && e.shouldCheckpointTailLocked() {
-		if err := e.checkpointLocked(ctx); err != nil {
-			e.logAutoFlushError("tail-triggered checkpoint failed", err)
-		}
+		e.scheduleCheckpointLocked()
 	}
 
 	return nil

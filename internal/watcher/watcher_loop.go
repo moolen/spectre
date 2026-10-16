@@ -58,26 +58,48 @@ func (w *Watcher) watchLoop(ctx context.Context, gvr schema.GroupVersionResource
 	allowedNamespaces := w.getAllowedNamespaces(gvr)
 	shouldProcess := namespaceFilter(namespaced, allowedNamespaces)
 
+	return w.listWatch(ctx, resourceInterface, gvr, gvk, shouldProcess, time.Second)
+}
+
+// listWatch lists the resource once and then keeps watching it. A watch stream that the
+// API server closes (it does so every 30-60 minutes) is resumed from the last
+// resourceVersion it delivered; only a failed watch, or one that reports an error such as
+// an expired resourceVersion, falls back to a full List. Re-listing would report every
+// object again, which on a large cluster is far more data than the actual changes.
+func (w *Watcher) listWatch(
+	ctx context.Context,
+	resourceInterface dynamic.ResourceInterface,
+	gvr schema.GroupVersionResource,
+	gvk schema.GroupVersionKind,
+	shouldProcess func(string) bool,
+	restartDelay time.Duration,
+) error {
+	resourceVersion := ""
 	for {
 		if err := w.checkWatchContext(ctx); err != nil {
 			return err
 		}
 
-		resourceVersion, err := w.listAndProcessResources(ctx, resourceInterface, gvr, gvk, shouldProcess)
-		if err != nil {
-			w.logger.Error("Failed to list resources %s: %v, retrying in 5s", gvr.String(), err)
-			time.Sleep(5 * time.Second)
-			continue
+		if resourceVersion == "" {
+			listedVersion, err := w.listAndProcessResources(ctx, resourceInterface, gvr, gvk, shouldProcess)
+			if err != nil {
+				w.logger.Error("Failed to list resources %s: %v, retrying in 5s", gvr.String(), err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			resourceVersion = listedVersion
 		}
 
-		if err := w.watchResourceStream(ctx, resourceInterface, gvr, gvk, resourceVersion, shouldProcess); err != nil {
+		nextVersion, err := w.watchResourceStream(ctx, resourceInterface, gvr, gvk, resourceVersion, shouldProcess)
+		if err != nil {
 			if err == errWatcherStopped || err == ctx.Err() {
 				return err
 			}
 			w.logger.Error("Watch loop for %s failed: %v", gvr.String(), err)
 		}
+		resourceVersion = nextVersion
 
-		time.Sleep(1 * time.Second)
+		time.Sleep(restartDelay)
 	}
 }
 
@@ -197,28 +219,38 @@ func (w *Watcher) watchResourceStream(
 	gvk schema.GroupVersionKind,
 	resourceVersion string,
 	shouldProcess func(string) bool,
-) error {
-	watcher, err := resourceInterface.Watch(ctx, metav1.ListOptions{ResourceVersion: resourceVersion})
+) (string, error) {
+	watcher, err := resourceInterface.Watch(ctx, metav1.ListOptions{
+		ResourceVersion:     resourceVersion,
+		AllowWatchBookmarks: true,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to start watch for %s: %w", gvr.String(), err)
+		return "", fmt.Errorf("failed to start watch for %s: %w", gvr.String(), err)
 	}
 	defer watcher.Stop()
 
+	// lastVersion is where a closed stream resumes; an empty result requests a List.
+	lastVersion := resourceVersion
 	watchCh := watcher.ResultChan()
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		case <-w.stopChan:
-			return errWatcherStopped
+			return "", errWatcherStopped
 		case event, ok := <-watchCh:
 			if !ok {
-				w.logger.Debug("Watch channel closed for %s, restarting", gvr.String())
-				return nil
+				w.logger.Debug("Watch channel closed for %s, resuming from resourceVersion %s", gvr.String(), lastVersion)
+				return lastVersion, nil
 			}
 			if event.Type == watch.Error {
 				w.logger.Error("Watch error for %s: %v", gvr.String(), event.Object)
-				return nil
+				return "", nil
+			}
+			if obj, ok := event.Object.(*unstructured.Unstructured); ok {
+				if version := obj.GetResourceVersion(); version != "" {
+					lastVersion = version
+				}
 			}
 			w.processWatchEvent(event, gvk, shouldProcess)
 		}

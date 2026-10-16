@@ -32,6 +32,13 @@ type Engine struct {
 	periodicCheckpointStop func()
 	backgroundTasks        sync.WaitGroup
 	closed                 bool
+
+	// compactionMu and checkpointMu serialise compactions and checkpoints; they are
+	// always taken before mu.
+	compactionMu      sync.Mutex
+	compactionRunning bool
+	checkpointMu      sync.Mutex
+	checkpointRunning bool
 }
 
 var (
@@ -41,8 +48,6 @@ var (
 	defaultAssociatedIndexWarmupTimeout           = 5 * time.Minute
 	defaultAssociatedIndexWarmupMaxSegments       = 64
 	defaultAssociatedIndexWarmupMaxBytes    int64 = 64 << 20
-	defaultRecentEventTimelineCacheHorizon        = 4 * time.Hour
-	defaultRecentEventTimelineCacheTimeout        = 5 * time.Minute
 )
 
 func OpenEngine(cfg EngineConfig) (*Engine, error) {
@@ -72,7 +77,19 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	if projection == nil {
 		projection = NewProjection()
 	}
+	projection.SetDataRoot(rootDir)
+	if err := remapRetiredSegmentReferences(rootDir, projection, manifest.RetiredSegments); err != nil {
+		return nil, fmt.Errorf("open embedded engine: remap retired segments: %w", err)
+	}
+	if mode == startupModeFast {
+		// Tail events that had already been flushed were replayed with their payloads in
+		// memory; point them at their segment records instead.
+		if err := attachSegmentsAfter(rootDir, projection, manifest.ActiveSegments, manifest.ActiveCheckpoint.HighWaterMark); err != nil {
+			return nil, fmt.Errorf("open embedded engine: attach flushed tail events: %w", err)
+		}
+	}
 	projection.SetRetentionWindowDays(cfg.EmbeddedRetentionDays)
+	projection.SetK8sEventInfoHorizon(cfg.K8sEventInfoHorizon)
 	if cfg.ProjectionHistoryFallback {
 		projection.EnableHistoricalEventRetention()
 	}
@@ -146,9 +163,17 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		segmentReaders:    readers,
 		nextHighWaterMark: nextHighWaterMark,
 	}
+	engine.analysis.olderK8sEvents = engine.queryExec.k8sEventInfosFromSegments
+	if retentionCutoffTimestamp > 0 {
+		// Segments are trimmed only now that the projection is loaded, so payloads it
+		// still references can be moved to a pinned segment first.
+		if err := engine.applySegmentRetentionLocked(retentionCutoffTimestamp); err != nil {
+			_ = tail.Close()
+			return nil, fmt.Errorf("open embedded engine: apply segment retention: %w", err)
+		}
+	}
 	if !cfg.ProjectionHistoryFallback {
 		engine.queryExec.DisableProjectionHistoryFallback()
-		engine.queryExec.ConfigureRecentEventTimelineCache(defaultRecentEventTimelineCacheHorizon)
 	}
 	engine.queryExec.SetMetrics(metrics)
 	plannerStart := time.Now()
@@ -161,10 +186,9 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	engine.metrics.RecordTailReplay(replayedTailEvents)
 	engine.metrics.SetActiveSegments(len(engine.segmentReaders))
 	engine.setActiveTailMetrics()
-	engine.logStaleTailCleanupWarning(pruneStaleTailJournals(engine.rootDir, engine.manifest.ActiveTail.ID))
+	engine.logStaleTailCleanupWarning(pruneStaleTailJournals(engine.rootDir, engine.manifest.ActiveTail.ID, previousTailIDs(engine.manifest)...))
 	engine.logStartup(mode, replayedTailEvents)
 	engine.ready.Store(true)
-	engine.startBackgroundRecentEventTimelineCacheSeed()
 	if needsSegmentIndexMigration {
 		engine.startBackgroundSegmentIndexMigration()
 	}
@@ -201,17 +225,26 @@ func openOrCreateActiveTail(rootDir string, manifest Manifest, baseHighWaterMark
 }
 
 func recoverTailState(projection *Projection, hot *hotStore, tail *tailJournal, afterHighWaterMark uint64) (int, error) {
+	return recoverTailStateFlushed(projection, hot, tail, afterHighWaterMark, 0)
+}
+
+// recoverTailStateFlushed replays tail events above afterHighWaterMark into the
+// projection. Events at or below flushedHighWaterMark are already in segments, so they
+// are not queued for another flush.
+func recoverTailStateFlushed(projection *Projection, hot *hotStore, tail *tailJournal, afterHighWaterMark, flushedHighWaterMark uint64) (int, error) {
 	if projection == nil || hot == nil || tail == nil {
 		return 0, nil
 	}
 
 	replayedEvents := 0
 	recoveredHotEvents := make([]models.Event, 0)
-	err := tail.ReplaySince(context.Background(), afterHighWaterMark, func(event models.Event, _ uint64) error {
+	err := tail.ReplaySince(context.Background(), afterHighWaterMark, func(event models.Event, highWaterMark uint64) error {
 		if err := recoverTailProjectionEvent(projection, event); err != nil {
 			return err
 		}
-		recoveredHotEvents = append(recoveredHotEvents, event)
+		if highWaterMark > flushedHighWaterMark {
+			recoveredHotEvents = append(recoveredHotEvents, event)
+		}
 		replayedEvents++
 		return nil
 	})
@@ -427,55 +460,6 @@ func (e *Engine) startBackgroundAssociatedIndexWarmup() {
 		e.logger.InfoWithFields(
 			"embedded startup associated-index warmup completed",
 			logging.Field("loaded_segments", loadedSegments),
-			logging.Field("duration_ms", time.Since(start).Milliseconds()),
-		)
-	}()
-}
-
-func (e *Engine) startBackgroundRecentEventTimelineCacheSeed() {
-	if e == nil || e.queryExec == nil || e.config.ProjectionHistoryFallback ||
-		defaultRecentEventTimelineCacheHorizon <= 0 || !e.beginBackgroundTask() {
-		return
-	}
-
-	go func() {
-		defer e.backgroundTasks.Done()
-
-		e.mu.Lock()
-		if e.closed {
-			e.mu.Unlock()
-			return
-		}
-		e.mu.Unlock()
-
-		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), defaultRecentEventTimelineCacheTimeout)
-		defer cancel()
-
-		if err := seedRecentEventTimelineCache(e.queryExec, ctx, start.UnixNano(), defaultRecentEventTimelineCacheHorizon); err != nil {
-			if ctx.Err() != nil {
-				e.logger.WarnWithFields(
-					"embedded startup recent event timeline cache seed timed out",
-					logging.Field("error", err.Error()),
-					logging.Field("duration_ms", time.Since(start).Milliseconds()),
-				)
-				return
-			}
-			e.logger.WarnWithFields(
-				"embedded startup recent event timeline cache seed failed",
-				logging.Field("error", err.Error()),
-				logging.Field("duration_ms", time.Since(start).Milliseconds()),
-			)
-			return
-		}
-
-		e.queryExec.recentEventCacheMu.RLock()
-		cachedEvents := len(e.queryExec.recentEventCache)
-		e.queryExec.recentEventCacheMu.RUnlock()
-		e.logger.InfoWithFields(
-			"embedded startup recent event timeline cache seeded",
-			logging.Field("horizon", defaultRecentEventTimelineCacheHorizon.String()),
-			logging.Field("events", cachedEvents),
 			logging.Field("duration_ms", time.Since(start).Milliseconds()),
 		)
 	}()

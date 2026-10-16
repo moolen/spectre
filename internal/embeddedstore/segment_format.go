@@ -2,7 +2,6 @@ package embeddedstore
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -47,6 +46,7 @@ var (
 
 type segmentBundleMeta struct {
 	ID             string              `json:"id"`
+	SizeBytes      int64               `json:"size_bytes,omitempty"`
 	EventCount     int                 `json:"event_count"`
 	MinTimestamp   int64               `json:"min_timestamp"`
 	MaxTimestamp   int64               `json:"max_timestamp"`
@@ -114,73 +114,75 @@ func normalizeNamespaceKinds(namespaceKinds map[string][]string) map[string][]st
 }
 
 func encodeFramedEvent(event models.Event) ([]byte, error) {
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return nil, fmt.Errorf("encode framed event: marshal event: %w", err)
+	record := make([]byte, 4, 4+len(event.Data)/2+256)
+	record = appendEventRecord(record, segmentRecordMagic, 0, &event, true)
+	payloadLen := len(record) - 4
+	if payloadLen > maxSegmentRecordSize {
+		return nil, fmt.Errorf("encode framed event: payload size %d exceeds max %d", payloadLen, maxSegmentRecordSize)
 	}
-	if len(payload) > maxSegmentRecordSize {
-		return nil, fmt.Errorf("encode framed event: payload size %d exceeds max %d", len(payload), maxSegmentRecordSize)
-	}
-
-	storedPayload := payload
-	headerValue := uint32(len(payload))
-	if compressed, ok := compressSegmentFramePayload(payload); ok {
-		storedPayload = compressed
-		headerValue = uint32(len(compressed)) | segmentRecordCompressedFlag
-	}
-
-	record := make([]byte, 4+len(storedPayload))
-	binary.BigEndian.PutUint32(record[:4], headerValue)
-	copy(record[4:], storedPayload)
-
+	binary.BigEndian.PutUint32(record[:4], uint32(payloadLen)) // #nosec G115 -- checked against maxSegmentRecordSize
 	return record, nil
 }
 
 func decodeFramedEvent(reader io.Reader) (models.Event, int64, error) {
+	event, _, size, err := decodeFramedEventIf(reader, nil)
+	return event, size, err
+}
+
+// decodeFramedEventIf reads one framed record and decodes its data only if keep accepts
+// the record's metadata. The returned size is the full frame length either way.
+func decodeFramedEventIf(reader io.Reader, keep func(*models.Event) bool) (models.Event, bool, int64, error) {
 	var header [4]byte
 	if _, err := io.ReadFull(reader, header[:]); err != nil {
 		if err == io.EOF {
-			return models.Event{}, 0, io.EOF
+			return models.Event{}, false, 0, io.EOF
 		}
 		if err == io.ErrUnexpectedEOF {
-			return models.Event{}, 0, fmt.Errorf("decode framed event: truncated header: %w", err)
+			return models.Event{}, false, 0, fmt.Errorf("decode framed event: truncated header: %w", err)
 		}
-		return models.Event{}, 0, fmt.Errorf("decode framed event: read header: %w", err)
+		return models.Event{}, false, 0, fmt.Errorf("decode framed event: read header: %w", err)
 	}
 
 	headerValue := binary.BigEndian.Uint32(header[:])
 	compressed := headerValue&segmentRecordCompressedFlag != 0
 	payloadLen := headerValue & segmentRecordLengthMask
 	if payloadLen > uint32(maxSegmentRecordSize) {
-		return models.Event{}, 0, fmt.Errorf("decode framed event: payload size %d exceeds max %d", payloadLen, maxSegmentRecordSize)
+		return models.Event{}, false, 0, fmt.Errorf("decode framed event: payload size %d exceeds max %d", payloadLen, maxSegmentRecordSize)
 	}
 
 	payload := make([]byte, int(payloadLen))
 	if _, err := io.ReadFull(reader, payload); err != nil {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			return models.Event{}, 0, fmt.Errorf("decode framed event: truncated payload: %w", err)
+			return models.Event{}, false, 0, fmt.Errorf("decode framed event: truncated payload: %w", err)
 		}
-		return models.Event{}, 0, fmt.Errorf("decode framed event: read payload: %w", err)
+		return models.Event{}, false, 0, fmt.Errorf("decode framed event: read payload: %w", err)
 	}
 
+	event, kept, err := decodeFramedPayload(payload, compressed, keep)
+	if err != nil {
+		return models.Event{}, false, 0, err
+	}
+	return event, kept, int64(4 + payloadLen), nil
+}
+
+func decodeFramedPayload(payload []byte, compressed bool, keep func(*models.Event) bool) (models.Event, bool, error) {
 	decodedPayload := payload
 	if compressed {
 		expanded, err := decompressSegmentFramePayload(payload)
 		if err != nil {
-			return models.Event{}, 0, fmt.Errorf("decode framed event: decompress payload: %w", err)
+			return models.Event{}, false, fmt.Errorf("decode framed event: decompress payload: %w", err)
 		}
 		decodedPayload = expanded
 	}
 	if len(decodedPayload) > maxSegmentRecordSize {
-		return models.Event{}, 0, fmt.Errorf("decode framed event: expanded payload size %d exceeds max %d", len(decodedPayload), maxSegmentRecordSize)
+		return models.Event{}, false, fmt.Errorf("decode framed event: expanded payload size %d exceeds max %d", len(decodedPayload), maxSegmentRecordSize)
 	}
 
-	var event models.Event
-	if err := json.Unmarshal(decodedPayload, &event); err != nil {
-		return models.Event{}, 0, fmt.Errorf("decode framed event: corrupt payload: %w", err)
+	event, kept, err := decodeEventPayloadIf(decodedPayload, keep)
+	if err != nil {
+		return models.Event{}, false, fmt.Errorf("decode framed event: corrupt payload: %w", err)
 	}
-
-	return event, int64(4 + payloadLen), nil
+	return event, kept, nil
 }
 
 func compressSegmentFramePayload(payload []byte) ([]byte, bool) {

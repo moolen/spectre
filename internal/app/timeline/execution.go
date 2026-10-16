@@ -15,6 +15,19 @@ type PaginatedExecutor interface {
 	ExecutePaginated(context.Context, *models.QueryRequest, *models.PaginationRequest) (*models.QueryResult, *models.PaginationResponse, error)
 }
 
+// K8sEventAttachingExecutor is implemented by executors whose resource queries already
+// attach the Kubernetes Events of every returned resource (QueryResult.K8sEventsByResource).
+// The timeline then skips its separate core/v1 Event query, which over long windows costs
+// far more than the resource page it would decorate.
+type K8sEventAttachingExecutor interface {
+	AttachesK8sEventsToResources() bool
+}
+
+func attachesK8sEvents(executor QueryExecutor) bool {
+	attaching, ok := executor.(K8sEventAttachingExecutor)
+	return ok && attaching.AttachesK8sEventsToResources()
+}
+
 // ExecutionResult contains the stream-ready result of a timeline query.
 type ExecutionResult struct {
 	ResourceResult *models.QueryResult
@@ -90,6 +103,9 @@ func (s *Service) ExecuteTimeline(ctx context.Context, query *models.QueryReques
 }
 
 func (s *Service) executeEventQuery(ctx context.Context, executor QueryExecutor, query *models.QueryRequest) (*models.QueryResult, error) {
+	if attachesK8sEvents(executor) {
+		return &models.QueryResult{Events: []models.Event{}}, nil
+	}
 	eventQuery := &models.QueryRequest{
 		StartTimestamp: query.StartTimestamp,
 		EndTimestamp:   query.EndTimestamp,

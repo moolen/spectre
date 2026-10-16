@@ -3,6 +3,7 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -229,6 +230,34 @@ func tryLoadFastStartupState(
 		return nil, nil, nil, 0, 0, false, nil
 	}
 
+	// Tails rotated out by a checkpoint that never got published come first.
+	replayedTailEvents := 0
+	for _, previous := range manifest.PreviousTails {
+		if _, err := os.Stat(filepath.Join(rootDir, tailDirName, previous.ID, journalFileName)); err != nil {
+			logger.WarnWithFields(
+				"embedded startup fast path falling back to repair: previous tail journal missing",
+				logging.Field("tail_id", previous.ID),
+				logging.Field("error", err.Error()),
+			)
+			return nil, nil, nil, 0, 0, false, nil
+		}
+		previousTail, err := openTailJournal(rootDir, previous)
+		if err != nil {
+			return nil, nil, nil, 0, 0, false, nil
+		}
+		replayed, err := recoverTailStateFlushed(projection, hot, previousTail, checkpointHighWaterMark, manifest.FlushHighWaterMark)
+		_ = previousTail.Close()
+		if err != nil {
+			logger.WarnWithFields(
+				"embedded startup fast path falling back to repair after previous tail replay failure",
+				logging.Field("tail_id", previous.ID),
+				logging.Field("error", err.Error()),
+			)
+			return nil, nil, nil, 0, 0, false, nil
+		}
+		replayedTailEvents += replayed
+	}
+
 	tail, err := openTailJournal(rootDir, manifest.ActiveTail)
 	if err != nil {
 		logger.WarnWithFields(
@@ -238,7 +267,8 @@ func tryLoadFastStartupState(
 		)
 		return nil, nil, nil, 0, 0, false, nil
 	}
-	replayedTailEvents, err := recoverTailState(projection, hot, tail, checkpointHighWaterMark)
+	replayed, err := recoverTailStateFlushed(projection, hot, tail, checkpointHighWaterMark, manifest.FlushHighWaterMark)
+	replayedTailEvents += replayed
 	if err != nil {
 		_ = tail.Close()
 		logger.WarnWithFields(

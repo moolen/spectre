@@ -107,14 +107,14 @@ func init() {
 	serverCmd.Flags().IntVar(
 		&embeddedCheckpointMaxTailEvents,
 		"embedded-checkpoint-max-tail-events",
-		2048,
-		"Maximum embedded tail events before forcing checkpoint compaction",
+		50000,
+		"Maximum embedded tail events before a background checkpoint is written",
 	)
 	serverCmd.Flags().Int64Var(
 		&embeddedCheckpointMaxTailBytes,
 		"embedded-checkpoint-max-tail-bytes",
-		16<<20,
-		"Maximum embedded tail bytes before forcing checkpoint compaction",
+		256<<20,
+		"Maximum embedded tail bytes before a background checkpoint is written",
 	)
 	serverCmd.Flags().BoolVar(
 		&embeddedCheckpointOnShutdown,

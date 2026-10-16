@@ -25,6 +25,9 @@ const (
 // It does not scan raw hot/cold event tiers during normal query execution.
 type Store struct {
 	projection *Projection
+	// olderK8sEvents reads event summaries the projection no longer holds in memory
+	// (see Projection.k8sEventInfosComplete); nil when only the projection is available.
+	olderK8sEvents func(ctx context.Context, involvedUIDs []string, startNs, endNs int64) (map[string][]analysisstore.K8sEventInfo, error)
 }
 
 var _ analysisstore.AnalysisStore = (*Store)(nil)
@@ -127,7 +130,7 @@ func (s *Store) GetManagers(_ context.Context, resourceUIDs []string, minConfide
 		}
 		targetNamespace := managerRef.namespace
 		if targetNamespace == "" {
-			targetNamespace = version.identity.Namespace
+			targetNamespace = version.meta.Namespace
 		}
 		managerVersion := s.projection.resolveByName(targetNamespace, managerRef.kind, managerRef.name, version.timestamp, 0)
 		if managerVersion == nil {
@@ -167,7 +170,7 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 			if target == nil {
 				return
 			}
-			key := relType + ":" + target.identity.UID + ":" + referenceTargetUID
+			key := relType + ":" + target.meta.UID + ":" + referenceTargetUID
 			if added[key] {
 				return
 			}
@@ -180,7 +183,7 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 		}
 
 		for _, ref := range directReferences(version) {
-			target := s.projection.resolveByName(ref.namespaceFor(version.identity.Namespace), ref.kind, ref.name, window.FailureTimestampNs, startNs)
+			target := s.projection.resolveByName(ref.namespaceFor(version.meta.Namespace), ref.kind, ref.name, window.FailureTimestampNs, startNs)
 			add(target, ref.relType, "")
 			if ref.relType == "USES_SERVICE_ACCOUNT" && target != nil {
 				for _, binding := range s.roleBindingsGrantingToServiceAccount(target, window.FailureTimestampNs, startNs) {
@@ -190,7 +193,7 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 							continue
 						}
 						role := s.projection.resolveByName(
-							roleRef.namespaceFor(binding.identity.Namespace),
+							roleRef.namespaceFor(binding.meta.Namespace),
 							roleRef.kind,
 							roleRef.name,
 							window.FailureTimestampNs,
@@ -204,9 +207,9 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 
 		for _, selector := range s.selectingResourcesForTarget(version, window.FailureTimestampNs) {
 			add(selector, "SELECTS", "")
-			if selector.identity.Kind == "Service" {
+			if selector.meta.Kind == "Service" {
 				for _, ingress := range s.ingressesReferencingService(selector, window.FailureTimestampNs, startNs) {
-					add(ingress, edgeTypeIngress, selector.identity.UID)
+					add(ingress, edgeTypeIngress, selector.meta.UID)
 				}
 			}
 		}
@@ -234,11 +237,11 @@ func (s *Store) GetChangeEvents(_ context.Context, resourceUIDs []string, window
 			if version.timestamp < startNs || version.timestamp > window.FailureTimestampNs {
 				continue
 			}
-			changeEvent := version.changeEvent
-			if len(changeEvent.Data) == 0 && len(version.data) > 0 {
-				changeEvent.Data = cloneBytes(version.data)
+			changeEvent := version.changeEventInfo()
+			if len(changeEvent.Data) == 0 && versionHasPayload(&version) {
+				changeEvent.Data = versionPayloadCopy(&version)
 			}
-			if version.changeEvent.ConfigChanged {
+			if version.configChanged() {
 				configEvents = append(configEvents, changeEvent)
 			}
 			if len(recentEvents) < maxRecentEvents {
@@ -254,31 +257,51 @@ func (s *Store) GetChangeEvents(_ context.Context, resourceUIDs []string, window
 	return result, nil
 }
 
-func (s *Store) GetK8sEvents(_ context.Context, resourceUIDs []string, window analysisstore.ResourceWindow) (map[string][]analysisstore.K8sEventInfo, error) {
-	s.projection.mu.RLock()
-	defer s.projection.mu.RUnlock()
-
-	result := make(map[string][]analysisstore.K8sEventInfo)
+func (s *Store) GetK8sEvents(ctx context.Context, resourceUIDs []string, window analysisstore.ResourceWindow) (map[string][]analysisstore.K8sEventInfo, error) {
 	startNs := window.Start()
+	result := make(map[string][]analysisstore.K8sEventInfo)
+	var incomplete []string
+
+	s.projection.mu.RLock()
 	for _, uid := range resourceUIDs {
-		events := s.projection.k8sEventsByInvolvedUID[uid]
-		if len(events) == 0 {
+		if !s.projection.k8sEventInfosComplete(uid, startNs) {
+			incomplete = append(incomplete, uid)
 			continue
 		}
-		filtered := make([]analysisstore.K8sEventInfo, 0, maxK8sEvents)
-		for _, event := range events {
-			ts := event.Timestamp.UnixNano()
-			if ts < startNs || ts > window.FailureTimestampNs {
-				continue
-			}
-			filtered = append(filtered, event)
-			if len(filtered) == maxK8sEvents {
-				break
-			}
+		if filtered := newestK8sEventsInWindow(s.projection.k8sEventsByInvolvedUID[uid], startNs, window.FailureTimestampNs); len(filtered) > 0 {
+			result[uid] = filtered
 		}
-		if len(filtered) > 0 {
+	}
+	s.projection.mu.RUnlock()
+
+	if len(incomplete) == 0 || s.olderK8sEvents == nil {
+		return result, nil
+	}
+	older, err := s.olderK8sEvents(ctx, incomplete, startNs, window.FailureTimestampNs)
+	if err != nil {
+		return nil, err
+	}
+	for uid, events := range older {
+		if filtered := newestK8sEventsInWindow(events, startNs, window.FailureTimestampNs); len(filtered) > 0 {
 			result[uid] = filtered
 		}
 	}
 	return result, nil
+}
+
+// newestK8sEventsInWindow returns up to maxK8sEvents of a newest-first list that fall in
+// [startNs, endNs].
+func newestK8sEventsInWindow(events []analysisstore.K8sEventInfo, startNs, endNs int64) []analysisstore.K8sEventInfo {
+	filtered := make([]analysisstore.K8sEventInfo, 0, min(len(events), maxK8sEvents))
+	for _, event := range events {
+		ts := event.Timestamp.UnixNano()
+		if ts < startNs || ts > endNs {
+			continue
+		}
+		filtered = append(filtered, event)
+		if len(filtered) == maxK8sEvents {
+			break
+		}
+	}
+	return filtered
 }

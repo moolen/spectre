@@ -114,8 +114,20 @@ func TestEngine_OpenUsesCheckpointAndTailOnNormalRestart(t *testing.T) {
 	record := engine.projection.resourcesByUID[expectedEvent.Resource.UID]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 1)
-	require.Equal(t, expectedEvent.ID, record.versions[0].eventID)
-	require.Equal(t, []string{expectedEvent.ID}, replayTestEventIDs(engine.hot.ScanTimeRange(expectedEvent.Timestamp, expectedEvent.Timestamp)))
+	require.Equal(t, expectedEvent.ID, record.versions[0].eventID())
+	// The tail event was already flushed, so it is not queued for a second flush; it is
+	// served from its segment exactly once.
+	require.Empty(t, engine.hot.ScanTimeRange(expectedEvent.Timestamp, expectedEvent.Timestamp))
+	exported, err := engine.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{StartTimestamp: 0, EndTimestamp: 10})
+	require.NoError(t, err)
+	occurrences := 0
+	for _, id := range replayTestEventIDs(exported) {
+		if id == expectedEvent.ID {
+			occurrences++
+		}
+	}
+	require.Equal(t, 1, occurrences)
+	require.True(t, record.versions[0].ref.valid(), "flushed tail events reference their segment record")
 }
 
 func TestEngine_OpenFastPathUsesReplayProjectionApplyForTailRecovery(t *testing.T) {
@@ -225,8 +237,8 @@ func TestEngine_OpenFallsBackToRepairReplayWhenTailStateIsStale(t *testing.T) {
 	record := engine.projection.resourcesByUID[checkpointEvent.Resource.UID]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 2)
-	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID)
-	require.Equal(t, repairEvent.ID, record.versions[1].eventID)
+	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID())
+	require.Equal(t, repairEvent.ID, record.versions[1].eventID())
 
 	manifest, err := loadOrCreateManifest(rootDir)
 	require.NoError(t, err)
@@ -273,8 +285,15 @@ func TestEngine_OpenFallsBackToRepairReplayWhenTailJournalIsTruncated(t *testing
 	record := reopened.projection.resourcesByUID[checkpointEvent.Resource.UID]
 	require.NotNil(t, record)
 	require.GreaterOrEqual(t, len(record.versions), 2)
-	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID)
-	require.Equal(t, repairEvent.ID, record.versions[len(record.versions)-1].eventID)
+	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID())
+	require.Equal(t, repairEvent.ID, record.versions[len(record.versions)-1].eventID())
+	for i := range record.versions {
+		version := &record.versions[i]
+		// Segment replays reference their records; tail replays stay in memory until
+		// the next flush.
+		require.True(t, version.ref.valid() != (len(version.inlinePayload()) > 0), "version %s: ref=%+v data=%d", version.eventID(), version.ref, len(version.inlinePayload()))
+		require.NotEmpty(t, versionPayload(version))
+	}
 	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.BaseHighWaterMark)
 	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.LastHighWaterMark)
 	require.Zero(t, reopened.manifest.ActiveTail.EventCount)
@@ -345,14 +364,14 @@ func TestEngine_OpenRepairFromLegacyManifestCreatesTailAtRecoveredHighWaterMark(
 		require.NoError(t, reopened.Close())
 	})
 
-	require.Equal(t, uint64(2), reopened.manifest.ActiveTail.BaseHighWaterMark)
-	require.Equal(t, uint64(2), reopened.manifest.ActiveTail.LastHighWaterMark)
+	require.Equal(t, uint64(2), lockedActiveTail(reopened).BaseHighWaterMark)
+	require.Equal(t, uint64(2), lockedActiveTail(reopened).LastHighWaterMark)
 
 	newEvent := testReplayEvent("legacy-new", 3)
 	newEvent.Resource.UID = checkpointEvent.Resource.UID
 	newEvent.Resource.Name = checkpointEvent.Resource.Name
 	require.NoError(t, reopened.ProcessBatch(context.Background(), []models.Event{newEvent}))
-	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.LastHighWaterMark)
+	require.Equal(t, uint64(3), lockedActiveTail(reopened).LastHighWaterMark)
 }
 
 func TestEngine_OpenStopsReplayAfterApplyFailure(t *testing.T) {
@@ -448,7 +467,7 @@ func replayTestEventIDs(events []models.Event) []string {
 func seedStoreWithCheckpointAndTail(t *testing.T, dataDir string) models.Event {
 	t.Helper()
 
-	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4, DisableAutoCompaction: true}) // abandoned below; no background work
 	require.NoError(t, err)
 
 	checkpointed := testReplayEvent("checkpointed", 1)
@@ -467,7 +486,7 @@ func seedStoreWithCheckpointAndStaleTail(t *testing.T, dataDir string) (models.E
 	t.Helper()
 
 	rootDir := embeddedRootDir(dataDir)
-	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4})
+	engine, err := OpenEngine(EngineConfig{DataDir: dataDir, HotMaxEvents: 100, HotMaxResourceVersions: 4, DisableAutoCompaction: true}) // abandoned below; no background work
 	require.NoError(t, err)
 
 	checkpointEvent := testReplayEvent("repair-checkpointed", 1)
@@ -506,4 +525,12 @@ func writeReplayTestSegment(t *testing.T) *segmentReader {
 	reader, err := openSegmentReader(rootDir, segment)
 	require.NoError(t, err)
 	return reader
+}
+
+// lockedActiveTail reads the active tail under the engine lock; a background
+// startup migration may publish a new manifest concurrently.
+func lockedActiveTail(engine *Engine) TailJournalMeta {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	return engine.manifest.ActiveTail
 }
