@@ -2,6 +2,7 @@ package embeddedstore
 
 import (
 	"sync"
+	"sync/atomic"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/graph"
@@ -84,6 +85,10 @@ type Projection struct {
 	// (0 keeps them for the whole retention window). k8sEventInfosTrimmedThrough is the
 	// newest timestamp trimmed by that horizon: like k8sEventsTruncatedThrough, but for
 	// every involved UID.
+	// retentionCutoffNs is the latest retention cutoff applied. Segments straddling it
+	// still hold older records, so segment scans clamp their windows to it.
+	retentionCutoffNs atomic.Int64
+
 	k8sEventInfoHorizonNs       int64
 	k8sEventInfosTrimmedThrough int64
 	// k8sEventHashes remembers recent core/v1 Event payloads for duplicate detection.

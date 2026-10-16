@@ -57,6 +57,15 @@ func newQueryPlanner(projection *Projection, hot *hotStore, segments []*segmentR
 	return planner
 }
 
+// clampToRetention raises a window start to the retention cutoff: segments that straddle
+// the cutoff are kept whole and still hold expired records.
+func (p *QueryPlanner) clampToRetention(startTimeNs int64) int64 {
+	if p == nil || p.projection == nil {
+		return startTimeNs
+	}
+	return max(startTimeNs, p.projection.retentionCutoffNs.Load())
+}
+
 func (s queryPlanStats) merge(other queryPlanStats) queryPlanStats {
 	return queryPlanStats{
 		projectionUsed:   s.projectionUsed || other.projectionUsed,

@@ -188,6 +188,7 @@ func (p *QueryPlanner) exportTimeRangeLazy(
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
 ) ([]lazyEvent, queryPlanStats, error) {
+	startTimeNs = p.clampToRetention(startTimeNs)
 	if p == nil || endTimeNs < startTimeNs {
 		return nil, queryPlanStats{}, nil
 	}

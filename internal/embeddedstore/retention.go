@@ -121,6 +121,9 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 	if p == nil || cutoffTimestamp <= 0 {
 		return
 	}
+	if cutoffTimestamp > p.retentionCutoffNs.Load() {
+		p.retentionCutoffNs.Store(cutoffTimestamp)
+	}
 
 	// Trim in place: most records only hold versions inside the window and are left
 	// untouched, so a pass costs O(records) rather than O(versions).

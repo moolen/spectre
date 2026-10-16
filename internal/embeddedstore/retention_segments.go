@@ -3,8 +3,6 @@ package embeddedstore
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/moolen/spectre/internal/models"
 )
@@ -15,11 +13,15 @@ const maxPinnedSegments = 4
 
 const pinnedSegmentPrefix = "pin-"
 
-// applySegmentRetentionLocked drops segment records older than cutoff while keeping the
-// payloads the projection still needs: for every resource, the version it was in when
-// the retained window starts. Those are copied into a pinned segment first, then the
-// expired active segments are rewritten or retired, and finally the projection is
-// pruned. Retired segments are deleted by the next checkpoint.
+// applySegmentRetentionLocked retires segments whose records are all older than cutoff
+// while keeping the payloads the projection still needs: for every resource, the version
+// it was in when the retained window starts. Those are copied into a pinned segment
+// first, then the expired segments are retired and the projection is pruned. Retired
+// segments are deleted by the next checkpoint.
+//
+// A segment that straddles the cutoff is kept whole until it expires completely; queries
+// clamp to the cutoff (Projection.retentionCutoff). Rewriting it instead would copy up to
+// a whole compacted segment under the engine lock every time retention runs.
 func (e *Engine) applySegmentRetentionLocked(ctx context.Context, cutoffTimestamp int64) error {
 	if cutoffTimestamp <= 0 {
 		return nil
@@ -27,7 +29,7 @@ func (e *Engine) applySegmentRetentionLocked(ctx context.Context, cutoffTimestam
 
 	expired := make(map[string]bool)
 	for _, segment := range e.manifest.ActiveSegments {
-		if segment.EventCount == 0 || segment.MinTimestamp < cutoffTimestamp {
+		if segment.EventCount == 0 || segment.MaxTimestamp < cutoffTimestamp {
 			expired[segment.ID] = true
 		}
 	}
@@ -52,7 +54,6 @@ func (e *Engine) applySegmentRetentionLocked(ctx context.Context, cutoffTimestam
 		}
 	}
 
-	rewrittenLocations := make(map[string][]segmentRecordLocation)
 	activeSegments := make([]SegmentMeta, 0, len(updatedManifest.ActiveSegments))
 	for _, segment := range updatedManifest.ActiveSegments {
 		if !expired[segment.ID] {
@@ -62,22 +63,6 @@ func (e *Engine) applySegmentRetentionLocked(ctx context.Context, cutoffTimestam
 		replacedBy := []string{}
 		if pinnedID != "" {
 			replacedBy = append(replacedBy, pinnedID)
-		}
-		if segment.MaxTimestamp >= cutoffTimestamp {
-			replacementID := newSegmentID(segment.HighWaterMark)
-			meta, locations, err := rewriteSegmentFrom(ctx, e.rootDir, segment.ID, replacementID, func(record *rawSegmentRecord) bool {
-				return record.event.Timestamp >= cutoffTimestamp
-			})
-			if err != nil {
-				return fmt.Errorf("rewrite segment %q for retention: %w", segment.ID, err)
-			}
-			if meta.EventCount > 0 {
-				activeSegments = append(activeSegments, segmentMetaFromBundle(meta, segment.HighWaterMark))
-				rewrittenLocations[replacementID] = locations
-				replacedBy = append(replacedBy, replacementID)
-			} else {
-				_ = os.RemoveAll(filepath.Join(e.rootDir, segmentsDirName, replacementID))
-			}
 		}
 		retired = append(retired, RetiredSegment{ID: segment.ID, ReplacedBy: replacedBy})
 	}
@@ -96,9 +81,6 @@ func (e *Engine) applySegmentRetentionLocked(ctx context.Context, cutoffTimestam
 
 	if pinnedID != "" {
 		e.projection.AttachSegmentLocations(pinnedID, pinnedLocations)
-	}
-	for id, locations := range rewrittenLocations {
-		e.projection.AttachSegmentLocations(id, locations)
 	}
 	retiredIDs := make([]string, 0, len(retired))
 	for i := range retired {
@@ -155,32 +137,6 @@ func (e *Engine) compactPinnedSegmentsLocked() error {
 	}
 	e.projection.ReleaseSegmentHandles(retiredIDs)
 	return nil
-}
-
-// rewriteSegmentFrom copies the records of one segment accepted by keep into a new
-// segment, copying binary frames verbatim.
-func rewriteSegmentFrom(ctx context.Context, rootDir, sourceID, targetID string, keep func(*rawSegmentRecord) bool) (segmentBundleMeta, []segmentRecordLocation, error) {
-	builder, err := newSegmentBuilder(rootDir, targetID)
-	if err != nil {
-		return segmentBundleMeta{}, nil, err
-	}
-	if err := mergeSegmentRecords([]string{segmentEventsPath(rootDir, sourceID)}, func(record *rawSegmentRecord) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if !keep(record) {
-			return nil
-		}
-		return builder.AppendRecord(record)
-	}); err != nil {
-		builder.Abort()
-		return segmentBundleMeta{}, nil, err
-	}
-	meta, err := builder.Finish()
-	if err != nil {
-		return segmentBundleMeta{}, nil, err
-	}
-	return meta, builder.Locations(), nil
 }
 
 // pinnedVersionEvents materialises the versions older than cutoff that retention keeps

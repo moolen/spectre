@@ -95,6 +95,7 @@ func (p *QueryPlanner) collectAssociatedEvents(
 	namespaces []string,
 	startTimeNs, endTimeNs int64,
 ) (map[string][]models.Event, queryPlanStats, error) {
+	startTimeNs = p.clampToRetention(startTimeNs)
 	if p == nil || len(involvedUIDs) == 0 || endTimeNs < startTimeNs {
 		return nil, queryPlanStats{}, nil
 	}

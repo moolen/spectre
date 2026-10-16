@@ -116,3 +116,46 @@ func TestRetention_PinsStateAtWindowStartAndDropsExpiredSegments(t *testing.T) {
 	}
 	assertState(reopened)
 }
+
+func TestRetention_KeepsStraddlingSegmentWholeAndClampsQueries(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	expired := now.Add(-30 * time.Hour).UnixNano()
+	retained := now.Add(-20 * time.Hour).UnixNano()
+
+	engine, err := OpenEngine(EngineConfig{DataDir: dir, HotMaxEvents: 100, HotMaxResourceVersions: 8, EmbeddedRetentionDays: 1, DisableAutoCompaction: true})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+
+	// One segment holds records on both sides of the 24h cutoff, including a core/v1
+	// Event, which only segment scans return.
+	k8sEvent := func(id string, ts int64) models.Event {
+		return models.Event{
+			ID: id, Timestamp: ts, Type: models.EventTypeCreate,
+			Resource: models.ResourceMetadata{Version: "v1", Kind: "Event", Namespace: "default", Name: id, UID: id + "-uid", InvolvedObjectUID: "cm"},
+			Data:     []byte(`{"reason":"Updated","message":"m","type":"Normal","count":1}`),
+		}
+	}
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{
+		pinnedTestEvent("cm-1", "cm", expired, models.EventTypeCreate, 1),
+		k8sEvent("ev-old", expired),
+		pinnedTestEvent("cm-2", "cm", retained, models.EventTypeUpdate, 2),
+		k8sEvent("ev-new", retained),
+	}))
+	require.NoError(t, engine.Flush(context.Background()))
+	segmentID := engine.manifest.ActiveSegments[0].ID
+	require.NoError(t, engine.Checkpoint(context.Background()))
+
+	engine.mu.Lock()
+	require.Len(t, engine.manifest.ActiveSegments, 1)
+	require.Equal(t, segmentID, engine.manifest.ActiveSegments[0].ID, "a straddling segment is kept, not rewritten")
+	engine.mu.Unlock()
+
+	result, _, err := engine.QueryExecutor().ExecutePaginated(context.Background(), &models.QueryRequest{
+		StartTimestamp: now.Add(-48 * time.Hour).Unix(),
+		EndTimestamp:   now.Unix(),
+		Filters:        models.QueryFilters{Kinds: []string{"Event"}},
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"ev-new"}, eventIDs(result.Events), "expired records in a kept segment stay hidden")
+}

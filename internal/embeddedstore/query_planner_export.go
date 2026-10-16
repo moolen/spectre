@@ -18,6 +18,7 @@ func (p *QueryPlanner) exportTimeRange(
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
 ) ([]models.Event, queryPlanStats, error) {
+	startTimeNs = p.clampToRetention(startTimeNs)
 	if p == nil || endTimeNs < startTimeNs {
 		return nil, queryPlanStats{}, nil
 	}
