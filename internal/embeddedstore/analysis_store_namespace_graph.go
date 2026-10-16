@@ -335,11 +335,18 @@ func (s *Store) currentEdgesForVersions(versionsByUID map[string]*resourceVersio
 		if !resourceUsesPodSelector(version.meta.Kind) || version.eventType() == models.EventTypeDelete {
 			continue
 		}
+		// Parse the selector once per resource, not once per pod: each parse reads and
+		// decodes the payload, and this runs under the projection read lock.
+		var selector map[string]any
+		parsed := false
 		for _, pod := range pods {
 			if pod.meta.Namespace != version.meta.Namespace {
 				continue
 			}
-			if selectorMatches(selectorSpec(version), pod.labels()) {
+			if !parsed {
+				selector, parsed = selectorSpec(version), true
+			}
+			if selectorMatches(selector, pod.labels()) {
 				add(version.meta.UID, pod.meta.UID, "SELECTS")
 			}
 		}
