@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sort"
+	"sync"
 
 	"github.com/moolen/spectre/internal/models"
 )
@@ -30,7 +32,10 @@ func loadedLazyEvent(event models.Event) lazyEvent {
 
 // scanTimeRangeLazy returns the records in [start, end] accepted by keep. Without
 // withData only metadata is decoded; legacy JSON records are always decoded fully.
-func (r *segmentReader) scanTimeRangeLazy(ctx context.Context, startTimestamp, endTimestamp int64, keep func(*models.Event) bool, withData bool) ([]lazyEvent, error) {
+// scanTimeRangeLazy returns the segment's records in [startTimestamp, endTimestamp] that
+// pass prefilter (checked on the raw header) and keep. withData decodes payloads now;
+// otherwise they are read later by hydrateLazyEvents.
+func (r *segmentReader) scanTimeRangeLazy(ctx context.Context, startTimestamp, endTimestamp int64, prefilter *recordPrefilter, keep func(*models.Event) bool, withData bool) ([]lazyEvent, error) {
 	if r == nil {
 		return nil, fmt.Errorf("scan segment by time: reader is nil")
 	}
@@ -94,6 +99,17 @@ func (r *segmentReader) scanTimeRangeLazy(ctx context.Context, startTimestamp, e
 		offset += int64(4 + payloadLen)
 
 		if !compressed && payloadLen > 0 && payload[0] == segmentRecordMagic {
+			if key, ok := peekEventRecordKey(payload); ok {
+				if key.timestamp < startTimestamp {
+					continue
+				}
+				if key.timestamp > endTimestamp {
+					return result, nil
+				}
+				if !prefilter.matches(&key) {
+					continue
+				}
+			}
 			record, err := decodeEventRecordHeader(payload)
 			if err != nil {
 				return nil, fmt.Errorf("scan segment by time: record at %d: %w", recordOffset, err)
@@ -182,7 +198,7 @@ func hydrateFromFile(path string, events []*lazyEvent) error {
 	return nil
 }
 
-// exportTimeRangeLazy is exportTimeRange without reading payloads.
+// exportTimeRangeLazy is exportTimeRange without reading payloads or ordering the result.
 func (p *QueryPlanner) exportTimeRangeLazy(
 	ctx context.Context,
 	startTimeNs, endTimeNs int64,
@@ -201,6 +217,7 @@ func (p *QueryPlanner) exportTimeRangeLazy(
 
 	stats := queryPlanStats{}
 	keep := func(event *models.Event) bool { return filters.Matches(event.Resource) }
+	prefilter := newRecordPrefilter(filters)
 	var exported []lazyEvent
 	relevant := p.relevantExportSegments(filters, startTimeNs, endTimeNs)
 	stats.relevantSegments = len(relevant)
@@ -208,34 +225,72 @@ func (p *QueryPlanner) exportTimeRangeLazy(
 		stats.coldUsed = true
 		stats.scannedSegments += len(relevant)
 	}
-	for _, reader := range relevant {
-		events, err := reader.scanTimeRangeLazy(ctx, startTimeNs, endTimeNs, keep, false)
-		if err != nil {
-			return nil, stats, fmt.Errorf("scan segment %q by time: %w", reader.ID(), err)
-		}
+	perSegment, err := scanSegmentsParallel(ctx, relevant, func(reader *segmentReader) ([]lazyEvent, error) {
+		return reader.scanTimeRangeLazy(ctx, startTimeNs, endTimeNs, prefilter, keep, false)
+	})
+	if err != nil {
+		return nil, stats, err
+	}
+	for _, events := range perSegment {
 		exported = append(exported, events...)
 	}
 
 	if p.hot != nil {
-		hotEvents := p.hot.ScanTimeRange(startTimeNs, endTimeNs)
+		hotEvents := p.hot.ScanTimeRangeMatching(startTimeNs, endTimeNs, func(event *models.Event) bool {
+			return filters.Matches(event.Resource)
+		})
 		if len(hotEvents) > 0 {
 			stats.hotUsed = true
 			stats.hotScans++
 		}
 		for _, event := range hotEvents {
-			if filters.Matches(event.Resource) {
-				exported = append(exported, loadedLazyEvent(event))
-			}
+			exported = append(exported, loadedLazyEvent(event))
 		}
 	}
 	if len(exported) == 0 {
 		return nil, stats, nil
 	}
 
-	sort.SliceStable(exported, func(i, j int) bool {
-		return compareEventOrder(exported[i].event, exported[j].event) < 0
-	})
+	// Unordered: the caller groups and orders a page at a time, which is far cheaper than
+	// sorting every event of a long window.
 	return dedupeLazyEventsByID(exported), stats, nil
+}
+
+// scanSegmentsParallel runs scan over the readers on up to GOMAXPROCS goroutines and
+// returns the results in reader order. Long windows span dozens of segments, and each
+// scan is independent.
+func scanSegmentsParallel(ctx context.Context, readers []*segmentReader, scan func(*segmentReader) ([]lazyEvent, error)) ([][]lazyEvent, error) {
+	results := make([][]lazyEvent, len(readers))
+	errs := make([]error, len(readers))
+	workers := min(len(readers), runtime.GOMAXPROCS(0))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				results[i], errs[i] = scan(readers[i])
+			}
+		}()
+	}
+	for i := range readers {
+		if ctx.Err() != nil {
+			break
+		}
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for i, err := range errs {
+		if err != nil {
+			return nil, fmt.Errorf("scan segment %q by time: %w", readers[i].ID(), err)
+		}
+	}
+	return results, nil
 }
 
 // dedupeLazyEventsByID keeps one event per ID, preferring an already loaded copy. The

@@ -20,6 +20,8 @@ package embeddedstore
 //	SPECTRE_SCALE_WINDOW            simulated time span, e.g. 168h (default per profile)
 //	SPECTRE_SCALE_RETENTION_DAYS    embedded retention days (default 0 = unlimited)
 //	SPECTRE_SCALE_HEAPPROFILE  write a heap profile after load
+//	SPECTRE_SCALE_QUERY_CPUPROFILE  write a CPU profile of the query phase
+//	SPECTRE_SCALE_QUERIES      only run queries whose name contains this
 
 import (
 	"context"
@@ -32,6 +34,7 @@ import (
 	"runtime/pprof"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -245,6 +248,15 @@ func TestTimelineScale(t *testing.T) {
 
 	// Let background cache seeding/index warmup settle so queries measure steady state.
 	time.Sleep(2 * time.Second)
+	if path := os.Getenv("SPECTRE_SCALE_QUERY_CPUPROFILE"); path != "" {
+		f, err := os.Create(path)
+		require.NoError(t, err)
+		require.NoError(t, pprof.StartCPUProfile(f))
+		defer func() {
+			pprof.StopCPUProfile()
+			require.NoError(t, f.Close())
+		}()
+	}
 	report.Queries = runTimelineQueries(t, engine.QueryExecutor(), profile)
 
 	closeStart := time.Now()
@@ -314,7 +326,11 @@ func runTimelineQueries(t *testing.T, exec *QueryExecutor, profile scaleProfile)
 	}
 
 	var results []queryResult
+	only := os.Getenv("SPECTRE_SCALE_QUERIES")
 	for _, s := range specs {
+		if only != "" && !strings.Contains(s.name, only) {
+			continue
+		}
 		req := &models.QueryRequest{StartTimestamp: now - s.window, EndTimestamp: now, Filters: s.filters}
 		var pagination *models.PaginationRequest
 		if s.events {

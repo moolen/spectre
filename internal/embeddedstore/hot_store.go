@@ -89,6 +89,28 @@ func (s *hotStore) ScanTimeRange(startTimestampNs, endTimestampNs int64) []model
 	return cloneEvents(s.events[startIdx:endIdx])
 }
 
+// ScanTimeRangeMatching is ScanTimeRange restricted to events accepted by match; only
+// those are copied.
+func (s *hotStore) ScanTimeRangeMatching(startTimestampNs, endTimestampNs int64, match func(*models.Event) bool) []models.Event {
+	if endTimestampNs < startTimestampNs {
+		return nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	startIdx := sort.Search(len(s.events), func(i int) bool {
+		return s.events[i].Timestamp >= startTimestampNs
+	})
+	var matched []models.Event
+	for i := startIdx; i < len(s.events) && s.events[i].Timestamp <= endTimestampNs; i++ {
+		if match(&s.events[i]) {
+			matched = append(matched, cloneEvent(s.events[i]))
+		}
+	}
+	return matched
+}
+
 func (s *hotStore) RecentEventsByUID(uid string) []models.Event {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

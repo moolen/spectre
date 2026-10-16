@@ -279,3 +279,36 @@ func (d *codecDecoder) string() string {
 	}
 	return string(d.bytes(length))
 }
+
+// eventRecordKey holds the header fields scans filter on. Its byte slices alias the
+// record payload; reading it allocates nothing.
+type eventRecordKey struct {
+	timestamp int64
+	group     []byte
+	version   []byte
+	kind      []byte
+	namespace []byte
+}
+
+// peekEventRecordKey reads a binary record's timestamp, group, version, kind and
+// namespace without decoding the rest of the header.
+func peekEventRecordKey(payload []byte) (eventRecordKey, bool) {
+	if len(payload) == 0 || (payload[0] != segmentRecordMagic && payload[0] != tailRecordMagic) {
+		return eventRecordKey{}, false
+	}
+	d := codecDecoder{buf: payload[1:]}
+	if payload[0] == tailRecordMagic {
+		d.uvarint()
+	}
+	d.bytes(d.uvarint()) // event ID
+	var key eventRecordKey
+	key.timestamp = d.varint()
+	if d.byte() == eventTypeCodeOther {
+		d.bytes(d.uvarint())
+	}
+	key.group = d.bytes(d.uvarint())
+	key.version = d.bytes(d.uvarint())
+	key.kind = d.bytes(d.uvarint())
+	key.namespace = d.bytes(d.uvarint())
+	return key, d.err == nil
+}

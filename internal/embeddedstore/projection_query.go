@@ -12,10 +12,20 @@ func (p *Projection) resourceTimelineEvents(uid string, startTimeNs, endTimeNs i
 	defer p.mu.RUnlock()
 
 	record := p.resourcesByUID[uid]
-	return resourceRecordTimelineEvents(record, startTimeNs, endTimeNs)
+	return resourceRecordTimelineEvents(record, startTimeNs, endTimeNs, 0)
 }
 
-func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs int64) []models.Event {
+// maxTimelineVersionsPerResource is the number of versions above which a timeline page
+// thins a resource's history (see timelineVersionKept). Over long windows objects that
+// report status periodically, such as Nodes, have thousands of versions, each sent with
+// its full object.
+const maxTimelineVersionsPerResource = 256
+
+// resourceRecordTimelineEvents returns the record's versions in the window, preceded by
+// the version current at its start. With maxVersions > 0 and more versions than that in
+// the window, versions that repeat the previous status without a configuration change
+// are left out.
+func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs int64, maxVersions int) []models.Event {
 	if record == nil || len(record.versions) == 0 || endTimeNs < startTimeNs {
 		return nil
 	}
@@ -36,8 +46,14 @@ func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs
 		}
 	}
 
+	thin := maxVersions > 0 && endIdx-startIdx > maxVersions
+	lastKept := startIdx - 1
 	for i := startIdx; i < endIdx; i++ {
+		if thin && !timelineVersionKept(record.versions, i, lastKept, endIdx) {
+			continue
+		}
 		result = append(result, resourceVersionEvent(record.versions[i]))
+		lastKept = i
 	}
 
 	if len(result) == 0 {
@@ -45,6 +61,19 @@ func resourceRecordTimelineEvents(record *resourceRecord, startTimeNs, endTimeNs
 	}
 
 	return dedupeEventsByID(result)
+}
+
+// timelineVersionKept reports whether a thinned history keeps versions[i]: the first and
+// last versions of the window, creates and deletes, configuration changes, and versions
+// whose status differs from the last kept one. What is left out are status-only updates
+// that do not change the displayed status, such as heartbeats; the diff between kept
+// neighbours still covers them.
+func timelineVersionKept(versions []resourceVersion, i, lastKept, endIdx int) bool {
+	version := &versions[i]
+	if lastKept < 0 || i == endIdx-1 || version.eventType() != models.EventTypeUpdate || version.configChanged() {
+		return true
+	}
+	return version.statusCode != versions[lastKept].statusCode
 }
 
 // resourceRecordHasWindowEvents reports whether resourceRecordTimelineEvents would return

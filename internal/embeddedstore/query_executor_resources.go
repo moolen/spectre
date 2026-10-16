@@ -129,7 +129,7 @@ func (qe *QueryExecutor) collectPaginatedResources(
 
 	filtered := make([]filteredResource, 0, len(page))
 	for i := range page {
-		events := resourceRecordTimelineEvents(page[i].record, startTimeNs, endTimeNs)
+		events := resourceRecordTimelineEvents(page[i].record, startTimeNs, endTimeNs, maxTimelineVersionsPerResource)
 		if len(events) == 0 {
 			continue
 		}
