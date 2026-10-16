@@ -17,7 +17,9 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 	defer s.projection.mu.RUnlock()
 
 	startTime := time.Now()
-	query := normalizeNamespaceQuery(input, s.projection.RetentionWindowNs())
+	// Read the field directly: RetentionWindowNs takes the read lock again, which blocks
+	// forever if a writer queues up between the two acquisitions.
+	query := normalizeNamespaceQuery(input, s.projection.retentionWindowNs)
 
 	namespacedResources := s.projection.activeResourcesInNamespace(query.Namespace, query.TimestampNs)
 	startIndex, err := decodeCursor(query.Cursor)
