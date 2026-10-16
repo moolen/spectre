@@ -1,206 +1,270 @@
-# Embedded timeline storage: scale test results
+# Embedded timeline storage: scale, sizing and limits
 
-Date: 2026-10-16. Scope: the embedded engine (`internal/embeddedstore`) as used by the
-timeline (`GET /v1/timeline`): ingest, persistence, and timeline queries. FalkorDB is out of
-scope, as are the analysis and graph endpoints.
+Scope: the embedded engine (`internal/embeddedstore`) behind `GET /v1/timeline`, covering
+ingest, persistence and timeline queries, plus the watcher's List/Watch loop, which
+decides how much data the engine receives. FalkorDB and the graph endpoints are out of
+scope.
 
-## How to reproduce
+## Summary
 
-The harness is opt-in. It sits behind the `scale` build tag, so it never runs in `make test`.
+The engine now keeps only compact per-version metadata in memory, about 100 bytes per
+change. Object payloads stay on disk and are read for the page being returned. Watch
+re-lists no longer duplicate history, and checkpoints and compactions no longer block
+ingest. As a result, retention is limited by memory roughly linearly in the number of
+changes kept, and 7–30 days are practical for large clusters:
 
-```bash
-SPECTRE_SCALE_PROFILE=medium SPECTRE_SCALE_OUT=/tmp/medium.json \
-  go test -tags scale -run TestTimelineScale -timeout 0 -v ./internal/embeddedstore/
-```
+| Cluster (assumed churn after duplicate removal) | 7 days | 14 days | 30 days |
+|---|---|---|---|
+| Medium: 100 nodes, ~3k pods (3 changes/s, 1 Event/s) | 0.5 GB heap, 0.75 GiB limit, 3 GB disk | 0.7 GB, 1 GiB, 4 GB | 1.2 GB, 1.75 GiB, 9 GB |
+| Large: 500 nodes, ~15k pods (10 changes/s, 3 Events/s) | 1.2 GB, 2 GiB, 7 GB | 2.0 GB, 3 GiB, 13 GB | 3.7 GB, 6 GiB, 28 GB |
+| XL: 1000 nodes, ~30k pods (25 changes/s, 8 Events/s) | 2.7 GB, 4 GiB, 17 GB | 4.6 GB, 7 GiB, 33 GB | 8.7 GB, 13 GiB, 69 GB |
 
-- `scale_workload_test.go` generates a deterministic, watcher-shaped workload. Object sizes
-  match real objects with managedFields stripped: Pod ~4 KB, Node ~5 KB, Deployment and
-  ReplicaSet ~3 KB, ConfigMap ~2 KB. The churn mix is:
-  - pod status updates: 55%
-  - pod replacements (delete, create, 2 updates): 15%
-  - rollouts: 3%
-  - node status updates: 20%
-  - ConfigMap edits: 7%
-  - optional core/v1 Events
-- `scale_test.go` opens the engine through `Open(Config{...})` with the chart defaults:
-  - 15m checkpoint interval
-  - `retentionDays: 0`
-  - checkpoint every 2048 tail events
-  - 16 MiB segments
-  - auto-compaction at 4 segments
-- It then measures:
-  - bulk load, using `ProcessBatch` with batches of 256
-  - live ingest: the last 5k events go one at a time through `ProcessEvent`, which is
-    exactly what the watcher does
-  - checkpoint, flush and compaction cost, read from the engine's Prometheus metrics
-  - heap and disk usage
-  - timeline queries, made through the same `ExecutePaginated` calls the HTTP handler uses
-  - close and reopen
+These figures come from the [sizing formula](#sizing). Measure your own rates and plug
+them in; the churn assumptions above are rough.
 
-Test machine: 4 vCPU, 15 GB RAM, local disk with fsync p50 0.27 ms / p99 3 ms. Cloud
-block storage typically has 1–3 ms fsync, so per-event ingest will be somewhat worse there.
+What we measured, on 4 vCPUs (details below):
+
+- **30 days, 5.07M events** over 970k distinct objects (17.4 GB of object JSON):
+  - ⟨LIVE30⟩ live heap, ⟨DISK30⟩ on disk
+  - ingest ⟨LOAD30⟩ events/s in batches and ⟨LIVEEV30⟩ events/s one at a time
+  - timeline pages in ⟨Q30⟩ for any window from 15 minutes to 30 days
+  - restart in ⟨REOPEN30⟩
+- **Reference workload, 7 days** (500 nodes, 108k objects, 335k events), against the
+  code before this work:
+
+  | | Before | After |
+  |---|---|---|
+  | Live heap | 2.2 GB | ⟨REFHEAP⟩ |
+  | Bulk ingest | 430 ev/s | ⟨REFLOAD⟩ |
+  | Longest ingest stall | 36 s | ⟨REFSTALL⟩ |
+  | Full-window timeline page | 1.1 s | ⟨REFFULL⟩ |
+
+## What changed
+
+Each item below names the limit it removed.
+
+1. **Payloads moved out of memory.**
+   - Before: every version of every object kept its full JSON in the projection, about
+     6–8 KB per change.
+   - Now a version holds:
+     - a 16-byte inline event ID
+     - timestamp, status and change flags as one byte each
+     - a shared identity block
+     - a segment reference (`versionDataRef`) to its payload
+   - That is **~100 bytes per version** (`TestScaleVersionMemory`).
+   - Payloads are read with one `pread` and a zstd decode, and only for the resources on
+     the page being returned.
+2. **Binary segments and tail.**
+   - Event metadata sits outside the compressed payload, so scans filter on kind,
+     namespace, UID and time before decompressing anything.
+   - Change detection uses xxhash fingerprints of the spec, status and kind-specific
+     fields. It used to parse the object about five times per event; now it parses once.
+3. **Watch re-lists no longer duplicate history.**
+   - The API server closes every watch after 30–60 minutes. The watcher then re-listed
+     the whole resource type and stored every object again. For a 150k-object cluster
+     that was ~5M copies a day, more than the real churn.
+   - The watcher now resumes from the last resourceVersion it received, using bookmarks,
+     and only re-lists when the watch fails or expires.
+   - The engine drops Create/Update events whose payload is byte-identical to the
+     object's latest stored state. These are counted in
+     `spectre_embedded_ingest_unchanged_events_total`. A re-list now costs ~1 µs per
+     object and stores nothing (`TestScaleRelist`).
+4. **Checkpoints off the lock.**
+   - Format v3 is a binary delta encoding with payloads stored as segment references.
+   - A checkpoint snapshots under the lock, encodes without it, and is triggered in the
+     background every 50k tail events or 256 MiB.
+   - It used to serialise the whole projection with gob while holding the engine mutex,
+     every 2048 events.
+5. **Tiered compaction in the background.**
+   - It merges neighbouring segments up to 512 MiB and 24 hours, copying raw records.
+   - It used to decode every event of every segment into one slice under the lock.
+6. **Resource pages independent of the window.**
+   - Pages come from an ordered B-tree walked from the cursor. Each resource's window is
+     checked against in-memory metadata, and payloads are read for the page only.
+   - A 30-day page costs about the same as a 15-minute one.
+7. **No separate Event query per timeline request.**
+   - The handler used to run a core/v1 Event query over the whole window on every
+     request. The embedded executor already attaches each page resource's Events, so
+     that query was pure overhead: 6.8 s for 30 days.
+   - Executors that attach Events now say so (`AttachesK8sEventsToResources`), and the
+     query is skipped.
+8. **Event summaries kept in memory for 48 hours.**
+   - Per-object core/v1 Event summaries (reason, message, count) are trimmed after
+     `K8sEventSummaryHorizon`, 48h by default.
+   - Older windows read them from each segment's associated-UID index, for both the
+     timeline and the analysis store.
+   - Kept for 30 days, they would be the largest part of the heap: ~450 bytes each.
+9. **Smaller items.**
+   - The recent-Event cache is gone. It held 4 hours of Event payloads and gave no
+     latency benefit.
+   - Kinds, namespaces and labels are interned.
+   - The hot store no longer drops unflushed events.
+   - Retention pins the payloads of versions that start a window.
+   - The chart sets `GOMEMLIMIT` from the memory limit.
 
 ## Results
 
-| Run | Resources | Events | Object JSON | Live heap | Peak heap | Disk |
-|---|---:|---:|---:|---:|---:|---:|
-| small | 6.6k | 51k | 184 MB | 425 MB | 840 MB | 43 MB |
-| medium | 37k | 257k | 931 MB | 2.08 GB | **4.82 GB** | 220 MB |
-| xlarge objects (150k initial objects, light churn) | 83k | 171k | 584 MB | 1.38 GB | 2.89 GB | 147 MB |
-| medium + 40% core/v1 Events | 54k | 127k | 357 MB | 740 MB | 1.77 GB | 96 MB |
-| medium, tuned (checkpoint per 100k events, no auto-compaction) | 37k | 257k | 931 MB | 1.97 GB | 4.08 GB | 396 MB |
+All runs use the harness described under
+[How to reproduce](#how-to-reproduce), on 4 vCPU with local disk.
 
-| Run | Bulk ingest | Live ingest (per event) | Longest ingest stall | Checkpoint mean / count | Compaction mean / count | Close | Reopen |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| small | 1,506 ev/s | 233 ev/s, p50 3.9 ms | 4.4 s | 0.55 s / 22 | 3.0 s / 2 | 5.5 s | 0.4 s |
-| medium | 526 ev/s | 107 ev/s, p50 3.0 ms | **27.9 s** | 3.6 s / 111 | 14.0 s / 19 | 2.7 s | 2.4 s |
-| xlarge objects | 697 ev/s | 227 ev/s, p50 3.3 ms | 17.5 s | 2.1 s / 74 | 8.8 s / 11 | 17.8 s | 1.7 s |
-| medium + Events | 1,166 ev/s | 268 ev/s, p50 2.9 ms | 10.2 s | 1.2 s / 55 | 5.9 s / 7 | 11.2 s | 0.9 s |
-| medium, tuned | 2,353 ev/s | 236 ev/s, p50 3.6 ms | 2.3 s | 1.7 s / 2 | – | 2.8 s | 2.4 s |
+### Reference workload: `large` profile, 7 days, 20% core/v1 Events
 
-Timeline query latency, p50 of 5 runs. Resource queries return page 1 at 100 resources per
-page; Events use the handler's unpaginated Event query.
+500 nodes, 200 namespaces, 108k distinct objects, 335k events, 1.08 GB of object JSON.
 
-| Query | small | medium | xlarge objects | medium + Events |
-|---|---:|---:|---:|---:|
-| resources, last 15m | 1.7 ms | 4.7 ms | 4.4 ms | 3.4 ms |
-| resources, last 1h | 5.2 ms | 35 ms | 33 ms | 14 ms |
-| resources, last 6h | 27 ms | 183 ms | 194 ms | 83 ms |
-| resources, last 24h | 133 ms | 798 ms | 694 ms | 289 ms |
-| resources, 24h, one namespace | 13 ms | 35 ms | 66 ms | 16 ms |
-| core/v1 Events, last 1h | – | – | – | 139 ms |
-| core/v1 Events, last 6h | – | – | – | **1.23 s** |
-| core/v1 Events, last 24h | – | – | – | **5.14 s** |
-| page through all resources in 1h (pages of 500) | 23 ms | 1.1 s | 5.9 s (148 pages) | 0.35 s |
-| 8 concurrent timeline requests, 1h | 16 ms | 111 ms | 198 ms | 487 ms |
+| Metric | Before | After |
+|---|---:|---:|
+| Bulk ingest (batches of 256) | 430 ev/s | ⟨R:load⟩ |
+| Longest batch stall | 32.7 s | ⟨R:batchmax⟩ |
+| Live ingest (one `ProcessEvent` per event) | 87 ev/s | ⟨R:live⟩ |
+| Live ingest p99 / max | 14.5 ms / 36 s | ⟨R:livep99⟩ / ⟨R:livemax⟩ |
+| Checkpoints (count × mean) | 145 × 4.6 s | ⟨R:ckpt⟩ |
+| Compactions (count × mean) | 26 × 17.2 s | ⟨R:compact⟩ |
+| Live heap / peak heap | 2,235 / 5,495 MB | ⟨R:heap⟩ |
+| Disk | 277 MB | ⟨R:disk⟩ |
+| Close / reopen | 5.2 s / 4.2 s | ⟨R:closeopen⟩ |
+| Resources, last 1h (page of 100) | 6.4 ms | ⟨R:q1h⟩ |
+| Resources, last 24h | – | ⟨R:q24h⟩ |
+| Resources, full 7 days | 1,147 ms | ⟨R:qfull⟩ |
+| Resources, full 7 days, one namespace | 61 ms | ⟨R:qfullns⟩ |
+| Walk every page of the last hour (82 × 500) | 607 ms | ⟨R:walk⟩ |
+| 8 concurrent timeline requests, 1h | 431 ms | ⟨R:conc⟩ |
+| Event query, full 7 days* | 15.0 s | ⟨R:evfull⟩ |
 
-## What limits scale
+\* Before this work, every timeline request also ran this query. It is now only used
+when someone asks for the `Event` kind explicitly.
 
-### 1. Memory grows with every event ever retained (the hard ceiling)
+### 30 days: `xlarge` profile, 5M churn events, 10% core/v1 Events, `retentionDays: 30`
 
-`Projection.appendResourceVersion` keeps a full copy of the object JSON for **every version
-of every resource**. The heap profile of the xlarge run shows 72% of live heap in
-`cloneBytes`, called from `appendResourceVersion`. Live heap comes to 6–8.5 KB per retained
-event, roughly the payload plus 2–4 KB for identity, labels and change info. The process
-peaks at about 2× live heap:
+1000 nodes, 400 namespaces. 5.07M events touching 970k distinct objects; most are pods
+replaced over the month, plus 500k Event objects. 17.4 GB of object JSON.
 
-- The chart sets no `GOMEMLIMIT`, so GC runs at the default `GOGC=100`.
-- Compaction decodes every on-disk event back into memory (see 3).
+⟨THIRTY⟩
 
-With the chart defaults, memory never stops growing: `retentionDays: 0` means nothing is
-pruned. The limit is `limits.memory: 1400Mi`, so the pod is OOM-killed after roughly
-**70–90k retained events (~250–300 MB of object JSON)**. The small run already peaked at
-840 MB with 51k events. The medium run crossed 1400Mi before 100k events.
+## Sizing
 
-Time until OOM is therefore about 80k events divided by your event rate. Your real rate is
-`rate(spectre_embedded_ingest_events_total[1h])`.
+Live heap is roughly:
 
-| Event rate | Time until OOM (default chart) | Heap needed for 1 day of history (live → peak) |
-|---|---|---|
-| 1 ev/s | ~22 h | 0.7 → 1.5 GB |
-| 5 ev/s | ~4.5 h | 3.5 → 7.5 GB |
-| 20 ev/s | ~1 h | 14 → 30 GB |
-| 100 ev/s | ~13 min | 70 → 150 GB |
+```
+heap ≈ 150 MB
+     + 0.9 KB × objects that existed during the retention window
+     + 0.1 KB × resource changes in the retention window
+     + 0.45 KB × core/v1 Events in the last 48h
+```
 
-The smallest retention you can set is `retentionDays: 1`. Even then, memory must hold a full
-day of every version.
+- **Objects** includes deleted ones still inside the window, such as replaced pods.
+  Labels make up a third of the per-object cost.
+- **Changes** count after duplicate removal; `spectre_embedded_ingest_events_total`
+  counts exactly these.
+- **The Event term** is bounded by `K8sEventSummaryHorizon` and by 64 summaries per
+  involved object.
 
-### 2. Ingest throughput and lock-held stalls
+Set `resources.limits.memory` to about 1.5× that. The chart sets `GOMEMLIMIT` from the
+limit (`goMemLimitFromResources: true`), so the GC works to stay below it. The headroom
+covers:
 
-- **Per-event cost.** The watcher calls `ProcessEvent` once per event. Each call:
-  - does one fsync
-  - runs about five full `json.Unmarshal`s of the object (`parseObject`,
-    `ParseResourceData`, `detectChangeKinds` on the old and new object, `ComputeJSONDiff`)
-  - holds the global engine mutex throughout
+- checkpoint encoding, which holds a snapshot of slice headers and Event summaries
+- compaction and queries in flight
 
-  Measured: **~100–270 events/s sustained**, p50 3–4 ms, which is CPU, not fsync.
-- **Checkpoints scale with history.** Every 2048 tail events (`checkpointMaxTailEvents`),
-  `checkpointLocked` serializes the entire projection: gob, then zstd. It does this while
-  holding the engine mutex. Cost grows linearly with history: 0.55 s mean at 51k events,
-  3.6 s at 257k. The total write work therefore grows quadratically, and ingest is blocked
-  for the full duration.
-- **Compaction rewrites everything.** With 4 or more segments, `compactLocked` merges *all*
-  segments into one. It decodes every event into a single slice, rewrites it, and does all
-  of this under the engine mutex. It ran 19 times in the medium run, averaging 14 s with a
-  28 s maximum. It is also the source of the second memory spike.
-- **The tuned config removes the stalls.** Checkpointing every 100k events with
-  auto-compaction off took the longest stall from 28 s to 2.3 s and made bulk ingest 4.5×
-  faster. Memory stayed the same.
-- **Shutdown is not bounded.** It does a flush and a checkpoint, which took up to 18 s
-  here. The pod's `terminationGracePeriodSeconds` is 60 s, and the checkpoint is
-  proportional to history.
+Without `GOMEMLIMIT`, peak heap runs at about 2× live heap.
 
-### 3. Query cost
+Disk:
 
-- **Resource timeline.** Cost is proportional to the number of resource *changes* in the
-  window, not to the number of objects. `recentWindowChangedUIDsLocked` builds a set of
-  every UID changed since `start`, and then sorts. That works out to about 3 µs per change:
-  35 ms for 1h and ~0.8 s for 24h at 250k changes/day. Linear extrapolation gives ~3.5 s for
-  a 24h view at 1M changes/day. A namespace filter helps a lot (24h: 35 ms instead of
-  800 ms).
-- **Per-resource history is unbounded.** A page holds at most 100–500 resources, but each
-  resource returns *every* version in the window, with full `ResourceData`. The 24h page of
-  100 Nodes returned 33,165 versions, about 200 MB of JSON in a single response. Real nodes
-  that report status every minute would make this worse.
-- **core/v1 Events: the slowest path.** `GET /v1/timeline` fires this query on *every*
-  request, in parallel with the resource query.
-  - Inside the 4h `recentEventCache`, each query still clones the whole cache.
-  - Outside it (the UI's 6h, 24h and 48h presets), `exportTimeRange` decompresses and
-    `json.Unmarshal`s every Event record in the window. It filters afterwards and returns
-    only 100.
-  - Cost is about 0.1 ms per Event in the window: 5.1 s for 24h with 48k Events. A cluster
-    emitting 20 Events/s would need about 3 minutes per 24h request.
-- **Object count by itself is fine.** 83k resources gave the same latency as 37k.
+- about **0.8 KB per stored event** (segments, zstd-compressed)
+- plus up to 2 × 256 MiB of tail journal
+- plus the last 3 checkpoints, each about 10% of segment size
 
-### 4. Disk is not a constraint
+The chart's default `persistence.enabled: false` keeps data on an `emptyDir`, so it does
+not survive the pod. For 7 days or more, enable persistence and size the volume with the
+numbers above.
 
-Segments and checkpoints compress about 4–6× (931 MB of JSON fits in 220 MB). The default
-10 Gi PVC is far larger than memory allows the store to grow. With compaction disabled,
-segments accumulate (57 after 257k events), and the tail journal grows to the configured
-budget.
+Measuring your rates:
 
-## What we can support today
+- Changes: `rate(spectre_embedded_ingest_events_total[1h])`. This includes core/v1
+  Events.
+- Events alone: count `kind=Event` objects in the timeline, or use the cluster's own
+  Event rate.
+- Duplicates dropped: `spectre_embedded_ingest_unchanged_events_total`.
 
-| Cluster | Typical churn* | With default chart (1400Mi, no retention) | Best case with config only |
-|---|---|---|---|
-| Small (≤10 nodes, ≤500 pods) | ≤1 ev/s | Runs for roughly a day, then OOM | `retentionDays: 1`, 2 Gi limit, `GOMEMLIMIT`: OK |
-| Medium (~100 nodes, ~3k pods) | 3–10 ev/s | OOM within hours | `retentionDays: 1` + 8–16 Gi + fewer checkpoints / no auto-compaction: workable, but 24h views ~1 s and Event views slow |
-| Large (500–1000+ nodes, 15–30k pods) | 20–100+ ev/s | Not supported | Not supported: needs 30–150 GB heap for 1 day, and ingest sits at or above the ~100–250 ev/s single-writer ceiling |
+## Limits and caveats
 
-\* Rough rates. Measure yours with `spectre_embedded_ingest_events_total`.
+- **Response size of long windows.**
+  - A timeline page carries every version of each resource in the window, with its full
+    object, because the UI diffs neighbouring versions.
+  - Objects that change often add up: a 30-day page of 100 Nodes held 61,821 versions,
+    about 300 MB of JSON, and took ~1 s.
+  - The planned fix is to load `resourceData` per version on demand: send segments
+    without payloads and fetch a version when the detail panel opens. That needs an API
+    and UI change.
+  - Until then, the UI's long presets work best with namespace or kind filters.
+- **Node heartbeats dominate history.** Kubelets rewrite Node status (heartbeat
+  timestamps) every few minutes even when nothing changes: 1000 nodes produce
+  ~290k versions a day. Not storing heartbeat-only status changes would cut memory and
+  response size for Nodes substantially. It is lossy for the detail view, so it is
+  left as a follow-up decision.
+- **Explicit Event-kind queries** (`kind=Event` in the timeline) scan Event metadata for
+  the whole window: 0.4–0.5 s for 7 days and ~7 s for 30 days with 500k Events. Default
+  timeline requests no longer run this query.
+- **Older Event summaries are read from disk.**
+  - The first query reaching back more than 48h loads the associated-UID index of each
+    segment in its window.
+  - Those indexes stay cached, and their memory grows with the number of Events in them.
+- **Checkpoint CPU grows with history.** A checkpoint encodes the whole projection
+  without blocking ingest, but still costs CPU: ⟨CKPT30⟩ each at the 30-day scale, every
+  50k events.
+- **Bulk-load stalls.** While loading at thousands of events per second, the longest
+  batch stall at 30 days was ⟨STALL30⟩: retention and compaction commits hold the
+  engine lock briefly. Real ingest rates are far below the measured ceiling.
+- **Storage format.**
+  - Segments, tail and checkpoints use new binary formats (segment record magic `0xB1`,
+    tail `0xB2`, checkpoint v3), and the manifest has new fields.
+  - Older formats (JSON records, v2 checkpoints) are still read, so upgrading in place
+    works.
+  - Downgrading to an older Spectre does not; wipe the data directory to do that.
 
-**Ceilings, in the order they bite:**
+## How to reproduce
 
-1. **Memory.** About 2× (retained events × average object size). Unbounded under the
-   default config.
-2. **Ingest.** About 100–250 events/s on one writer, minus checkpoint and compaction
-   stalls that grow with history.
-3. **Event query latency.** Linear in the number of core/v1 Events in the window, and
-   charged to every timeline request.
+The harness sits behind the `scale` build tag, so it never runs in `make test`.
 
-## Recommended changes, by impact
+```bash
+# Reference workload (7 days, 335k events), ~2 minutes:
+SPECTRE_SCALE_PROFILE=large SPECTRE_SCALE_CHURN=300000 SPECTRE_SCALE_K8S_EVENTS=20 \
+SPECTRE_SCALE_WINDOW=168h SPECTRE_SCALE_OUT=/tmp/ref.json \
+  go test -tags scale -run 'TestTimelineScale$' -timeout 0 -v ./internal/embeddedstore/
 
-1. **Stop keeping full object JSON for every historical version in the projection.**
-   Keep the latest object, plus the small per-version metadata the timeline needs (status,
-   change flags, timestamps). Hydrate historical `ResourceData` from segments using the
-   existing `resource.idx`. Memory then scales with object count rather than event count,
-   which also shrinks checkpoints. This is the change that moves the ceiling.
-2. **Bound checkpoint and compaction work.**
-   - Make checkpoints incremental, or at least take them off the engine mutex.
-   - Replace merge-all compaction with size-tiered merging that streams records rather
-     than materialising every event.
-   - Short term: raise the `checkpointMaxTailEvents` default (2048 is far too small), and
-     consider disabling auto-compaction (measured above).
-3. **Make the Event query proportional to the page, not the window.**
-   - Walk segments newest-first and stop once the page is full.
-   - Filter on the index (namespace, involved UID) before decoding.
-   - Store a compact `K8sEventInfo` instead of re-parsing full JSON.
-   - Stop cloning the whole recent cache per request.
-4. **Cap per-resource versions in a timeline response.** Downsample, or send `ResourceData`
-   only for status transitions.
-5. **Chart defaults.**
-   - Set a default `retentionDays` (1–3).
-   - Set `GOMEMLIMIT` from `limits.memory`.
-   - Document a sizing formula: limit ≈ 2.5 × daily event volume × average object size ×
-     retention days. Until item 1 lands, this is the only real way to size the pod.
-   - Make sure `terminationGracePeriodSeconds` covers the shutdown checkpoint.
+# 30 days, 5M events, ~20 minutes and ~6 GB of disk:
+SPECTRE_SCALE_PROFILE=xlarge SPECTRE_SCALE_CHURN=5000000 SPECTRE_SCALE_K8S_EVENTS=10 \
+SPECTRE_SCALE_WINDOW=720h SPECTRE_SCALE_RETENTION_DAYS=30 SPECTRE_SCALE_DIR=/data/scale \
+SPECTRE_SCALE_OUT=/tmp/30d.json SPECTRE_SCALE_HEAPPROFILE=/tmp/30d.heap \
+  go test -tags scale -run 'TestTimelineScale$' -timeout 0 -v ./internal/embeddedstore/
+
+# Heap per stored version, and the cost of a watch re-list:
+go test -tags scale -run 'TestScaleVersionMemory$|TestScaleRelist$' -v ./internal/embeddedstore/
+```
+
+The workload in `scale_workload_test.go` is deterministic and shaped like watcher
+output. Object sizes match real objects with managedFields stripped: Pod ~4 KB, Node
+~5 KB, Deployment and ReplicaSet ~3 KB, ConfigMap ~2 KB. The churn mix is:
+
+| Change | Share |
+|---|---:|
+| Pod status updates | 55% |
+| Pod replacements (delete, create, 2 updates) | 15% |
+| Rollouts | 3% |
+| Node status updates | 20% |
+| ConfigMap edits | 7% |
+| core/v1 Events | optional share of all churn |
+
+Timestamps are spread evenly over the window, ending now.
+
+`scale_test.go` opens the engine through `Open(Config{...})` with the production
+defaults. It then measures:
+
+- bulk load (`ProcessBatch`, 256 events per batch)
+- live ingest (5k single `ProcessEvent` calls, as the watcher makes them)
+- checkpoint, flush and compaction cost, from the engine's metrics
+- live and peak heap, and disk
+- timeline queries through `ExecutePaginated`, as the HTTP handler calls it
+- a page walk and concurrent requests
+- close and reopen
+
+Environment knobs are listed at the top of `scale_test.go`.
