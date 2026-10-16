@@ -334,7 +334,11 @@ func encodeCheckpointRecordV3(out *checkpointV3Writer, record *checkpointRecordS
 			out.byte(checkpointV3SameAsPrevious)
 		} else {
 			meta := version.metaOrEmpty()
-			out.byte(checkpointV3New)
+			if meta.graph != nil {
+				out.byte(checkpointV3NewWithGraph)
+			} else {
+				out.byte(checkpointV3New)
+			}
 			out.string(meta.UID)
 			out.string(meta.Kind)
 			out.string(meta.APIGroup)
@@ -347,6 +351,9 @@ func encodeCheckpointRecordV3(out *checkpointV3Writer, record *checkpointRecordS
 				previousLabels = previous.labels()
 			}
 			out.labels(meta.Labels, previousLabels, previous == nil)
+			if meta.graph != nil {
+				out.graphFacts(meta.graph)
+			}
 		}
 		out.uint64(version.dataHash)
 		encodeCheckpointPayloadV3(out, version)
@@ -627,12 +634,13 @@ func decodeCheckpointResourcesV3(r *bufio.Reader, projection *Projection, segmen
 			version.typeCode = remap(typeCodes, in.byte())
 			version.statusCode = remap(statusCodes, in.byte())
 			version.flags = in.byte()
-			switch in.byte() {
+			switch marker := in.byte(); marker {
 			case checkpointV3SameAsPrevious:
 				if previous != nil {
 					version.meta = previous.meta
 				}
-			case checkpointV3New:
+			case checkpointV3New, checkpointV3NewWithGraph:
+				withGraph := marker == checkpointV3NewWithGraph
 				meta := &versionMeta{
 					UID:       in.string(),
 					Kind:      in.string(),
@@ -647,6 +655,13 @@ func decodeCheckpointResourcesV3(r *bufio.Reader, projection *Projection, segmen
 					previousLabels = previous.labels()
 				}
 				meta.Labels = in.labels(previousLabels)
+				if withGraph {
+					var previousFacts *graphFacts
+					if previous != nil && previous.meta != nil {
+						previousFacts = previous.meta.graph
+					}
+					meta.graph = in.graphFacts(previousFacts)
+				}
 				version.meta = meta
 			default:
 				in.fail(fmt.Errorf("invalid meta marker"))

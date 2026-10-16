@@ -228,6 +228,36 @@ func (p *Projection) finishAppliedResourceEvent(
 	}
 
 	p.updateTimestampBounds(event.Timestamp)
+	p.indexAppliedVersionLocked(record, event)
+}
+
+// indexAppliedVersionLocked indexes the graph facts of the version just applied for
+// event, and of the version after it when the event arrived out of order.
+func (p *Projection) indexAppliedVersionLocked(record *resourceRecord, event models.Event) {
+	matcher := newEventIDMatcher(event.ID)
+	versions := record.versions
+	for i := len(versions) - 1; i >= 0; i-- {
+		if versions[i].timestamp != event.Timestamp || !matcher.matches(&versions[i]) {
+			continue
+		}
+		var previous *versionMeta
+		if i > 0 {
+			previous = versions[i-1].meta
+		}
+		p.indexMetaLocked(record, versions[i].meta, previous)
+		if i+1 < len(versions) {
+			p.indexMetaLocked(record, versions[i+1].meta, versions[i].meta)
+		}
+		return
+	}
+}
+
+func (p *Projection) indexRecordMetasLocked(record *resourceRecord) {
+	var previous *versionMeta
+	for i := range record.versions {
+		p.indexMetaLocked(record, record.versions[i].meta, previous)
+		previous = record.versions[i].meta
+	}
 }
 
 func (p *Projection) ensureResourceRecord(event models.Event) {
@@ -239,6 +269,7 @@ func (p *Projection) ensureResourceRecord(event models.Event) {
 	record := &resourceRecord{uid: uid}
 	p.resourcesByUID[uid] = record
 	kind, namespace := internString(event.Resource.Kind), internString(event.Resource.Namespace)
+	p.indexRecordNamespaceLocked(record, namespace)
 	key := resourceKey{
 		namespace: namespace,
 		kind:      kind,
@@ -298,6 +329,7 @@ func (p *Projection) rebuildRecordFromEvents(uid string, events []models.Event) 
 
 	record.versions = versions
 	record.latest = state
+	p.indexRecordMetasLocked(record)
 }
 
 func resourceVersionEvent(version resourceVersion) models.Event {
@@ -385,7 +417,7 @@ func insertResourceVersion(record *resourceRecord, event models.Event) {
 		next := &versions[idx+1]
 		data := versionPayload(next)
 		configChanged, statusChanged := changeKindsFromStates(state, newRecordChangeState(data, parseObject(data)))
-		next.flags = 0
+		next.flags &= versionFlagNoPayload
 		if configChanged {
 			next.flags |= versionFlagConfigChanged
 		}

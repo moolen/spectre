@@ -175,7 +175,7 @@ func (p *Projection) resolveByName(namespace, kind, name string, failureTimestam
 
 func (p *Projection) activeResourcesInNamespace(namespace string, timestampNs int64) []*resourceVersion {
 	var result []*resourceVersion
-	for _, record := range p.resourcesByUID {
+	for _, record := range uniqueRecords(p.graph.byNamespace[namespace]) {
 		version := record.activeVersionAt(timestampNs)
 		if version == nil || version.meta.Kind == "Event" || version.meta.Namespace != namespace {
 			continue

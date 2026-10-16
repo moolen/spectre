@@ -1,7 +1,13 @@
 package embeddedstore
 
 func managerReference(version *resourceVersion) *managerRef {
-	labels := version.labels()
+	meta := version.metaOrEmpty()
+	return managerReferenceFor(meta.Labels, meta.Namespace)
+}
+
+// managerReferenceFor derives the GitOps manager of a resource in namespace from its
+// labels.
+func managerReferenceFor(labels map[string]string, namespace string) *managerRef {
 	switch {
 	case labels["helm.toolkit.fluxcd.io/name"] != "":
 		return &managerRef{
@@ -21,7 +27,7 @@ func managerReference(version *resourceVersion) *managerRef {
 		return &managerRef{
 			kind:       "Application",
 			name:       labels["argocd.argoproj.io/instance"],
-			namespace:  version.meta.Namespace,
+			namespace:  namespace,
 			confidence: 1.0,
 		}
 	default:

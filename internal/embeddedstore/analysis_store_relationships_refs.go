@@ -25,24 +25,26 @@ func ownerUIDs(object map[string]any) []string {
 	return result
 }
 
-func directReferences(version *resourceVersion) []directRef {
+// directReferencesFromObject returns the name-based references an object of kind in
+// namespace makes: volume and env sources, role bindings, Flux sources, Gateway routes,
+// the node a pod is scheduled on and its service account.
+func directReferencesFromObject(kind, namespace string, object map[string]any) []directRef {
 	result := make([]directRef, 0)
-	object := parsedVersionObject(version)
-	switch version.meta.Kind {
+	switch kind {
 	case "Pod":
-		result = append(result, podReferences(version)...)
+		result = append(result, podReferences(namespace, object)...)
 	case "Ingress":
-		result = append(result, ingressReferences(version)...)
+		result = append(result, ingressReferences(namespace, object)...)
 	case "RoleBinding", "ClusterRoleBinding":
-		result = append(result, roleBindingReferences(version)...)
+		result = append(result, roleBindingReferences(object)...)
 	case "HelmRelease":
-		result = append(result, helmReleaseReferences(version)...)
+		result = append(result, helmReleaseReferences(object)...)
 	case "Kustomization":
-		result = append(result, sourceRefReferences(version, "GitRepository", "Bucket", "OCIRepository")...)
+		result = append(result, sourceRefReferences(object, "GitRepository", "Bucket", "OCIRepository")...)
 	case "HTTPRoute":
-		result = append(result, sourceRefReferences(version, "Gateway", "Service")...)
+		result = append(result, sourceRefReferences(object, "Gateway", "Service")...)
 	}
-	if version.meta.Kind == "Pod" {
+	if kind == "Pod" {
 		if nodeName := getString(getMap(object, "spec"), "nodeName"); nodeName != "" {
 			result = append(result, directRef{kind: "Node", name: nodeName, relType: "SCHEDULED_ON"})
 		}
@@ -51,26 +53,26 @@ func directReferences(version *resourceVersion) []directRef {
 			serviceAccountName = getString(getMap(object, "spec"), "serviceAccount")
 		}
 		if serviceAccountName != "" {
-			result = append(result, directRef{kind: "ServiceAccount", name: serviceAccountName, namespace: version.meta.Namespace, relType: "USES_SERVICE_ACCOUNT"})
+			result = append(result, directRef{kind: "ServiceAccount", name: serviceAccountName, namespace: namespace, relType: "USES_SERVICE_ACCOUNT"})
 		}
 	}
 
 	return result
 }
 
-func podReferences(version *resourceVersion) []directRef {
-	spec := getMap(parsedVersionObject(version), "spec")
+func podReferences(namespace string, object map[string]any) []directRef {
+	spec := getMap(object, "spec")
 	result := make([]directRef, 0)
 	for _, volumeItem := range getSlice(spec, "volumes") {
 		volume, _ := volumeItem.(map[string]any)
 		if configMap := getMap(volume, "configMap"); configMap != nil {
 			if name := getString(configMap, "name"); name != "" {
-				result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+				result = append(result, directRef{kind: "ConfigMap", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 			}
 		}
 		if secret := getMap(volume, "secret"); secret != nil {
 			if name := getString(secret, "secretName"); name != "" {
-				result = append(result, directRef{kind: "Secret", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+				result = append(result, directRef{kind: "Secret", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 			}
 		}
 		if projected := getMap(volume, "projected"); projected != nil {
@@ -78,12 +80,12 @@ func podReferences(version *resourceVersion) []directRef {
 				source, _ := sourceItem.(map[string]any)
 				if configMap := getMap(source, "configMap"); configMap != nil {
 					if name := getString(configMap, "name"); name != "" {
-						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 				if secret := getMap(source, "secret"); secret != nil {
 					if name := getString(secret, "name"); name != "" {
-						result = append(result, directRef{kind: "Secret", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "Secret", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 			}
@@ -96,12 +98,12 @@ func podReferences(version *resourceVersion) []directRef {
 				envFrom, _ := envFromItem.(map[string]any)
 				if configMapRef := getMap(envFrom, "configMapRef"); configMapRef != nil {
 					if name := getString(configMapRef, "name"); name != "" {
-						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 				if secretRef := getMap(envFrom, "secretRef"); secretRef != nil {
 					if name := getString(secretRef, "name"); name != "" {
-						result = append(result, directRef{kind: "Secret", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "Secret", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 			}
@@ -110,12 +112,12 @@ func podReferences(version *resourceVersion) []directRef {
 				valueFrom := getMap(env, "valueFrom")
 				if configMapRef := getMap(valueFrom, "configMapKeyRef"); configMapRef != nil {
 					if name := getString(configMapRef, "name"); name != "" {
-						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "ConfigMap", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 				if secretRef := getMap(valueFrom, "secretKeyRef"); secretRef != nil {
 					if name := getString(secretRef, "name"); name != "" {
-						result = append(result, directRef{kind: "Secret", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+						result = append(result, directRef{kind: "Secret", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 					}
 				}
 			}
@@ -125,13 +127,13 @@ func podReferences(version *resourceVersion) []directRef {
 	return dedupeRefs(result)
 }
 
-func ingressReferences(version *resourceVersion) []directRef {
-	spec := getMap(parsedVersionObject(version), "spec")
+func ingressReferences(namespace string, object map[string]any) []directRef {
+	spec := getMap(object, "spec")
 	result := make([]directRef, 0)
 	if backend := getMap(spec, "defaultBackend"); backend != nil {
 		if service := getMap(backend, "service"); service != nil {
 			if name := getString(service, "name"); name != "" {
-				result = append(result, directRef{kind: "Service", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+				result = append(result, directRef{kind: "Service", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 			}
 		}
 	}
@@ -143,7 +145,7 @@ func ingressReferences(version *resourceVersion) []directRef {
 			backend := getMap(pathMap, "backend")
 			service := getMap(backend, "service")
 			if name := getString(service, "name"); name != "" {
-				result = append(result, directRef{kind: "Service", name: name, namespace: version.meta.Namespace, relType: "REFERENCES_SPEC"})
+				result = append(result, directRef{kind: "Service", name: name, namespace: namespace, relType: "REFERENCES_SPEC"})
 			}
 		}
 	}
@@ -151,9 +153,8 @@ func ingressReferences(version *resourceVersion) []directRef {
 	return dedupeRefs(result)
 }
 
-func roleBindingReferences(version *resourceVersion) []directRef {
+func roleBindingReferences(object map[string]any) []directRef {
 	result := make([]directRef, 0)
-	object := parsedVersionObject(version)
 	roleRef := getMap(object, "roleRef")
 	roleKind := getString(roleRef, "kind")
 	roleName := getString(roleRef, "name")
@@ -176,9 +177,9 @@ func roleBindingReferences(version *resourceVersion) []directRef {
 	return dedupeRefs(result)
 }
 
-func helmReleaseReferences(version *resourceVersion) []directRef {
-	spec := getMap(parsedVersionObject(version), "spec")
-	result := sourceRefReferences(version, "GitRepository", "Bucket", "OCIRepository")
+func helmReleaseReferences(object map[string]any) []directRef {
+	spec := getMap(object, "spec")
+	result := sourceRefReferences(object, "GitRepository", "Bucket", "OCIRepository")
 	for _, valueItem := range getSlice(spec, "valuesFrom") {
 		valueRef, _ := valueItem.(map[string]any)
 		kind := getString(valueRef, "kind")
@@ -196,8 +197,8 @@ func helmReleaseReferences(version *resourceVersion) []directRef {
 	return dedupeRefs(result)
 }
 
-func sourceRefReferences(version *resourceVersion, allowedKinds ...string) []directRef {
-	spec := getMap(parsedVersionObject(version), "spec")
+func sourceRefReferences(object map[string]any, allowedKinds ...string) []directRef {
+	spec := getMap(object, "spec")
 	sourceRef := getMap(spec, "sourceRef")
 	if len(sourceRef) == 0 {
 		chart := getMap(spec, "chart")

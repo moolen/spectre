@@ -73,8 +73,17 @@ func buildResourceVersion(event models.Event, priorVersions []resourceVersion, p
 	if len(priorVersions) > 0 {
 		previousMeta = priorVersions[len(priorVersions)-1].meta
 	}
-	version.setIdentity(buildResourceIdentityWithLabels(event, labels, priorVersions), previousMeta)
+	// Versions without a payload (deletes) keep the previous facts; factsFor reports
+	// them as empty because they carry no object.
+	var facts *graphFacts
+	if len(event.Data) > 0 {
+		facts = graphFactsFromObject(event.Resource.Kind, event.Resource.Namespace, object)
+	}
+	version.setIdentity(buildResourceIdentityWithLabels(event, labels, priorVersions), previousMeta, facts)
 	version.setChangeInfo(buildChangeEventInfoFromObject(event, object, previous, current))
+	if len(event.Data) == 0 {
+		version.flags |= versionFlagNoPayload
+	}
 	return version, current
 }
 

@@ -9,14 +9,16 @@ import (
 
 	"github.com/moolen/spectre/internal/analysis"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
-	"github.com/moolen/spectre/internal/models"
 )
 
+// GetNamespaceGraph returns one page of a namespace's resources at a point in time, the
+// cluster-scoped resources within MaxDepth hops of them, and the edges between all of
+// those. Edges come from in-memory graph facts and reverse indexes; payloads are read
+// only for the spec diffs of the returned nodes, after the projection lock is released.
 func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.NamespaceGraphQuery) (*analysisstore.NamespaceGraphData, error) {
-	s.projection.mu.RLock()
-	defer s.projection.mu.RUnlock()
-
 	startTime := time.Now()
+
+	s.projection.mu.RLock()
 	// Read the field directly: RetentionWindowNs takes the read lock again, which blocks
 	// forever if a writer queues up between the two acquisitions.
 	query := normalizeNamespaceQuery(input, s.projection.retentionWindowNs)
@@ -55,6 +57,11 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 		return allVersions[i].meta.UID < allVersions[j].meta.UID
 	})
 
+	type specDiffJob struct {
+		node             int
+		earliest, latest resourceVersion
+	}
+	var diffJobs []specDiffJob
 	nodes := make([]analysisstore.NamespaceGraphNode, 0, len(allVersions))
 	for _, version := range allVersions {
 		node := analysisstore.NamespaceGraphNode{
@@ -66,14 +73,17 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 			Status:    version.status(),
 			Labels:    copyStringMap(version.labels()),
 		}
-		latestEvent := analysisstore.NamespaceGraphChangeEvent{
+		node.LatestEvent = &analysisstore.NamespaceGraphChangeEvent{
 			TimestampNs:  version.timestamp,
 			EventType:    string(version.eventType()),
 			Status:       version.status(),
-			SpecChanges:  s.specDiffWithinLookback(version.meta.UID, query.TimestampNs, query.LookbackNs),
-			SpecReplicas: specReplicasForVersion(version),
+			SpecReplicas: factsFor(version).specReplicas(),
 		}
-		node.LatestEvent = &latestEvent
+		if earliest, latest, ok := s.specDiffVersions(version.meta.UID, query.TimestampNs, query.LookbackNs); ok {
+			// Copies: versions are immutable apart from payload references, and a copy
+			// keeps the reference it was taken with.
+			diffJobs = append(diffJobs, specDiffJob{node: len(nodes), earliest: *earliest, latest: *latest})
+		}
 		nodes = append(nodes, node)
 	}
 
@@ -86,6 +96,11 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 			LastKind: last.meta.Kind,
 			LastName: last.meta.Name,
 		})
+	}
+	s.projection.mu.RUnlock()
+
+	for i := range diffJobs {
+		nodes[diffJobs[i].node].LatestEvent.SpecChanges = specDiff(&diffJobs[i].earliest, &diffJobs[i].latest)
 	}
 
 	return &analysisstore.NamespaceGraphData{
@@ -166,30 +181,45 @@ func applyCursor(resources []*resourceVersion, cursor namespaceCursor) []*resour
 	return result
 }
 
-func (s *Store) specDiffWithinLookback(uid string, timestampNs, lookbackNs int64) string {
+// specDiffVersions returns the versions a node's spec diff compares: the earliest with
+// a payload inside the lookback window and the latest with a payload at or before
+// timestampNs (the first of equal timestamps in both cases). ok is false when there is
+// nothing to compare.
+func (s *Store) specDiffVersions(uid string, timestampNs, lookbackNs int64) (*resourceVersion, *resourceVersion, bool) {
 	record := s.projection.resourcesByUID[uid]
 	if record == nil {
-		return ""
+		return nil, nil, false
 	}
+	versions := record.versions
+	end := sort.Search(len(versions), func(i int) bool { return versions[i].timestamp > timestampNs })
 
-	var earliest, latest *resourceVersion
-	startNs := timestampNs - lookbackNs
-	for i := range record.versions {
-		version := &record.versions[i]
-		if version.timestamp > timestampNs || !versionHasPayload(version) {
-			continue
+	var latest *resourceVersion
+	for i := end - 1; i >= 0; i-- {
+		version := &versions[i]
+		if latest != nil && version.timestamp != latest.timestamp {
+			break
 		}
-		if latest == nil || version.timestamp > latest.timestamp {
+		if versionHasPayload(version) {
 			latest = version
 		}
-		if version.timestamp >= startNs && (earliest == nil || version.timestamp < earliest.timestamp) {
-			earliest = version
+	}
+
+	startNs := timestampNs - lookbackNs
+	var earliest *resourceVersion
+	for i := sort.Search(end, func(i int) bool { return versions[i].timestamp >= startNs }); i < end; i++ {
+		if versionHasPayload(&versions[i]) {
+			earliest = &versions[i]
+			break
 		}
 	}
 	if earliest == nil || latest == nil || earliest.timestamp == latest.timestamp {
-		return ""
+		return nil, nil, false
 	}
+	return earliest, latest, true
+}
 
+// specDiff formats the spec-only differences between two versions' payloads.
+func specDiff(earliest, latest *resourceVersion) string {
 	diffs, err := analysis.ComputeJSONDiff(versionPayload(earliest), versionPayload(latest))
 	if err != nil {
 		return ""
@@ -222,27 +252,170 @@ func (s *Store) namespaceEdgesForSet(versionsByUID map[string]*resourceVersion, 
 	return result
 }
 
-func (s *Store) clusterScopedReachableFrom(start []*resourceVersion, timestampNs, lookbackNs int64, maxDepth int) []*resourceVersion {
-	startNs := timestampNs - lookbackNs
-	visible := s.visibleVersions(timestampNs, startNs)
-	edges := s.currentEdgesForVersions(visible, timestampNs, startNs)
-	adjacency := make(map[string][]string)
-	for _, edge := range edges {
-		adjacency[edge.sourceUID] = append(adjacency[edge.sourceUID], edge.targetUID)
-		adjacency[edge.targetUID] = append(adjacency[edge.targetUID], edge.sourceUID)
+// graphWalk resolves the neighbours of resources visible at one point in time. A
+// resource is visible when it exists at timestampNs or was deleted inside the window;
+// edges only connect visible resources.
+type graphWalk struct {
+	store         *Store
+	timestampNs   int64
+	windowStartNs int64
+	// namespaces caches the visible pods and pod-selecting resources per namespace.
+	namespaces map[string]*namespaceSelectorSet
+}
+
+type namespaceSelectorSet struct {
+	pods      []*resourceVersion
+	selectors []*resourceVersion
+}
+
+func (w *graphWalk) visible(record *resourceRecord) *resourceVersion {
+	if record == nil {
+		return nil
+	}
+	return record.visibleVersionWithinWindow(w.timestampNs, w.windowStartNs)
+}
+
+func (w *graphWalk) resolve(namespace, kind, name string) *resourceVersion {
+	return w.store.projection.resolveByName(namespace, kind, name, w.timestampNs, w.windowStartNs)
+}
+
+// resolveManager resolves a GitOps manager reference, falling back to the resource's own
+// namespace when the reference has none.
+func (w *graphWalk) resolveManager(version *resourceVersion) *resourceVersion {
+	manager := managerReference(version)
+	if manager == nil {
+		return nil
+	}
+	resolved := w.resolve(manager.namespace, manager.kind, manager.name)
+	if resolved == nil && manager.namespace == "" {
+		resolved = w.resolve(version.meta.Namespace, manager.kind, manager.name)
+	}
+	return resolved
+}
+
+func (w *graphWalk) selectorSet(namespace string) *namespaceSelectorSet {
+	if set, ok := w.namespaces[namespace]; ok {
+		return set
+	}
+	set := &namespaceSelectorSet{}
+	for _, record := range uniqueRecords(w.store.projection.graph.byNamespace[namespace]) {
+		version := w.visible(record)
+		if version == nil || version.isDelete() || version.meta.Namespace != namespace {
+			continue
+		}
+		switch {
+		case version.meta.Kind == "Pod":
+			set.pods = append(set.pods, version)
+		case resourceUsesPodSelector(version.meta.Kind):
+			set.selectors = append(set.selectors, version)
+		}
+	}
+	if w.namespaces == nil {
+		w.namespaces = make(map[string]*namespaceSelectorSet)
+	}
+	w.namespaces[namespace] = set
+	return set
+}
+
+// neighbours returns the visible resources sharing an edge with version, in either
+// direction. With clusterScopedOnly it skips namespaced neighbours, which lets the last
+// hop of a walk avoid selector matching (selectors only connect resources of one
+// namespace).
+func (w *graphWalk) neighbours(version *resourceVersion, clusterScopedOnly bool) []*resourceVersion {
+	uid := version.meta.UID
+	var result []*resourceVersion
+	add := func(other *resourceVersion) {
+		if other == nil || other.meta.UID == "" || other.meta.UID == uid {
+			return
+		}
+		if clusterScopedOnly && other.meta.Namespace != "" {
+			return
+		}
+		result = append(result, other)
+	}
+	projection := w.store.projection
+	facts := factsFor(version)
+
+	// Outgoing: owners, name references and the GitOps manager.
+	for _, owner := range facts.owners() {
+		add(w.visible(projection.resourcesByUID[owner]))
+	}
+	for ref := range facts.refs() {
+		add(w.resolve(ref.namespaceFor(version.meta.Namespace), ref.kind, ref.name))
+	}
+	add(w.resolveManager(version))
+
+	// Incoming: children, and resources whose references or manager labels resolve here.
+	for _, record := range uniqueRecords(projection.graph.byOwner[uid]) {
+		if child := w.visible(record); child != nil && containsString(factsFor(child).owners(), uid) {
+			add(child)
+		}
+	}
+	key := resourceKey{namespace: version.meta.Namespace, kind: version.meta.Kind, name: version.meta.Name}
+	for _, record := range uniqueRecords(projection.graph.byTarget[key]) {
+		source := w.visible(record)
+		if source == nil {
+			continue
+		}
+		if w.referencesResolveTo(source, key, uid) {
+			add(source)
+		}
 	}
 
-	seen := make(map[string]bool)
-	queue := make([]struct {
-		uid   string
-		depth int
-	}, 0, len(start))
+	// Selector edges: pods and the resources selecting them share a namespace.
+	if clusterScopedOnly && version.meta.Namespace != "" || version.isDelete() {
+		return result
+	}
+	set := w.selectorSet(version.meta.Namespace)
+	switch {
+	case version.meta.Kind == "Pod":
+		for _, selector := range set.selectors {
+			if factsFor(selector).selector().matches(version.labels()) {
+				add(selector)
+			}
+		}
+	case resourceUsesPodSelector(version.meta.Kind):
+		for _, pod := range set.pods {
+			if facts.selector().matches(pod.labels()) {
+				add(pod)
+			}
+		}
+	}
+	return result
+}
+
+// referencesResolveTo reports whether a name reference or the manager of source names
+// key and resolves to the resource uid.
+func (w *graphWalk) referencesResolveTo(source *resourceVersion, key resourceKey, uid string) bool {
+	for ref := range factsFor(source).refs() {
+		refKey := resourceKey{namespace: ref.namespaceFor(source.meta.Namespace), kind: ref.kind, name: ref.name}
+		if refKey != key {
+			continue
+		}
+		if target := w.resolve(refKey.namespace, refKey.kind, refKey.name); target != nil && target.meta.UID == uid {
+			return true
+		}
+	}
+	if manager := w.resolveManager(source); manager != nil && manager.meta.UID == uid {
+		return true
+	}
+	return false
+}
+
+// clusterScopedReachableFrom returns the cluster-scoped resources within maxDepth hops of
+// start. The walk expands only the resources it reaches.
+func (s *Store) clusterScopedReachableFrom(start []*resourceVersion, timestampNs, lookbackNs int64, maxDepth int) []*resourceVersion {
+	walk := &graphWalk{store: s, timestampNs: timestampNs, windowStartNs: timestampNs - lookbackNs}
+
+	type queued struct {
+		version *resourceVersion
+		depth   int
+	}
+	seen := make(map[string]bool, len(start))
+	queue := make([]queued, 0, len(start))
 	for _, version := range start {
 		seen[version.meta.UID] = true
-		queue = append(queue, struct {
-			uid   string
-			depth int
-		}{uid: version.meta.UID})
+		queue = append(queue, queued{version: version})
 	}
 
 	var result []*resourceVersion
@@ -252,40 +425,26 @@ func (s *Store) clusterScopedReachableFrom(start []*resourceVersion, timestampNs
 		if item.depth >= maxDepth {
 			continue
 		}
-		for _, nextUID := range adjacency[item.uid] {
-			if seen[nextUID] {
+		// Resources found at the last hop are not expanded, so only cluster-scoped ones
+		// matter there.
+		lastHop := item.depth+1 >= maxDepth
+		for _, next := range walk.neighbours(item.version, lastHop) {
+			if seen[next.meta.UID] {
 				continue
 			}
-			seen[nextUID] = true
-			next := visible[nextUID]
-			if next == nil {
-				continue
-			}
+			seen[next.meta.UID] = true
 			if next.meta.Namespace == "" {
 				result = append(result, next)
 			}
-			queue = append(queue, struct {
-				uid   string
-				depth int
-			}{uid: nextUID, depth: item.depth + 1})
+			queue = append(queue, queued{version: next, depth: item.depth + 1})
 		}
 	}
 	return result
 }
 
-func (s *Store) visibleVersions(timestampNs, windowStartNs int64) map[string]*resourceVersion {
-	result := make(map[string]*resourceVersion)
-	for uid, record := range s.projection.resourcesByUID {
-		version := record.visibleVersionWithinWindow(timestampNs, windowStartNs)
-		if version == nil {
-			continue
-		}
-		result[uid] = version
-	}
-	return result
-}
-
+// currentEdgesForVersions returns the edges among versionsByUID.
 func (s *Store) currentEdgesForVersions(versionsByUID map[string]*resourceVersion, timestampNs, windowStartNs int64) []currentEdge {
+	walk := &graphWalk{store: s, timestampNs: timestampNs, windowStartNs: windowStartNs}
 	seen := make(map[string]currentEdge)
 	add := func(sourceUID, targetUID, relType string) {
 		if sourceUID == "" || targetUID == "" || sourceUID == targetUID {
@@ -303,50 +462,31 @@ func (s *Store) currentEdgesForVersions(versionsByUID map[string]*resourceVersio
 		}
 	}
 
+	podsByNamespace := make(map[string][]*resourceVersion)
 	for _, version := range versionsByUID {
-		for _, ownerUID := range ownerUIDs(parsedVersionObject(version)) {
+		facts := factsFor(version)
+		for _, ownerUID := range facts.owners() {
 			add(ownerUID, version.meta.UID, "OWNS")
 		}
-		for _, ref := range directReferences(version) {
-			target := s.projection.resolveByName(ref.namespaceFor(version.meta.Namespace), ref.kind, ref.name, timestampNs, windowStartNs)
-			if target == nil {
-				continue
-			}
-			add(version.meta.UID, target.meta.UID, ref.relType)
-		}
-		if manager := managerReference(version); manager != nil {
-			managerVersion := s.projection.resolveByName(manager.namespace, manager.kind, manager.name, timestampNs, windowStartNs)
-			if managerVersion == nil && manager.namespace == "" {
-				managerVersion = s.projection.resolveByName(version.meta.Namespace, manager.kind, manager.name, timestampNs, windowStartNs)
-			}
-			if managerVersion != nil {
-				add(managerVersion.meta.UID, version.meta.UID, "MANAGES")
+		for ref := range facts.refs() {
+			if target := walk.resolve(ref.namespaceFor(version.meta.Namespace), ref.kind, ref.name); target != nil {
+				add(version.meta.UID, target.meta.UID, ref.relType)
 			}
 		}
-	}
-
-	pods := make([]*resourceVersion, 0)
-	for _, version := range versionsByUID {
-		if version.meta.Kind == "Pod" && version.eventType() != models.EventTypeDelete {
-			pods = append(pods, version)
+		if managerVersion := walk.resolveManager(version); managerVersion != nil {
+			add(managerVersion.meta.UID, version.meta.UID, "MANAGES")
+		}
+		if version.meta.Kind == "Pod" && !version.isDelete() {
+			podsByNamespace[version.meta.Namespace] = append(podsByNamespace[version.meta.Namespace], version)
 		}
 	}
 	for _, version := range versionsByUID {
-		if !resourceUsesPodSelector(version.meta.Kind) || version.eventType() == models.EventTypeDelete {
+		if !resourceUsesPodSelector(version.meta.Kind) || version.isDelete() {
 			continue
 		}
-		// Parse the selector once per resource, not once per pod: each parse reads and
-		// decodes the payload, and this runs under the projection read lock.
-		var selector map[string]any
-		parsed := false
-		for _, pod := range pods {
-			if pod.meta.Namespace != version.meta.Namespace {
-				continue
-			}
-			if !parsed {
-				selector, parsed = selectorSpec(version), true
-			}
-			if selectorMatches(selector, pod.labels()) {
+		selector := factsFor(version).selector()
+		for _, pod := range podsByNamespace[version.meta.Namespace] {
+			if selector.matches(pod.labels()) {
 				add(version.meta.UID, pod.meta.UID, "SELECTS")
 			}
 		}

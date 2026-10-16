@@ -36,6 +36,7 @@ func NewAnalysisStore(projection *Projection) *Store {
 	if projection == nil {
 		projection = NewProjection()
 	}
+	projection.resolvePendingGraphFacts()
 	return &Store{projection: projection}
 }
 
@@ -84,7 +85,7 @@ func (s *Store) GetOwnershipChain(_ context.Context, uid string, atTimestampNs i
 	for depth := 1; depth <= maxDepth; depth++ {
 		var next []*resourceVersion
 		for _, version := range current {
-			for _, ownerUID := range ownerUIDs(parsedVersionObject(version)) {
+			for _, ownerUID := range factsFor(version).owners() {
 				if ownerUID == "" || seen[ownerUID] {
 					continue
 				}
@@ -182,13 +183,13 @@ func (s *Store) GetRelatedResources(_ context.Context, resourceUIDs []string, wi
 			})
 		}
 
-		for _, ref := range directReferences(version) {
+		for ref := range factsFor(version).refs() {
 			target := s.projection.resolveByName(ref.namespaceFor(version.meta.Namespace), ref.kind, ref.name, window.FailureTimestampNs, startNs)
 			add(target, ref.relType, "")
 			if ref.relType == "USES_SERVICE_ACCOUNT" && target != nil {
 				for _, binding := range s.roleBindingsGrantingToServiceAccount(target, window.FailureTimestampNs, startNs) {
 					add(binding, "GRANTS_TO", "")
-					for _, roleRef := range roleBindingReferences(binding) {
+					for roleRef := range factsFor(binding).refs() {
 						if roleRef.relType != "BINDS_ROLE" {
 							continue
 						}

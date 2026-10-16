@@ -223,6 +223,7 @@ func (p *Projection) ImportSnapshot(snapshot ProjectionSnapshot) error {
 	if err != nil {
 		return err
 	}
+	rebuilt.resolvePendingGraphFacts()
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -241,6 +242,7 @@ func (p *Projection) replaceStateLocked(other *Projection) {
 	p.k8sEventsByInvolvedUID = other.k8sEventsByInvolvedUID
 	p.k8sEventsTruncatedThrough = other.k8sEventsTruncatedThrough
 	p.orderedResources = other.orderedResources
+	p.graph = other.graph
 	p.minTimestampNs = other.minTimestampNs
 	p.maxTimestampNs = other.maxTimestampNs
 	p.retainHistoricalEventArrays = retainHistoricalEventArrays || other.retainHistoricalEventArrays
@@ -324,6 +326,7 @@ func restoreProjectionResourceRecord(projection *Projection, record *resourceRec
 		name:      meta.Name,
 		uid:       meta.UID,
 	})
+	projection.indexRecordLocked(record)
 }
 
 // snapshotResourceRecord copies a record for serialisation. With hydrate the payloads are
@@ -426,7 +429,7 @@ func restoreResourceRecord(snapshot ProjectionResourceSnapshot, resolveSegment f
 		if len(record.versions) > 0 {
 			previousMeta = record.versions[len(record.versions)-1].meta
 		}
-		restoredVersion.setIdentity(version.Identity, previousMeta)
+		restoredVersion.setIdentity(version.Identity, previousMeta, nil)
 		restoredVersion.setChangeInfo(version.ChangeEvent)
 		if len(version.Data) == 0 && version.DataSegment != 0 && resolveSegment != nil {
 			if handle := resolveSegment(version.DataSegment); handle != nil {

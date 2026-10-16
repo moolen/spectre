@@ -128,6 +128,8 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 	// Trim in place: most records only hold versions inside the window and are left
 	// untouched, so a pass costs O(records) rather than O(versions).
 	removed := make(map[string]struct{})
+	removedRecords := make(map[*resourceRecord]bool)
+	staleMetas := make(map[*resourceRecord][]*versionMeta)
 	minTimestampNs := int64(-1)
 	maxTimestampNs := int64(-1)
 	for uid, record := range p.resourcesByUID {
@@ -140,6 +142,9 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 			if len(retained) == 0 {
 				removed[uid] = struct{}{}
 				continue
+			}
+			if dropped := droppedMetas(record.versions, retained); len(dropped) > 0 {
+				staleMetas[record] = dropped
 			}
 			record.versions = retained
 		}
@@ -159,6 +164,7 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 			if record == nil {
 				continue
 			}
+			removedRecords[record] = true
 			for key, records := range p.resourceKeysForRecord(record) {
 				kept := records[:0]
 				for _, candidate := range records {
@@ -184,6 +190,7 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 			p.orderedResources.Delete(key)
 		}
 	}
+	p.unindexRecordsLocked(removedRecords, staleMetas)
 
 	trimK8sEventInfosBefore(p.k8sEventsByInvolvedUID, cutoffTimestamp)
 	for uid, truncated := range p.k8sEventsTruncatedThrough {
@@ -215,6 +222,24 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 		}
 		p.k8sRawEventsByInvolvedUID = filteredK8sRaw
 	}
+}
+
+// droppedMetas returns the metas of versions that retention trims and the retained
+// versions no longer use.
+func droppedMetas(versions, retained []resourceVersion) []*versionMeta {
+	kept := make(map[*versionMeta]bool, 1)
+	for i := range retained {
+		kept[retained[i].meta] = true
+	}
+	var dropped []*versionMeta
+	for i := range versions {
+		meta := versions[i].meta
+		if meta != nil && !kept[meta] {
+			kept[meta] = true
+			dropped = append(dropped, meta)
+		}
+	}
+	return dropped
 }
 
 // resourceKeysForRecord returns the resourcesByKey entries that may hold record.
