@@ -25,6 +25,9 @@ const (
 // It does not scan raw hot/cold event tiers during normal query execution.
 type Store struct {
 	projection *Projection
+	// olderK8sEvents reads event summaries the projection no longer holds in memory
+	// (see Projection.k8sEventInfosComplete); nil when only the projection is available.
+	olderK8sEvents func(ctx context.Context, involvedUIDs []string, startNs, endNs int64) (map[string][]analysisstore.K8sEventInfo, error)
 }
 
 var _ analysisstore.AnalysisStore = (*Store)(nil)
@@ -254,31 +257,51 @@ func (s *Store) GetChangeEvents(_ context.Context, resourceUIDs []string, window
 	return result, nil
 }
 
-func (s *Store) GetK8sEvents(_ context.Context, resourceUIDs []string, window analysisstore.ResourceWindow) (map[string][]analysisstore.K8sEventInfo, error) {
-	s.projection.mu.RLock()
-	defer s.projection.mu.RUnlock()
-
-	result := make(map[string][]analysisstore.K8sEventInfo)
+func (s *Store) GetK8sEvents(ctx context.Context, resourceUIDs []string, window analysisstore.ResourceWindow) (map[string][]analysisstore.K8sEventInfo, error) {
 	startNs := window.Start()
+	result := make(map[string][]analysisstore.K8sEventInfo)
+	var incomplete []string
+
+	s.projection.mu.RLock()
 	for _, uid := range resourceUIDs {
-		events := s.projection.k8sEventsByInvolvedUID[uid]
-		if len(events) == 0 {
+		if !s.projection.k8sEventInfosComplete(uid, startNs) {
+			incomplete = append(incomplete, uid)
 			continue
 		}
-		filtered := make([]analysisstore.K8sEventInfo, 0, maxK8sEvents)
-		for _, event := range events {
-			ts := event.Timestamp.UnixNano()
-			if ts < startNs || ts > window.FailureTimestampNs {
-				continue
-			}
-			filtered = append(filtered, event)
-			if len(filtered) == maxK8sEvents {
-				break
-			}
+		if filtered := newestK8sEventsInWindow(s.projection.k8sEventsByInvolvedUID[uid], startNs, window.FailureTimestampNs); len(filtered) > 0 {
+			result[uid] = filtered
 		}
-		if len(filtered) > 0 {
+	}
+	s.projection.mu.RUnlock()
+
+	if len(incomplete) == 0 || s.olderK8sEvents == nil {
+		return result, nil
+	}
+	older, err := s.olderK8sEvents(ctx, incomplete, startNs, window.FailureTimestampNs)
+	if err != nil {
+		return nil, err
+	}
+	for uid, events := range older {
+		if filtered := newestK8sEventsInWindow(events, startNs, window.FailureTimestampNs); len(filtered) > 0 {
 			result[uid] = filtered
 		}
 	}
 	return result, nil
+}
+
+// newestK8sEventsInWindow returns up to maxK8sEvents of a newest-first list that fall in
+// [startNs, endNs].
+func newestK8sEventsInWindow(events []analysisstore.K8sEventInfo, startNs, endNs int64) []analysisstore.K8sEventInfo {
+	var filtered []analysisstore.K8sEventInfo
+	for _, event := range events {
+		ts := event.Timestamp.UnixNano()
+		if ts < startNs || ts > endNs {
+			continue
+		}
+		filtered = append(filtered, event)
+		if len(filtered) == maxK8sEvents {
+			break
+		}
+	}
+	return filtered
 }

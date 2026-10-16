@@ -55,6 +55,7 @@ type checkpointSnapshot struct {
 	records        []checkpointRecordSnapshot
 	k8sEvents      map[string][]analysisstore.K8sEventInfo
 	k8sTruncated   map[string]int64
+	k8sTrimmed     int64
 	segmentTable   []string
 	eventTypes     []string
 	statuses       []string
@@ -74,6 +75,7 @@ func (p *Projection) captureCheckpointSnapshot(highWaterMark uint64) *checkpoint
 		records:        make([]checkpointRecordSnapshot, 0, len(p.resourcesByUID)),
 		k8sEvents:      make(map[string][]analysisstore.K8sEventInfo, len(p.k8sEventsByInvolvedUID)),
 		k8sTruncated:   make(map[string]int64, len(p.k8sEventsTruncatedThrough)),
+		k8sTrimmed:     p.k8sEventInfosTrimmedThrough,
 	}
 	p.orderedResources.Ascend(func(key orderedResourceKey) bool {
 		record := p.resourcesByUID[key.uid]
@@ -146,6 +148,8 @@ func writeCheckpointV3(rootDir string, projection *Projection, snapshot *checkpo
 		MinTimestampNs: snapshot.minTimestampNs,
 		MaxTimestampNs: snapshot.maxTimestampNs,
 		SegmentTable:   snapshot.segmentTable,
+
+		K8sEventInfosTrimmedThroughNs: snapshot.k8sTrimmed,
 	}
 	if err := writeJSONFile(filepath.Join(tmpDir, checkpointStateFile), state); err != nil {
 		return CheckpointMeta{}, fmt.Errorf("write checkpoint: state file: %w", err)
@@ -569,6 +573,7 @@ func loadCheckpointV3(state checkpointState, checkpointDir string) (*Projection,
 	projection := NewProjection()
 	projection.minTimestampNs = state.MinTimestampNs
 	projection.maxTimestampNs = state.MaxTimestampNs
+	projection.k8sEventInfosTrimmedThrough = state.K8sEventInfosTrimmedThroughNs
 	if err := decodeCheckpointResourcesV3(bufio.NewReaderSize(resources, 1<<20), projection, state.SegmentTable); err != nil {
 		return nil, fmt.Errorf("decode resources: %w", err)
 	}

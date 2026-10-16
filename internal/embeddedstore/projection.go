@@ -80,6 +80,12 @@ type Projection struct {
 	// newest timestamp of an event info that was dropped. The projection only has the
 	// complete set of infos for windows starting after it.
 	k8sEventsTruncatedThrough map[string]int64
+	// k8sEventInfoHorizonNs bounds how far back event summaries are kept in memory
+	// (0 keeps them for the whole retention window). k8sEventInfosTrimmedThrough is the
+	// newest timestamp trimmed by that horizon: like k8sEventsTruncatedThrough, but for
+	// every involved UID.
+	k8sEventInfoHorizonNs       int64
+	k8sEventInfosTrimmedThrough int64
 	// k8sEventHashes remembers recent core/v1 Event payloads for duplicate detection.
 	k8sEventHashes         map[string]k8sEventPayloadHash
 	k8sEventHashPruneAt    int

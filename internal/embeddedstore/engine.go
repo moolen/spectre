@@ -89,6 +89,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		}
 	}
 	projection.SetRetentionWindowDays(cfg.EmbeddedRetentionDays)
+	projection.SetK8sEventInfoHorizon(cfg.K8sEventInfoHorizon)
 	if cfg.ProjectionHistoryFallback {
 		projection.EnableHistoricalEventRetention()
 	}
@@ -162,6 +163,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		segmentReaders:    readers,
 		nextHighWaterMark: nextHighWaterMark,
 	}
+	engine.analysis.olderK8sEvents = engine.queryExec.k8sEventInfosFromSegments
 	if retentionCutoffTimestamp > 0 {
 		// Segments are trimmed only now that the projection is loaded, so payloads it
 		// still references can be moved to a pinned segment first.

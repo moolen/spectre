@@ -32,6 +32,10 @@ type Config struct {
 	// KeepUnchangedEvents stores events that repeat an object's latest state verbatim,
 	// such as the copies a watch re-list reports. They are dropped by default.
 	KeepUnchangedEvents bool
+	// K8sEventSummaryHorizon bounds how long core/v1 Event summaries stay in memory
+	// (default DefaultK8sEventSummaryHorizon); older ones are read from segments when a
+	// query reaches back further. Negative keeps them for the whole retention window.
+	K8sEventSummaryHorizon time.Duration
 }
 
 type Backend struct {
@@ -120,6 +124,13 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 		MetricsRegisterer:         cfg.MetricsRegisterer,
 		ProjectionHistoryFallback: cfg.ProjectionHistoryFallback,
 		DropUnchangedEvents:       !cfg.KeepUnchangedEvents,
+		K8sEventInfoHorizon:       cfg.K8sEventSummaryHorizon,
+	}
+	switch {
+	case engineCfg.K8sEventInfoHorizon == 0:
+		engineCfg.K8sEventInfoHorizon = DefaultK8sEventSummaryHorizon
+	case engineCfg.K8sEventInfoHorizon < 0:
+		engineCfg.K8sEventInfoHorizon = 0
 	}
 	if engineCfg.HotMaxEvents == 0 {
 		engineCfg.HotMaxEvents = defaultHotMaxEvents

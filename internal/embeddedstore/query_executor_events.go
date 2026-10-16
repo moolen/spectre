@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	"github.com/moolen/spectre/internal/models"
 )
 
@@ -395,6 +396,29 @@ func (qe *QueryExecutor) collectAssociatedK8sEventsFromProjection(
 ) map[string][]models.K8sEvent {
 	events, _ := qe.collectAssociatedK8sEventsFromProjectionWithGaps(involvedUIDs, startTimeNs, endTimeNs)
 	return events
+}
+
+// k8sEventInfosFromSegments reads the summaries of core/v1 Events about the given objects
+// from segments, newest first. It serves windows the projection's in-memory summaries
+// no longer cover.
+func (qe *QueryExecutor) k8sEventInfosFromSegments(ctx context.Context, involvedUIDs []string, startNs, endNs int64) (map[string][]analysisstore.K8sEventInfo, error) {
+	planner := qe.sharedPlanner()
+	if planner == nil {
+		return nil, nil
+	}
+	eventsByUID, _, err := planner.collectAssociatedEvents(ctx, involvedUIDs, nil, startNs, endNs)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]analysisstore.K8sEventInfo, len(eventsByUID))
+	for uid, events := range eventsByUID {
+		infos := make([]analysisstore.K8sEventInfo, 0, len(events))
+		for i := len(events) - 1; i >= 0; i-- {
+			infos = append(infos, buildK8sEventInfo(events[i]))
+		}
+		result[uid] = infos
+	}
+	return result, nil
 }
 
 // collectAssociatedK8sEventsFromProjectionWithGaps also returns the involved UIDs whose

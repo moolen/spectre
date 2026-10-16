@@ -179,6 +179,7 @@ func (p *Projection) applyK8sEvent(event models.Event) {
 		return
 	}
 	p.rememberK8sEventHashLocked(event)
+	p.trimK8sEventInfosToHorizonLocked(max(event.Timestamp, p.maxTimestampNs), false)
 	involvedUID := event.Resource.InvolvedObjectUID
 	if p.retainHistoricalEventArrays {
 		p.k8sRawEventsByInvolvedUID[involvedUID] = insertEventSorted(p.k8sRawEventsByInvolvedUID[involvedUID], event)
@@ -350,6 +351,9 @@ func (p *Projection) capK8sEventInfos(involvedUID string, events []analysisstore
 // k8sEventInfosComplete reports whether the in-memory infos for uid cover every event
 // at or after startTimeNs.
 func (p *Projection) k8sEventInfosComplete(uid string, startTimeNs int64) bool {
+	if p.k8sEventInfosTrimmedThrough > 0 && startTimeNs <= p.k8sEventInfosTrimmedThrough {
+		return false
+	}
 	truncated, ok := p.k8sEventsTruncatedThrough[uid]
 	return !ok || startTimeNs > truncated
 }
