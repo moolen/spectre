@@ -197,6 +197,11 @@ func (p *Projection) appendResourceVersion(record *resourceRecord, event models.
 	version, state := buildResourceVersion(event, record.versions, record.latestChangeState())
 	record.versions = append(record.versions, version)
 	record.latest = state
+	if version.isDelete() && cap(record.versions) > len(record.versions) {
+		// A deleted object gets no further versions (a recreate has a new UID), so
+		// release the slack append left in its history.
+		record.versions = append([]resourceVersion(nil), record.versions...)
+	}
 }
 
 func canAppendResourceVersion(record *resourceRecord, event models.Event) bool {

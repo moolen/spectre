@@ -115,15 +115,19 @@ func TestTailJournal_ReplaysLegacyJSONRecordsAfterUpgrade(t *testing.T) {
 	require.NoError(t, tail.Close())
 }
 
-func TestCompactEventID_RoundTripsUUIDsAndKeepsOtherIDs(t *testing.T) {
+func TestResourceVersionEventID_StoresUUIDsInlineAndKeepsOtherIDs(t *testing.T) {
 	for _, id := range []string{
 		"0b8f6a8e-3c1d-4f7a-9e2b-5d6c7a8b9c0d",
 		"00000000-0000-0000-0000-000000000000",
 		"ffffffff-ffff-ffff-ffff-ffffffffffff",
 	} {
-		compact := compactEventID(id)
-		require.Len(t, compact, 17)
-		require.Equal(t, id, expandEventID(compact))
+		var version resourceVersion
+		version.setEventID(id)
+		require.Equal(t, idFormUUID, version.idForm)
+		require.Nil(t, version.extra)
+		require.Equal(t, id, version.eventID())
+		require.True(t, newEventIDMatcher(id).matches(&version))
+		require.False(t, newEventIDMatcher("evt-1").matches(&version))
 	}
 	for _, id := range []string{
 		"evt-1",
@@ -132,9 +136,34 @@ func TestCompactEventID_RoundTripsUUIDsAndKeepsOtherIDs(t *testing.T) {
 		"0b8f6a8e03c1d-4f7a-9e2b-5d6c7a8b9c0d",
 		"",
 	} {
-		require.Equal(t, id, compactEventID(id))
-		require.Equal(t, id, expandEventID(compactEventID(id)))
+		var version resourceVersion
+		version.setEventID(id)
+		require.NotEqual(t, idFormUUID, version.idForm)
+		require.Equal(t, id, version.eventID())
+		require.True(t, newEventIDMatcher(id).matches(&version))
+		require.False(t, newEventIDMatcher("00000000-0000-0000-0000-000000000000").matches(&version))
 	}
+}
+
+func TestResourceVersionExtra_KeepsIDAcrossPayloadChangesAndCopies(t *testing.T) {
+	var version resourceVersion
+	version.setEventID("evt-1")
+	version.setInlinePayload([]byte(`{"a":1}`))
+	copied := version
+	version.setInlinePayload(nil)
+
+	require.Equal(t, "evt-1", version.eventID())
+	require.Nil(t, version.inlinePayload())
+	require.Equal(t, []byte(`{"a":1}`), copied.inlinePayload())
+	require.Equal(t, "evt-1", copied.eventID())
+
+	version.setEventID("0b8f6a8e-3c1d-4f7a-9e2b-5d6c7a8b9c0d")
+	require.Nil(t, version.extra)
+
+	version.setInlinePayload([]byte(`{"b":2}`))
+	version.setEventID("evt-2")
+	require.Equal(t, []byte(`{"b":2}`), version.inlinePayload())
+	require.Equal(t, "evt-2", version.eventID())
 }
 
 func TestVersionDataRef_PacksOffsetAndLength(t *testing.T) {

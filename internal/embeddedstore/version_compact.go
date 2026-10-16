@@ -208,38 +208,93 @@ func (v *resourceVersion) labels() map[string]string {
 	return v.meta.Labels
 }
 
+const (
+	idFormEmpty uint8 = iota
+	idFormUUID
+	idFormText
+)
+
 func (v *resourceVersion) eventID() string {
-	return expandEventID(v.id)
+	switch v.idForm {
+	case idFormUUID:
+		return formatUUID(v.uuid)
+	case idFormText:
+		return v.extra.textID
+	default:
+		return ""
+	}
+}
+
+// setEventID stores canonical lowercase UUIDs (the watcher's event IDs) inline; other
+// IDs go to extra.
+func (v *resourceVersion) setEventID(id string) {
+	if uuid, ok := parseCanonicalUUID(id); ok {
+		v.uuid, v.idForm = uuid, idFormUUID
+		v.setExtra("", v.inlinePayload())
+		return
+	}
+	v.uuid = [16]byte{}
+	v.idForm = idFormText
+	if id == "" {
+		v.idForm = idFormEmpty
+	}
+	v.setExtra(id, v.inlinePayload())
+}
+
+// eventIDMatcher compares version event IDs against one ID without formatting them.
+type eventIDMatcher struct {
+	id     string
+	uuid   [16]byte
+	isUUID bool
+}
+
+func newEventIDMatcher(id string) eventIDMatcher {
+	uuid, ok := parseCanonicalUUID(id)
+	return eventIDMatcher{id: id, uuid: uuid, isUUID: ok}
+}
+
+func (m eventIDMatcher) matches(v *resourceVersion) bool {
+	if m.isUUID {
+		return v.idForm == idFormUUID && v.uuid == m.uuid
+	}
+	return v.idForm != idFormUUID && v.eventID() == m.id
 }
 
 // inlinePayload returns the payload held in memory (unflushed versions), or nil.
 func (v *resourceVersion) inlinePayload() []byte {
-	if v.pending == nil {
+	if v.extra == nil {
 		return nil
 	}
-	return *v.pending
+	return v.extra.pending
 }
 
 func (v *resourceVersion) setInlinePayload(data []byte) {
 	if len(data) == 0 {
-		v.pending = nil
-		return
+		data = nil
 	}
-	v.pending = &data
+	textID := ""
+	if v.idForm == idFormText {
+		textID = v.extra.textID
+	}
+	v.setExtra(textID, data)
 }
 
-// compactUUIDMarker prefixes event IDs stored as the 16 raw bytes of a UUID.
-const compactUUIDMarker = 0xFF
-
-// compactEventID stores canonical lowercase UUIDs (the watcher's event IDs) as 17
-// bytes instead of 36; other IDs are kept as they are.
-func compactEventID(id string) string {
-	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
-		return id
+// setExtra replaces the version's extra fields, dropping the allocation when both are
+// empty. It never mutates the previous extra, so copies of a version stay independent.
+func (v *resourceVersion) setExtra(textID string, pending []byte) {
+	if textID == "" && pending == nil {
+		v.extra = nil
+		return
 	}
-	var raw [17]byte
-	raw[0] = compactUUIDMarker
-	j := 1
+	v.extra = &versionExtra{textID: textID, pending: pending}
+}
+
+func parseCanonicalUUID(id string) ([16]byte, bool) {
+	var raw [16]byte
+	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+		return raw, false
+	}
+	j := 0
 	for i := 0; i < 36; i += 2 {
 		if i == 8 || i == 13 || i == 18 || i == 23 {
 			i--
@@ -248,28 +303,25 @@ func compactEventID(id string) string {
 		hi, ok1 := lowerHexValue(id[i])
 		lo, ok2 := lowerHexValue(id[i+1])
 		if !ok1 || !ok2 {
-			return id
+			return [16]byte{}, false
 		}
 		raw[j] = hi<<4 | lo
 		j++
 	}
-	return string(raw[:])
+	return raw, true
 }
 
-func expandEventID(id string) string {
-	if len(id) != 17 || id[0] != compactUUIDMarker {
-		return id
-	}
+func formatUUID(raw [16]byte) string {
 	const hexDigits = "0123456789abcdef"
 	var out [36]byte
 	j := 0
-	for i := 1; i < 17; i++ {
+	for i := 0; i < 16; i++ {
 		if j == 8 || j == 13 || j == 18 || j == 23 {
 			out[j] = '-'
 			j++
 		}
-		out[j] = hexDigits[id[i]>>4]
-		out[j+1] = hexDigits[id[i]&0x0F]
+		out[j] = hexDigits[raw[i]>>4]
+		out[j+1] = hexDigits[raw[i]&0x0F]
 		j += 2
 	}
 	return string(out[:])

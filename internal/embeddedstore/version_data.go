@@ -223,7 +223,7 @@ func (p *Projection) AttachSegmentLocations(segmentID string, locations []segmen
 			continue
 		}
 		version.ref = newVersionDataRef(handle, location.Offset, location.Length)
-		version.pending = nil
+		version.setInlinePayload(nil)
 		attached++
 	}
 	return attached
@@ -246,7 +246,7 @@ func (p *Projection) attachReplayLocation(event models.Event, location replayLoc
 		return
 	}
 	version.ref = newVersionDataRef(p.segmentHandleLocked(location.segmentID), location.offset, location.length)
-	version.pending = nil
+	version.setInlinePayload(nil)
 }
 
 // ReleaseSegmentHandles forgets handles for segments that no version references any more,
@@ -313,9 +313,9 @@ func (r *resourceRecord) findVersion(timestamp int64, eventID string) *resourceV
 	idx := sort.Search(len(r.versions), func(i int) bool {
 		return r.versions[i].timestamp >= timestamp
 	})
-	id := compactEventID(eventID)
+	id := newEventIDMatcher(eventID)
 	for i := idx; i < len(r.versions) && r.versions[i].timestamp == timestamp; i++ {
-		if r.versions[i].id == id {
+		if id.matches(&r.versions[i]) {
 			return &r.versions[i]
 		}
 	}

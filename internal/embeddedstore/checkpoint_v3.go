@@ -612,7 +612,8 @@ func decodeCheckpointResourcesV3(r *bufio.Reader, projection *Projection, segmen
 		record := &resourceRecord{uid: uid, versions: make([]resourceVersion, 0, min(versionCount, 1<<16))}
 		var previous *resourceVersion
 		for j := uint64(0); j < versionCount && in.err == nil; j++ {
-			version := resourceVersion{id: compactEventID(in.string())}
+			var version resourceVersion
+			version.setEventID(in.string())
 			delta := in.varint()
 			if previous == nil {
 				version.timestamp = delta

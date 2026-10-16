@@ -416,11 +416,11 @@ func restoreResourceRecord(snapshot ProjectionResourceSnapshot, resolveSegment f
 	for i := range snapshot.Versions {
 		version := snapshot.Versions[i]
 		restoredVersion := resourceVersion{
-			id:        compactEventID(version.EventID),
 			timestamp: version.Timestamp,
 			typeCode:  versionEventTypes.code(string(version.EventType)),
 			dataHash:  version.DataHash,
 		}
+		restoredVersion.setEventID(version.EventID)
 		restoredVersion.setInlinePayload(version.Data)
 		var previousMeta *versionMeta
 		if len(record.versions) > 0 {
