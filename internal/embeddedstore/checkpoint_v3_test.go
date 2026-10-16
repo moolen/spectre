@@ -113,3 +113,45 @@ func TestCheckpointV3_RoundTripsVersionStateAndEventSummaries(t *testing.T) {
 	require.Equal(t, 3, infos[0].Count)
 	require.Equal(t, "kubelet", infos[0].Source)
 }
+
+func TestProjection_OutOfOrderInsertMatchesInOrderHistoryAndKeepsReferences(t *testing.T) {
+	ordered := []models.Event{
+		checkpointTestEvent("e0", 5, "pod-1", 0),
+		checkpointTestEvent("e1", 10, "pod-1", 1),
+		checkpointTestEvent("e2", 20, "pod-1", 1),
+		checkpointTestEvent("e3", 30, "pod-1", 2),
+	}
+	ordered[2].Data = []byte(`{"kind":"Pod","metadata":{"name":"pod-1","labels":{"app":"y"}},"spec":{"rev":1},"status":{"phase":"Pending"}}`)
+
+	expected, err := BuildProjection(ordered)
+	require.NoError(t, err)
+
+	engine, err := OpenEngine(EngineConfig{DataDir: t.TempDir(), HotMaxEvents: 100, HotMaxResourceVersions: 8, DisableAutoCompaction: true})
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, engine.Close())
+	}()
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{ordered[1], ordered[3]}))
+	require.NoError(t, engine.Flush(context.Background()))
+	require.NoError(t, engine.ProcessBatch(context.Background(), []models.Event{ordered[2], ordered[0]}))
+
+	describe := func(record *resourceRecord) []any {
+		out := []any{}
+		for i := range record.versions {
+			version := &record.versions[i]
+			out = append(out, version.eventID(), version.identity(), version.changeEventInfo())
+		}
+		return out
+	}
+	actual := engine.projection.resourcesByUID["pod-1"]
+	require.Equal(t, describe(expected.resourcesByUID["pod-1"]), describe(actual))
+	for i := range actual.versions {
+		version := &actual.versions[i]
+		switch version.eventID() {
+		case "e1", "e3":
+			require.True(t, version.ref.valid(), "%s keeps its segment reference", version.eventID())
+		default:
+			require.NotEmpty(t, version.inlinePayload(), "%s is unflushed", version.eventID())
+		}
+	}
+}

@@ -91,6 +91,11 @@ func (p *Projection) Apply(event models.Event) error {
 		p.finishAppliedResourceEvent(uid, cloned, record, cloned.Resource)
 		return nil
 	}
+	if !p.retainHistoricalEventArrays {
+		insertResourceVersion(record, cloned)
+		p.finishAppliedResourceEvent(uid, cloned, record, cloned.Resource)
+		return nil
+	}
 
 	history := p.resourceEventsForUID(uid)
 	history = insertEventSorted(history, cloned)
@@ -340,4 +345,63 @@ func (p *Projection) capK8sEventInfos(involvedUID string, events []analysisstore
 func (p *Projection) k8sEventInfosComplete(uid string, startTimeNs int64) bool {
 	truncated, ok := p.k8sEventsTruncatedThrough[uid]
 	return !ok || startTimeNs > truncated
+}
+
+// insertResourceVersion places an out-of-order event into a record's history. Only the
+// inserted version and the one after it are reclassified, and the other versions keep
+// their payload references.
+func insertResourceVersion(record *resourceRecord, event models.Event) {
+	versions := record.versions
+	idx := sort.Search(len(versions), func(i int) bool {
+		if versions[i].timestamp != event.Timestamp {
+			return versions[i].timestamp > event.Timestamp
+		}
+		return versions[i].eventID() > event.ID
+	})
+
+	previous := recordChangeState{known: true}
+	if idx > 0 {
+		data := versionPayload(&versions[idx-1])
+		previous = newRecordChangeState(data, parseObject(data))
+	}
+	version, state := buildResourceVersion(event, versions[:idx], previous)
+
+	versions = append(versions, resourceVersion{})
+	copy(versions[idx+1:], versions[idx:])
+	versions[idx] = version
+
+	if idx+1 < len(versions) {
+		next := &versions[idx+1]
+		data := versionPayload(next)
+		configChanged, statusChanged := changeKindsFromStates(state, newRecordChangeState(data, parseObject(data)))
+		next.flags = 0
+		if configChanged {
+			next.flags |= versionFlagConfigChanged
+		}
+		if statusChanged {
+			next.flags |= versionFlagStatusChanged
+		}
+	}
+	if idx == 0 && len(versions) > 1 {
+		// The resource is now first seen at the inserted event.
+		replaced := make(map[*versionMeta]*versionMeta)
+		for i := 1; i < len(versions); i++ {
+			meta := versions[i].meta
+			if meta == nil {
+				continue
+			}
+			updated, ok := replaced[meta]
+			if !ok {
+				copied := *meta
+				copied.FirstSeen = event.Timestamp
+				updated = &copied
+				replaced[meta] = updated
+			}
+			versions[i].meta = updated
+		}
+	}
+	record.versions = versions
+	if idx == len(versions)-1 {
+		record.latest = state
+	}
 }
