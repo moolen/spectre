@@ -175,7 +175,7 @@ func (p *Projection) resolveByName(namespace, kind, name string, failureTimestam
 
 func (p *Projection) activeResourcesInNamespace(namespace string, timestampNs int64) []*resourceVersion {
 	var result []*resourceVersion
-	for _, record := range p.resourcesByUID {
+	for _, record := range uniqueRecords(p.graph.byNamespace[namespace]) {
 		version := record.activeVersionAt(timestampNs)
 		if version == nil || version.meta.Kind == "Event" || version.meta.Namespace != namespace {
 			continue
@@ -183,15 +183,7 @@ func (p *Projection) activeResourcesInNamespace(namespace string, timestampNs in
 		result = append(result, version)
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].meta.Kind != result[j].meta.Kind {
-			return result[i].meta.Kind < result[j].meta.Kind
-		}
-		if result[i].meta.Name != result[j].meta.Name {
-			return result[i].meta.Name < result[j].meta.Name
-		}
-		return result[i].meta.UID < result[j].meta.UID
-	})
+	sort.Slice(result, func(i, j int) bool { return namespaceOrderLess(result[i], result[j]) })
 
 	return result
 }

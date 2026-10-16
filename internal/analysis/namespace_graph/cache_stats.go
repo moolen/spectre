@@ -14,9 +14,9 @@ func (c *Cache) GetStats() CacheStats {
 		RefreshTTLSecs: int64(c.config.RefreshTTL.Seconds()),
 	}
 
-	for ns, entry := range c.cache {
+	for key, entry := range c.cache {
 		stats.Entries = append(stats.Entries, CacheEntryStats{
-			Namespace: ns,
+			Namespace: key.namespace,
 			NodeCount: entry.Response.Metadata.NodeCount,
 			EdgeCount: entry.Response.Metadata.EdgeCount,
 			SizeKB:    entry.Size / 1024,

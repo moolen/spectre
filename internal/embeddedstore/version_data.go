@@ -64,7 +64,12 @@ func (r versionDataRef) length() uint32 {
 	return uint32(r.packed & versionRefLengthMask) // #nosec G115 -- 24 bits
 }
 
-var versionDataReadErrors atomic.Uint64
+// versionDataReads counts payloads read back from segments; versionDataReadErrors the
+// reads that failed.
+var (
+	versionDataReads      atomic.Uint64
+	versionDataReadErrors atomic.Uint64
+)
 
 func newSegmentDataHandle(id, root string) *segmentDataHandle {
 	handle := &segmentDataHandle{id: id}
@@ -145,6 +150,7 @@ func versionPayload(version *resourceVersion) []byte {
 	if inline := version.inlinePayload(); len(inline) > 0 || !version.ref.valid() {
 		return inline
 	}
+	versionDataReads.Add(1)
 	data, err := version.ref.segment.readPayload(version.ref.offset(), version.ref.length())
 	if err != nil {
 		versionDataReadErrors.Add(1)

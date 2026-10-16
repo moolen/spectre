@@ -90,6 +90,7 @@ type Projection struct {
 	k8sEventHashes      map[string]k8sEventPayloadHash
 	k8sEventHashPruneAt int
 	orderedResources    *orderedResourceIndex
+	graph               graphIndexes
 	minTimestampNs      int64
 	maxTimestampNs      int64
 
@@ -131,6 +132,7 @@ func NewProjection() *Projection {
 		resourcesByUID:            make(map[string]*resourceRecord),
 		resourcesByKey:            make(map[resourceKey][]*resourceRecord),
 		orderedResources:          newOrderedResourceIndex(),
+		graph:                     newGraphIndexes(),
 		k8sRawEventsByInvolvedUID: make(map[string][]models.Event),
 		k8sEventsByInvolvedUID:    make(map[string][]analysisstore.K8sEventInfo),
 		k8sEventsTruncatedThrough: make(map[string]int64),

@@ -9,8 +9,8 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
-// versionMeta holds the identity fields and labels shared by consecutive versions of a
-// resource. Values are immutable once versions reference them.
+// versionMeta holds the identity fields, labels and graph facts shared by consecutive
+// versions of a resource. Values are immutable once versions reference them.
 type versionMeta struct {
 	UID       string
 	Kind      string
@@ -20,11 +20,17 @@ type versionMeta struct {
 	Name      string
 	FirstSeen int64
 	Labels    map[string]string
+	// graph holds the edge-relevant fields of these versions; nil when unknown (metas
+	// restored from checkpoints that predate it), see factsFor.
+	graph *graphFacts
 }
 
 const (
 	versionFlagConfigChanged uint8 = 1 << iota
 	versionFlagStatusChanged
+	// versionFlagNoPayload marks versions ingested without an object (deletes that
+	// carry none). Once flushed they still have a segment reference, to an empty record.
+	versionFlagNoPayload
 )
 
 // smallStringTable interns the few distinct event types and statuses into one-byte
@@ -141,10 +147,16 @@ func (v *resourceVersion) changeEventInfo() analysisstore.ChangeEventInfo {
 	}
 }
 
-// sharedVersionMeta returns previous when it already describes identity, so long
-// histories share one meta value.
-func sharedVersionMeta(previous *versionMeta, identity graph.ResourceIdentity) *versionMeta {
+// sharedVersionMeta returns previous when it already describes identity and facts, so
+// long histories share one meta value. A nil facts keeps previous' facts.
+func sharedVersionMeta(previous *versionMeta, identity graph.ResourceIdentity, facts *graphFacts) *versionMeta {
+	if facts == nil && previous != nil {
+		facts = previous.graph
+	} else if previous != nil && facts.equal(previous.graph) {
+		facts = previous.graph
+	}
 	if previous != nil &&
+		previous.graph == facts &&
 		previous.UID == identity.UID &&
 		previous.Kind == identity.Kind &&
 		previous.APIGroup == identity.APIGroup &&
@@ -177,6 +189,7 @@ func sharedVersionMeta(previous *versionMeta, identity graph.ResourceIdentity) *
 		Name:      name,
 		FirstSeen: identity.FirstSeen,
 		Labels:    labels,
+		graph:     facts,
 	}
 }
 
@@ -184,7 +197,7 @@ func sharedVersionMeta(previous *versionMeta, identity graph.ResourceIdentity) *
 // version itself.
 func (v *resourceVersion) setChangeInfo(info analysisstore.ChangeEventInfo) {
 	v.statusCode = versionStatuses.code(info.Status)
-	v.flags = 0
+	v.flags &= versionFlagNoPayload
 	if info.ConfigChanged {
 		v.flags |= versionFlagConfigChanged
 	}
@@ -193,9 +206,10 @@ func (v *resourceVersion) setChangeInfo(info analysisstore.ChangeEventInfo) {
 	}
 }
 
-// setIdentity stores identity, sharing meta with the previous version when possible.
-func (v *resourceVersion) setIdentity(identity graph.ResourceIdentity, previous *versionMeta) {
-	v.meta = sharedVersionMeta(previous, identity)
+// setIdentity stores identity and graph facts, sharing meta with the previous version
+// when possible. Nil facts are unknown and keep the previous version's.
+func (v *resourceVersion) setIdentity(identity graph.ResourceIdentity, previous *versionMeta, facts *graphFacts) {
+	v.meta = sharedVersionMeta(previous, identity, facts)
 }
 
 // labels returns the version's labels; they are shared and must not be modified.

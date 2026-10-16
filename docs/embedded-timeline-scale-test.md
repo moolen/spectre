@@ -232,6 +232,8 @@ heap ≈ 150 MB
   counts exactly these.
 - **The Event term** is bounded by `K8sEventSummaryHorizon` and by 64 summaries per
   involved object.
+- **The graph store** adds about 0.4 KB per object for its edge facts and indexes; see
+  [embedded-graph-scale-test.md](embedded-graph-scale-test.md#sizing).
 
 Set `resources.limits.memory` to about 1.5× that. The chart sets `GOMEMLIMIT` from the
 limit (`goMemLimitFromResources: true`), so the GC works to stay below it. The headroom
