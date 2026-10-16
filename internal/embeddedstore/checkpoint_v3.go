@@ -537,7 +537,7 @@ func (c *checkpointV3Reader) labels(previous map[string]string) map[string]strin
 		if previous != nil && stringMapsEqual(labels, previous) {
 			return previous
 		}
-		return labels
+		return internLabels(labels)
 	default:
 		c.fail(fmt.Errorf("invalid labels marker"))
 		return nil
@@ -706,10 +706,10 @@ func decodeCheckpointK8sEventsV3(r *bufio.Reader, projection *Projection) error 
 			events = append(events, analysisstore.K8sEventInfo{
 				EventID:   in.string(),
 				Timestamp: time.Unix(0, in.varint()).UTC(),
-				Reason:    in.string(),
+				Reason:    internString(in.string()),
 				Message:   in.string(),
-				Type:      in.string(),
-				Source:    in.string(),
+				Type:      internString(in.string()),
+				Source:    internString(in.string()),
 				Count:     int(in.varint()),
 			})
 		}

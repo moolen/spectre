@@ -237,15 +237,16 @@ func (p *Projection) ensureResourceRecord(event models.Event) {
 
 	record := &resourceRecord{uid: uid}
 	p.resourcesByUID[uid] = record
+	kind, namespace := internString(event.Resource.Kind), internString(event.Resource.Namespace)
 	key := resourceKey{
-		namespace: event.Resource.Namespace,
-		kind:      event.Resource.Kind,
+		namespace: namespace,
+		kind:      kind,
 		name:      event.Resource.Name,
 	}
 	p.resourcesByKey[key] = append(p.resourcesByKey[key], record)
 	p.orderedResources.Insert(orderedResourceKey{
-		kind:      event.Resource.Kind,
-		namespace: event.Resource.Namespace,
+		kind:      kind,
+		namespace: namespace,
 		name:      event.Resource.Name,
 		uid:       uid,
 	})

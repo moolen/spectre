@@ -307,11 +307,11 @@ func buildK8sEventInfo(event models.Event) analysisstore.K8sEventInfo {
 	return analysisstore.K8sEventInfo{
 		EventID:   event.ID,
 		Timestamp: timeFromNs(event.Timestamp),
-		Reason:    getString(object, "reason"),
+		Reason:    internString(getString(object, "reason")),
 		Message:   getString(object, "message"),
-		Type:      getString(object, "type"),
+		Type:      internString(getString(object, "type")),
 		Count:     count,
-		Source:    source,
+		Source:    internString(source),
 	}
 }
 
@@ -324,7 +324,7 @@ func extractLabels(object map[string]any) map[string]string {
 	labels := make(map[string]string, len(labelsMap))
 	for key, value := range labelsMap {
 		if stringValue, ok := value.(string); ok {
-			labels[key] = stringValue
+			labels[internString(key)] = internString(stringValue)
 		}
 	}
 	return labels

@@ -167,16 +167,25 @@ func sharedVersionMeta(previous *versionMeta, identity graph.ResourceIdentity) *
 		return previous
 	}
 	labels := identity.Labels
-	if previous != nil && stringMapsEqual(previous.Labels, labels) {
-		labels = previous.Labels
+	uid, name := identity.UID, identity.Name
+	if previous != nil {
+		if stringMapsEqual(previous.Labels, labels) {
+			labels = previous.Labels
+		}
+		if previous.UID == uid {
+			uid = previous.UID
+		}
+		if previous.Name == name {
+			name = previous.Name
+		}
 	}
 	return &versionMeta{
-		UID:       identity.UID,
-		Kind:      identity.Kind,
-		APIGroup:  identity.APIGroup,
-		Version:   identity.Version,
-		Namespace: identity.Namespace,
-		Name:      identity.Name,
+		UID:       uid,
+		Kind:      internString(identity.Kind),
+		APIGroup:  internString(identity.APIGroup),
+		Version:   internString(identity.Version),
+		Namespace: internString(identity.Namespace),
+		Name:      name,
 		FirstSeen: identity.FirstSeen,
 		Labels:    labels,
 	}

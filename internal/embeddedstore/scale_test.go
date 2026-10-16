@@ -608,6 +608,12 @@ func TestScaleVersionMemory(t *testing.T) {
 	require.NoError(t, engine.ProcessBatch(ctx, batch))
 	require.NoError(t, engine.Flush(ctx))
 	after := measure()
+	if path := os.Getenv("SPECTRE_SCALE_HEAPPROFILE"); path != "" {
+		f, err := os.Create(path)
+		require.NoError(t, err)
+		require.NoError(t, pprof.WriteHeapProfile(f))
+		require.NoError(t, f.Close())
+	}
 
 	updates := resources * (versionsPerResource - 1)
 	perVersion := float64(after-base) / float64(updates)
