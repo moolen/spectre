@@ -446,3 +446,46 @@ func TestService_PaginateEntries_SortsAndSlicesByCursor(t *testing.T) {
 		t.Fatal("expected second page to be terminal")
 	}
 }
+
+type mockAttachingQueryExecutor struct {
+	mockQueryExecutor
+}
+
+func (m *mockAttachingQueryExecutor) AttachesK8sEventsToResources() bool { return true }
+
+func TestService_ExecuteConcurrentQueries_SkipsEventQueryWhenExecutorAttachesEvents(t *testing.T) {
+	pod := createTestEvent("pod-1", "Pod", "default", "test-pod", time.Now().UnixNano())
+	attached := models.K8sEvent{ID: "event-1", Reason: "Pulled"}
+	executor := &mockAttachingQueryExecutor{mockQueryExecutor{
+		executeFunc: func(q *models.QueryRequest) (*models.QueryResult, error) {
+			if kinds := q.Filters.GetKinds(); len(kinds) == 1 && kinds[0] == kindEvent {
+				t.Fatalf("unexpected separate Event query")
+			}
+			return &models.QueryResult{
+				Events:              []models.Event{pod},
+				Count:               1,
+				K8sEventsByResource: map[string][]models.K8sEvent{pod.Resource.UID: {attached}},
+			}, nil
+		},
+	}}
+
+	service := NewService(executor, logging.GetLogger("test"), noop.NewTracerProvider().Tracer("test"))
+	resourceResult, eventResult, err := service.ExecuteConcurrentQueries(context.Background(), &models.QueryRequest{
+		StartTimestamp: time.Now().Add(-time.Hour).Unix(),
+		EndTimestamp:   time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got := atomic.LoadInt32(&executor.executeCalls); got != 1 {
+		t.Fatalf("expected one executor call, got %d", got)
+	}
+	if eventResult == nil || len(eventResult.Events) != 0 {
+		t.Fatalf("expected an empty event result, got %+v", eventResult)
+	}
+
+	response := service.BuildTimelineResponse(resourceResult, eventResult)
+	if len(response.Resources) != 1 || len(response.Resources[0].Events) != 1 || response.Resources[0].Events[0].ID != "event-1" {
+		t.Fatalf("expected the attached event on the resource, got %+v", response.Resources)
+	}
+}

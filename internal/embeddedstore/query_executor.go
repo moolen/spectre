@@ -50,6 +50,12 @@ func NewQueryExecutor(projection *Projection) *QueryExecutor {
 	}
 }
 
+// AttachesK8sEventsToResources reports that resource queries return each resource's
+// core/v1 Events in QueryResult.K8sEventsByResource.
+func (qe *QueryExecutor) AttachesK8sEventsToResources() bool {
+	return true
+}
+
 func (qe *QueryExecutor) Execute(ctx context.Context, query *models.QueryRequest) (*models.QueryResult, error) {
 	result, _, err := qe.ExecutePaginated(ctx, query, query.Pagination)
 	return result, err

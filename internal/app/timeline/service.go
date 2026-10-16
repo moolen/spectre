@@ -145,6 +145,14 @@ func (s *Service) ExecuteConcurrentQueries(ctx context.Context, query *models.Qu
 		},
 	}
 
+	if attachesK8sEvents(executor) {
+		resourceResult, resourceErr := executor.Execute(ctx, query)
+		if resourceErr != nil {
+			return nil, nil, resourceErr
+		}
+		return resourceResult, &models.QueryResult{Events: []models.Event{}}, nil
+	}
+
 	wg.Add(2)
 
 	go func() {
