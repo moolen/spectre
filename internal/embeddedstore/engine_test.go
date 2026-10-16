@@ -51,50 +51,6 @@ func TestEngine_OpenLoadsCheckpointAndReplaysNewerSegments(t *testing.T) {
 	require.Len(t, result.Events, 1)
 }
 
-func TestEngine_OpenDoesNotBlockOnRecentEventTimelineCacheSeed(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	restoreSeed := setRecentEventTimelineCacheSeedFnForTest(
-		func(_ *QueryExecutor, _ context.Context, _ int64, _ time.Duration) error {
-			close(started)
-			<-release
-			return nil
-		},
-	)
-	t.Cleanup(restoreSeed)
-
-	type openResult struct {
-		engine *Engine
-		err    error
-	}
-
-	done := make(chan openResult, 1)
-	go func() {
-		engine, err := OpenEngine(EngineConfig{DataDir: t.TempDir(), HotMaxEvents: 100, HotMaxResourceVersions: 4})
-		done <- openResult{engine: engine, err: err}
-	}()
-
-	var result openResult
-	select {
-	case result = <-done:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("OpenEngine blocked on recent event timeline cache seed")
-	}
-
-	require.NoError(t, result.err)
-	require.NotNil(t, result.engine)
-	require.True(t, result.engine.IsReady())
-
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("recent event timeline cache seed did not start in background")
-	}
-
-	close(release)
-	require.NoError(t, result.engine.Close())
-}
-
 func TestEngine_OpenRecoversCheckpointDiscoveredOnDiskWhenManifestLags(t *testing.T) {
 	dir := t.TempDir()
 

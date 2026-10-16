@@ -166,7 +166,6 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		}
 		e.hot.Append([]models.Event{events[i]})
 	}
-	e.queryExec.AppendRecentEventTimelineCache(events)
 	if wasReady {
 		e.ready.Store(true)
 	}

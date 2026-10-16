@@ -20,7 +20,6 @@ package embeddedstore
 //	SPECTRE_SCALE_WINDOW            simulated time span, e.g. 168h (default per profile)
 //	SPECTRE_SCALE_RETENTION_DAYS    embedded retention days (default 0 = unlimited)
 //	SPECTRE_SCALE_HEAPPROFILE  write a heap profile after load
-//	SPECTRE_SCALE_NO_EVENT_CACHE    disable the recent core/v1 Event cache
 
 import (
 	"context"
@@ -157,10 +156,6 @@ func TestTimelineScale(t *testing.T) {
 	backend, err := Open(cfg)
 	require.NoError(t, err)
 	engine := backend.engine
-	if os.Getenv("SPECTRE_SCALE_NO_EVENT_CACHE") != "" {
-		waitForStartupEventCacheSeed(t, engine)
-		engine.queryExec.ConfigureRecentEventTimelineCache(0)
-	}
 	require.NoError(t, engine.Start(context.Background()))
 
 	ctx := context.Background()

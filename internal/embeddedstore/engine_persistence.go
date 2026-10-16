@@ -323,11 +323,6 @@ func (e *Engine) applyRetentionLocked(ctx context.Context, retentionCutoffTimest
 	e.hot = rebuildHotStoreWithRetention(e.hot, e.metrics, retentionCutoffTimestamp)
 	e.refreshQueryPlanner()
 	e.metrics.SetActiveSegments(len(e.segmentReaders))
-	if e.queryExec != nil {
-		e.queryExec.recentEventCacheMu.Lock()
-		e.queryExec.pruneRecentEventTimelineCacheLocked(retentionCutoffTimestamp)
-		e.queryExec.recentEventCacheMu.Unlock()
-	}
 	return nil
 }
 

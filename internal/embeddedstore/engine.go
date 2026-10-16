@@ -48,8 +48,6 @@ var (
 	defaultAssociatedIndexWarmupTimeout           = 5 * time.Minute
 	defaultAssociatedIndexWarmupMaxSegments       = 64
 	defaultAssociatedIndexWarmupMaxBytes    int64 = 64 << 20
-	defaultRecentEventTimelineCacheHorizon        = 4 * time.Hour
-	defaultRecentEventTimelineCacheTimeout        = 5 * time.Minute
 )
 
 func OpenEngine(cfg EngineConfig) (*Engine, error) {
@@ -174,7 +172,6 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	}
 	if !cfg.ProjectionHistoryFallback {
 		engine.queryExec.DisableProjectionHistoryFallback()
-		engine.queryExec.ConfigureRecentEventTimelineCache(defaultRecentEventTimelineCacheHorizon)
 	}
 	engine.queryExec.SetMetrics(metrics)
 	plannerStart := time.Now()
@@ -190,7 +187,6 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	engine.logStaleTailCleanupWarning(pruneStaleTailJournals(engine.rootDir, engine.manifest.ActiveTail.ID, previousTailIDs(engine.manifest)...))
 	engine.logStartup(mode, replayedTailEvents)
 	engine.ready.Store(true)
-	engine.startBackgroundRecentEventTimelineCacheSeed()
 	if needsSegmentIndexMigration {
 		engine.startBackgroundSegmentIndexMigration()
 	}
@@ -462,55 +458,6 @@ func (e *Engine) startBackgroundAssociatedIndexWarmup() {
 		e.logger.InfoWithFields(
 			"embedded startup associated-index warmup completed",
 			logging.Field("loaded_segments", loadedSegments),
-			logging.Field("duration_ms", time.Since(start).Milliseconds()),
-		)
-	}()
-}
-
-func (e *Engine) startBackgroundRecentEventTimelineCacheSeed() {
-	if e == nil || e.queryExec == nil || e.config.ProjectionHistoryFallback ||
-		defaultRecentEventTimelineCacheHorizon <= 0 || !e.beginBackgroundTask() {
-		return
-	}
-
-	go func() {
-		defer e.backgroundTasks.Done()
-
-		e.mu.Lock()
-		if e.closed {
-			e.mu.Unlock()
-			return
-		}
-		e.mu.Unlock()
-
-		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), defaultRecentEventTimelineCacheTimeout)
-		defer cancel()
-
-		if err := seedRecentEventTimelineCache(e.queryExec, ctx, start.UnixNano(), defaultRecentEventTimelineCacheHorizon); err != nil {
-			if ctx.Err() != nil {
-				e.logger.WarnWithFields(
-					"embedded startup recent event timeline cache seed timed out",
-					logging.Field("error", err.Error()),
-					logging.Field("duration_ms", time.Since(start).Milliseconds()),
-				)
-				return
-			}
-			e.logger.WarnWithFields(
-				"embedded startup recent event timeline cache seed failed",
-				logging.Field("error", err.Error()),
-				logging.Field("duration_ms", time.Since(start).Milliseconds()),
-			)
-			return
-		}
-
-		e.queryExec.recentEventCacheMu.RLock()
-		cachedEvents := len(e.queryExec.recentEventCache)
-		e.queryExec.recentEventCacheMu.RUnlock()
-		e.logger.InfoWithFields(
-			"embedded startup recent event timeline cache seeded",
-			logging.Field("horizon", defaultRecentEventTimelineCacheHorizon.String()),
-			logging.Field("events", cachedEvents),
 			logging.Field("duration_ms", time.Since(start).Milliseconds()),
 		)
 	}()

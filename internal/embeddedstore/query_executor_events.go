@@ -199,10 +199,6 @@ func (qe *QueryExecutor) eventTimelineEvents(
 	startTimeNs, endTimeNs int64,
 	filters models.QueryFilters,
 ) ([]lazyEvent, queryPlanStats, error) {
-	if cached, stats, ok := qe.recentEventTimelineEvents(startTimeNs, endTimeNs, filters); ok {
-		return cached, stats, nil
-	}
-
 	planner := qe.sharedPlanner()
 	if planner != nil {
 		return planner.exportTimeRangeLazy(ctx, startTimeNs, endTimeNs, filters)
