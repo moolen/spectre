@@ -72,12 +72,15 @@ type Projection struct {
 	// newest timestamp of an event info that was dropped. The projection only has the
 	// complete set of infos for windows starting after it.
 	k8sEventsTruncatedThrough map[string]int64
-	orderedResources          *orderedResourceIndex
-	activeOrderedResources    []orderedResourceKey
-	activeResourceKeyByUID    map[string]orderedResourceKey
-	recentResourceChanges     []recentResourceChange
-	minTimestampNs            int64
-	maxTimestampNs            int64
+	// k8sEventHashes remembers recent core/v1 Event payloads for duplicate detection.
+	k8sEventHashes         map[string]k8sEventPayloadHash
+	k8sEventHashPruneAt    int
+	orderedResources       *orderedResourceIndex
+	activeOrderedResources []orderedResourceKey
+	activeResourceKeyByUID map[string]orderedResourceKey
+	recentResourceChanges  []recentResourceChange
+	minTimestampNs         int64
+	maxTimestampNs         int64
 
 	dataRoot       string
 	segmentHandles map[string]*segmentDataHandle

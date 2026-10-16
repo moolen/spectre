@@ -25,6 +25,8 @@ type Metrics struct {
 	IngestEvents   prometheus.Counter
 	IngestErrors   prometheus.Counter
 	IngestDuration prometheus.Histogram
+	// IngestUnchanged counts events dropped because they repeat an object's stored state.
+	IngestUnchanged prometheus.Counter
 
 	StartupMode      *prometheus.GaugeVec
 	TailReplayEvents prometheus.Counter
@@ -79,6 +81,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Name:    "spectre_embedded_ingest_duration_seconds",
 		Help:    "Time spent processing embedded ingest batches.",
 		Buckets: prometheus.DefBuckets,
+	})
+	ingestUnchanged := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "spectre_embedded_ingest_unchanged_events_total",
+		Help: "Total number of embedded events dropped because their payload repeats the object's latest stored state.",
 	})
 	startupMode := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "spectre_embedded_startup_mode",
@@ -182,6 +188,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		ingestEvents,
 		ingestErrors,
 		ingestDuration,
+		ingestUnchanged,
 		startupMode,
 		tailReplayEvents,
 		hotEvents,
@@ -214,6 +221,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		IngestEvents:       ingestEvents,
 		IngestErrors:       ingestErrors,
 		IngestDuration:     ingestDuration,
+		IngestUnchanged:    ingestUnchanged,
 		StartupMode:        startupMode,
 		TailReplayEvents:   tailReplayEvents,
 		HotEvents:          hotEvents,
@@ -297,6 +305,13 @@ func (m *Metrics) RecordIngest(eventCount int, duration time.Duration, err error
 		m.IngestErrors.Inc()
 	}
 	m.IngestDuration.Observe(duration.Seconds())
+}
+
+func (m *Metrics) RecordUnchangedEventsDropped(count int) {
+	if m == nil || m.IngestUnchanged == nil || count <= 0 {
+		return
+	}
+	m.IngestUnchanged.Add(float64(count))
 }
 
 func (m *Metrics) RecordStartupMode(mode string) {

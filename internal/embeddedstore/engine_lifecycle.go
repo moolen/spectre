@@ -142,6 +142,15 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		return fmt.Errorf("process embedded batch: tail journal is nil")
 	}
 
+	if e.config.DropUnchangedEvents {
+		var dropped int
+		events, dropped = e.projection.dropUnchangedEvents(events)
+		e.metrics.RecordUnchangedEventsDropped(dropped)
+		if len(events) == 0 {
+			return nil
+		}
+	}
+
 	wasReady := e.ready.Load()
 	tailMeta, err := e.tail.AppendBatch(ctx, e.nextHighWaterMark+1, events)
 	if err != nil {

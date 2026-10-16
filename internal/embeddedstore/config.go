@@ -22,4 +22,7 @@ type EngineConfig struct {
 	DisableAutoCompaction     bool
 	MetricsRegisterer         prometheus.Registerer
 	ProjectionHistoryFallback bool
+	// DropUnchangedEvents discards Create/Update events whose payload repeats the
+	// object's latest stored state (watch re-lists); see dropUnchangedEvents.
+	DropUnchangedEvents bool
 }

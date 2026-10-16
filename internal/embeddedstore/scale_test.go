@@ -615,3 +615,48 @@ func TestScaleVersionMemory(t *testing.T) {
 		resources, versionsPerResource, float64(base)/(1<<20), float64(after)/(1<<20), perVersion)
 	runtime.KeepAlive(engine)
 }
+
+// TestScaleRelist measures what a watch re-list costs: the watcher reports every live
+// object again, byte-identical to its stored state. SPECTRE_SCALE_PROFILE picks the
+// cluster shape (default medium).
+func TestScaleRelist(t *testing.T) {
+	profileName := envOr("SPECTRE_SCALE_PROFILE", "medium")
+	profile, ok := scaleProfiles[profileName]
+	require.True(t, ok, "unknown profile %q", profileName)
+
+	reg := prometheus.NewRegistry()
+	backend, err := Open(Config{DataDir: t.TempDir(), MetricsRegisterer: reg})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, backend.Close()) })
+	ctx := context.Background()
+
+	var objects []models.Event
+	newScaleWorkload(profile, time.Now()).Initial(func(event models.Event) {
+		objects = append(objects, event)
+	})
+	ingest := func(events []models.Event) time.Duration {
+		start := time.Now()
+		for i := 0; i < len(events); i += 256 {
+			require.NoError(t, backend.ProcessBatch(ctx, events[i:min(i+256, len(events))]))
+		}
+		return time.Since(start)
+	}
+	initial := ingest(objects)
+	require.NoError(t, backend.engine.Flush(ctx))
+
+	relisted := make([]models.Event, len(objects))
+	now := time.Now().UnixNano()
+	for i := range objects {
+		relisted[i] = objects[i]
+		relisted[i].ID = fmt.Sprintf("relist-%d", i)
+		relisted[i].Timestamp = now + int64(i)
+	}
+	relist := ingest(relisted)
+
+	var dropped dto.Metric
+	require.NoError(t, backend.engine.metrics.IngestUnchanged.Write(&dropped))
+	require.Equal(t, float64(len(objects)), dropped.GetCounter().GetValue())
+	t.Logf("profile=%s objects=%d initial=%s (%.0f ev/s) relist=%s (%.0f ev/s), relisted events stored: %d",
+		profileName, len(objects), initial.Round(time.Millisecond), float64(len(objects))/initial.Seconds(),
+		relist.Round(time.Millisecond), float64(len(objects))/relist.Seconds(), len(objects)-int(dropped.GetCounter().GetValue()))
+}

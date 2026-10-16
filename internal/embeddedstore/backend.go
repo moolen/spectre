@@ -29,6 +29,9 @@ type Config struct {
 	DisableAutoCompaction       bool
 	MetricsRegisterer           prometheus.Registerer
 	ProjectionHistoryFallback   bool
+	// KeepUnchangedEvents stores events that repeat an object's latest state verbatim,
+	// such as the copies a watch re-list reports. They are dropped by default.
+	KeepUnchangedEvents bool
 }
 
 type Backend struct {
@@ -116,6 +119,7 @@ func (cfg Config) EffectiveEngineConfig() (EngineConfig, error) {
 		DisableAutoCompaction:     cfg.DisableAutoCompaction,
 		MetricsRegisterer:         cfg.MetricsRegisterer,
 		ProjectionHistoryFallback: cfg.ProjectionHistoryFallback,
+		DropUnchangedEvents:       !cfg.KeepUnchangedEvents,
 	}
 	if engineCfg.HotMaxEvents == 0 {
 		engineCfg.HotMaxEvents = defaultHotMaxEvents

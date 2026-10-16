@@ -178,6 +178,7 @@ func (p *Projection) applyK8sEvent(event models.Event) {
 	if event.Resource.InvolvedObjectUID == "" {
 		return
 	}
+	p.rememberK8sEventHashLocked(event)
 	involvedUID := event.Resource.InvolvedObjectUID
 	if p.retainHistoricalEventArrays {
 		p.k8sRawEventsByInvolvedUID[involvedUID] = insertEventSorted(p.k8sRawEventsByInvolvedUID[involvedUID], event)
