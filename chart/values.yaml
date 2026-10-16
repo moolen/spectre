@@ -25,6 +25,8 @@ resources:
     memory: "500Mi"
     cpu: "500m"
   limits:
+    # Enough for 7 days of a ~100-node cluster. Large clusters and longer retention need
+    # more: see the sizing section of docs/embedded-timeline-scale-test.md.
     memory: "1400Mi"
 
 # Set GOMEMLIMIT from resources.limits.memory so the Go GC keeps the heap under the
@@ -60,7 +62,10 @@ tracing:
 embedded:
   dataDir: /var/lib/spectre-data
   flushInterval: 30s
-  retentionDays: 0
+  # Days of history to keep (0 keeps everything, so memory grows without bound). Memory
+  # and disk grow roughly linearly with retention; see the sizing section of
+  # docs/embedded-timeline-scale-test.md before raising it, and enable persistence.
+  retentionDays: 7
   checkpointInterval: 15m
   checkpointRetentionCount: 3
   checkpointMaxTailEvents: 50000
