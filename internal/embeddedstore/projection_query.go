@@ -183,15 +183,7 @@ func (p *Projection) activeResourcesInNamespace(namespace string, timestampNs in
 		result = append(result, version)
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].meta.Kind != result[j].meta.Kind {
-			return result[i].meta.Kind < result[j].meta.Kind
-		}
-		if result[i].meta.Name != result[j].meta.Name {
-			return result[i].meta.Name < result[j].meta.Name
-		}
-		return result[i].meta.UID < result[j].meta.UID
-	})
+	sort.Slice(result, func(i, j int) bool { return namespaceOrderLess(result[i], result[j]) })
 
 	return result
 }

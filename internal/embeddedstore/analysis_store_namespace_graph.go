@@ -23,12 +23,11 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 	// forever if a writer queues up between the two acquisitions.
 	query := normalizeNamespaceQuery(input, s.projection.retentionWindowNs)
 
-	namespacedResources := s.projection.activeResourcesInNamespace(query.Namespace, query.TimestampNs)
-	startIndex, err := decodeCursor(query.Cursor)
+	cursor, err := decodeCursor(query.Cursor)
 	if err != nil {
-		startIndex = namespaceCursor{}
+		cursor = namespaceCursor{}
 	}
-	pagedResources := applyCursor(namespacedResources, startIndex)
+	pagedResources := s.projection.namespacePage(query.Namespace, query.TimestampNs, cursor, query.Limit+1)
 
 	hasMore := len(pagedResources) > query.Limit
 	if hasMore {
@@ -168,17 +167,47 @@ func decodeCursor(value string) (namespaceCursor, error) {
 	return cursor, nil
 }
 
-func applyCursor(resources []*resourceVersion, cursor namespaceCursor) []*resourceVersion {
-	if cursor.LastKind == "" && cursor.LastName == "" {
-		return resources
+// before reports whether version sorts after the cursor.
+func (c namespaceCursor) before(version *resourceVersion) bool {
+	if c.LastKind == "" && c.LastName == "" {
+		return true
 	}
-	result := make([]*resourceVersion, 0, len(resources))
-	for _, version := range resources {
-		if version.meta.Kind > cursor.LastKind || (version.meta.Kind == cursor.LastKind && version.meta.Name > cursor.LastName) {
-			result = append(result, version)
+	return version.meta.Kind > c.LastKind || (version.meta.Kind == c.LastKind && version.meta.Name > c.LastName)
+}
+
+// namespacePage returns, in activeResourcesInNamespace order, the first n resources of
+// the namespace active at timestampNs that sort after cursor. It keeps only the n
+// smallest while scanning, so walking every page of a large namespace stays linear per
+// page instead of sorting the namespace each time.
+func (p *Projection) namespacePage(namespace string, timestampNs int64, cursor namespaceCursor, n int) []*resourceVersion {
+	page := make([]*resourceVersion, 0, n)
+	for _, record := range uniqueRecords(p.graph.byNamespace[namespace]) {
+		version := record.activeVersionAt(timestampNs)
+		if version == nil || version.meta.Kind == "Event" || version.meta.Namespace != namespace || !cursor.before(version) {
+			continue
 		}
+		if len(page) == n && !namespaceOrderLess(version, page[n-1]) {
+			continue
+		}
+		i := sort.Search(len(page), func(i int) bool { return namespaceOrderLess(version, page[i]) })
+		if len(page) < n {
+			page = append(page, nil)
+		}
+		copy(page[i+1:], page[i:len(page)-1])
+		page[i] = version
 	}
-	return result
+	return page
+}
+
+// namespaceOrderLess orders resources by kind, name and UID.
+func namespaceOrderLess(a, b *resourceVersion) bool {
+	if a.meta.Kind != b.meta.Kind {
+		return a.meta.Kind < b.meta.Kind
+	}
+	if a.meta.Name != b.meta.Name {
+		return a.meta.Name < b.meta.Name
+	}
+	return a.meta.UID < b.meta.UID
 }
 
 // specDiffVersions returns the versions a node's spec diff compares: the earliest with

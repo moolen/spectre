@@ -430,7 +430,7 @@ func legacyGetNamespaceGraph(s *Store, input analysisstore.NamespaceGraphQuery) 
 	if err != nil {
 		cursor = namespaceCursor{}
 	}
-	paged := applyCursor(namespaced, cursor)
+	paged := legacyApplyCursor(namespaced, cursor)
 	hasMore := len(paged) > query.Limit
 	if hasMore {
 		paged = paged[:query.Limit]
@@ -808,4 +808,17 @@ func TestGraphQueriesConcurrentWithIngest(t *testing.T) {
 		require.NoError(t, <-errs)
 	}
 	assertGraphParity(t, store, timestamps[len(timestamps)-2:])
+}
+
+func legacyApplyCursor(resources []*resourceVersion, cursor namespaceCursor) []*resourceVersion {
+	if cursor.LastKind == "" && cursor.LastName == "" {
+		return resources
+	}
+	result := make([]*resourceVersion, 0, len(resources))
+	for _, version := range resources {
+		if cursor.before(version) {
+			result = append(result, version)
+		}
+	}
+	return result
 }
