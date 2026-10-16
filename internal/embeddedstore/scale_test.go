@@ -542,3 +542,76 @@ func mustAtoi(t *testing.T, value string) int {
 	require.NoError(t, err)
 	return n
 }
+
+// TestScaleVersionMemory measures retained heap per stored version once payloads are
+// flushed, the number that bounds how much history fits in memory.
+//
+//	go test -tags scale -run TestScaleVersionMemory -v ./internal/embeddedstore/
+func TestScaleVersionMemory(t *testing.T) {
+	resources := 20000
+	versionsPerResource := 50
+	if v := os.Getenv("SPECTRE_SCALE_RESOURCES"); v != "" {
+		resources = mustAtoi(t, v)
+	}
+	if v := os.Getenv("SPECTRE_SCALE_VERSIONS"); v != "" {
+		versionsPerResource = mustAtoi(t, v)
+	}
+
+	engine, err := OpenEngine(EngineConfig{
+		DataDir:                t.TempDir(),
+		HotMaxEvents:           50000,
+		HotMaxResourceVersions: 32,
+		SegmentTargetBytes:     16 << 20,
+		CompactionMinSegments:  4,
+		DisableAutoCompaction:  true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, engine.Close())
+	})
+
+	measure := func() uint64 {
+		runtime.GC()
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		return ms.HeapAlloc
+	}
+
+	workload := newScaleWorkload(scaleProfiles["small"], time.Now())
+	pods := make([]*scaleObject, resources)
+	ctx := context.Background()
+	batch := make([]models.Event, 0, 1024)
+	push := func(event models.Event) {
+		batch = append(batch, event)
+		if len(batch) == cap(batch) {
+			require.NoError(t, engine.ProcessBatch(ctx, batch))
+			batch = batch[:0]
+		}
+	}
+	workload.nodes = []*scaleObject{{meta: models.ResourceMetadata{Name: "node-0"}}}
+	rs := &scaleObject{meta: models.ResourceMetadata{Namespace: "team-000", Name: "svc-000-abc", UID: "rs-uid"}}
+	for i := range pods {
+		pods[i] = workload.newPod(rs)
+		push(workload.event(models.EventTypeCreate, pods[i]))
+	}
+	require.NoError(t, engine.ProcessBatch(ctx, batch))
+	batch = batch[:0]
+	require.NoError(t, engine.Flush(ctx))
+	base := measure()
+
+	for v := 1; v < versionsPerResource; v++ {
+		for i := range pods {
+			push(workload.event(models.EventTypeUpdate, pods[i]))
+		}
+	}
+	require.NoError(t, engine.ProcessBatch(ctx, batch))
+	require.NoError(t, engine.Flush(ctx))
+	after := measure()
+
+	updates := resources * (versionsPerResource - 1)
+	perVersion := float64(after-base) / float64(updates)
+	t.Logf("resources=%d versions/resource=%d base_heap=%.1fMB heap=%.1fMB bytes/version=%.1f",
+		resources, versionsPerResource, float64(base)/(1<<20), float64(after)/(1<<20), perVersion)
+	runtime.KeepAlive(engine)
+}

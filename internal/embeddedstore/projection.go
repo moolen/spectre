@@ -64,7 +64,6 @@ type Projection struct {
 	// Compact projection state should leave them empty after build/import/apply.
 	events                    []models.Event
 	eventsByResourceUID       map[string][]models.Event
-	resourceMetaByUID         map[string]models.ResourceMetadata
 	resourcesByUID            map[string]*resourceRecord
 	resourcesByKey            map[resourceKey][]*resourceRecord
 	k8sRawEventsByInvolvedUID map[string][]models.Event
@@ -115,7 +114,6 @@ type ProjectionResourceVersionSnapshot struct {
 func NewProjection() *Projection {
 	return &Projection{
 		eventsByResourceUID:       make(map[string][]models.Event),
-		resourceMetaByUID:         make(map[string]models.ResourceMetadata),
 		resourcesByUID:            make(map[string]*resourceRecord),
 		resourcesByKey:            make(map[resourceKey][]*resourceRecord),
 		orderedResources:          newOrderedResourceIndex(),

@@ -215,7 +215,6 @@ func (p *Projection) finishAppliedResourceEvent(
 		return
 	}
 
-	p.resourceMetaByUID[uid] = latestMeta
 	p.updateTimestampBounds(event.Timestamp)
 }
 

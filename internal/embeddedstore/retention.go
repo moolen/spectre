@@ -153,7 +153,6 @@ func (p *Projection) applyRetentionCutoffLocked(cutoffTimestamp int64) {
 		for uid := range removed {
 			record := p.resourcesByUID[uid]
 			delete(p.resourcesByUID, uid)
-			delete(p.resourceMetaByUID, uid)
 			if record == nil {
 				continue
 			}

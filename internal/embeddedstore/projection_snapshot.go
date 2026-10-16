@@ -235,7 +235,6 @@ func (p *Projection) replaceStateLocked(other *Projection) {
 	retentionWindowNs := p.retentionWindowNs
 	p.events = other.events
 	p.eventsByResourceUID = other.eventsByResourceUID
-	p.resourceMetaByUID = other.resourceMetaByUID
 	p.resourcesByUID = other.resourcesByUID
 	p.resourcesByKey = other.resourcesByKey
 	p.k8sRawEventsByInvolvedUID = other.k8sRawEventsByInvolvedUID
@@ -313,7 +312,6 @@ func restoreProjectionResourceRecord(projection *Projection, record *resourceRec
 	latest := record.versions[len(record.versions)-1]
 	meta := resourceMetadataFromIdentity(latest.identity())
 	projection.resourcesByUID[record.uid] = record
-	projection.resourceMetaByUID[record.uid] = meta
 	key := resourceKey{
 		namespace: meta.Namespace,
 		kind:      meta.Kind,

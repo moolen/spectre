@@ -85,9 +85,10 @@ func (qe *QueryExecutor) QueryDistinctMetadata(ctx context.Context, startTimeNs,
 		qe.recordQueryMetrics(queryFamilyDistinctMeta, stats, start, err)
 		return nil, nil, 0, 0, err
 	}
-	for uid, meta := range projection.resourceMetaByUID {
+	for _, record := range projection.resourcesByUID {
+		meta := resourceRecordLatestMeta(record)
 		if !fullRange {
-			first, last, ok := resourceRecordWindowBounds(projection.resourcesByUID[uid], startTimeNs, endTimeNs)
+			first, last, ok := resourceRecordWindowBounds(record, startTimeNs, endTimeNs)
 			if !ok {
 				continue
 			}
