@@ -292,7 +292,7 @@ func (s *Store) GetK8sEvents(ctx context.Context, resourceUIDs []string, window 
 // newestK8sEventsInWindow returns up to maxK8sEvents of a newest-first list that fall in
 // [startNs, endNs].
 func newestK8sEventsInWindow(events []analysisstore.K8sEventInfo, startNs, endNs int64) []analysisstore.K8sEventInfo {
-	var filtered []analysisstore.K8sEventInfo
+	filtered := make([]analysisstore.K8sEventInfo, 0, min(len(events), maxK8sEvents))
 	for _, event := range events {
 		ts := event.Timestamp.UnixNano()
 		if ts < startNs || ts > endNs {

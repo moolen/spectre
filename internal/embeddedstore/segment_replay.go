@@ -97,7 +97,7 @@ func (c *segmentReplayCursor) nextLocated(ctx context.Context) (models.Event, re
 			return models.Event{}, replayLocation{}, false, fmt.Errorf("decode event: %w", err)
 		}
 
-		location := replayLocation{segmentID: c.source.segmentID, offset: c.nextOffset, length: uint32(size)}
+		location := replayLocation{segmentID: c.source.segmentID, offset: c.nextOffset, length: uint32(size)} // #nosec G115 -- one record, <= maxSegmentRecordSize
 		c.nextOffset += size
 		if event.Timestamp < c.source.startTimestamp {
 			continue

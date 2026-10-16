@@ -97,7 +97,7 @@ func (p *Projection) CheckpointState(highWaterMark uint64) checkpointState {
 	for i, id := range segmentTable {
 		handle := p.segmentHandles[id]
 		handle.mu.Lock()
-		handle.checkpointIndex = uint32(i + 1)
+		handle.checkpointIndex = uint32(i + 1) // #nosec G115 -- one entry per segment file
 		handle.mu.Unlock()
 	}
 

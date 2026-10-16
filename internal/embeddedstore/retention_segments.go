@@ -1,7 +1,6 @@
 package embeddedstore
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/moolen/spectre/internal/models"
@@ -22,7 +21,7 @@ const pinnedSegmentPrefix = "pin-"
 // A segment that straddles the cutoff is kept whole until it expires completely; queries
 // clamp to the cutoff (Projection.retentionCutoff). Rewriting it instead would copy up to
 // a whole compacted segment under the engine lock every time retention runs.
-func (e *Engine) applySegmentRetentionLocked(ctx context.Context, cutoffTimestamp int64) error {
+func (e *Engine) applySegmentRetentionLocked(cutoffTimestamp int64) error {
 	if cutoffTimestamp <= 0 {
 		return nil
 	}

@@ -331,7 +331,7 @@ func TestEngine_StartPeriodicCheckpointFlushesAndPersistsRestartableState(t *tes
 	engine.mu.Unlock()
 	stopPeriodicCheckpoint()
 	engine.checkpointMu.Lock()
-	engine.checkpointMu.Unlock() //nolint:staticcheck // waits for an in-flight checkpoint
+	engine.checkpointMu.Unlock() //nolint:staticcheck,gocritic // waits for an in-flight checkpoint
 
 	// Checkpoints flush first, so the hot event is durable in a segment and the
 	// checkpoint references it instead of inlining the payload.

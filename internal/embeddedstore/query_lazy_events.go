@@ -134,7 +134,7 @@ func (r *segmentReader) scanTimeRangeLazy(ctx context.Context, startTimestamp, e
 				event:  record.event,
 				path:   r.eventsPath,
 				offset: recordOffset,
-				length: uint32(4 + payloadLen),
+				length: uint32(4 + payloadLen), // #nosec G115 -- payloadLen <= maxSegmentRecordSize
 				loaded: record.dataEncoding == eventDataNone,
 			})
 			continue
@@ -175,7 +175,7 @@ func hydrateLazyEvents(events []*lazyEvent) error {
 }
 
 func hydrateFromFile(path string, events []*lazyEvent) error {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- segment file under the engine data dir
 	if err != nil {
 		return fmt.Errorf("hydrate events: open %s: %w", path, err)
 	}

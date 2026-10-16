@@ -67,13 +67,6 @@ func (e *Engine) Compact(ctx context.Context) error {
 	}
 }
 
-func (e *Engine) shouldAutoCompactLocked() bool {
-	if e == nil || e.config.DisableAutoCompaction {
-		return false
-	}
-	return e.planCompactionLocked(e.compactionMinSegments()) != nil
-}
-
 func (e *Engine) compactionMinSegments() int {
 	minSegments := e.config.CompactionMinSegments
 	if minSegments < 2 {
@@ -114,7 +107,7 @@ func (e *Engine) scheduleCompactionLocked() {
 // can be merged without exceeding the size and time-span limits.
 func (e *Engine) planCompactionLocked(minRun int) *compactionPlan {
 	segments := e.manifest.ActiveSegments
-	var run []SegmentMeta
+	run := make([]SegmentMeta, 0, len(segments))
 	var runBytes int64
 	var runMin, runMax int64
 
@@ -135,14 +128,14 @@ func (e *Engine) planCompactionLocked(minRun int) *compactionPlan {
 				if plan := flush(); plan != nil {
 					return plan
 				}
-				run, runBytes = nil, 0
+				run, runBytes = run[:0], 0
 			}
 		}
 		if !eligible {
 			if plan := flush(); plan != nil {
 				return plan
 			}
-			run, runBytes = nil, 0
+			run, runBytes = run[:0], 0
 			continue
 		}
 		if len(run) == 0 {
@@ -277,32 +270,6 @@ func (e *Engine) locateSegmentRunLocked(plan *compactionPlan) (int, bool) {
 		return start, true
 	}
 	return 0, false
-}
-
-// removeRetiredSegmentsLocked deletes segments retired before the checkpoint that was
-// just written; nothing on disk references them any more.
-func (e *Engine) removeRetiredSegmentsLocked() error {
-	if len(e.manifest.RetiredSegments) == 0 {
-		return nil
-	}
-	retired := e.manifest.RetiredSegments
-	updatedManifest := e.manifest
-	updatedManifest.RetiredSegments = nil
-	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
-		return fmt.Errorf("store manifest: %w", err)
-	}
-	e.manifest = updatedManifest
-
-	segmentsRoot := filepath.Join(e.rootDir, segmentsDirName)
-	for i := range retired {
-		if err := os.RemoveAll(filepath.Join(segmentsRoot, retired[i].ID)); err != nil {
-			return fmt.Errorf("remove retired segment %q: %w", retired[i].ID, err)
-		}
-	}
-	if err := syncPath(segmentsRoot); err != nil {
-		return fmt.Errorf("sync segments dir: %w", err)
-	}
-	return nil
 }
 
 // remapRetiredSegmentReferences moves version references restored from a checkpoint off

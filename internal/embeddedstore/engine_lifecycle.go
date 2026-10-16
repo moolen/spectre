@@ -95,7 +95,7 @@ func (e *Engine) Close() error {
 	// A checkpoint encodes without holding mu; wait for an in-flight one (for example a
 	// periodic checkpoint) so nothing writes to the data directory after Close returns.
 	e.checkpointMu.Lock()
-	e.checkpointMu.Unlock() //nolint:staticcheck // waits for an in-flight checkpoint
+	e.checkpointMu.Unlock() //nolint:staticcheck,gocritic // waits for an in-flight checkpoint
 
 	if tail != nil {
 		if err := tail.Close(); err != nil {

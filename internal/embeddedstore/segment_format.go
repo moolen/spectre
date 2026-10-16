@@ -120,7 +120,7 @@ func encodeFramedEvent(event models.Event) ([]byte, error) {
 	if payloadLen > maxSegmentRecordSize {
 		return nil, fmt.Errorf("encode framed event: payload size %d exceeds max %d", payloadLen, maxSegmentRecordSize)
 	}
-	binary.BigEndian.PutUint32(record[:4], uint32(payloadLen))
+	binary.BigEndian.PutUint32(record[:4], uint32(payloadLen)) // #nosec G115 -- checked against maxSegmentRecordSize
 	return record, nil
 }
 

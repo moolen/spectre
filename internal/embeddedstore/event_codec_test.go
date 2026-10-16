@@ -3,6 +3,7 @@ package embeddedstore
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -174,4 +175,18 @@ func TestVersionDataRef_PacksOffsetAndLength(t *testing.T) {
 	require.Equal(t, uint32(maxSegmentRecordSize+4), ref.length())
 	require.False(t, newVersionDataRef(handle, 1<<40, 10).valid())
 	require.False(t, newVersionDataRef(nil, 10, 10).valid())
+}
+
+func TestSmallStringTable_FallsBackToEmptyWhenFull(t *testing.T) {
+	table := newSmallStringTable()
+	for i := 1; i <= 255; i++ {
+		value := fmt.Sprintf("status-%d", i)
+		code := table.code(value)
+		require.Equal(t, uint8(i), code)
+		require.Equal(t, value, table.value(code))
+	}
+	// The 256th distinct value does not fit in a byte; it must not alias code 0.
+	require.Equal(t, uint8(0), table.code("one-too-many"))
+	require.Equal(t, "", table.value(0))
+	require.Equal(t, "status-1", table.value(1))
 }

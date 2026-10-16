@@ -92,7 +92,8 @@ func (qe *QueryExecutor) collectPaginatedResources(
 	var walkErr error
 	checked := 0
 	projection.orderedResources.AscendAfterCursor(cursor, func(key orderedResourceKey) bool {
-		if checked++; checked%4096 == 0 {
+		checked++
+		if checked%4096 == 0 {
 			if err := ctx.Err(); err != nil {
 				walkErr = err
 				return false

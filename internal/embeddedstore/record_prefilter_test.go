@@ -42,7 +42,6 @@ func TestRecordPrefilter_AgreesWithQueryFilters(t *testing.T) {
 			require.True(t, ok)
 			require.Equal(t, events[i].Timestamp, key.timestamp)
 			for _, filters := range filterSets {
-				filters := filters
 				require.Equal(t, filters.Matches(events[i].Resource), newRecordPrefilter(filters).matches(&key), "%+v %+v", filters, events[i].Resource)
 			}
 		}

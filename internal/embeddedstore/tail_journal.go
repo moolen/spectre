@@ -83,7 +83,7 @@ func (t *tailJournal) AppendBatch(ctx context.Context, nextHighWaterMark uint64,
 
 	payloads := make([][]byte, 0, len(events))
 	for i := range events {
-		payloads = append(payloads, appendEventRecord(nil, tailRecordMagic, nextHighWaterMark+uint64(i), &events[i], false))
+		payloads = append(payloads, appendEventRecord(nil, tailRecordMagic, nextHighWaterMark+uint64(i), &events[i], false)) // #nosec G115 -- i is a slice index
 	}
 
 	if err := t.journal.appendPayloadBatch(ctx, payloads); err != nil {

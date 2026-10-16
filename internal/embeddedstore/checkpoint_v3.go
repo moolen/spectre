@@ -104,7 +104,7 @@ func (p *Projection) captureCheckpointSnapshot(highWaterMark uint64) *checkpoint
 	for i, id := range snapshot.segmentTable {
 		handle := p.segmentHandles[id]
 		handle.mu.Lock()
-		handle.checkpointIndex = uint32(i + 1)
+		handle.checkpointIndex = uint32(i + 1) // #nosec G115 -- one entry per segment file
 		handle.mu.Unlock()
 	}
 
@@ -239,7 +239,7 @@ func (c *checkpointV3Writer) uint64(value uint64) {
 
 func (c *checkpointV3Writer) string(value string) {
 	c.uvarint(uint64(len(value)))
-	if c.err != nil || len(value) == 0 {
+	if c.err != nil || value == "" {
 		return
 	}
 	_, c.err = c.w.WriteString(value)
@@ -398,7 +398,7 @@ func encodeCheckpointPayloadV3(out *checkpointV3Writer, version *resourceVersion
 	}
 	out.byte(checkpointV3PayloadRef)
 	out.uvarint(uint64(index))
-	out.uvarint(uint64(version.ref.offset()))
+	out.uvarint(uint64(version.ref.offset())) // #nosec G115 -- offsets are non-negative
 	out.uvarint(uint64(version.ref.length()))
 }
 
@@ -437,7 +437,6 @@ func encodeCheckpointK8sEventsV3(w *bufio.Writer, snapshot *checkpointSnapshot) 
 
 type checkpointV3Reader struct {
 	r   *bufio.Reader
-	buf []byte
 	err error
 }
 
@@ -661,6 +660,10 @@ func decodeCheckpointResourcesV3(r *bufio.Reader, projection *Projection, segmen
 				index := in.uvarint()
 				offset := in.uvarint()
 				length := in.uvarint()
+				if index > math.MaxUint32 || offset > maxVersionRefOffset || length > versionRefLengthMask {
+					in.fail(fmt.Errorf("payload reference out of range"))
+					break
+				}
 				if handle := resolveSegment(uint32(index)); handle != nil {
 					version.ref = newVersionDataRef(handle, int64(offset), uint32(length))
 				}

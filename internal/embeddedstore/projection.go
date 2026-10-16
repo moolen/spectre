@@ -22,11 +22,6 @@ type orderedResourceKey struct {
 	uid       string
 }
 
-type recentResourceChange struct {
-	timestamp int64
-	uid       string
-}
-
 // resourceVersion is one observed state of a resource. It is kept compact because the
 // projection holds one per event for the whole retention window: identity strings live
 // in a versionMeta shared by consecutive versions, and identity/change info structs are
@@ -92,14 +87,11 @@ type Projection struct {
 	k8sEventInfoHorizonNs       int64
 	k8sEventInfosTrimmedThrough int64
 	// k8sEventHashes remembers recent core/v1 Event payloads for duplicate detection.
-	k8sEventHashes         map[string]k8sEventPayloadHash
-	k8sEventHashPruneAt    int
-	orderedResources       *orderedResourceIndex
-	activeOrderedResources []orderedResourceKey
-	activeResourceKeyByUID map[string]orderedResourceKey
-	recentResourceChanges  []recentResourceChange
-	minTimestampNs         int64
-	maxTimestampNs         int64
+	k8sEventHashes      map[string]k8sEventPayloadHash
+	k8sEventHashPruneAt int
+	orderedResources    *orderedResourceIndex
+	minTimestampNs      int64
+	maxTimestampNs      int64
 
 	dataRoot       string
 	segmentHandles map[string]*segmentDataHandle
@@ -142,7 +134,6 @@ func NewProjection() *Projection {
 		k8sRawEventsByInvolvedUID: make(map[string][]models.Event),
 		k8sEventsByInvolvedUID:    make(map[string][]analysisstore.K8sEventInfo),
 		k8sEventsTruncatedThrough: make(map[string]int64),
-		activeResourceKeyByUID:    make(map[string]orderedResourceKey),
 		minTimestampNs:            -1,
 		maxTimestampNs:            -1,
 	}

@@ -1,6 +1,7 @@
 package embeddedstore
 
 import (
+	"math"
 	"sync"
 
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
@@ -54,10 +55,10 @@ func (t *smallStringTable) code(value string) uint8 {
 	if code, ok := t.codes[value]; ok {
 		return code
 	}
-	if len(t.values) > 255 {
+	if len(t.values) > math.MaxUint8 {
 		return 0
 	}
-	code = uint8(len(t.values))
+	code = uint8(len(t.values)) // #nosec G115 -- checked against MaxUint8 above
 	t.codes[value] = code
 	t.values = append(t.values, value)
 	return code
@@ -137,18 +138,6 @@ func (v *resourceVersion) changeEventInfo() analysisstore.ChangeEventInfo {
 		ConfigChanged: v.configChanged(),
 		StatusChanged: v.statusChanged(),
 		Description:   changeDescription(eventType),
-	}
-}
-
-func (v *resourceVersion) resourceMetadata() models.ResourceMetadata {
-	meta := v.metaOrEmpty()
-	return models.ResourceMetadata{
-		Group:     meta.APIGroup,
-		Version:   meta.Version,
-		Kind:      meta.Kind,
-		Namespace: meta.Namespace,
-		Name:      meta.Name,
-		UID:       meta.UID,
 	}
 }
 

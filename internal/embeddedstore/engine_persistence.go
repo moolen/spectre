@@ -317,7 +317,7 @@ func (e *Engine) applyRetentionLocked(ctx context.Context, retentionCutoffTimest
 	}
 	e.manifest = updatedManifest
 
-	if err := e.applySegmentRetentionLocked(ctx, retentionCutoffTimestamp); err != nil {
+	if err := e.applySegmentRetentionLocked(retentionCutoffTimestamp); err != nil {
 		return err
 	}
 	e.hot = rebuildHotStoreWithRetention(e.hot, e.metrics, retentionCutoffTimestamp)

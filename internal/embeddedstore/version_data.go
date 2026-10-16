@@ -42,13 +42,14 @@ type versionDataRef struct {
 const (
 	versionRefLengthBits = 24
 	versionRefLengthMask = 1<<versionRefLengthBits - 1
+	maxVersionRefOffset  = 1<<(64-versionRefLengthBits) - 1
 )
 
 func newVersionDataRef(segment *segmentDataHandle, offset int64, length uint32) versionDataRef {
-	if segment == nil || offset < 0 || offset >= 1<<40 || length == 0 || length > versionRefLengthMask {
+	if segment == nil || offset < 0 || offset > maxVersionRefOffset || length == 0 || length > versionRefLengthMask {
 		return versionDataRef{}
 	}
-	return versionDataRef{segment: segment, packed: uint64(offset)<<versionRefLengthBits | uint64(length)}
+	return versionDataRef{segment: segment, packed: uint64(offset)<<versionRefLengthBits | uint64(length)} // #nosec G115 -- offset checked above
 }
 
 func (r versionDataRef) valid() bool {
@@ -56,11 +57,11 @@ func (r versionDataRef) valid() bool {
 }
 
 func (r versionDataRef) offset() int64 {
-	return int64(r.packed >> versionRefLengthBits)
+	return int64(r.packed >> versionRefLengthBits) // #nosec G115 -- 40 bits
 }
 
 func (r versionDataRef) length() uint32 {
-	return uint32(r.packed & versionRefLengthMask)
+	return uint32(r.packed & versionRefLengthMask) // #nosec G115 -- 24 bits
 }
 
 var versionDataReadErrors atomic.Uint64
@@ -260,28 +261,6 @@ func (p *Projection) ReleaseSegmentHandles(segmentIDs []string) {
 	for _, id := range segmentIDs {
 		delete(p.segmentHandles, id)
 	}
-}
-
-// pinnedVersionKeys lists versions that must stay readable even though they are older
-// than cutoffTimestamp: the state each resource was in when the retained window starts.
-func (p *Projection) pinnedVersionKeys(cutoffTimestamp int64) map[pinnedVersionKey]struct{} {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	pinned := make(map[pinnedVersionKey]struct{})
-	for uid, record := range p.resourcesByUID {
-		retained := retainedVersionsBefore(record, cutoffTimestamp)
-		for _, version := range retained {
-			pinned[pinnedVersionKey{uid: uid, eventID: version.eventID(), timestamp: version.timestamp}] = struct{}{}
-		}
-	}
-	return pinned
-}
-
-type pinnedVersionKey struct {
-	uid       string
-	eventID   string
-	timestamp int64
 }
 
 // retainedVersionsBefore returns the versions older than cutoff that retention keeps.

@@ -177,7 +177,7 @@ func newSegmentBuilder(rootDir, segmentID string) (*segmentBuilder, error) {
 
 func openSegmentBundleBuilder(segmentDir, segmentID string) (*segmentBuilder, error) {
 	eventsPath := filepath.Join(segmentDir, segmentEventsFile)
-	file, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	file, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) // #nosec G304 -- path under the engine data dir
 	if err != nil {
 		return nil, fmt.Errorf("write segment bundle: open events file: %w", err)
 	}
@@ -212,7 +212,7 @@ func (b *segmentBuilder) Append(event *models.Event) error {
 	if payloadLen > maxSegmentRecordSize {
 		return fmt.Errorf("write segment bundle: encode event: payload size %d exceeds max %d", payloadLen, maxSegmentRecordSize)
 	}
-	binary.BigEndian.PutUint32(b.scratch[:4], uint32(payloadLen))
+	binary.BigEndian.PutUint32(b.scratch[:4], uint32(payloadLen)) // #nosec G115 -- checked against maxSegmentRecordSize
 	return b.appendFrame(event, b.scratch)
 }
 
@@ -247,7 +247,7 @@ func (b *segmentBuilder) appendFrame(event *models.Event, frame []byte) error {
 				EventID:   event.ID,
 				Timestamp: event.Timestamp,
 				Offset:    recordOffset,
-				Length:    uint32(len(frame)),
+				Length:    uint32(len(frame)), // #nosec G115 -- one record, <= maxSegmentRecordSize
 			})
 		}
 	}

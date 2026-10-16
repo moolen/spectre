@@ -28,7 +28,7 @@ type segmentRecordIterator struct {
 }
 
 func openSegmentRecordIterator(path string) (*segmentRecordIterator, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- segment file under the engine data dir
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func scanSegmentLocations(path string) ([]segmentRecordLocation, error) {
 		if resource.UID == "" || resource.Kind == "Event" {
 			continue
 		}
-		length := uint32(iterator.offset - record.offset)
+		length := uint32(iterator.offset - record.offset) // #nosec G115 -- one record, <= maxSegmentRecordSize
 		locations = append(locations, segmentRecordLocation{
 			UID:       resource.UID,
 			EventID:   record.event.ID,

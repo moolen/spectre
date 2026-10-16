@@ -2,7 +2,6 @@ package embeddedstore
 
 import (
 	"sort"
-	"time"
 
 	"github.com/moolen/spectre/internal/models"
 )
@@ -149,37 +148,6 @@ func resourceRecordPreExistingEvent(record *resourceRecord) (models.Event, bool)
 	event := resourceVersionEvent(*latest)
 	event.PreExisting = true
 	return event, true
-}
-
-func (p *Projection) recentWindowChangedUIDs(startTimeNs int64) (map[string]struct{}, bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.recentWindowChangedUIDsLocked(startTimeNs)
-}
-
-func (p *Projection) recentWindowChangedUIDsLocked(startTimeNs int64) (map[string]struct{}, bool) {
-	if p == nil || p.maxTimestampNs <= 0 || len(p.recentResourceChanges) == 0 {
-		return nil, false
-	}
-
-	if p.retentionWindowNs > 0 {
-		retentionStart := time.Now().UTC().Add(-time.Duration(p.retentionWindowNs)).UnixNano()
-		if startTimeNs < retentionStart {
-			return nil, false
-		}
-	}
-
-	idx := sort.Search(len(p.recentResourceChanges), func(i int) bool {
-		return p.recentResourceChanges[i].timestamp >= startTimeNs
-	})
-	if idx >= len(p.recentResourceChanges) {
-		return nil, false
-	}
-	changedUIDs := make(map[string]struct{})
-	for i := idx; i < len(p.recentResourceChanges); i++ {
-		changedUIDs[p.recentResourceChanges[i].uid] = struct{}{}
-	}
-	return changedUIDs, true
 }
 
 func (p *Projection) rebuildRecord(uid string) {

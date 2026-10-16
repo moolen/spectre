@@ -161,8 +161,8 @@ func decodeEventRecordHeader(payload []byte) (eventRecord, error) {
 	event.Resource.Name = d.string()
 	event.Resource.UID = d.string()
 	event.Resource.InvolvedObjectUID = d.string()
-	event.DataSize = int32(d.varint())
-	event.CompressedSize = int32(d.varint())
+	event.DataSize = int32(d.varint())       // #nosec G115 -- encoded from an int32
+	event.CompressedSize = int32(d.varint()) // #nosec G115 -- encoded from an int32
 	event.PreExisting = d.byte()&eventFlagPreExisting != 0
 	record.dataEncoding = d.byte()
 	if record.dataEncoding != eventDataNone {
