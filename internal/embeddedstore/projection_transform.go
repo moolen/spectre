@@ -1,18 +1,15 @@
 package embeddedstore
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
 	"strings"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
 
-	"github.com/moolen/spectre/internal/analysis"
 	analysisstore "github.com/moolen/spectre/internal/analysis/store"
 	analyzerpkg "github.com/moolen/spectre/internal/analyzer"
 	"github.com/moolen/spectre/internal/graph"
@@ -164,7 +161,10 @@ func changeKindsFromStates(previous, current recordChangeState) (bool, bool) {
 	}
 	prev, cur := previous.fingerprint, current.fingerprint
 	if !prev.valid || !cur.valid {
-		return false, false
+		// An unparsable payload compares as an empty object, and its spec fields are not
+		// diffed; kind-specific fields only count when the current payload parses.
+		configChanged := cur.valid && prev.kindSpecific != cur.kindSpecific
+		return configChanged, prev.status != cur.status
 	}
 	configChanged := prev.spec != cur.spec || prev.kindSpecific != cur.kindSpecific
 	statusChanged := prev.status != cur.status
@@ -185,6 +185,10 @@ func computeChangeFingerprint(object map[string]any) changeFingerprint {
 		case strings.HasPrefix(key, "status"):
 			target = &fp.status
 		default:
+			// Kind-specific fields compare like map lookups: null equals absent.
+			if value == nil {
+				continue
+			}
 			for _, specific := range specificKeys {
 				if key == specific {
 					target = &fp.kindSpecific
@@ -309,54 +313,6 @@ func buildK8sEventInfo(event models.Event) analysisstore.K8sEventInfo {
 		Count:     count,
 		Source:    source,
 	}
-}
-
-func detectChangeKinds(previousData, currentData []byte) (bool, bool) {
-	if len(previousData) == 0 || len(currentData) == 0 {
-		return false, false
-	}
-
-	previousObject := parseObject(previousData)
-	currentObject := parseObject(currentData)
-	kind := getString(currentObject, "kind")
-
-	configChanged := detectKindSpecificConfigChange(kind, previousObject, currentObject)
-	statusChanged := fieldChanged(previousObject, currentObject, "status")
-
-	diffs, err := analysis.ComputeJSONDiff(previousData, currentData)
-	if err != nil {
-		return configChanged, statusChanged
-	}
-	for _, diff := range diffs {
-		if bytes.HasPrefix([]byte(diff.Path), []byte("/spec")) || bytes.HasPrefix([]byte(diff.Path), []byte("spec")) {
-			configChanged = true
-		}
-		if bytes.HasPrefix([]byte(diff.Path), []byte("/status")) || bytes.HasPrefix([]byte(diff.Path), []byte("status")) {
-			statusChanged = true
-		}
-	}
-	return configChanged, statusChanged
-}
-
-func detectKindSpecificConfigChange(kind string, previousObject, currentObject map[string]any) bool {
-	switch kind {
-	case "ConfigMap", "Secret":
-		return fieldChanged(previousObject, currentObject, "data") ||
-			fieldChanged(previousObject, currentObject, "binaryData") ||
-			fieldChanged(previousObject, currentObject, "stringData")
-	case "Role", "ClusterRole":
-		return fieldChanged(previousObject, currentObject, "rules") ||
-			fieldChanged(previousObject, currentObject, "aggregationRule")
-	case "RoleBinding", "ClusterRoleBinding":
-		return fieldChanged(previousObject, currentObject, "roleRef") ||
-			fieldChanged(previousObject, currentObject, "subjects")
-	default:
-		return false
-	}
-}
-
-func fieldChanged(previousObject, currentObject map[string]any, key string) bool {
-	return !reflect.DeepEqual(previousObject[key], currentObject[key])
 }
 
 func extractLabels(object map[string]any) map[string]string {

@@ -144,9 +144,22 @@ spec:
         {{- with .Values.extraVolumeMounts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- with .Values.env }}
+        {{- $memoryLimit := dig "limits" "memory" "" (.Values.resources | default dict) }}
+        {{- $goMemLimit := and .Values.goMemLimitFromResources $memoryLimit }}
+        {{- if or .Values.env $goMemLimit }}
         env:
+          {{- if $goMemLimit }}
+          # Lets the Go GC work harder as the heap approaches the container limit
+          # instead of growing to twice the live heap.
+          - name: GOMEMLIMIT
+            valueFrom:
+              resourceFieldRef:
+                containerName: spectre
+                resource: limits.memory
+          {{- end }}
+          {{- with .Values.env }}
           {{- toYaml . | nindent 10 }}
+          {{- end }}
         {{- end }}
         {{- with .Values.envFrom }}
         envFrom:

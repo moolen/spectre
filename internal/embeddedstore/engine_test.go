@@ -367,6 +367,16 @@ func TestEngine_StartPeriodicCheckpointFlushesAndPersistsRestartableState(t *tes
 			manifest.ActiveTail.EventCount == 0
 	}, time.Second, 10*time.Millisecond)
 
+	// Stop periodic checkpoints and wait out an in-flight one before inspecting the
+	// on-disk state, which a running checkpoint rewrites.
+	engine.mu.Lock()
+	stopPeriodicCheckpoint := engine.periodicCheckpointStop
+	engine.periodicCheckpointStop = nil
+	engine.mu.Unlock()
+	stopPeriodicCheckpoint()
+	engine.checkpointMu.Lock()
+	engine.checkpointMu.Unlock() //nolint:staticcheck // waits for an in-flight checkpoint
+
 	// Checkpoints flush first, so the hot event is durable in a segment and the
 	// checkpoint references it instead of inlining the payload.
 	manifest, err := loadOrCreateManifest(rootDir)

@@ -439,6 +439,7 @@ func TestEngine_OpenSeedsRecentEventTimelineCache(t *testing.T) {
 		require.NoError(t, reopened.Close())
 	})
 
+	waitForStartupEventCacheSeed(t, reopened)
 	reopened.QueryExecutor().SetSharedCache((*QueryPlanner)(nil))
 
 	require.Eventually(t, func() bool {

@@ -66,6 +66,11 @@ func (e *Engine) flushLocked(ctx context.Context) (err error) {
 	}
 
 	updatedManifest := e.manifest
+	if len(updatedManifest.ActiveSegments) == 0 && len(e.manifest.RetiredSegments) == 0 {
+		// Every segment of this store is written in the current format, so there is
+		// nothing for the startup index migration to do.
+		updatedManifest.SegmentIndexGeneration = associatedIndexGeneration
+	}
 	updatedManifest.ActiveSegments = append(updatedManifest.ActiveSegments, segmentMetaFromBundle(meta, e.nextHighWaterMark))
 	updatedManifest.FlushHighWaterMark = e.nextHighWaterMark
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {

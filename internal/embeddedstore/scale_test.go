@@ -304,6 +304,14 @@ func runTimelineQueries(t *testing.T, exec *QueryExecutor, profile scaleProfile)
 		{name: "events full all", window: windowSec, events: true},
 		{name: "events full ns", window: windowSec, events: true, filters: models.QueryFilters{Namespaces: []string{"team-001"}}},
 	}
+	if windowSec > 2*86400 {
+		specs = append(specs,
+			spec{name: "resources 24h all", window: 86400},
+			spec{name: "resources 7d all", window: 7 * 86400},
+			spec{name: "events 24h all", window: 86400, events: true},
+			spec{name: "events 7d all", window: 7 * 86400, events: true},
+		)
+	}
 
 	var results []queryResult
 	for _, s := range specs {

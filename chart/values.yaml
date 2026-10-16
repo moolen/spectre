@@ -27,6 +27,10 @@ resources:
   limits:
     memory: "1400Mi"
 
+# Set GOMEMLIMIT from resources.limits.memory so the Go GC keeps the heap under the
+# container limit. See docs/embedded-timeline-scale-test.md for sizing the limit.
+goMemLimitFromResources: true
+
 # Service configuration
 # Port allocation:
 #   - 8080: HTTP REST API with gRPC-Web support, MCP at /v1/mcp (main service)

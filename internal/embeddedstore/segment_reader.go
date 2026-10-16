@@ -32,11 +32,6 @@ type segmentReader struct {
 	associatedIndexPresent bool
 }
 
-var (
-	readResourceIndexUIDsFnMu sync.RWMutex
-	readResourceIndexUIDsFn   = readResourceIndexUIDsDirect
-)
-
 func openSegmentReader(rootDir string, meta segmentBundleMeta) (*segmentReader, error) {
 	if rootDir == "" {
 		return nil, fmt.Errorf("open segment reader: root dir is empty")
@@ -286,13 +281,6 @@ func (r *segmentReader) scanOffsets(ctx context.Context, offsets []int64, op str
 	return events, nil
 }
 
-func (r *segmentReader) IndexedUIDs() ([]string, error) {
-	if r == nil {
-		return nil, fmt.Errorf("reader is nil")
-	}
-	return readResourceIndexUIDs(r.resourceIndexPath)
-}
-
 func (r *segmentReader) AssociatedIndexLoaded() bool {
 	if r == nil {
 		return false
@@ -514,13 +502,6 @@ func readResourceIndex(path string) (segmentResourceIndex, error) {
 	return index, nil
 }
 
-func readResourceIndexUIDs(path string) ([]string, error) {
-	readResourceIndexUIDsFnMu.RLock()
-	fn := readResourceIndexUIDsFn
-	readResourceIndexUIDsFnMu.RUnlock()
-	return fn(path)
-}
-
 func readResourceIndexContainsUID(path, targetUID string) (bool, error) {
 	if targetUID == "" {
 		return false, nil
@@ -606,101 +587,6 @@ func readResourceIndexContainsUID(path, targetUID string) (bool, error) {
 	}
 
 	return false, nil
-}
-
-func readResourceIndexUIDsDirect(path string) ([]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	decoder := json.NewDecoder(file)
-	token, err := decoder.Token()
-	if err != nil {
-		return nil, fmt.Errorf("decode resource index json: %w", err)
-	}
-	if delim, ok := token.(json.Delim); !ok || delim != '{' {
-		return nil, fmt.Errorf("decode resource index json: expected object")
-	}
-
-	uids := make([]string, 0)
-	for decoder.More() {
-		keyToken, err := decoder.Token()
-		if err != nil {
-			return nil, fmt.Errorf("decode resource index json: read key: %w", err)
-		}
-		key, ok := keyToken.(string)
-		if !ok {
-			return nil, fmt.Errorf("decode resource index json: invalid key token")
-		}
-
-		if key != "uid_offsets" {
-			var discard json.RawMessage
-			if err := decoder.Decode(&discard); err != nil {
-				return nil, fmt.Errorf("decode resource index json: skip field %q: %w", key, err)
-			}
-			continue
-		}
-
-		token, err := decoder.Token()
-		if err != nil {
-			return nil, fmt.Errorf("decode resource index json: read uid_offsets: %w", err)
-		}
-		if delim, ok := token.(json.Delim); !ok || delim != '{' {
-			return nil, fmt.Errorf("decode resource index json: expected uid_offsets object")
-		}
-
-		for decoder.More() {
-			uidToken, err := decoder.Token()
-			if err != nil {
-				return nil, fmt.Errorf("decode resource index json: read uid key: %w", err)
-			}
-			uid, ok := uidToken.(string)
-			if !ok {
-				return nil, fmt.Errorf("decode resource index json: invalid uid key token")
-			}
-			uids = append(uids, uid)
-
-			var discard json.RawMessage
-			if err := decoder.Decode(&discard); err != nil {
-				return nil, fmt.Errorf("decode resource index json: read uid offsets for %q: %w", uid, err)
-			}
-		}
-
-		token, err = decoder.Token()
-		if err != nil {
-			return nil, fmt.Errorf("decode resource index json: close uid_offsets: %w", err)
-		}
-		if delim, ok := token.(json.Delim); !ok || delim != '}' {
-			return nil, fmt.Errorf("decode resource index json: expected uid_offsets close")
-		}
-	}
-
-	token, err = decoder.Token()
-	if err != nil {
-		return nil, fmt.Errorf("decode resource index json: close object: %w", err)
-	}
-	if delim, ok := token.(json.Delim); !ok || delim != '}' {
-		return nil, fmt.Errorf("decode resource index json: expected object close")
-	}
-
-	return uids, nil
-}
-
-func setReadResourceIndexUIDsFnForTest(fn func(string) ([]string, error)) func() {
-	readResourceIndexUIDsFnMu.Lock()
-	previous := readResourceIndexUIDsFn
-	readResourceIndexUIDsFn = fn
-	readResourceIndexUIDsFnMu.Unlock()
-
-	return func() {
-		readResourceIndexUIDsFnMu.Lock()
-		readResourceIndexUIDsFn = previous
-		readResourceIndexUIDsFnMu.Unlock()
-	}
 }
 
 func readAssociatedIndex(path string) (segmentAssociatedIndex, bool, error) {
