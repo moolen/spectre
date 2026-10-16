@@ -275,6 +275,13 @@ func TestEngine_OpenFallsBackToRepairReplayWhenTailJournalIsTruncated(t *testing
 	require.GreaterOrEqual(t, len(record.versions), 2)
 	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID)
 	require.Equal(t, repairEvent.ID, record.versions[len(record.versions)-1].eventID)
+	for i := range record.versions {
+		version := &record.versions[i]
+		// Segment replays reference their records; tail replays stay in memory until
+		// the next flush.
+		require.True(t, version.ref.valid() != (len(version.data) > 0), "version %s: ref=%+v data=%d", version.eventID, version.ref, len(version.data))
+		require.NotEmpty(t, versionPayload(version))
+	}
 	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.BaseHighWaterMark)
 	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.LastHighWaterMark)
 	require.Zero(t, reopened.manifest.ActiveTail.EventCount)

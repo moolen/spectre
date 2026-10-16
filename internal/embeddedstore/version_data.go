@@ -208,6 +208,26 @@ func (p *Projection) AttachSegmentLocations(segmentID string, locations []segmen
 	return attached
 }
 
+// attachReplayLocation points a just-replayed version at its segment record so repair
+// replays do not hold every payload in memory.
+func (p *Projection) attachReplayLocation(event models.Event, location replayLocation) {
+	if p == nil || location.segmentID == "" || location.length == 0 || event.Resource.Kind == "Event" || event.Resource.UID == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	record := p.resourcesByUID[event.Resource.UID]
+	if record == nil {
+		return
+	}
+	version := record.findVersion(event.Timestamp, event.ID)
+	if version == nil {
+		return
+	}
+	version.ref = versionDataRef{segment: p.segmentHandleLocked(location.segmentID), offset: location.offset, length: location.length}
+	version.data = nil
+}
+
 // ReleaseSegmentHandles forgets handles for segments that no version references any more,
 // so their descriptors can be closed once in-flight readers finish.
 func (p *Projection) ReleaseSegmentHandles(segmentIDs []string) {

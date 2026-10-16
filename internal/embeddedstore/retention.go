@@ -307,11 +307,6 @@ func reconcileEmbeddedRetention(
 		return manifest, err
 	}
 
-	updatedManifest.ActiveSegments, err = rewriteSegmentsForRetention(ctx, rootDir, updatedManifest.ActiveSegments, cutoffTimestamp)
-	if err != nil {
-		return manifest, err
-	}
-
 	if rewriteActiveTail {
 		updatedManifest, err = rewriteTailForRetention(rootDir, updatedManifest, cutoffTimestamp)
 		if err != nil {
@@ -381,78 +376,6 @@ func pruneExpiredCheckpoints(rootDir string, manifest Manifest, cutoffTimestamp 
 		}
 	}
 	return updatedManifest, nil
-}
-
-func rewriteSegmentsForRetention(
-	ctx context.Context,
-	rootDir string,
-	segments []SegmentMeta,
-	cutoffTimestamp int64,
-) ([]SegmentMeta, error) {
-	if cutoffTimestamp <= 0 || len(segments) == 0 {
-		return segments, nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	updatedSegments := make([]SegmentMeta, 0, len(segments))
-	segmentsRoot := filepath.Join(rootDir, segmentsDirName)
-	removedAny := false
-
-	for i := range segments {
-		current := segments[i]
-		reader, err := openSegmentReader(rootDir, current.bundleMeta())
-		if err != nil {
-			return nil, fmt.Errorf("open retention segment %q: %w", current.ID, err)
-		}
-
-		meta, err := reader.EnsureBundleMeta()
-		if err != nil {
-			return nil, fmt.Errorf("load retention segment metadata %q: %w", current.ID, err)
-		}
-		if meta.EventCount == 0 || meta.MaxTimestamp < cutoffTimestamp {
-			if err := os.RemoveAll(filepath.Join(segmentsRoot, current.ID)); err != nil {
-				return nil, fmt.Errorf("remove expired segment %q: %w", current.ID, err)
-			}
-			removedAny = true
-			continue
-		}
-		if meta.MinTimestamp >= cutoffTimestamp {
-			updatedSegments = append(updatedSegments, current)
-			continue
-		}
-
-		events, err := reader.ScanTimeRange(ctx, cutoffTimestamp, meta.MaxTimestamp)
-		if err != nil {
-			return nil, fmt.Errorf("scan retention segment %q: %w", current.ID, err)
-		}
-		if len(events) == 0 {
-			if err := os.RemoveAll(filepath.Join(segmentsRoot, current.ID)); err != nil {
-				return nil, fmt.Errorf("remove expired segment %q: %w", current.ID, err)
-			}
-			removedAny = true
-			continue
-		}
-
-		replacementID := newSegmentID(current.HighWaterMark)
-		replacementMeta, err := writeSegment(rootDir, replacementID, events)
-		if err != nil {
-			return nil, fmt.Errorf("rewrite retention segment %q: %w", current.ID, err)
-		}
-		if err := os.RemoveAll(filepath.Join(segmentsRoot, current.ID)); err != nil {
-			return nil, fmt.Errorf("remove rewritten segment %q: %w", current.ID, err)
-		}
-		removedAny = true
-		updatedSegments = append(updatedSegments, segmentMetaFromBundle(replacementMeta, current.HighWaterMark))
-	}
-
-	if removedAny {
-		if err := syncPath(segmentsRoot); err != nil {
-			return nil, fmt.Errorf("sync segments dir after retention: %w", err)
-		}
-	}
-	return updatedSegments, nil
 }
 
 func rewriteTailForRetention(rootDir string, manifest Manifest, cutoffTimestamp int64) (Manifest, error) {

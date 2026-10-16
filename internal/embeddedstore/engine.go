@@ -154,6 +154,14 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 		segmentReaders:    readers,
 		nextHighWaterMark: nextHighWaterMark,
 	}
+	if retentionCutoffTimestamp > 0 {
+		// Segments are trimmed only now that the projection is loaded, so payloads it
+		// still references can be moved to a pinned segment first.
+		if err := engine.applySegmentRetentionLocked(context.Background(), retentionCutoffTimestamp); err != nil {
+			_ = tail.Close()
+			return nil, fmt.Errorf("open embedded engine: apply segment retention: %w", err)
+		}
+	}
 	if !cfg.ProjectionHistoryFallback {
 		engine.queryExec.DisableProjectionHistoryFallback()
 		engine.queryExec.ConfigureRecentEventTimelineCache(defaultRecentEventTimelineCacheHorizon)

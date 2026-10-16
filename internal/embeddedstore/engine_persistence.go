@@ -177,7 +177,12 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 		e.metrics.RecordCheckpoint(time.Since(start), err)
 	}()
 
+	// Apply retention before snapshotting so the checkpoint reflects the pruned state and
+	// the segments retention replaced can be removed once it is written.
 	retentionCutoffTimestamp := embeddedRetentionCutoffTimestamp(e.config.EmbeddedRetentionDays, time.Now())
+	if err := e.applyRetentionLocked(ctx, retentionCutoffTimestamp); err != nil {
+		return fmt.Errorf("checkpoint embedded engine: apply retention: %w", err)
+	}
 	meta, err := writeCheckpointWithRetention(e.rootDir, e.projection, e.nextHighWaterMark, retentionCutoffTimestamp)
 	if err != nil {
 		return fmt.Errorf("checkpoint embedded engine: write checkpoint: %w", err)
@@ -215,9 +220,6 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 	if err := e.removeRetiredSegmentsLocked(); err != nil {
 		return fmt.Errorf("checkpoint embedded engine: remove retired segments: %w", err)
 	}
-	if err := e.applyRetentionLocked(ctx, retentionCutoffTimestamp); err != nil {
-		return fmt.Errorf("checkpoint embedded engine: apply retention: %w", err)
-	}
 	if err := e.pruneCheckpointHistoryLocked(); err != nil {
 		return fmt.Errorf("checkpoint embedded engine: prune checkpoint history: %w", err)
 	}
@@ -236,20 +238,19 @@ func (e *Engine) applyRetentionLocked(ctx context.Context, retentionCutoffTimest
 		ctx = context.Background()
 	}
 
-	updatedManifest, err := reconcileEmbeddedRetention(ctx, e.rootDir, e.manifest, retentionCutoffTimestamp, false)
+	updatedManifest, err := pruneExpiredCheckpoints(e.rootDir, e.manifest, retentionCutoffTimestamp)
 	if err != nil {
 		return err
 	}
-
-	readers, err := openActiveSegmentReaders(e.rootDir, updatedManifest.ActiveSegments)
-	if err != nil {
-		return fmt.Errorf("reopen retained segments: %w", err)
+	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
+		return err
 	}
-
 	e.manifest = updatedManifest
-	e.segmentReaders = readers
+
+	if err := e.applySegmentRetentionLocked(ctx, retentionCutoffTimestamp); err != nil {
+		return err
+	}
 	e.hot = rebuildHotStoreWithRetention(e.hot, e.metrics, retentionCutoffTimestamp)
-	e.projection.ApplyRetentionCutoff(retentionCutoffTimestamp)
 	e.refreshQueryPlanner()
 	e.metrics.SetActiveSegments(len(e.segmentReaders))
 	if e.queryExec != nil {
