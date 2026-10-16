@@ -75,9 +75,13 @@ Each item below names the limit it removed.
      background every 50k tail events or 256 MiB.
    - It used to serialise the whole projection with gob while holding the engine mutex,
      every 2048 events.
-5. **Tiered compaction in the background.**
-   - It merges neighbouring segments up to 512 MiB and 24 hours, copying raw records.
-   - It used to decode every event of every segment into one slice under the lock.
+5. **Tiered compaction in the background, and retention without rewrites.**
+   - Compaction merges neighbouring segments up to 512 MiB and 24 hours, copying raw
+     records. It used to decode every event of every segment into one slice under the
+     lock.
+   - Retention retires a segment once all its records have expired. A segment that
+     straddles the cutoff is kept whole, and queries clamp to the cutoff. Rewriting it on
+     every checkpoint stalled ingest for seconds and wrote more than was ingested.
 6. **Resource pages independent of the window.**
    - Pages come from an ordered B-tree walked from the cursor. Each resource's window is
      checked against in-memory metadata, and payloads are read for the page only.
