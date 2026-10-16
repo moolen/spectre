@@ -317,7 +317,7 @@ func encodeCheckpointRecordV3(out *checkpointV3Writer, record *checkpointRecordS
 	out.uvarint(uint64(len(versions)))
 	var previous *resourceVersion
 	for _, version := range versions {
-		out.string(version.eventID)
+		out.string(version.eventID())
 		if previous == nil {
 			out.varint(version.timestamp)
 		} else {
@@ -338,12 +338,12 @@ func encodeCheckpointRecordV3(out *checkpointV3Writer, record *checkpointRecordS
 			out.string(meta.Namespace)
 			out.string(meta.Name)
 			out.varint(meta.FirstSeen)
+			var previousLabels map[string]string
+			if previous != nil {
+				previousLabels = previous.labels()
+			}
+			out.labels(meta.Labels, previousLabels, previous == nil)
 		}
-		var previousLabels map[string]string
-		if previous != nil {
-			previousLabels = previous.labels
-		}
-		out.labels(version.labels, previousLabels, previous == nil)
 		out.uint64(version.dataHash)
 		encodeCheckpointPayloadV3(out, version)
 		previous = version
@@ -368,15 +368,15 @@ func encodeCheckpointRecordV3(out *checkpointV3Writer, record *checkpointRecordS
 	}
 	var lastLabels map[string]string
 	if previous != nil {
-		lastLabels = previous.labels
+		lastLabels = previous.labels()
 	}
 	out.labels(latest.labels, lastLabels, false)
 }
 
 func encodeCheckpointPayloadV3(out *checkpointV3Writer, version *resourceVersion) {
-	if len(version.data) > 0 {
+	if inline := version.inlinePayload(); len(inline) > 0 {
 		out.byte(checkpointV3PayloadInline)
-		out.blob(version.data)
+		out.blob(inline)
 		return
 	}
 	if !version.ref.valid() {
@@ -394,8 +394,8 @@ func encodeCheckpointPayloadV3(out *checkpointV3Writer, version *resourceVersion
 	}
 	out.byte(checkpointV3PayloadRef)
 	out.uvarint(uint64(index))
-	out.uvarint(uint64(version.ref.offset))
-	out.uvarint(uint64(version.ref.length))
+	out.uvarint(uint64(version.ref.offset()))
+	out.uvarint(uint64(version.ref.length()))
 }
 
 func encodeCheckpointK8sEventsV3(w *bufio.Writer, snapshot *checkpointSnapshot) error {
@@ -612,7 +612,7 @@ func decodeCheckpointResourcesV3(r *bufio.Reader, projection *Projection, segmen
 		record := &resourceRecord{uid: uid, versions: make([]resourceVersion, 0, min(versionCount, 1<<16))}
 		var previous *resourceVersion
 		for j := uint64(0); j < versionCount && in.err == nil; j++ {
-			version := resourceVersion{eventID: in.string()}
+			version := resourceVersion{id: compactEventID(in.string())}
 			delta := in.varint()
 			if previous == nil {
 				version.timestamp = delta
@@ -628,7 +628,7 @@ func decodeCheckpointResourcesV3(r *bufio.Reader, projection *Projection, segmen
 					version.meta = previous.meta
 				}
 			case checkpointV3New:
-				version.meta = &versionMeta{
+				meta := &versionMeta{
 					UID:       in.string(),
 					Kind:      in.string(),
 					APIGroup:  in.string(),
@@ -637,25 +637,26 @@ func decodeCheckpointResourcesV3(r *bufio.Reader, projection *Projection, segmen
 					Name:      in.string(),
 					FirstSeen: in.varint(),
 				}
+				var previousLabels map[string]string
+				if previous != nil {
+					previousLabels = previous.labels()
+				}
+				meta.Labels = in.labels(previousLabels)
+				version.meta = meta
 			default:
 				in.fail(fmt.Errorf("invalid meta marker"))
 			}
-			var previousLabels map[string]string
-			if previous != nil {
-				previousLabels = previous.labels
-			}
-			version.labels = in.labels(previousLabels)
 			version.dataHash = in.uint64()
 			switch in.byte() {
 			case checkpointV3PayloadNone:
 			case checkpointV3PayloadInline:
-				version.data = in.blob()
+				version.setInlinePayload(in.blob())
 			case checkpointV3PayloadRef:
 				index := in.uvarint()
 				offset := in.uvarint()
 				length := in.uvarint()
 				if handle := resolveSegment(uint32(index)); handle != nil {
-					version.ref = versionDataRef{segment: handle, offset: int64(offset), length: uint32(length)}
+					version.ref = newVersionDataRef(handle, int64(offset), uint32(length))
 				}
 			default:
 				in.fail(fmt.Errorf("invalid payload marker"))
@@ -674,7 +675,7 @@ func decodeCheckpointResourcesV3(r *bufio.Reader, projection *Projection, segmen
 		}
 		var lastLabels map[string]string
 		if previous != nil {
-			lastLabels = previous.labels
+			lastLabels = previous.labels()
 		}
 		latest.labels = in.labels(lastLabels)
 		record.latest = latest

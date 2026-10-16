@@ -62,7 +62,7 @@ func (s *Store) GetNamespaceGraph(_ context.Context, input analysisstore.Namespa
 			Namespace: version.meta.Namespace,
 			Name:      version.meta.Name,
 			Status:    version.status(),
-			Labels:    copyStringMap(version.labels),
+			Labels:    copyStringMap(version.labels()),
 		}
 		latestEvent := analysisstore.NamespaceGraphChangeEvent{
 			TimestampNs:  version.timestamp,
@@ -337,7 +337,7 @@ func (s *Store) currentEdgesForVersions(versionsByUID map[string]*resourceVersio
 			if pod.meta.Namespace != version.meta.Namespace {
 				continue
 			}
-			if selectorMatches(selectorSpec(version), pod.labels) {
+			if selectorMatches(selectorSpec(version), pod.labels()) {
 				add(version.meta.UID, pod.meta.UID, "SELECTS")
 			}
 		}

@@ -31,13 +31,13 @@ type recentResourceChange struct {
 // in a versionMeta shared by consecutive versions, and identity/change info structs are
 // derived on demand (see version_compact.go).
 type resourceVersion struct {
-	eventID   string
+	// id is the event ID, stored compactly (see compactEventID); read it with eventID().
+	id        string
 	timestamp int64
 	meta      *versionMeta
-	labels    map[string]string
-	// data holds the payload until the event is flushed; afterwards ref locates it.
+	// pending holds the payload until the event is flushed; afterwards ref locates it.
 	// Read payloads through versionPayload rather than these fields.
-	data     []byte
+	pending  *[]byte
 	ref      versionDataRef
 	dataHash uint64
 	typeCode uint8

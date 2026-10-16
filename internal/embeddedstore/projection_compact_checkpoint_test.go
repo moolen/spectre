@@ -265,7 +265,7 @@ func TestCheckpoint_LoadCheckpointAcceptsLegacyUncompressedV2Streams(t *testing.
 	record := loaded.resourcesByUID["pod-1"]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 1)
-	require.Equal(t, "pod-create", record.versions[0].eventID)
+	require.Equal(t, "pod-create", record.versions[0].eventID())
 
 	k8sEvents := loaded.k8sEventsByInvolvedUID["pod-1"]
 	require.Len(t, k8sEvents, 1)
@@ -318,8 +318,8 @@ func TestCheckpoint_RoundTripCompactsRedundantResourceVersionsWhilePreservingHis
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 2)
 	require.Equal(t, []string{"pod-create-1", "pod-update-changed-1"}, []string{
-		record.versions[0].eventID,
-		record.versions[1].eventID,
+		record.versions[0].eventID(),
+		record.versions[1].eventID(),
 	})
 
 	exported, err := reopened.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{
@@ -400,10 +400,10 @@ func TestCheckpoint_RoundTripRetainsRecentAnalysisWindow(t *testing.T) {
 		checkpointEventID("pod-window", 2),
 		checkpointEventID("pod-window", 3),
 	}, []string{
-		record.versions[0].eventID,
-		record.versions[1].eventID,
-		record.versions[2].eventID,
-		record.versions[3].eventID,
+		record.versions[0].eventID(),
+		record.versions[1].eventID(),
+		record.versions[2].eventID(),
+		record.versions[3].eventID(),
 	})
 }
 

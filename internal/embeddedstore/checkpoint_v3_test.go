@@ -52,8 +52,8 @@ func TestCheckpointV3_CrashBeforePublishReplaysRotatedTail(t *testing.T) {
 		require.NotNil(t, record, uid)
 		ids := []string{}
 		for i := range record.versions {
-			ids = append(ids, record.versions[i].eventID)
-			require.NotEmpty(t, versionPayload(&record.versions[i]), "%s/%s payload", uid, record.versions[i].eventID)
+			ids = append(ids, record.versions[i].eventID())
+			require.NotEmpty(t, versionPayload(&record.versions[i]), "%s/%s payload", uid, record.versions[i].eventID())
 		}
 		require.Equal(t, expected, ids, uid)
 	}

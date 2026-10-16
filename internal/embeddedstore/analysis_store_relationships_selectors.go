@@ -16,7 +16,7 @@ func (s *Store) selectingResourcesForTarget(target *resourceVersion, timestampNs
 		if !resourceUsesPodSelector(version.meta.Kind) {
 			continue
 		}
-		if selectorMatches(selectorSpec(version), target.labels) {
+		if selectorMatches(selectorSpec(version), target.labels()) {
 			result = append(result, version)
 		}
 	}

@@ -346,7 +346,7 @@ func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int
 		}
 
 		snapshotVersion := ProjectionResourceVersionSnapshot{
-			EventID:     version.eventID,
+			EventID:     version.eventID(),
 			Timestamp:   version.timestamp,
 			EventType:   version.eventType(),
 			Identity:    copyIdentity(version),
@@ -356,14 +356,14 @@ func snapshotResourceRecord(record *resourceRecord, retentionCutoffTimestamp int
 		switch {
 		case hydrate:
 			snapshotVersion.Data = versionPayloadCopy(version)
-		case len(version.data) > 0 || !version.ref.valid():
-			snapshotVersion.Data = cloneBytes(version.data)
+		case len(version.inlinePayload()) > 0 || !version.ref.valid():
+			snapshotVersion.Data = cloneBytes(version.inlinePayload())
 		default:
 			version.ref.segment.mu.Lock()
 			snapshotVersion.DataSegment = version.ref.segment.checkpointIndex
 			version.ref.segment.mu.Unlock()
-			snapshotVersion.DataOffset = version.ref.offset
-			snapshotVersion.DataLength = version.ref.length
+			snapshotVersion.DataOffset = version.ref.offset()
+			snapshotVersion.DataLength = version.ref.length()
 			if snapshotVersion.DataSegment == 0 {
 				// The segment appeared after the table was built; inline instead.
 				snapshotVersion.Data = versionPayloadCopy(version)
@@ -418,26 +418,21 @@ func restoreResourceRecord(snapshot ProjectionResourceSnapshot, resolveSegment f
 	for i := range snapshot.Versions {
 		version := snapshot.Versions[i]
 		restoredVersion := resourceVersion{
-			eventID:   version.EventID,
+			id:        compactEventID(version.EventID),
 			timestamp: version.Timestamp,
 			typeCode:  versionEventTypes.code(string(version.EventType)),
-			data:      version.Data,
 			dataHash:  version.DataHash,
 		}
+		restoredVersion.setInlinePayload(version.Data)
 		var previousMeta *versionMeta
-		var previousLabels map[string]string
 		if len(record.versions) > 0 {
 			previousMeta = record.versions[len(record.versions)-1].meta
-			previousLabels = record.versions[len(record.versions)-1].labels
 		}
 		restoredVersion.setIdentity(version.Identity, previousMeta)
-		if previousLabels != nil && stringMapsEqual(restoredVersion.labels, previousLabels) {
-			restoredVersion.labels = previousLabels
-		}
 		restoredVersion.setChangeInfo(version.ChangeEvent)
 		if len(version.Data) == 0 && version.DataSegment != 0 && resolveSegment != nil {
 			if handle := resolveSegment(version.DataSegment); handle != nil {
-				restoredVersion.ref = versionDataRef{segment: handle, offset: version.DataOffset, length: version.DataLength}
+				restoredVersion.ref = newVersionDataRef(handle, version.DataOffset, version.DataLength)
 			}
 		}
 		if restoredVersion.dataHash == 0 {
@@ -463,7 +458,7 @@ func checkpointEquivalentState(previous, current resourceVersion) bool {
 	if previous.dataHash != 0 || current.dataHash != 0 {
 		return previous.dataHash == current.dataHash
 	}
-	return bytes.Equal(previous.data, current.data)
+	return bytes.Equal(previous.inlinePayload(), current.inlinePayload())
 }
 
 func resourceMetadataFromIdentity(identity graph.ResourceIdentity) models.ResourceMetadata {

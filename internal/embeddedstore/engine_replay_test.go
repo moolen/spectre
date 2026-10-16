@@ -114,7 +114,7 @@ func TestEngine_OpenUsesCheckpointAndTailOnNormalRestart(t *testing.T) {
 	record := engine.projection.resourcesByUID[expectedEvent.Resource.UID]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 1)
-	require.Equal(t, expectedEvent.ID, record.versions[0].eventID)
+	require.Equal(t, expectedEvent.ID, record.versions[0].eventID())
 	// The tail event was already flushed, so it is not queued for a second flush; it is
 	// served from its segment exactly once.
 	require.Empty(t, engine.hot.ScanTimeRange(expectedEvent.Timestamp, expectedEvent.Timestamp))
@@ -237,8 +237,8 @@ func TestEngine_OpenFallsBackToRepairReplayWhenTailStateIsStale(t *testing.T) {
 	record := engine.projection.resourcesByUID[checkpointEvent.Resource.UID]
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 2)
-	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID)
-	require.Equal(t, repairEvent.ID, record.versions[1].eventID)
+	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID())
+	require.Equal(t, repairEvent.ID, record.versions[1].eventID())
 
 	manifest, err := loadOrCreateManifest(rootDir)
 	require.NoError(t, err)
@@ -285,13 +285,13 @@ func TestEngine_OpenFallsBackToRepairReplayWhenTailJournalIsTruncated(t *testing
 	record := reopened.projection.resourcesByUID[checkpointEvent.Resource.UID]
 	require.NotNil(t, record)
 	require.GreaterOrEqual(t, len(record.versions), 2)
-	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID)
-	require.Equal(t, repairEvent.ID, record.versions[len(record.versions)-1].eventID)
+	require.Equal(t, checkpointEvent.ID, record.versions[0].eventID())
+	require.Equal(t, repairEvent.ID, record.versions[len(record.versions)-1].eventID())
 	for i := range record.versions {
 		version := &record.versions[i]
 		// Segment replays reference their records; tail replays stay in memory until
 		// the next flush.
-		require.True(t, version.ref.valid() != (len(version.data) > 0), "version %s: ref=%+v data=%d", version.eventID, version.ref, len(version.data))
+		require.True(t, version.ref.valid() != (len(version.inlinePayload()) > 0), "version %s: ref=%+v data=%d", version.eventID(), version.ref, len(version.inlinePayload()))
 		require.NotEmpty(t, versionPayload(version))
 	}
 	require.Equal(t, uint64(3), reopened.manifest.ActiveTail.BaseHighWaterMark)

@@ -300,7 +300,7 @@ func TestCompaction_RestartFromOlderCheckpointReadsPayloadsFromReplacement(t *te
 	compacted := reopened.manifest.ActiveSegments[0].ID
 	for i := range record.versions {
 		version := &record.versions[i]
-		require.True(t, version.ref.valid(), "version %s should reference a segment", version.eventID)
+		require.True(t, version.ref.valid(), "version %s should reference a segment", version.eventID())
 		require.Equal(t, compacted, version.ref.segment.id)
 		require.NotEmpty(t, versionPayload(version))
 	}

@@ -32,14 +32,35 @@ type segmentDataHandle struct {
 	checkpointIndex uint32
 }
 
+// versionDataRef locates a payload record. Offset and length share one word: records
+// are at most maxSegmentRecordSize (24 bits) and offsets stay below 2^40.
 type versionDataRef struct {
 	segment *segmentDataHandle
-	offset  int64
-	length  uint32
+	packed  uint64
+}
+
+const (
+	versionRefLengthBits = 24
+	versionRefLengthMask = 1<<versionRefLengthBits - 1
+)
+
+func newVersionDataRef(segment *segmentDataHandle, offset int64, length uint32) versionDataRef {
+	if segment == nil || offset < 0 || offset >= 1<<40 || length == 0 || length > versionRefLengthMask {
+		return versionDataRef{}
+	}
+	return versionDataRef{segment: segment, packed: uint64(offset)<<versionRefLengthBits | uint64(length)}
 }
 
 func (r versionDataRef) valid() bool {
-	return r.segment != nil && r.length > 0
+	return r.segment != nil && r.length() > 0
+}
+
+func (r versionDataRef) offset() int64 {
+	return int64(r.packed >> versionRefLengthBits)
+}
+
+func (r versionDataRef) length() uint32 {
+	return uint32(r.packed & versionRefLengthMask)
 }
 
 var versionDataReadErrors atomic.Uint64
@@ -120,10 +141,10 @@ func versionPayload(version *resourceVersion) []byte {
 	if version == nil {
 		return nil
 	}
-	if len(version.data) > 0 || !version.ref.valid() {
-		return version.data
+	if inline := version.inlinePayload(); len(inline) > 0 || !version.ref.valid() {
+		return inline
 	}
-	data, err := version.ref.segment.readPayload(version.ref.offset, version.ref.length)
+	data, err := version.ref.segment.readPayload(version.ref.offset(), version.ref.length())
 	if err != nil {
 		versionDataReadErrors.Add(1)
 		return nil
@@ -136,14 +157,14 @@ func versionPayloadCopy(version *resourceVersion) []byte {
 	if version == nil {
 		return nil
 	}
-	if len(version.data) > 0 || !version.ref.valid() {
-		return cloneBytes(version.data)
+	if inline := version.inlinePayload(); len(inline) > 0 || !version.ref.valid() {
+		return cloneBytes(inline)
 	}
 	return versionPayload(version)
 }
 
 func versionHasPayload(version *resourceVersion) bool {
-	return version != nil && (len(version.data) > 0 || version.ref.valid())
+	return version != nil && (len(version.inlinePayload()) > 0 || version.ref.valid())
 }
 
 func payloadHash(data []byte) uint64 {
@@ -201,8 +222,8 @@ func (p *Projection) AttachSegmentLocations(segmentID string, locations []segmen
 		if version == nil {
 			continue
 		}
-		version.ref = versionDataRef{segment: handle, offset: location.Offset, length: location.Length}
-		version.data = nil
+		version.ref = newVersionDataRef(handle, location.Offset, location.Length)
+		version.pending = nil
 		attached++
 	}
 	return attached
@@ -224,8 +245,8 @@ func (p *Projection) attachReplayLocation(event models.Event, location replayLoc
 	if version == nil {
 		return
 	}
-	version.ref = versionDataRef{segment: p.segmentHandleLocked(location.segmentID), offset: location.offset, length: location.length}
-	version.data = nil
+	version.ref = newVersionDataRef(p.segmentHandleLocked(location.segmentID), location.offset, location.length)
+	version.pending = nil
 }
 
 // ReleaseSegmentHandles forgets handles for segments that no version references any more,
@@ -251,7 +272,7 @@ func (p *Projection) pinnedVersionKeys(cutoffTimestamp int64) map[pinnedVersionK
 	for uid, record := range p.resourcesByUID {
 		retained := retainedVersionsBefore(record, cutoffTimestamp)
 		for _, version := range retained {
-			pinned[pinnedVersionKey{uid: uid, eventID: version.eventID, timestamp: version.timestamp}] = struct{}{}
+			pinned[pinnedVersionKey{uid: uid, eventID: version.eventID(), timestamp: version.timestamp}] = struct{}{}
 		}
 	}
 	return pinned
@@ -292,8 +313,9 @@ func (r *resourceRecord) findVersion(timestamp int64, eventID string) *resourceV
 	idx := sort.Search(len(r.versions), func(i int) bool {
 		return r.versions[i].timestamp >= timestamp
 	})
+	id := compactEventID(eventID)
 	for i := idx; i < len(r.versions) && r.versions[i].timestamp == timestamp; i++ {
-		if r.versions[i].eventID == eventID {
+		if r.versions[i].id == id {
 			return &r.versions[i]
 		}
 	}

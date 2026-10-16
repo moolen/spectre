@@ -110,7 +110,7 @@ func (w *scaleWorkload) event(eventType models.EventType, obj *scaleObject) mode
 		data = w.render(obj, ts)
 	}
 	return models.Event{
-		ID:        fmt.Sprintf("evt-%012d", w.seq),
+		ID:        fmt.Sprintf("%08x-0000-4000-8000-%012x", w.seq>>16, w.seq), // watcher event IDs are UUIDs
 		Timestamp: ts,
 		Type:      eventType,
 		Resource:  obj.meta,
@@ -226,7 +226,7 @@ func (w *scaleWorkload) k8sEvent(pod *scaleObject) models.Event {
 	data := fmt.Sprintf(`{"apiVersion":"v1","kind":"Event","metadata":{"name":%q,"namespace":%q,"uid":%q,"creationTimestamp":%q},"involvedObject":{"kind":"Pod","namespace":%q,"name":%q,"uid":%q},"reason":%q,"message":"Readiness probe failed: HTTP probe failed with statuscode: 503 %s","source":{"component":"kubelet","host":%q},"firstTimestamp":%q,"lastTimestamp":%q,"count":1,"type":"Warning"}`,
 		meta.Name, meta.Namespace, meta.UID, stamp, pod.meta.Namespace, pod.meta.Name, pod.meta.UID, reason, w.padding[:300], pod.node, stamp, stamp)
 	return models.Event{
-		ID:        fmt.Sprintf("evt-%012d", w.seq),
+		ID:        fmt.Sprintf("%08x-0000-4000-8000-%012x", w.seq>>16, w.seq), // watcher event IDs are UUIDs
 		Timestamp: ts,
 		Type:      models.EventTypeCreate,
 		Resource:  meta,

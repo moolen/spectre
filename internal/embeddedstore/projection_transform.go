@@ -63,12 +63,12 @@ func buildResourceVersion(event models.Event, priorVersions []resourceVersion, p
 	}
 
 	version := resourceVersion{
-		eventID:   event.ID,
+		id:        compactEventID(event.ID),
 		timestamp: event.Timestamp,
 		typeCode:  versionEventTypes.code(string(event.Type)),
-		data:      cloneBytes(event.Data),
 		dataHash:  payloadHash(event.Data),
 	}
+	version.setInlinePayload(cloneBytes(event.Data))
 	var previousMeta *versionMeta
 	if len(priorVersions) > 0 {
 		previousMeta = priorVersions[len(priorVersions)-1].meta

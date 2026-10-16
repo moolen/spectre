@@ -1,7 +1,7 @@
 package embeddedstore
 
 func managerReference(version *resourceVersion) *managerRef {
-	labels := version.labels
+	labels := version.labels()
 	switch {
 	case labels["helm.toolkit.fluxcd.io/name"] != "":
 		return &managerRef{

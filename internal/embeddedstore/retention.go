@@ -302,7 +302,7 @@ func cloneResourceVersion(version resourceVersion) resourceVersion {
 	// Versions are immutable apart from payload references, so the clone can share
 	// meta and labels.
 	cloned := version
-	cloned.data = cloneBytes(version.data)
+	cloned.setInlinePayload(cloneBytes(version.inlinePayload()))
 	return cloned
 }
 

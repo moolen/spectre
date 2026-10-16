@@ -59,12 +59,12 @@ func TestRetention_PinsStateAtWindowStartAndDropsExpiredSegments(t *testing.T) {
 		stable := e.projection.resourcesByUID["stable"]
 		require.NotNil(t, stable)
 		require.Len(t, stable.versions, 1)
-		require.Equal(t, "stable-2", stable.versions[0].eventID)
+		require.Equal(t, "stable-2", stable.versions[0].eventID())
 		require.Contains(t, string(versionPayload(&stable.versions[0])), `"rev":"2"`)
 
 		changed := e.projection.resourcesByUID["changed"]
 		require.NotNil(t, changed)
-		require.Equal(t, []string{"changed-1", "changed-2"}, []string{changed.versions[0].eventID, changed.versions[1].eventID})
+		require.Equal(t, []string{"changed-1", "changed-2"}, []string{changed.versions[0].eventID(), changed.versions[1].eventID()})
 		require.Contains(t, string(versionPayload(&changed.versions[0])), `"rev":"1"`)
 
 		result, _, err := e.QueryExecutor().ExecutePaginated(context.Background(), &models.QueryRequest{

@@ -202,7 +202,7 @@ func canAppendResourceVersion(record *resourceRecord, event models.Event) bool {
 	if last.timestamp != event.Timestamp {
 		return last.timestamp < event.Timestamp
 	}
-	return last.eventID <= event.ID
+	return last.eventID() <= event.ID
 }
 
 func (p *Projection) finishAppliedResourceEvent(
@@ -290,7 +290,7 @@ func (p *Projection) rebuildRecordFromEvents(uid string, events []models.Event) 
 
 func resourceVersionEvent(version resourceVersion) models.Event {
 	return models.Event{
-		ID:        version.eventID,
+		ID:        version.eventID(),
 		Timestamp: version.timestamp,
 		Type:      version.eventType(),
 		Resource: models.ResourceMetadata{

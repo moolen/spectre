@@ -114,3 +114,35 @@ func TestTailJournal_ReplaysLegacyJSONRecordsAfterUpgrade(t *testing.T) {
 	require.Equal(t, []models.Event{legacy, current}, replayed)
 	require.NoError(t, tail.Close())
 }
+
+func TestCompactEventID_RoundTripsUUIDsAndKeepsOtherIDs(t *testing.T) {
+	for _, id := range []string{
+		"0b8f6a8e-3c1d-4f7a-9e2b-5d6c7a8b9c0d",
+		"00000000-0000-0000-0000-000000000000",
+		"ffffffff-ffff-ffff-ffff-ffffffffffff",
+	} {
+		compact := compactEventID(id)
+		require.Len(t, compact, 17)
+		require.Equal(t, id, expandEventID(compact))
+	}
+	for _, id := range []string{
+		"evt-1",
+		"0B8F6A8E-3C1D-4F7A-9E2B-5D6C7A8B9C0D",
+		"0b8f6a8e-3c1d-4f7a-9e2b-5d6c7a8b9c0g",
+		"0b8f6a8e03c1d-4f7a-9e2b-5d6c7a8b9c0d",
+		"",
+	} {
+		require.Equal(t, id, compactEventID(id))
+		require.Equal(t, id, expandEventID(compactEventID(id)))
+	}
+}
+
+func TestVersionDataRef_PacksOffsetAndLength(t *testing.T) {
+	handle := &segmentDataHandle{id: "seg"}
+	ref := newVersionDataRef(handle, 1<<39+12345, maxSegmentRecordSize+4)
+	require.True(t, ref.valid())
+	require.Equal(t, int64(1<<39+12345), ref.offset())
+	require.Equal(t, uint32(maxSegmentRecordSize+4), ref.length())
+	require.False(t, newVersionDataRef(handle, 1<<40, 10).valid())
+	require.False(t, newVersionDataRef(nil, 10, 10).valid())
+}

@@ -8,7 +8,8 @@ import (
 	"github.com/moolen/spectre/internal/models"
 )
 
-// versionMeta holds the identity fields shared by consecutive versions of a resource.
+// versionMeta holds the identity fields and labels shared by consecutive versions of a
+// resource. Values are immutable once versions reference them.
 type versionMeta struct {
 	UID       string
 	Kind      string
@@ -17,6 +18,7 @@ type versionMeta struct {
 	Namespace string
 	Name      string
 	FirstSeen int64
+	Labels    map[string]string
 }
 
 const (
@@ -114,7 +116,7 @@ func (v *resourceVersion) identity() graph.ResourceIdentity {
 		Version:   meta.Version,
 		Namespace: meta.Namespace,
 		Name:      meta.Name,
-		Labels:    v.labels,
+		Labels:    meta.Labels,
 		FirstSeen: meta.FirstSeen,
 		LastSeen:  v.timestamp,
 		Deleted:   v.isDelete(),
@@ -128,7 +130,7 @@ func (v *resourceVersion) identity() graph.ResourceIdentity {
 func (v *resourceVersion) changeEventInfo() analysisstore.ChangeEventInfo {
 	eventType := v.eventType()
 	return analysisstore.ChangeEventInfo{
-		EventID:       v.eventID,
+		EventID:       v.eventID(),
 		Timestamp:     timeFromNs(v.timestamp),
 		EventType:     string(eventType),
 		Status:        v.status(),
@@ -160,8 +162,13 @@ func sharedVersionMeta(previous *versionMeta, identity graph.ResourceIdentity) *
 		previous.Version == identity.Version &&
 		previous.Namespace == identity.Namespace &&
 		previous.Name == identity.Name &&
-		previous.FirstSeen == identity.FirstSeen {
+		previous.FirstSeen == identity.FirstSeen &&
+		stringMapsEqual(previous.Labels, identity.Labels) {
 		return previous
+	}
+	labels := identity.Labels
+	if previous != nil && stringMapsEqual(previous.Labels, labels) {
+		labels = previous.Labels
 	}
 	return &versionMeta{
 		UID:       identity.UID,
@@ -171,6 +178,7 @@ func sharedVersionMeta(previous *versionMeta, identity graph.ResourceIdentity) *
 		Namespace: identity.Namespace,
 		Name:      identity.Name,
 		FirstSeen: identity.FirstSeen,
+		Labels:    labels,
 	}
 }
 
@@ -190,5 +198,90 @@ func (v *resourceVersion) setChangeInfo(info analysisstore.ChangeEventInfo) {
 // setIdentity stores identity, sharing meta with the previous version when possible.
 func (v *resourceVersion) setIdentity(identity graph.ResourceIdentity, previous *versionMeta) {
 	v.meta = sharedVersionMeta(previous, identity)
-	v.labels = identity.Labels
+}
+
+// labels returns the version's labels; they are shared and must not be modified.
+func (v *resourceVersion) labels() map[string]string {
+	if v.meta == nil {
+		return nil
+	}
+	return v.meta.Labels
+}
+
+func (v *resourceVersion) eventID() string {
+	return expandEventID(v.id)
+}
+
+// inlinePayload returns the payload held in memory (unflushed versions), or nil.
+func (v *resourceVersion) inlinePayload() []byte {
+	if v.pending == nil {
+		return nil
+	}
+	return *v.pending
+}
+
+func (v *resourceVersion) setInlinePayload(data []byte) {
+	if len(data) == 0 {
+		v.pending = nil
+		return
+	}
+	v.pending = &data
+}
+
+// compactUUIDMarker prefixes event IDs stored as the 16 raw bytes of a UUID.
+const compactUUIDMarker = 0xFF
+
+// compactEventID stores canonical lowercase UUIDs (the watcher's event IDs) as 17
+// bytes instead of 36; other IDs are kept as they are.
+func compactEventID(id string) string {
+	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+		return id
+	}
+	var raw [17]byte
+	raw[0] = compactUUIDMarker
+	j := 1
+	for i := 0; i < 36; i += 2 {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			i--
+			continue
+		}
+		hi, ok1 := lowerHexValue(id[i])
+		lo, ok2 := lowerHexValue(id[i+1])
+		if !ok1 || !ok2 {
+			return id
+		}
+		raw[j] = hi<<4 | lo
+		j++
+	}
+	return string(raw[:])
+}
+
+func expandEventID(id string) string {
+	if len(id) != 17 || id[0] != compactUUIDMarker {
+		return id
+	}
+	const hexDigits = "0123456789abcdef"
+	var out [36]byte
+	j := 0
+	for i := 1; i < 17; i++ {
+		if j == 8 || j == 13 || j == 18 || j == 23 {
+			out[j] = '-'
+			j++
+		}
+		out[j] = hexDigits[id[i]>>4]
+		out[j+1] = hexDigits[id[i]&0x0F]
+		j += 2
+	}
+	return string(out[:])
+}
+
+func lowerHexValue(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	default:
+		return 0, false
+	}
 }
