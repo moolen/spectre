@@ -59,8 +59,8 @@ embedded:
   retentionDays: 0
   checkpointInterval: 15m
   checkpointRetentionCount: 3
-  checkpointMaxTailEvents: 2048
-  checkpointMaxTailBytes: 16777216
+  checkpointMaxTailEvents: 50000
+  checkpointMaxTailBytes: 268435456
   checkpointOnShutdown: true
   segmentTargetBytes: 16777216
   compactionMinSegments: 4

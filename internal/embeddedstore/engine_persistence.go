@@ -134,6 +134,11 @@ func (e *Engine) logAutoFlushError(message string, err error) {
 	e.logger.ErrorWithErr(message, err)
 }
 
+// Checkpoint persists the projection so restarts only replay the tail. It runs in three
+// phases: a short locked phase flushes, applies retention, captures a snapshot and
+// rotates the tail; the snapshot is then encoded without the engine lock while ingest
+// continues; a final locked phase publishes the checkpoint and removes what it
+// superseded.
 func (e *Engine) Checkpoint(ctx context.Context) error {
 	if e == nil {
 		return fmt.Errorf("checkpoint embedded engine: engine is nil")
@@ -145,79 +150,106 @@ func (e *Engine) Checkpoint(ctx context.Context) error {
 		return err
 	}
 
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed {
-		return nil
-	}
-
-	return e.checkpointLocked(ctx)
+	e.checkpointMu.Lock()
+	defer e.checkpointMu.Unlock()
+	return e.runCheckpoint(ctx)
 }
 
-func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if !e.ready.Load() {
+func (e *Engine) runCheckpoint(ctx context.Context) (err error) {
+	e.mu.Lock()
+	if e.closed || !e.ready.Load() {
+		e.mu.Unlock()
 		return nil
 	}
-
-	// Flush first so every version at or below the checkpoint's high-water mark is in a
-	// segment: the checkpoint then stores references instead of payloads, and nothing
-	// that only lived in the hot store is lost when the tail rotates.
-	if err := e.flushLocked(ctx); err != nil {
-		return fmt.Errorf("checkpoint embedded engine: flush: %w", err)
-	}
-
 	start := time.Now()
 	defer func() {
 		e.metrics.RecordCheckpoint(time.Since(start), err)
 	}()
-
-	// Apply retention before snapshotting so the checkpoint reflects the pruned state and
-	// the segments retention replaced can be removed once it is written.
-	retentionCutoffTimestamp := embeddedRetentionCutoffTimestamp(e.config.EmbeddedRetentionDays, time.Now())
-	if err := e.applyRetentionLocked(ctx, retentionCutoffTimestamp); err != nil {
-		return fmt.Errorf("checkpoint embedded engine: apply retention: %w", err)
+	snapshot, retiredBefore, err := e.beginCheckpointLocked(ctx)
+	e.mu.Unlock()
+	if err != nil {
+		return err
 	}
-	meta, err := writeCheckpointWithRetention(e.rootDir, e.projection, e.nextHighWaterMark, retentionCutoffTimestamp)
+
+	meta, err := writeCheckpointV3(e.rootDir, e.projection, snapshot)
 	if err != nil {
 		return fmt.Errorf("checkpoint embedded engine: write checkpoint: %w", err)
 	}
 
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.commitCheckpointLocked(meta, retiredBefore)
+}
+
+// beginCheckpointLocked flushes, applies retention, rotates the tail at the checkpoint's
+// high-water mark and captures the snapshot to encode.
+func (e *Engine) beginCheckpointLocked(ctx context.Context) (*checkpointSnapshot, map[string]struct{}, error) {
+	// Flush first so every version at or below the high-water mark is in a segment: the
+	// checkpoint then stores references instead of payloads.
+	if err := e.flushLocked(ctx); err != nil {
+		return nil, nil, fmt.Errorf("checkpoint embedded engine: flush: %w", err)
+	}
+	// Apply retention before snapshotting so the checkpoint reflects the pruned state and
+	// the segments retention replaced can be removed once it is written.
+	retentionCutoffTimestamp := embeddedRetentionCutoffTimestamp(e.config.EmbeddedRetentionDays, time.Now())
+	if err := e.applyRetentionLocked(ctx, retentionCutoffTimestamp); err != nil {
+		return nil, nil, fmt.Errorf("checkpoint embedded engine: apply retention: %w", err)
+	}
+
+	highWaterMark := e.nextHighWaterMark
+	snapshot := e.projection.captureCheckpointSnapshot(highWaterMark)
+	retiredBefore := make(map[string]struct{}, len(e.manifest.RetiredSegments))
+	for _, retired := range e.manifest.RetiredSegments {
+		retiredBefore[retired.ID] = struct{}{}
+	}
+
+	// Start a new tail at the high-water mark. The previous tail stays on disk (listed in
+	// the manifest) until the checkpoint is published, so a crash in between can still
+	// replay it on top of the older checkpoint.
+	if e.tail != nil && e.tail.meta.LastHighWaterMark > e.tail.meta.BaseHighWaterMark {
+		previous := e.tail.meta
+		next, err := e.tail.Rotate(highWaterMark)
+		if err != nil {
+			return nil, nil, fmt.Errorf("checkpoint embedded engine: rotate tail journal: %w", err)
+		}
+		updatedManifest := e.manifest
+		updatedManifest.PreviousTails = append(append([]TailJournalMeta(nil), updatedManifest.PreviousTails...), previous)
+		updatedManifest.ActiveTail = next
+		if err := storeManifest(e.rootDir, updatedManifest); err != nil {
+			return nil, nil, fmt.Errorf("checkpoint embedded engine: store rotated tail manifest: %w", err)
+		}
+		e.manifest = updatedManifest
+		e.setActiveTailMetricsLocked()
+	}
+	return snapshot, retiredBefore, nil
+}
+
+// commitCheckpointLocked publishes a written checkpoint and removes the tails and
+// segments it supersedes.
+func (e *Engine) commitCheckpointLocked(meta CheckpointMeta, retiredBefore map[string]struct{}) error {
 	updatedManifest := e.manifest
-	updatedManifest.Checkpoints = append(updatedManifest.Checkpoints, meta)
+	updatedManifest.Checkpoints = append(append([]CheckpointMeta(nil), updatedManifest.Checkpoints...), meta)
 	updatedManifest.ActiveCheckpoint = meta
+	updatedManifest.PreviousTails = nil
 	if e.tail != nil {
 		updatedManifest.ActiveTail = e.tail.meta
 	}
+	var removable []string
+	keptRetired := make([]RetiredSegment, 0, len(updatedManifest.RetiredSegments))
+	for _, retired := range updatedManifest.RetiredSegments {
+		if _, ok := retiredBefore[retired.ID]; ok {
+			removable = append(removable, retired.ID)
+			continue
+		}
+		keptRetired = append(keptRetired, retired)
+	}
+	updatedManifest.RetiredSegments = keptRetired
 	if err := storeManifest(e.rootDir, updatedManifest); err != nil {
 		return fmt.Errorf("checkpoint embedded engine: store manifest: %w", err)
 	}
-
 	e.manifest = updatedManifest
-	if e.tail != nil {
-		previousMeta := e.tail.meta
-		nextTailMeta, rotateErr := e.tail.Rotate(e.nextHighWaterMark)
-		if rotateErr != nil {
-			return fmt.Errorf("checkpoint embedded engine: rotate tail journal: %w", rotateErr)
-		}
 
-		updatedManifest.ActiveTail = nextTailMeta
-		if err := storeManifest(e.rootDir, updatedManifest); err != nil {
-			reopenedTail, reopenErr := openTailJournal(e.rootDir, previousMeta)
-			if reopenErr == nil {
-				_ = e.tail.Close()
-				e.tail = reopenedTail
-			}
-			return fmt.Errorf("checkpoint embedded engine: store rotated tail manifest: %w", err)
-		}
-		e.manifest = updatedManifest
-	}
-	if err := e.removeRetiredSegmentsLocked(); err != nil {
+	if err := removeSegmentDirs(e.rootDir, removable); err != nil {
 		return fmt.Errorf("checkpoint embedded engine: remove retired segments: %w", err)
 	}
 	if err := e.pruneCheckpointHistoryLocked(); err != nil {
@@ -225,8 +257,41 @@ func (e *Engine) checkpointLocked(ctx context.Context) (err error) {
 	}
 	e.logStaleTailCleanupWarning(pruneStaleTailJournals(e.rootDir, e.manifest.ActiveTail.ID))
 	e.scheduleCompactionLocked()
-
 	e.setActiveTailMetricsLocked()
+	return nil
+}
+
+// scheduleCheckpointLocked starts a background checkpoint unless one is running.
+func (e *Engine) scheduleCheckpointLocked() {
+	if e == nil || e.closed || e.checkpointRunning {
+		return
+	}
+	e.checkpointRunning = true
+	e.backgroundTasks.Add(1)
+	go func() {
+		defer e.backgroundTasks.Done()
+		if err := e.Checkpoint(context.Background()); err != nil {
+			e.logAutoFlushError("tail-triggered checkpoint failed", err)
+		}
+		e.mu.Lock()
+		e.checkpointRunning = false
+		e.mu.Unlock()
+	}()
+}
+
+func removeSegmentDirs(rootDir string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	segmentsRoot := filepath.Join(rootDir, segmentsDirName)
+	for _, id := range ids {
+		if err := os.RemoveAll(filepath.Join(segmentsRoot, id)); err != nil {
+			return fmt.Errorf("remove segment %q: %w", id, err)
+		}
+	}
+	if err := syncPath(segmentsRoot); err != nil {
+		return fmt.Errorf("sync segments dir: %w", err)
+	}
 	return nil
 }
 

@@ -179,6 +179,8 @@ func loadCheckpoint(rootDir string, meta CheckpointMeta) (*Projection, uint64, e
 		projection, err = loadCheckpointV1(state, checkpointDir)
 	case checkpointFormatVersionV2:
 		projection, err = loadCheckpointV2(state, checkpointDir)
+	case checkpointFormatVersionV3:
+		projection, err = loadCheckpointV3(state, checkpointDir)
 	default:
 		return nil, 0, fmt.Errorf(
 			"load checkpoint: unsupported checkpoint format version %d",

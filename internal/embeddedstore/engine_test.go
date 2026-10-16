@@ -687,6 +687,14 @@ func TestEngine_AutoCheckpointWhenTailExceedsByteBudget(t *testing.T) {
 		},
 	}))
 
+	// Tail-triggered checkpoints run in the background.
+	require.Eventually(t, func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		return engine.manifest.ActiveCheckpoint.HighWaterMark == 1 && !engine.checkpointRunning
+	}, 5*time.Second, time.Millisecond)
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
 	require.NotEmpty(t, engine.manifest.Checkpoints)
 	require.Equal(t, uint64(1), engine.manifest.ActiveCheckpoint.HighWaterMark)
 	require.Equal(t, uint64(1), engine.manifest.ActiveTail.BaseHighWaterMark)
@@ -732,10 +740,16 @@ func TestEngine_OpenTailReplayPreservesCheckpointedVersionMetadata(t *testing.T)
 	require.NoError(t, engine.Checkpoint(context.Background()))
 	require.NoError(t, engine.Close())
 
+	// Make the active checkpoint a v2 (gob) one, as written by earlier versions, so the
+	// test can edit it and also covers loading the older format.
 	rootDir := embeddedRootDir(dir)
 	manifest, err := loadOrCreateManifest(rootDir)
 	require.NoError(t, err)
-	checkpointMeta := latestCheckpointMeta(manifest.Checkpoints)
+	checkpointMeta, err := writeCheckpoint(rootDir, engine.projection, manifest.ActiveCheckpoint.HighWaterMark)
+	require.NoError(t, err)
+	manifest.Checkpoints = []CheckpointMeta{checkpointMeta}
+	manifest.ActiveCheckpoint = checkpointMeta
+	require.NoError(t, storeManifest(rootDir, manifest))
 
 	resourcesPath := filepath.Join(rootDir, checkpointsDirName, checkpointMeta.ID, checkpointResourcesFile)
 	stream, err := openCheckpointStream(resourcesPath)

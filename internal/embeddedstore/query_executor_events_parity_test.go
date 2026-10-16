@@ -317,6 +317,7 @@ func TestQueryExecutor_RecentEventCacheServesTimelineWithoutPlanner(t *testing.T
 		plannerParityK8sEvent("evt-2", "event-uid-2", "evt-2", "ns-a", "uid-a", 30, "BackOff", "second", "Warning", 2, "scheduler"),
 	}))
 	require.NoError(t, engine.Flush(context.Background()))
+	waitForStartupEventCacheSeed(t, engine)
 
 	engine.QueryExecutor().ConfigureRecentEventTimelineCache(2 * time.Hour)
 	require.NoError(t, engine.QueryExecutor().SeedRecentEventTimelineCache(context.Background(), 40*1e9, 2*time.Hour))
@@ -515,4 +516,15 @@ func plannerParityK8sEventIDs(events []models.K8sEvent) []string {
 		ids = append(ids, events[i].ID)
 	}
 	return ids
+}
+
+// waitForStartupEventCacheSeed waits for the engine's background cache seed so a test's
+// own seed is not overwritten by it.
+func waitForStartupEventCacheSeed(t *testing.T, engine *Engine) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		engine.queryExec.recentEventCacheMu.RLock()
+		defer engine.queryExec.recentEventCacheMu.RUnlock()
+		return engine.queryExec.recentEventCacheCoverageEndNs > 0
+	}, 5*time.Second, time.Millisecond)
 }

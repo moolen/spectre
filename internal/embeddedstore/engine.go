@@ -33,9 +33,12 @@ type Engine struct {
 	backgroundTasks        sync.WaitGroup
 	closed                 bool
 
-	// compactionMu serialises compactions; it is always taken before mu.
+	// compactionMu and checkpointMu serialise compactions and checkpoints; they are
+	// always taken before mu.
 	compactionMu      sync.Mutex
 	compactionRunning bool
+	checkpointMu      sync.Mutex
+	checkpointRunning bool
 }
 
 var (
@@ -79,6 +82,13 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	projection.SetDataRoot(rootDir)
 	if err := remapRetiredSegmentReferences(rootDir, projection, manifest.RetiredSegments); err != nil {
 		return nil, fmt.Errorf("open embedded engine: remap retired segments: %w", err)
+	}
+	if mode == startupModeFast {
+		// Tail events that had already been flushed were replayed with their payloads in
+		// memory; point them at their segment records instead.
+		if err := attachSegmentsAfter(rootDir, projection, manifest.ActiveSegments, manifest.ActiveCheckpoint.HighWaterMark); err != nil {
+			return nil, fmt.Errorf("open embedded engine: attach flushed tail events: %w", err)
+		}
 	}
 	projection.SetRetentionWindowDays(cfg.EmbeddedRetentionDays)
 	if cfg.ProjectionHistoryFallback {
@@ -177,7 +187,7 @@ func OpenEngine(cfg EngineConfig) (*Engine, error) {
 	engine.metrics.RecordTailReplay(replayedTailEvents)
 	engine.metrics.SetActiveSegments(len(engine.segmentReaders))
 	engine.setActiveTailMetrics()
-	engine.logStaleTailCleanupWarning(pruneStaleTailJournals(engine.rootDir, engine.manifest.ActiveTail.ID))
+	engine.logStaleTailCleanupWarning(pruneStaleTailJournals(engine.rootDir, engine.manifest.ActiveTail.ID, previousTailIDs(engine.manifest)...))
 	engine.logStartup(mode, replayedTailEvents)
 	engine.ready.Store(true)
 	engine.startBackgroundRecentEventTimelineCacheSeed()
@@ -217,17 +227,26 @@ func openOrCreateActiveTail(rootDir string, manifest Manifest, baseHighWaterMark
 }
 
 func recoverTailState(projection *Projection, hot *hotStore, tail *tailJournal, afterHighWaterMark uint64) (int, error) {
+	return recoverTailStateFlushed(projection, hot, tail, afterHighWaterMark, 0)
+}
+
+// recoverTailStateFlushed replays tail events above afterHighWaterMark into the
+// projection. Events at or below flushedHighWaterMark are already in segments, so they
+// are not queued for another flush.
+func recoverTailStateFlushed(projection *Projection, hot *hotStore, tail *tailJournal, afterHighWaterMark, flushedHighWaterMark uint64) (int, error) {
 	if projection == nil || hot == nil || tail == nil {
 		return 0, nil
 	}
 
 	replayedEvents := 0
 	recoveredHotEvents := make([]models.Event, 0)
-	err := tail.ReplaySince(context.Background(), afterHighWaterMark, func(event models.Event, _ uint64) error {
+	err := tail.ReplaySince(context.Background(), afterHighWaterMark, func(event models.Event, highWaterMark uint64) error {
 		if err := recoverTailProjectionEvent(projection, event); err != nil {
 			return err
 		}
-		recoveredHotEvents = append(recoveredHotEvents, event)
+		if highWaterMark > flushedHighWaterMark {
+			recoveredHotEvents = append(recoveredHotEvents, event)
+		}
 		replayedEvents++
 		return nil
 	})

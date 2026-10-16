@@ -28,11 +28,14 @@ type Manifest struct {
 	// RetiredSegments were replaced by compaction or retention but may still be
 	// referenced by the active checkpoint. They are deleted once a newer checkpoint is
 	// written; on startup, references into them are moved to their replacements.
-	RetiredSegments    []RetiredSegment `json:"retired_segments,omitempty"`
-	ActiveCheckpoint   CheckpointMeta   `json:"active_checkpoint"`
-	ActiveTail         TailJournalMeta  `json:"active_tail"`
-	Checkpoints        []CheckpointMeta `json:"checkpoints"`
-	FlushHighWaterMark uint64           `json:"flush_high_water_mark"`
+	RetiredSegments []RetiredSegment `json:"retired_segments,omitempty"`
+	// PreviousTails were rotated out by a checkpoint that has not been published yet.
+	// Startup replays them before ActiveTail.
+	PreviousTails      []TailJournalMeta `json:"previous_tails,omitempty"`
+	ActiveCheckpoint   CheckpointMeta    `json:"active_checkpoint"`
+	ActiveTail         TailJournalMeta   `json:"active_tail"`
+	Checkpoints        []CheckpointMeta  `json:"checkpoints"`
+	FlushHighWaterMark uint64            `json:"flush_high_water_mark"`
 }
 
 type SegmentMeta struct {
@@ -233,12 +236,14 @@ func ensureManifestDir(dir string) error {
 }
 
 func normalizeManifest(manifest Manifest) Manifest {
-	if manifest.ActiveSegments == nil {
-		manifest.ActiveSegments = []SegmentMeta{}
-	}
+	// Copy before normalising: callers share the segment slice with manifest snapshots
+	// read by background tasks.
+	segments := make([]SegmentMeta, len(manifest.ActiveSegments))
 	for i := range manifest.ActiveSegments {
-		manifest.ActiveSegments[i].NamespaceKinds = normalizeNamespaceKinds(manifest.ActiveSegments[i].NamespaceKinds)
+		segments[i] = manifest.ActiveSegments[i]
+		segments[i].NamespaceKinds = normalizeNamespaceKinds(manifest.ActiveSegments[i].NamespaceKinds)
 	}
+	manifest.ActiveSegments = segments
 	if manifest.Checkpoints == nil {
 		manifest.Checkpoints = []CheckpointMeta{}
 	}

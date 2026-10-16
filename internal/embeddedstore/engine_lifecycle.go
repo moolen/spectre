@@ -163,9 +163,7 @@ func (e *Engine) ProcessBatch(ctx context.Context, events []models.Event) (err e
 		}
 	}
 	if e.ready.Load() && e.shouldCheckpointTailLocked() {
-		if err := e.checkpointLocked(ctx); err != nil {
-			e.logAutoFlushError("tail-triggered checkpoint failed", err)
-		}
+		e.scheduleCheckpointLocked()
 	}
 
 	return nil

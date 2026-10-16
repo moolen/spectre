@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/moolen/spectre/internal/models"
@@ -210,7 +211,8 @@ func newTailJournalID(baseHighWaterMark uint64) string {
 	return fmt.Sprintf("tail-%020d-%d", baseHighWaterMark, time.Now().UTC().UnixNano())
 }
 
-func pruneStaleTailJournals(root, activeTailID string) error {
+// pruneStaleTailJournals removes tail journals other than the active one and keepIDs.
+func pruneStaleTailJournals(root, activeTailID string, keepIDs ...string) error {
 	if root == "" || activeTailID == "" {
 		return nil
 	}
@@ -226,7 +228,7 @@ func pruneStaleTailJournals(root, activeTailID string) error {
 
 	removed := false
 	for i := range entries {
-		if !entries[i].IsDir() || entries[i].Name() == activeTailID {
+		if !entries[i].IsDir() || entries[i].Name() == activeTailID || slices.Contains(keepIDs, entries[i].Name()) {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(tailRoot, entries[i].Name())); err != nil {
@@ -261,4 +263,12 @@ func decodeTailJournalRecord(payload []byte) (tailJournalRecord, error) {
 		return tailJournalRecord{}, err
 	}
 	return tailJournalRecord{HighWaterMark: decoded.highWaterMark, Event: decoded.event}, nil
+}
+
+func previousTailIDs(manifest Manifest) []string {
+	ids := make([]string, 0, len(manifest.PreviousTails))
+	for _, previous := range manifest.PreviousTails {
+		ids = append(ids, previous.ID)
+	}
+	return ids
 }

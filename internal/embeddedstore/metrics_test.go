@@ -77,6 +77,14 @@ func TestEngine_AutoCheckpointWhenTailExceedsEventBudget(t *testing.T) {
 
 	require.NoError(t, engine.ProcessBatch(context.Background(), makeReplayHeavyEvents(5)))
 
+	// Tail-triggered checkpoints run in the background.
+	require.Eventually(t, func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		return engine.manifest.ActiveCheckpoint.HighWaterMark == 5 && !engine.checkpointRunning
+	}, 5*time.Second, time.Millisecond)
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
 	require.NotEmpty(t, engine.manifest.Checkpoints)
 	require.Equal(t, uint64(5), engine.manifest.ActiveCheckpoint.HighWaterMark)
 	require.LessOrEqual(t, engine.manifest.ActiveTail.EventCount, 1)

@@ -166,9 +166,9 @@ func TestCheckpoint_WritesCompressedBinaryStreamsAndReopens(t *testing.T) {
 	checkpointMeta := latestCheckpointMeta(engine.manifest.Checkpoints)
 	checkpointDir := filepath.Join(embeddedRootDir(engine.config.DataDir), checkpointsDirName, checkpointMeta.ID)
 
-	resourcesPayload, err := os.ReadFile(filepath.Join(checkpointDir, checkpointResourcesFile))
+	resourcesPayload, err := os.ReadFile(filepath.Join(checkpointDir, checkpointResourcesFileV3))
 	require.NoError(t, err)
-	k8sPayload, err := os.ReadFile(filepath.Join(checkpointDir, checkpointK8sEventsFile))
+	k8sPayload, err := os.ReadFile(filepath.Join(checkpointDir, checkpointK8sEventsFileV3))
 	require.NoError(t, err)
 
 	require.True(t, bytes.HasPrefix(resourcesPayload, []byte{0x28, 0xb5, 0x2f, 0xfd}))

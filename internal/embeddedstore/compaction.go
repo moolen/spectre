@@ -330,3 +330,19 @@ func remapRetiredSegmentReferences(rootDir string, projection *Projection, retir
 	projection.ReleaseSegmentHandles(ids)
 	return nil
 }
+
+// attachSegmentsAfter points versions at the records of segments flushed after
+// highWaterMark.
+func attachSegmentsAfter(rootDir string, projection *Projection, segments []SegmentMeta, highWaterMark uint64) error {
+	for _, segment := range segments {
+		if segment.HighWaterMark <= highWaterMark {
+			continue
+		}
+		locations, err := scanSegmentLocations(segmentEventsPath(rootDir, segment.ID))
+		if err != nil {
+			return fmt.Errorf("scan segment %q: %w", segment.ID, err)
+		}
+		projection.AttachSegmentLocations(segment.ID, locations)
+	}
+	return nil
+}

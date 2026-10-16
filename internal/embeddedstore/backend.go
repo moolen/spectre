@@ -41,8 +41,8 @@ const (
 	defaultFlushInterval            time.Duration = 30 * time.Second
 	defaultCheckpointInterval       time.Duration = 0
 	defaultCheckpointRetentionCount int           = 3
-	defaultCheckpointMaxTailEvents  int           = 2048
-	defaultCheckpointMaxTailBytes   int64         = 16 << 20
+	defaultCheckpointMaxTailEvents  int           = 50000
+	defaultCheckpointMaxTailBytes   int64         = 256 << 20
 	defaultCheckpointOnShutdown     bool          = true
 	defaultSegmentTargetBytes       int64         = 16 << 20
 	defaultCompactionMinSegments    int           = 4

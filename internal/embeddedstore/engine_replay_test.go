@@ -115,7 +115,19 @@ func TestEngine_OpenUsesCheckpointAndTailOnNormalRestart(t *testing.T) {
 	require.NotNil(t, record)
 	require.Len(t, record.versions, 1)
 	require.Equal(t, expectedEvent.ID, record.versions[0].eventID)
-	require.Equal(t, []string{expectedEvent.ID}, replayTestEventIDs(engine.hot.ScanTimeRange(expectedEvent.Timestamp, expectedEvent.Timestamp)))
+	// The tail event was already flushed, so it is not queued for a second flush; it is
+	// served from its segment exactly once.
+	require.Empty(t, engine.hot.ScanTimeRange(expectedEvent.Timestamp, expectedEvent.Timestamp))
+	exported, err := engine.QueryExecutor().ExportTimeRange(context.Background(), &models.QueryRequest{StartTimestamp: 0, EndTimestamp: 10})
+	require.NoError(t, err)
+	occurrences := 0
+	for _, id := range replayTestEventIDs(exported) {
+		if id == expectedEvent.ID {
+			occurrences++
+		}
+	}
+	require.Equal(t, 1, occurrences)
+	require.True(t, record.versions[0].ref.valid(), "flushed tail events reference their segment record")
 }
 
 func TestEngine_OpenFastPathUsesReplayProjectionApplyForTailRecovery(t *testing.T) {
