@@ -7,7 +7,7 @@ COPY ui/public ./public
 COPY ui/index.html ui/vite.config.ts ui/tsconfig.json ./
 RUN npm run build
 
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /build
 RUN apk add --no-cache git make
 COPY go.mod go.sum ./
